@@ -17,6 +17,25 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+DEFAULT_PORT_FALLBACK = 47950
+
+
+def _configured_port() -> int:
+    """Return the port the local service binds, per install state.
+
+    Imported lazily: ``agentalloy.install`` pulls in the whole CLI surface,
+    and this module is imported by the service itself.  Any failure to read
+    state falls back to the shipped default rather than raising — a client
+    that cannot read config should still point somewhere plausible.
+    """
+    try:
+        from agentalloy.install import state as install_state
+
+        st = install_state.load_state()
+        return install_state.validate_port(st.get("port", DEFAULT_PORT_FALLBACK))
+    except Exception:  # noqa: BLE001 — config read must never break client construction
+        return DEFAULT_PORT_FALLBACK
+
 
 @dataclass(frozen=True)
 class StateClientError(Exception):
@@ -34,9 +53,18 @@ class StateClient:
     response.  When the service is unreachable they raise
     ``StateClientError`` — there is no file-mirror fallback.
 
-    The base URL is configured via the ``STATE_SERVICE_URL`` environment
-    variable (useful for tests that spin up a fake service).  When the
-    ``base_url`` dataclass field is passed explicitly it takes priority.
+    Resolution order for the base URL:
+
+    1. the ``base_url`` dataclass field, when passed explicitly;
+    2. the ``STATE_SERVICE_URL`` environment variable (useful for tests
+       that spin up a fake service);
+    3. the port recorded in install state — the same value the service
+       itself binds — falling back to 47950.
+
+    Step 3 matters: the default used to be a hard-coded ``:8400``, which no
+    deployment has ever listened on.  Every ``is_running()`` therefore
+    returned False and every store-aware CLI silently took its file-mirror
+    path, so CLI writes and service writes stopped seeing each other.
     """
 
     base_url: str | None = None
@@ -47,7 +75,7 @@ class StateClient:
             object.__setattr__(
                 self,
                 "base_url",
-                os.environ.get("STATE_SERVICE_URL", "http://localhost:8400"),
+                os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}",
             )
 
     def is_running(self) -> bool:

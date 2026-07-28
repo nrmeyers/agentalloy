@@ -117,6 +117,49 @@ class TestSidecarCompatibility:
             assert result == {"approved": "design"}
 
 
+class TestStateClientDefaultBaseUrl:
+    """The default base URL must point at the port the service actually binds."""
+
+    def test_default_uses_configured_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With no env override, the client targets the port from install state."""
+        monkeypatch.delenv("STATE_SERVICE_URL", raising=False)
+        monkeypatch.setattr("agentalloy.api.state_client._configured_port", lambda: 47950)
+
+        assert StateClient().base_url == "http://127.0.0.1:47950"
+
+    def test_default_honours_nonstandard_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A repo configured on another port is followed, not ignored."""
+        monkeypatch.delenv("STATE_SERVICE_URL", raising=False)
+        monkeypatch.setattr("agentalloy.api.state_client._configured_port", lambda: 47960)
+
+        assert StateClient().base_url == "http://127.0.0.1:47960"
+
+    def test_env_var_wins_over_configured_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """STATE_SERVICE_URL still overrides, so tests can point at a fake service."""
+        monkeypatch.setenv("STATE_SERVICE_URL", "http://localhost:9999")
+        monkeypatch.setattr("agentalloy.api.state_client._configured_port", lambda: 47950)
+
+        assert StateClient().base_url == "http://localhost:9999"
+
+    def test_explicit_base_url_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An explicitly passed base_url takes priority over everything."""
+        monkeypatch.setenv("STATE_SERVICE_URL", "http://localhost:9999")
+
+        assert StateClient(base_url="http://localhost:1234").base_url == "http://localhost:1234"
+
+    def test_unreadable_state_falls_back_to_default_port(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A broken install state must not break client construction."""
+        monkeypatch.delenv("STATE_SERVICE_URL", raising=False)
+        monkeypatch.setattr(
+            "agentalloy.install.state.load_state",
+            lambda: (_ for _ in ()).throw(OSError("no state file")),
+        )
+
+        assert StateClient().base_url == "http://127.0.0.1:47950"
+
+
 class TestStateClientError:
     """StateClientError behaviour."""
 
