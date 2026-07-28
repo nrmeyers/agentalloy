@@ -118,6 +118,16 @@ class StateClient:
             "/state/phase", {"value": value, "contract": contract}, repo_root=repo_root
         )
 
+    def import_files(self, repo_root: str | None = None) -> dict[str, str]:
+        """Migrate a repo's ``.agentalloy`` file mirror into the store.
+
+        Returns the kinds imported by this call — empty when the repo has no
+        file mirror left, which is the steady state after the first run.
+        """
+        resp = self._post("/state/import-files", {}, repo_root=repo_root)
+        imported = resp.get("imported") or {}
+        return imported if isinstance(imported, dict) else {}
+
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""
         return self._post("/state/approve", {"value": phase})

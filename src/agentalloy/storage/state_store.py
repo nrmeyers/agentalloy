@@ -658,11 +658,18 @@ class DuckDBStateStore:
         imported. Idempotent: a kind that already has a row is skipped, and a
         repo with no files at all is a no-op.
 
-        ``phase`` is handled separately from every other kind. The others hold a
-        single bare token, so their raw text *is* the value. ``phase`` holds flat
-        YAML across several lines — storing its raw text as the value (what this
-        method did until 2026-07-28) yields a row no reader can parse. It is
-        parsed into the blob shape via :meth:`write_phase` instead.
+        ``phase`` holds flat YAML across several lines — storing its raw text as
+        the value (what this method did until 2026-07-28) yields a row no reader
+        can parse. It is parsed into the blob shape via :meth:`write_phase`.
+
+        The rest of the mirror is *not* uniformly a bare token, so it cannot be
+        imported by reading text: ``approved`` is a directory of per-phase marker
+        files, and the session-scoped kinds hold TSV lines keyed by session id.
+        Session-scoped state is skipped outright — it is per-session ephemera
+        that regenerates on the next request, and a row imported without its
+        session key matches no reader. Repo-scoped kinds are imported only when
+        the path is a regular file; a directory-shaped kind is left for the
+        contract that gives it a store shape.
 
         The phase file is deleted once its content has been *carried into* the
         store. A repo that already has a store row is diverged: the store value
@@ -675,7 +682,7 @@ class DuckDBStateStore:
         """
         imported: dict[str, str] = {}
 
-        for kind in sorted(REPO_SCOPED_KINDS | SESSION_SCOPED_KINDS):
+        for kind in sorted(REPO_SCOPED_KINDS):
             filepath = agentalloy_dir / kind
             if kind == "phase":
                 value = self._import_phase_file(filepath)
@@ -685,8 +692,8 @@ class DuckDBStateStore:
 
             if self.read(kind) is not None:
                 continue  # already in store
-            if not filepath.exists():
-                continue
+            if not filepath.is_file():
+                continue  # absent, or a directory-shaped kind
             value = filepath.read_text(encoding="utf-8").strip()
             if value:
                 self.write(kind, value)
@@ -723,12 +730,10 @@ class DuckDBStateStore:
             filepath.unlink()
             return phase
 
-        # Diverged: the store already has a phase and it wins — readers consult
-        # the store, so the file is already inert. It is *kept* rather than
-        # deleted: until the readers have actually moved (task 08), a per-repo
-        # file may be the only record of a phase this repo set while the
-        # service was down, and the store row it loses to is not yet proven to
-        # be repo-scoped. Deleting it is task 08's job, once that is settled.
+        # Diverged: the store already has a phase and it wins. The file is
+        # *kept* rather than deleted for one reason — the readers have not moved
+        # yet (task 08), so this file may still be the only record of a phase
+        # set while the service was down. Deleting it is task 08's job.
         return None
 
     # -- contract helpers ----------------------------------------------------

@@ -43,7 +43,7 @@ from agentalloy.api.state_models import (
     StateWriteResponse,
 )
 from agentalloy.providers.base import end_session_instruction
-from agentalloy.storage.state_store import DuckDBStateStore
+from agentalloy.storage.state_store import DuckDBStateStore, StateStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -531,6 +531,35 @@ async def write_approve(
             detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
         )
     return response  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# POST /state/import-files
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/import-files",
+    summary="One-shot migration of a repo's .agentalloy file mirror into the store",
+)
+async def import_files(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, dict[str, str]]:
+    """Carry ``<repo>/.agentalloy/phase`` into the store and delete the file.
+
+    A route rather than a CLI-local call because the service is the process
+    holding the DuckDB write lock — a second handle would deadlock against it.
+    Idempotent: a repo with no file mirror, or one already migrated, returns an
+    empty map. Deliberately *not* subject to the phase-advance gate: this
+    carries a phase that already exists across a storage change, it does not
+    advance one.
+    """
+    try:
+        imported = await asyncio.to_thread(store.import_from_files, root / ".agentalloy")
+    except StateStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"imported": imported}
 
 
 # ---------------------------------------------------------------------------
