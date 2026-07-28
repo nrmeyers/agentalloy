@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "19e67615b229",
+  "session_id": "0ed7b101-f7af-4a4e-8b28-c46e0374d839",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-28T21:14:18.788765614Z",
+  "branch": "feat/phase-blob-shape",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-5",
+  "turn_id": "8c103da561d0",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 23341,
+    "cache_creation_tokens": 2471301,
+    "cache_read_tokens": 123552717,
+    "output_tokens": 470873,
+    "api_call_count": 1079
+  },
+  "session_metrics": {
+    "turn_count": 42
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 9,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".agentalloy/announced": 1,
+        ".agentalloy/approved/design": 3,
+        ".agentalloy/banner-turns": 1,
+        ".agentalloy/claude-code-env.sh": 3,
+        ".agentalloy/config": 1
+      }
+    }
+  ]
+}
