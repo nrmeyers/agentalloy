@@ -88,14 +88,14 @@ subsequent slices (07b, 07c, 11): commits `c1455b1`, `38d524f`, `2d0f83b`,
   test-plan cases for the five CLI verbs. **Lower priority** — the CLI verbs are
   exercised through the integration/smoke path (Task 2).
 
-- **Legacy glob tolerance in shipped pack YAML.** Slice 11 (SDD pack rewrite) has not
-  run, so the shipped pack still carries glob args, not `phase`/`slug`:
-  `sdd-design-and-planning.yaml` uses `contracts: .agentalloy/contracts/active/build/*.md`,
-  and the intake gate uses `path: ".agentalloy/contracts/active/**/*.md"`. The
-  `_derive_phase_from_glob` resolver handles phase-scoped patterns but returns
-  **`None`** for intake's `**/*.md`. Covered in
-  `tests/signals/test_predicates_store_migration.py` only via hand-built args, never
-  against the real pack. **Deferred** — requires slice 11 to land first.
+- **Legacy glob tolerance in shipped pack YAML. RESOLVED 2026-07-27.** Slice 11
+  (SDD pack rewrite, commit `c5534a1`) landed on the current branch and replaced all
+  filesystem glob patterns in the shipped pack with `phase`/`slug` keys:
+  `contracts: .agentalloy/contracts/active/build/*.md` → `phase: design, slug: "{slug}"`,
+  and intake `path: ".agentalloy/contracts/active/**/*.md"` → `contract_exists: phase: spec`.
+  The `_derive_phase_from_glob` function and its `None` return path are now dead code
+  in production (exercised only by 4 tests). Residual: consider removing legacy glob
+  tolerance code and adding ingest-time rejection for any custom packs still using `contracts:` globs.
 
 ## build/contract-store-and-write-gating — acceptance A5 (fresh install)
 
