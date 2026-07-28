@@ -97,7 +97,9 @@ class TestTA6RetainsConfig:
         aa = repo / ".agentalloy"
         aa.mkdir()
         (aa / "config").write_text("harness: claude-code\n")
-        (aa / "phase").write_text("phase: build\n")  # phase is no longer cleaned up (store is source of truth)
+        (aa / "phase").write_text(
+            "phase: build\n"
+        )  # phase is no longer cleaned up (store is source of truth)
         (aa / "upstream").write_text("origin/main\n")
         (aa / "README.md").write_text("test\n")
         (aa / "claude-code-env.sh").write_text("export FOO=bar\n")

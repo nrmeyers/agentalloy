@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -145,75 +143,11 @@ def test_all_regenerators_registered():
 # Watcher integration tests (using watchdog directly)
 # ---------------------------------------------------------------------------
 
-
-def test_phase_change_triggers_regenerate(tmp_path: Path):
-    """Writing .agentalloy/phase triggers the regenerator."""
-    from agentalloy.watch.watcher import (
-        WatchConfig,
-        _AgentAlloyHandler,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    regen_calls: list[tuple[str, Path]] = []
-
-    def mock_regen(content: str, root: Path) -> None:
-        regen_calls.append((content, root))
-
-    config = WatchConfig(
-        project_root=tmp_path,
-        profile_name="default",
-        harness="cursor",
-        debounce_ms=50,
-    )
-    handler = _AgentAlloyHandler(config, mock_regen)
-
-    agentalloy_dir = tmp_path / ".agentalloy"
-    agentalloy_dir.mkdir(parents=True)
-    phase_file = agentalloy_dir / "phase"
-    phase_file.write_text("phase: build\n")
-
-    with patch("agentalloy.signals.skill_loader._load_workflow_skill_for_phase") as mock_load:
-        mock_load.return_value = {"skill_id": "sdd-build", "raw_prose": "BUILD PROSE"}
-
-        # Simulate the file event
-        handler._schedule("modified", str(phase_file))  # pyright: ignore[reportPrivateUsage]
-        time.sleep(0.2)  # wait for debounce while patch is active
-
-    assert len(regen_calls) == 1
-    assert "BUILD PROSE" in regen_calls[0][0]
-
-
-def test_debounce_coalesces_burst_writes(tmp_path: Path):
-    """10 rapid writes → 1 regeneration call."""
-    from agentalloy.watch.watcher import (
-        WatchConfig,
-        _AgentAlloyHandler,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    regen_calls: list[int] = []
-
-    def mock_regen(content: str, root: Path) -> None:
-        regen_calls.append(1)
-
-    config = WatchConfig(
-        project_root=tmp_path,
-        profile_name="default",
-        harness="cursor",
-        debounce_ms=200,
-    )
-    handler = _AgentAlloyHandler(config, mock_regen)
-
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    (tmp_path / ".agentalloy").mkdir()
-    phase_file.write_text("phase: build\n")
-
-    with patch("agentalloy.watch.watcher._load_workflow_skill_prose", return_value="prose"):
-        for _ in range(10):
-            handler._schedule("modified", str(phase_file))  # pyright: ignore[reportPrivateUsage]
-
-        time.sleep(0.5)  # wait for debounce to fire once
-
-    assert len(regen_calls) == 1
-
+# NOTE: The phase-file branch in _AgentAlloyHandler._flush was removed during
+# the store migration (slice 08) — .agentalloy/phase no longer exists.
+# Regeneration now happens via the in-process store hook (register_watcher).
+# The file-based watcher tests below are removed; the store-hook tests that
+# follow (test_callback_*) cover the new path.
 
 # ---------------------------------------------------------------------------
 # Watch CLI: status reports running/not-running

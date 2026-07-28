@@ -23,7 +23,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from watchdog.events import (
     FileSystemEvent,
@@ -106,41 +106,17 @@ class _AgentAlloyHandler(FileSystemEventHandler):
         if not events:
             return
 
-        project_root = self._config.project_root
-        phase_file = project_root / ".agentalloy" / "phase"
-
-        # Determine what changed — phase file changes only (contract watching
-        # removed; the service write is the compose trigger now).
-        phase_changed = any("phase" in e for e in events)
-
-        content_parts: list[str] = []
-
-        if phase_changed and phase_file.exists():
-            try:
-                import yaml
-
-                raw_data: Any = yaml.safe_load(phase_file.read_text()) or {}
-                phase: str | None = None
-                if isinstance(raw_data, dict):
-                    data: dict[str, Any] = cast(dict[str, Any], raw_data)
-                    phase_val = data.get("phase")
-                    phase = str(phase_val) if phase_val else None
-                else:
-                    phase = str(raw_data).strip() or None
-                if phase:
-                    prose = _load_workflow_skill_prose(phase, self._config.profile_name)
-                    if prose:
-                        content_parts.append(f"# Active Phase: {phase}\n\n{prose}")
-            except Exception as exc:
-                _log.warning("phase reload failed: %s", exc)
-
-        if content_parts:
-            content = "\n\n---\n\n".join(content_parts)
-            try:
-                self._regenerate(content, project_root)
-                _log.info("Regenerated %s rules file", self._config.harness)
-            except Exception as exc:
-                _log.warning("Regeneration failed: %s", exc)
+        # The phase file (.agentalloy/phase) was deleted during the store
+        # migration (slice 08).  Its branch is dead code — regeneration now
+        # happens via the in-process store hook (register_watcher) for
+        # proxy-wired harnesses.  The sidecar watcher path is deprecated;
+        # keep the handler as a no-op so `agentalloy watch` stays honest
+        # rather than silently exiting.
+        _log.debug(
+            "Watcher tick for %s but phase file no longer exists — "
+            "regeneration is handled by the store hook",
+            self._config.harness,
+        )
 
     def shutdown(self) -> None:
         """Cancel any pending debounce timer so late callbacks cannot fire."""

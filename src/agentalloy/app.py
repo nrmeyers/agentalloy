@@ -148,6 +148,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # is single-writer, so they must share this one rather than open their own.
     bind_process_store(state_store)
 
+    # AC-6: register the in-process store hook so the watcher fires post-commit
+    # when the phase row changes.  Discovers every harness wired into every
+    # recorded repo so new harnesses added at runtime are covered.  Harness-agnostic:
+    # the callback knows only kinds and callables; per-harness output from
+    # ``wire_harness`` is unchanged and stays.
+    try:
+        from agentalloy.install import state as install_state  # noqa: PLC0415
+        from agentalloy.watch.watcher import register_watcher  # noqa: PLC0415
+
+        _st = install_state.load_state()
+        for _entry in _st.get("harness_files_written") or []:
+            _harness = _entry.get("harness")
+            _repo = _entry.get("repo_root")
+            if _harness and _repo:
+                register_watcher(state_store, Path(_repo), "default", _harness)
+    except Exception:
+        logger.warning("watcher hook registration failed — continuing", exc_info=True)
+
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None
     runtime_load_error: str | None = None
