@@ -401,11 +401,11 @@ def _prompt_modules() -> str:
     return _prompt_numbered(
         "Which modules do you want?",
         [
-            ("injector", "Instruction injector (skill compose/proxy)   [default]"),
+            ("injector", "Instruction injector (skill compose/proxy)"),
             ("code-index", "Codebase indexer (code search, call graphs & decision graph)"),
-            ("both", "Both"),
+            ("both", "Both   [default]"),
         ],
-        default_index=1,
+        default_index=3,
     )
 
 
@@ -2446,10 +2446,10 @@ def add_parser(
     p.add_argument(
         "--modules",
         choices=["injector", "code-index", "both"],
-        default=None,
+        default="both",
         help=(
-            "Context modules to enable: 'injector' (skill compose/proxy, default), "
-            "'code-index' (code search & call graphs), or 'both'."
+            "Context modules to enable: 'injector' (skill compose/proxy), "
+            "'code-index' (code search & call graphs), or 'both' (default)."
         ),
     )
     p.add_argument(
