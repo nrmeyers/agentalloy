@@ -232,12 +232,16 @@ def _start_llama_server(
 
     # GPU device pinning: when the host has multiple GPUs, set the appropriate
     # visibility env var so llama.cpp sees only the selected card.  NVIDIA uses
-    # CUDA_VISIBLE_DEVICES; AMD HIP uses HIP_VISIBLE_DEVICES.
+    # CUDA_VISIBLE_DEVICES; AMD HIP uses HIP_VISIBLE_DEVICES.  CUDA_DEVICE_ORDER
+    # must be pinned to PCI_BUS_ID too: CUDA's default enumeration is fastest-
+    # first, which can disagree with the PCI-bus-ordered index nvidia-smi (and
+    # our device picker) uses, silently selecting the wrong physical card.
     env = None
     if gpu_device is not None:
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
         env["HIP_VISIBLE_DEVICES"] = str(gpu_device)
+        env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
     print(
         f"start-rerank-server: launching llama-server on port {LLAMA_RERANK_PORT} "
