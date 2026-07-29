@@ -102,6 +102,20 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: uv sync --frozen --extra code-index
 
+      # ubuntu-latest ships podman 5.x, which emits OCI runtime spec v1.2.1.
+      # The runner's bundled crun predates 1.14.3 and can't parse that spec
+      # version, so every container build fails with "unknown version
+      # specified" regardless of the Containerfile contents. Upgrade crun
+      # until the runner image itself ships a fixed version.
+      # https://github.com/containers/crun/issues/1485
+      - name: Upgrade crun (OCI runtime spec v1.2.1 compat)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          curl -fsSL -o /tmp/crun \
+            https://github.com/containers/crun/releases/download/1.27/crun-1.27-linux-amd64
+          sudo install -m755 /tmp/crun /usr/bin/crun
+          crun --version
+
       - name: Container tests (real podman, serial)
         if: steps.gate.outputs.run == 'true'
         run: uv run pytest -m "container and not integration" -n0
