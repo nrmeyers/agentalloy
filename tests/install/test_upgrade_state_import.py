@@ -19,10 +19,24 @@ _DEPLOYMENT = Path("/nonexistent/agentalloy-deployment-root")
 
 
 class _StubClient:
-    def __init__(self, *, imported: dict[str, str] | None = None, raises: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        imported: dict[str, str] | None = None,
+        raises: Exception | None = None,
+        health: list[bool] | None = None,
+    ):
         self.calls: list[str | None] = []
         self._imported = imported if imported is not None else {"phase": "build"}
         self._raises = raises
+        #: Successive ``is_running()`` answers; the last one repeats forever.
+        self._health = list(health) if health else [True]
+        self.health_calls = 0
+
+    def is_running(self) -> bool:
+        self.health_calls += 1
+        idx = min(self.health_calls - 1, len(self._health) - 1)
+        return self._health[idx]
 
     def import_files(self, repo_root: str | None = None) -> dict[str, str]:
         self.calls.append(repo_root)
@@ -173,6 +187,47 @@ class TestImportStep:
         stub(_StubClient(raises=RuntimeError("boom")))
 
         upgrade._import_state_files([], [], show_progress=False)  # must not raise
+
+    def test_a_service_still_starting_is_waited_for_not_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub
+    ) -> None:
+        """``_start_service`` returns before uvicorn binds; the import must wait.
+
+        Without the wait, every repo raced the restart and the whole migration
+        reported "skipped" — one warning per repo — on a healthy install.
+        """
+        monkeypatch.setattr(upgrade.time, "sleep", lambda _s: None)
+        a, b = tmp_path / "a", tmp_path / "b"
+        _mirror(a)
+        _mirror(b)
+        _wire(monkeypatch, a, b)
+        client = stub(_StubClient(health=[False, False, True]))
+
+        actions: list[str] = []
+        warnings: list[str] = []
+        upgrade._import_state_files(actions, warnings, show_progress=False)
+
+        assert client.calls == [str(a), str(b)]
+        assert warnings == []
+
+    def test_a_service_that_never_comes_up_warns_once(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub
+    ) -> None:
+        """One warning for the run, not one per repo."""
+        monkeypatch.setattr(upgrade, "STATE_SERVICE_READY_TIMEOUT_S", 0.0)
+        a, b = tmp_path / "a", tmp_path / "b"
+        _mirror(a)
+        _mirror(b)
+        _wire(monkeypatch, a, b)
+        client = stub(_StubClient(health=[False]))
+
+        actions: list[str] = []
+        warnings: list[str] = []
+        upgrade._import_state_files(actions, warnings, show_progress=False)
+
+        assert client.calls == []
+        assert actions == []
+        assert len(warnings) == 1
 
     def test_no_repo_with_a_mirror_skips_the_client_entirely(
         self, monkeypatch: pytest.MonkeyPatch, stub

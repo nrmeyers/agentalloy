@@ -709,6 +709,32 @@ def _repos_with_state_files() -> list[str]:
     return roots
 
 
+STATE_SERVICE_READY_TIMEOUT_S = 60.0
+_STATE_SERVICE_POLL_S = 1.0
+
+
+def _wait_for_state_service(client: Any, timeout_s: float | None = None) -> bool:
+    """Poll the state service's health endpoint until it answers, or time out.
+
+    A restart is asynchronous — systemd returns once the unit is *activated* and
+    ``server-start`` once the process is spawned, both well before uvicorn binds
+    the port and opens the corpus. Callers that write through the service must
+    wait for it rather than take the first connection refusal as a verdict.
+
+    The budget is read at call time (not bound as a default) so it stays one
+    knob for tests and for anyone tuning a slow start.
+    """
+    deadline = time.monotonic() + (
+        STATE_SERVICE_READY_TIMEOUT_S if timeout_s is None else timeout_s
+    )
+    while True:
+        if client.is_running():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_STATE_SERVICE_POLL_S)
+
+
 def _import_state_files(actions: list[str], warnings: list[str], *, show_progress: bool) -> None:
     """Carry every wired repo's ``.agentalloy`` file mirror into the state store.
 
@@ -720,7 +746,10 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
     the readers still consult the file mirror at this version, so a skipped
     import is a retry, not a broken repo.
     """
-    roots = _repos_with_state_files()
+    # Filter to repos that actually hold a mirror *before* anything else: with
+    # nothing to migrate there is no reason to touch the service, let alone wait
+    # on it — the steady state after the first upgrade must stay silent and fast.
+    roots = [r for r in _repos_with_state_files() if (Path(r) / ".agentalloy").is_dir()]
     if not roots:
         return
 
@@ -729,19 +758,35 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
     client = StateClient()
     migrated = 0
     with progress_activity("migrating phase state into the store", enabled=show_progress):
+        # `_start_service()` returns as soon as the unit/process is spawned, not
+        # when uvicorn is serving: without this wait every repo raced a socket
+        # that was not listening yet and the whole migration was "skipped".
+        if not _wait_for_state_service(client):
+            warnings.append(
+                "phase state migration skipped — the service did not come up within "
+                f"{STATE_SERVICE_READY_TIMEOUT_S:.0f}s; the file mirror still works, "
+                "re-run `agentalloy upgrade` once the service is up"
+            )
+            return
         for root in roots:
-            if not (Path(root) / ".agentalloy").is_dir():
-                continue
             try:
                 if client.import_files(root):
                     migrated += 1
-            except StateClientError:
+            # The cause is carried into the warning: `StateClientError` covers
+            # both a refused connection and any HTTP status, and the two want
+            # different follow-ups. Without it the next occurrence is another
+            # archaeology session.
+            except StateClientError as exc:
                 warnings.append(
-                    f"phase state migration skipped for {root} — the file still works; "
-                    "re-run `agentalloy upgrade` once the service is up"
+                    f"phase state migration skipped for {root} ({exc}) — the file "
+                    "still works; re-run `agentalloy upgrade`"
                 )
-            except Exception:  # noqa: BLE001 — never fail an upgrade
+            except Exception as exc:  # noqa: BLE001 — never fail an upgrade
                 logger.debug("state file import failed for %s", root, exc_info=True)
+                warnings.append(
+                    f"phase state migration skipped for {root} ({exc!r}) — the file "
+                    "still works; re-run `agentalloy upgrade`"
+                )
     if migrated:
         actions.append(f"migrated phase state into the store ({migrated} repos)")
 
