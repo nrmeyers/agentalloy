@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -57,6 +58,15 @@ def add_parser(
         type=float,
         default=float(LLAMA_START_TIMEOUT),
         help=f"Seconds to wait for llama-server /health (default: {LLAMA_START_TIMEOUT}).",
+    )
+    p.add_argument(
+        "--gpu-device",
+        type=int,
+        default=None,
+        help="CUDA/HIP device index to assign to this server (e.g. 0 or 1). "
+        "Uses CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES so llama.cpp sees "
+        "only the selected GPU — needed when the host has multiple GPUs and "
+        "you want each server pinned to a specific card.",
     )
     add_json_flag(p)
     p.set_defaults(func=_run)
@@ -102,7 +112,8 @@ def _run(args: argparse.Namespace) -> int:
 
     # Hardware target (from the recommend-models preset) selects GPU offload.
     hardware = str(models_json.get("preset") or "cpu").strip().lower()
-    return _start_llama_server(model, args.timeout, args, hardware)
+    gpu_device = getattr(args, "gpu_device", None)
+    return _start_llama_server(model, args.timeout, args, hardware, gpu_device)
 
 
 def _render_embed_server(result: dict[str, Any]) -> None:
@@ -133,7 +144,11 @@ def _render_embed_server(result: dict[str, Any]) -> None:
 
 
 def _start_llama_server(
-    model: str, timeout: float, args: argparse.Namespace, hardware: str = "cpu"
+    model: str,
+    timeout: float,
+    args: argparse.Namespace,
+    hardware: str = "cpu",
+    gpu_device: int | None = None,
 ) -> int:
     model_path = install_state.user_data_dir() / "models" / model
     if not model_path.exists():
@@ -165,6 +180,15 @@ def _start_llama_server(
     log_path = install_state.user_data_dir() / "logs" / "embed-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # GPU device pinning: when the host has multiple GPUs, set the appropriate
+    # visibility env var so llama.cpp sees only the selected card.  NVIDIA uses
+    # CUDA_VISIBLE_DEVICES; AMD HIP uses HIP_VISIBLE_DEVICES.
+    env = None
+    if gpu_device is not None:
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
+        env["HIP_VISIBLE_DEVICES"] = str(gpu_device)
+
     print(
         f"start-embed-server: launching llama-server on port {LLAMA_EMBED_PORT} "
         f"(ubatch={LLAMA_UBATCH_SIZE}, log={log_path})",
@@ -177,6 +201,7 @@ def _start_llama_server(
                 stdout=log_fh,
                 stderr=log_fh,
                 start_new_session=True,
+                env=env,
             )
     except FileNotFoundError:
         print("ERROR: llama-server not found in PATH.", file=sys.stderr)

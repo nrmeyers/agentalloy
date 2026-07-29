@@ -194,8 +194,19 @@ def _llama_unit_path(name: str) -> Path:
     return unit_dir / name
 
 
-def _render_llama_embed_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> str:
+def _render_llama_embed_unit(
+    llama_bin: str,
+    model_path: Path,
+    ngl: int = 0,
+    gpu_device: int | None = None,
+) -> str:
     ngl_flag = f" -ngl {ngl}" if ngl > 0 else ""
+    env_lines = ""
+    if gpu_device is not None:
+        env_lines = (
+            f"Environment=CUDA_VISIBLE_DEVICES={gpu_device}\n"
+            f"Environment=HIP_VISIBLE_DEVICES={gpu_device}\n"
+        )
     return (
         "[Unit]\n"
         "Description=AgentAlloy embedding server (llama-server)\n"
@@ -205,6 +216,7 @@ def _render_llama_embed_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> 
         "Type=simple\n"
         f"ExecStart={llama_bin} --embeddings --pooling mean --port {_LLAMA_EMBED_PORT} "
         f"--ubatch-size 2048{ngl_flag} -m {model_path}\n"
+        f"{env_lines}"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"
@@ -218,6 +230,7 @@ def _render_llama_rerank_unit(
     model_path: Path,
     ngl: int = 0,
     hardware_target: str | None = None,
+    gpu_device: int | None = None,
 ) -> str:
     # Completions mode — NO --embeddings — so /v1/completions logprobs are served.
     # --parallel/-c come from start_rerank_server's hardware-conditional helper so
@@ -231,6 +244,12 @@ def _render_llama_rerank_unit(
     ngl_flag = f" -ngl {ngl}" if ngl > 0 else ""
     parallel, ctx = rerank_launch_args(hardware_target)
     agentalloy_bin = shutil.which("agentalloy") or "agentalloy"
+    env_lines = ""
+    if gpu_device is not None:
+        env_lines = (
+            f"Environment=CUDA_VISIBLE_DEVICES={gpu_device}\n"
+            f"Environment=HIP_VISIBLE_DEVICES={gpu_device}\n"
+        )
     return (
         "[Unit]\n"
         "Description=AgentAlloy reranker server (llama-server)\n"
@@ -240,6 +259,7 @@ def _render_llama_rerank_unit(
         "Type=simple\n"
         f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT}{ngl_flag} -m {model_path}"
         f" --parallel {parallel} -c {ctx}\n"
+        f"{env_lines}"
         # `-` prefix: a warmup error must NEVER mark the unit failed (the breaker
         # at request time is the real safety net; warmup is best-effort).
         # Pass --parallel so the warmup fan-out matches the actual slot count
@@ -267,6 +287,10 @@ def _ngl_for_target(target: str | None) -> int:
     return _NGL_BY_TARGET.get(target or "cpu", _DEFAULT_NGL)
 
 
+# Valid hardware presets (same set used throughout the install system).
+_VALID_PRESETS: frozenset[str] = frozenset({"cpu", "nvidia", "radeon", "apple-silicon"})
+
+
 def _resolve_preset(st: dict[str, Any]) -> str | None:
     """Resolve the hardware preset that selects ``-ngl`` for the persistent
     embed/reranker llama-servers.
@@ -279,8 +303,11 @@ def _resolve_preset(st: dict[str, Any]) -> str | None:
     registered without ``-ngl`` (CPU-only) on every GPU host, contradicting the
     setup-time launch and the renderers' documented offload intent.
 
-    Resolve from recommend-models.json first (the same source the launchers
-    use); fall back to install state, then ``None`` (→ CPU, the safe default).
+    Resolution order:
+      1. ``recommend-models.json``  (the canonical source the launchers use)
+      2. ``.env``  (parsed from the ``# Preset: …`` header written by write-env)
+      3. install state  (``st.get("preset")`` — historically always None)
+      4. ``None``  (→ CPU, the safe default)
     """
     models_fp = install_state.outputs_dir() / "recommend-models.json"
     data: dict[str, Any] = {}
@@ -293,6 +320,20 @@ def _resolve_preset(st: dict[str, Any]) -> str | None:
     preset = data.get("preset")
     if isinstance(preset, str) and preset.strip():
         return preset.strip().lower()
+
+    # Fallback: parse the preset from the .env header written by write-env.
+    # Format: "# Preset: nvidia, Port: 47950"
+    env_path = install_state.env_path()
+    try:
+        for line in env_path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# Preset:"):
+                value = stripped.split("# Preset:", 1)[1].split(",", 1)[0].strip().lower()
+                if value in _VALID_PRESETS:
+                    return value
+    except OSError:
+        pass
+
     return st.get("preset")
 
 
@@ -324,7 +365,11 @@ def _reclaim_port(unit_name: str, port: int, match: list[str]) -> None:
         )
 
 
-def _write_llama_units(target: str | None = None) -> list[str]:
+def _write_llama_units(
+    target: str | None = None,
+    embed_gpu_device: int | None = None,
+    rerank_gpu_device: int | None = None,
+) -> list[str]:
     """Write + enable the embed (47951) and reranker (47952) llama-server units.
 
     Returns the list of unit paths written (empty if llama-server is absent).
@@ -332,6 +377,9 @@ def _write_llama_units(target: str | None = None) -> list[str]:
     agentalloy.service unit is the only hard requirement. ``target`` is the
     hardware preset (cpu/nvidia/radeon/apple-silicon) — it selects ``-ngl`` so
     the persistent units offload to the GPU like the setup-time launch did.
+    When ``embed_gpu_device`` or ``rerank_gpu_device`` is set, the corresponding
+    unit gets ``CUDA_VISIBLE_DEVICES`` / ``HIP_VISIBLE_DEVICES`` so llama.cpp
+    sees only the selected GPU.
     """
     llama_bin = shutil.which("llama-server")
     if not llama_bin:
@@ -344,7 +392,10 @@ def _write_llama_units(target: str | None = None) -> list[str]:
         (
             "agentalloy-embed.service",
             _render_llama_embed_unit(
-                llama_bin, _model_path("nomic-embed-text-v1.5.Q8_0.gguf"), ngl
+                llama_bin,
+                _model_path("nomic-embed-text-v1.5.Q8_0.gguf"),
+                ngl,
+                gpu_device=embed_gpu_device,
             ),
         ),
         (
@@ -354,6 +405,7 @@ def _write_llama_units(target: str | None = None) -> list[str]:
                 _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf"),
                 ngl,
                 hardware_target=target,
+                gpu_device=rerank_gpu_device,
             ),
         ),
     ]
@@ -401,13 +453,19 @@ def _enable_native_linux(
     repo_root: Path,
     port: int,
     preset: str | None,
+    embed_gpu_device: int | None = None,
+    rerank_gpu_device: int | None = None,
 ) -> dict[str, Any]:
     env_path = _sanitize_env_for_systemd(install_state.env_path())
     unit_path = _systemd_unit_path()
     content = _render_systemd_unit(uv_bin, repo_root, port, env_path)
     install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
 
-    llama_units = _write_llama_units(preset)
+    llama_units = _write_llama_units(
+        preset,
+        embed_gpu_device=embed_gpu_device,
+        rerank_gpu_device=rerank_gpu_device,
+    )
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     # Reclaim port 47950 from a stale uvicorn (an orphan left by `--force`
@@ -516,15 +574,34 @@ def _llama_launchd_plist_path(label: str) -> Path:
     return agents_dir / f"{label}.plist"
 
 
-def _render_llama_launchd_plist(label: str, program_args: list[str]) -> str:
+def _render_llama_launchd_plist(
+    label: str,
+    program_args: list[str],
+    gpu_device: int | None = None,
+) -> str:
     """Render a launchd plist for a llama-server instance.
 
     RunAtLoad + KeepAlive give the embed/reranker servers the same
     auto-start-and-restart guarantee the systemd units provide on Linux.
     Logs go to a per-label file under /tmp.
+
+    When ``gpu_device`` is set, adds ``CUDA_VISIBLE_DEVICES`` /
+    ``HIP_VISIBLE_DEVICES`` to ``EnvironmentVariables`` so llama.cpp
+    sees only the selected GPU.
     """
     arg_lines = "\n".join(f"    {_xml_str(a)}" for a in program_args)
     log_path = f"/tmp/{label}.log"
+    env_vars_block = ""
+    if gpu_device is not None:
+        env_vars_block = (
+            "  <key>EnvironmentVariables</key>\n"
+            "  <dict>\n"
+            f"    <key>CUDA_VISIBLE_DEVICES</key>\n"
+            f"    {_xml_str(str(gpu_device))}\n"
+            f"    <key>HIP_VISIBLE_DEVICES</key>\n"
+            f"    {_xml_str(str(gpu_device))}\n"
+            "  </dict>\n"
+        )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"'
@@ -537,6 +614,7 @@ def _render_llama_launchd_plist(label: str, program_args: list[str]) -> str:
         "  <array>\n"
         f"{arg_lines}\n"
         "  </array>\n"
+        f"{env_vars_block}"
         "  <key>RunAtLoad</key>\n"
         "  <true/>\n"
         "  <key>KeepAlive</key>\n"
@@ -550,7 +628,11 @@ def _render_llama_launchd_plist(label: str, program_args: list[str]) -> str:
     )
 
 
-def _write_llama_launchd_agents(target: str | None = None) -> list[str]:
+def _write_llama_launchd_agents(
+    target: str | None = None,
+    embed_gpu_device: int | None = None,
+    rerank_gpu_device: int | None = None,
+) -> list[str]:
     """Write + load LaunchAgent plists for the embed (47951) and reranker (47952)
     llama-servers — the macOS mirror of ``_write_llama_units``.
 
@@ -558,6 +640,9 @@ def _write_llama_launchd_agents(target: str | None = None) -> list[str]:
     Best-effort: skipped gracefully (logged, non-fatal) when llama-server is
     not on PATH, matching the systemd path. ``target`` selects ``-ngl`` so the
     persistent agents Metal-offload like the setup-time launch did.
+    When ``embed_gpu_device`` or ``rerank_gpu_device`` is set, the corresponding
+    plist gets ``CUDA_VISIBLE_DEVICES`` / ``HIP_VISIBLE_DEVICES`` so llama.cpp
+    sees only the selected GPU.
     """
     llama_bin = shutil.which("llama-server")
     if not llama_bin:
@@ -587,16 +672,18 @@ def _write_llama_launchd_agents(target: str | None = None) -> list[str]:
                 "-m",
                 str(embed_model),
             ],
+            embed_gpu_device,
         ),
         # Reranker: completions mode on 47952 — NO --embeddings.
         (
             "ai.agentalloy.rerank",
             [llama_bin, "--port", str(_LLAMA_RERANK_PORT), *ngl_args, "-m", str(rerank_model)],
+            rerank_gpu_device,
         ),
     ]
-    for label, program_args in agents:
+    for label, program_args, gpu_device in agents:
         plist_path = _llama_launchd_plist_path(label)
-        content = _render_llama_launchd_plist(label, program_args)
+        content = _render_llama_launchd_plist(label, program_args, gpu_device=gpu_device)
         install_state._atomic_write(plist_path, content)  # pyright: ignore[reportPrivateUsage]
         os.chmod(plist_path, 0o600)
         written.append(str(plist_path))
@@ -622,6 +709,8 @@ def _enable_native_macos(
     repo_root: Path,
     port: int,
     preset: str | None,
+    embed_gpu_device: int | None = None,
+    rerank_gpu_device: int | None = None,
 ) -> dict[str, Any]:
     env_vars = _read_env_file(install_state.env_path())
     plist_path = _launchd_plist_path()
@@ -636,7 +725,11 @@ def _enable_native_macos(
     # Register the embed (47951) and reranker (47952) llama-servers as
     # LaunchAgents so they auto-start at login and restart on crash — the
     # macOS mirror of the systemd units written on Linux.
-    llama_agents = _write_llama_launchd_agents(preset)
+    llama_agents = _write_llama_launchd_agents(
+        preset,
+        embed_gpu_device=embed_gpu_device,
+        rerank_gpu_device=rerank_gpu_device,
+    )
 
     return {
         "unit_path": str(plist_path),
@@ -655,6 +748,8 @@ def enable_service(
     port: int = 47950,
     repo_root: Path | None = None,
     preset: str | None = None,
+    embed_gpu_device: int | None = None,
+    rerank_gpu_device: int | None = None,
 ) -> dict[str, Any]:
     """Enable the AgentAlloy service. Returns the contract-shaped result."""
     if repo_root is None:
@@ -680,9 +775,23 @@ def enable_service(
             print("FIX:   Use --mode manual.", file=sys.stderr)
             raise SystemExit(1)
         if os_name == "linux":
-            details = _enable_native_linux(uv_bin, repo_root, port, preset)
+            details = _enable_native_linux(
+                uv_bin,
+                repo_root,
+                port,
+                preset,
+                embed_gpu_device=embed_gpu_device,
+                rerank_gpu_device=rerank_gpu_device,
+            )
         else:
-            details = _enable_native_macos(uv_bin, repo_root, port, preset)
+            details = _enable_native_macos(
+                uv_bin,
+                repo_root,
+                port,
+                preset,
+                embed_gpu_device=embed_gpu_device,
+                rerank_gpu_device=rerank_gpu_device,
+            )
         result.update(details)
         result["service_started"] = True
 
@@ -725,6 +834,20 @@ def add_parser(
         default=None,
         help="Service port override (default: read from user state, fallback 47950).",
     )
+    p.add_argument(
+        "--embed-gpu-device",
+        type=int,
+        default=None,
+        help="CUDA/HIP device index for the embed llama-server (default: auto-detect). "
+        "Sets CUDA_VISIBLE_DEVICES so llama.cpp sees only the selected GPU.",
+    )
+    p.add_argument(
+        "--rerank-gpu-device",
+        type=int,
+        default=None,
+        help="CUDA/HIP device index for the rerank llama-server (default: auto-detect). "
+        "Sets CUDA_VISIBLE_DEVICES so llama.cpp sees only the selected GPU.",
+    )
     add_json_flag(p)
     p.set_defaults(func=run)
 
@@ -758,7 +881,13 @@ def run(args: argparse.Namespace) -> int:
     if mode is None:
         mode = _prompt_mode()
 
-    result = enable_service(mode=mode, port=port, preset=preset)
+    result = enable_service(
+        mode=mode,
+        port=port,
+        preset=preset,
+        embed_gpu_device=getattr(args, "embed_gpu_device", None),
+        rerank_gpu_device=getattr(args, "rerank_gpu_device", None),
+    )
 
     fp, digest = install_state.save_output_file(result, "enable-service.json")
     install_state.record_step(
