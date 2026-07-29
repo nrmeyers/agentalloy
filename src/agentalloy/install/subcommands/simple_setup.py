@@ -205,8 +205,8 @@ class SetupConfig:
     non_interactive: bool = False
     force: bool = False
     acknowledge_sidecar: bool = False
-    # Which context modules to enable: "injector" (default), "code-index", "both".
-    modules: str = "injector"
+    # Which context modules to enable: "injector", "code-index", "both" (default).
+    modules: str = "both"
     hardware_target: str = ""  # explicit user choice: "nvidia", "radeon", "apple-silicon", "cpu"
     embed_gpu_device: int | None = None  # CUDA/HIP device index for embed server
     rerank_gpu_device: int | None = None  # CUDA/HIP device index for rerank server
@@ -2535,7 +2535,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         mode=args.mode or "persistent",
         packs=args.packs or "",
         harness=args.harness or "manual",
-        modules=getattr(args, "modules", None) or "injector",
+        modules=getattr(args, "modules", None) or "both",
         hardware_target=getattr(args, "hardware", None) or "",
         deployment=getattr(args, "deployment", None) or "",
         runtime_binary=getattr(args, "runtime", None) or "",

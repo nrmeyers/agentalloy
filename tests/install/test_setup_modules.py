@@ -40,26 +40,26 @@ class TestModuleOverrides:
 
 
 class TestModulePrompt:
-    def test_non_tty_defaults_to_injector(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_tty_defaults_to_both(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # pytest stdin is not a TTY — _prompt_numbered returns the default value.
-        assert simple_setup._prompt_modules() == "injector"  # pyright: ignore[reportPrivateUsage]
+        assert simple_setup._prompt_modules() == "both"  # pyright: ignore[reportPrivateUsage]
 
-    def test_setup_config_default_is_injector(self) -> None:
-        assert simple_setup.SetupConfig().modules == "injector"
+    def test_setup_config_default_is_both(self) -> None:
+        assert simple_setup.SetupConfig().modules == "both"
 
     def test_cli_flag_threads_into_config(self) -> None:
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers()
         simple_setup.add_parser(sub)
-        args = parser.parse_args(["setup", "--modules", "both", "-n"])
-        assert args.modules == "both"
+        args = parser.parse_args(["setup", "--modules", "injector", "-n"])
+        assert args.modules == "injector"
 
-    def test_cli_flag_default_is_none_maps_to_injector(self) -> None:
+    def test_cli_flag_default_is_both(self) -> None:
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers()
         simple_setup.add_parser(sub)
         args = parser.parse_args(["setup", "-n"])
-        assert args.modules is None
+        assert args.modules == "both"
 
 
 class TestImportCheck:
