@@ -206,6 +206,7 @@ def _render_llama_embed_unit(
         env_lines = (
             f"Environment=CUDA_VISIBLE_DEVICES={gpu_device}\n"
             f"Environment=HIP_VISIBLE_DEVICES={gpu_device}\n"
+            "Environment=CUDA_DEVICE_ORDER=PCI_BUS_ID\n"
         )
     return (
         "[Unit]\n"
@@ -249,6 +250,7 @@ def _render_llama_rerank_unit(
         env_lines = (
             f"Environment=CUDA_VISIBLE_DEVICES={gpu_device}\n"
             f"Environment=HIP_VISIBLE_DEVICES={gpu_device}\n"
+            "Environment=CUDA_DEVICE_ORDER=PCI_BUS_ID\n"
         )
     return (
         "[Unit]\n"
@@ -586,8 +588,9 @@ def _render_llama_launchd_plist(
     Logs go to a per-label file under /tmp.
 
     When ``gpu_device`` is set, adds ``CUDA_VISIBLE_DEVICES`` /
-    ``HIP_VISIBLE_DEVICES`` to ``EnvironmentVariables`` so llama.cpp
-    sees only the selected GPU.
+    ``HIP_VISIBLE_DEVICES`` (plus ``CUDA_DEVICE_ORDER=PCI_BUS_ID`` so CUDA's
+    enumeration agrees with nvidia-smi's) to ``EnvironmentVariables`` so
+    llama.cpp sees only the selected GPU.
     """
     arg_lines = "\n".join(f"    {_xml_str(a)}" for a in program_args)
     log_path = f"/tmp/{label}.log"
@@ -600,6 +603,8 @@ def _render_llama_launchd_plist(
             f"    {_xml_str(str(gpu_device))}\n"
             f"    <key>HIP_VISIBLE_DEVICES</key>\n"
             f"    {_xml_str(str(gpu_device))}\n"
+            "    <key>CUDA_DEVICE_ORDER</key>\n"
+            "    <string>PCI_BUS_ID</string>\n"
             "  </dict>\n"
         )
     return (

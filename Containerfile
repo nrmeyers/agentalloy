@@ -33,7 +33,7 @@ FROM ghcr.io/ggml-org/llama.cpp:full AS llamacpp
 FROM node:22-slim AS webui
 WORKDIR /web
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
-RUN corepack enable && corepack prepare pnpm@10 --activate && pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@10.34.5 --activate && pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build && test -f dist/index.html
 
