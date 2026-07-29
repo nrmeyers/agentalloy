@@ -22,6 +22,7 @@ shared CLAUDE.md, and CLAUDE.md is the default when nothing is detected.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -95,10 +96,28 @@ def detect_target(root: Path, harness: str | None = None) -> Path | None:
     return root / "CLAUDE.md"
 
 
+def service_base_url(port: int) -> str:
+    """Base URL of the local service, honouring ``STATE_SERVICE_URL``.
+
+    The code-index endpoints live on the *same* service and the *same* port as
+    the state API, so they take the same override — one knob for "where is my
+    agentalloy", not two.
+
+    This is what keeps the test suite off a developer's live service. XDG
+    redirection isolates every other write, but these calls leave the process:
+    a wiring test would reach the real :47950, whose own environment resolves
+    the real data dir, and the service would index the test's ``tmp_path`` into
+    ``~/.local/share/agentalloy/code_index``. That is how 32 pytest temp dirs
+    ended up in the registry (2026-07-28 cleanup); ``tests/conftest.py`` pins
+    this env var to a dead port autouse.
+    """
+    return os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{port}"
+
+
 def service_module_status(port: int) -> str | None:
     """The running service's ``modules.code_index`` state, or None (unreachable)."""
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="GET")
+        req = urllib.request.Request(f"{service_base_url(port)}/health", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
             body = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
@@ -113,7 +132,7 @@ def service_module_status(port: int) -> str | None:
 def registry_slugs(port: int) -> list[str] | None:
     """Slugs in the service's indexed-repos registry, or None (unreachable)."""
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/code/repos", method="GET")
+        req = urllib.request.Request(f"{service_base_url(port)}/code/repos", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
             body = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
@@ -128,7 +147,7 @@ def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
     payload = json.dumps({"repo_path": str(repo_path), "force": False}).encode("utf-8")
     try:
         req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/code/index",
+            f"{service_base_url(port)}/code/index",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",

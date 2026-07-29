@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from agentalloy.install import state as install_state
+from agentalloy.install.code_index_wiring import service_base_url
 from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
 from agentalloy.install.subcommands.uninstall import uninstall
 from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
@@ -131,7 +132,7 @@ def _remove_index_via_service(slug: str, port: int) -> bool | None:
     """DELETE /code/index/{slug}. True=removed, False=refused (active job /
     error reported), None=service unreachable (caller falls back)."""
     try:
-        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30.0) as client:
+        with httpx.Client(base_url=service_base_url(port), timeout=30.0) as client:
             resp = client.delete(f"/code/index/{slug}")
     except httpx.HTTPError:
         return None
