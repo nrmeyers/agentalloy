@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -482,6 +483,19 @@ def _count_gpus(hardware_target: str) -> int:
             if result.returncode == 0:
                 return int(result.stdout.strip())
         except (FileNotFoundError, ValueError, subprocess.TimeoutExpired):
+            pass
+        # Fallback: nvidia-smi -L lists each GPU (e.g. "GPU 0: ...").
+        # More reliable when --query-gpu=count fails but the driver works.
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "-L"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return sum(1 for line in result.stdout.splitlines() if re.search(r"GPU \d+:", line))
+        except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
     elif hardware_target == "radeon":
         try:
@@ -1975,6 +1989,15 @@ def run_setup(cfg: SetupConfig) -> int:
             cfg.rerank_gpu_device = 0
             _print("  Embed GPU: 0")
             _print("  Reranker GPU: 0")
+        else:
+            # nvidia-smi --query-gpu=count can return 0 even when GPUs are
+            # present (driver issue, nvidia-smi not on PATH, etc.).
+            # Since hardware was detected as GPU-capable above, prompt the
+            # user rather than silently degrading to CPU-only.
+            _print(f"\n  Detected {num_gpus} GPU(s). Assuming single-GPU system (device 0).")
+            _print("  If this is wrong, stop and set CUDA_VISIBLE_DEVICES manually.")
+            cfg.embed_gpu_device = 0
+            cfg.rerank_gpu_device = 0
 
     # 3. Model (embed GGUF; reranker GGUF is fixed)
     default_model = _DEFAULT_EMBED_MODEL
