@@ -1,0 +1,13 @@
+I squash merged
+
+---
+
+go ahead
+
+---
+
+when I add a repo, does it automatically kickoff the indexing?
+
+---
+
+remove all of those /tmp/pytest-of-nmeyers/pytest-159/popen-gw7/ indexes from agent alloy and fix whatever is causing that to happen.

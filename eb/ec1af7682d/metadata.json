@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "ebec1af7682d",
+  "strategy": "manual-commit",
+  "branch": "fix/test-suite-code-index-leak",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "src/agentalloy/install/code_index_wiring.py",
+    "tests/conftest.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/eb/ec1af7682d/0/metadata.json",
+      "transcript": "/eb/ec1af7682d/0/full.jsonl",
+      "compact_transcript": "/eb/ec1af7682d/0/transcript.jsonl",
+      "content_hash": "/eb/ec1af7682d/0/content_hash.txt",
+      "prompt": "/eb/ec1af7682d/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 98,
+    "cache_creation_tokens": 46397,
+    "cache_read_tokens": 5879630,
+    "output_tokens": 19019,
+    "api_call_count": 51
+  }
+}
