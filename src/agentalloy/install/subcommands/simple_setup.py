@@ -68,10 +68,12 @@ from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415,
 
 def _print(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-untyped-def]
     """Print with Rich if available, plain stdout otherwise."""
+    # Rich's Console.print() doesn't accept 'flush' — only built-in print() does.
+    flush = kwargs.pop("flush", False)
     if console is not None:
         console.print(*args, **kwargs)  # type: ignore[union-attr, arg-type]
     else:
-        print(*args, **kwargs)
+        print(*args, flush=flush, **kwargs)
 
 
 def _image_variant_label(image_ref: str) -> str:
