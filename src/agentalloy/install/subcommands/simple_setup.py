@@ -68,10 +68,12 @@ from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415,
 
 def _print(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-untyped-def]
     """Print with Rich if available, plain stdout otherwise."""
+    # Rich's Console.print() doesn't accept 'flush' — only built-in print() does.
+    flush = kwargs.pop("flush", False)
     if console is not None:
         console.print(*args, **kwargs)  # type: ignore[union-attr, arg-type]
     else:
-        print(*args, **kwargs)
+        print(*args, flush=flush, **kwargs)
 
 
 def _image_variant_label(image_ref: str) -> str:
@@ -203,8 +205,8 @@ class SetupConfig:
     non_interactive: bool = False
     force: bool = False
     acknowledge_sidecar: bool = False
-    # Which context modules to enable: "injector" (default), "code-index", "both".
-    modules: str = "injector"
+    # Which context modules to enable: "injector", "code-index", "both" (default).
+    modules: str = "both"
     hardware_target: str = ""  # explicit user choice: "nvidia", "radeon", "apple-silicon", "cpu"
     embed_gpu_device: int | None = None  # CUDA/HIP device index for embed server
     rerank_gpu_device: int | None = None  # CUDA/HIP device index for rerank server
@@ -399,11 +401,11 @@ def _prompt_modules() -> str:
     return _prompt_numbered(
         "Which modules do you want?",
         [
-            ("injector", "Instruction injector (skill compose/proxy)   [default]"),
+            ("injector", "Instruction injector (skill compose/proxy)"),
             ("code-index", "Codebase indexer (code search, call graphs & decision graph)"),
-            ("both", "Both"),
+            ("both", "Both   [default]"),
         ],
-        default_index=1,
+        default_index=3,
     )
 
 
@@ -2444,10 +2446,10 @@ def add_parser(
     p.add_argument(
         "--modules",
         choices=["injector", "code-index", "both"],
-        default=None,
+        default="both",
         help=(
-            "Context modules to enable: 'injector' (skill compose/proxy, default), "
-            "'code-index' (code search & call graphs), or 'both'."
+            "Context modules to enable: 'injector' (skill compose/proxy), "
+            "'code-index' (code search & call graphs), or 'both' (default)."
         ),
     )
     p.add_argument(
@@ -2533,7 +2535,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         mode=args.mode or "persistent",
         packs=args.packs or "",
         harness=args.harness or "manual",
-        modules=getattr(args, "modules", None) or "injector",
+        modules=getattr(args, "modules", None) or "both",
         hardware_target=getattr(args, "hardware", None) or "",
         deployment=getattr(args, "deployment", None) or "",
         runtime_binary=getattr(args, "runtime", None) or "",
