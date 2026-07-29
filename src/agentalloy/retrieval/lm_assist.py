@@ -54,6 +54,23 @@ logger = logging.getLogger(__name__)
 # pointed at an unrelated local service. Stage B is off by default (LM_ASSIST),
 # but when enabled it shares the same reranker as the signal intent scorer.
 _DEFAULT_URL = "http://127.0.0.1:47952"
+
+# Shared concurrency semaphore — bounds TOTAL in-flight requests across BOTH
+# scorer singletons (compose Stage B + signal intent classifier) to a safe
+# value that the reranker server can handle without queuing.
+#
+# The reranker llama-server is launched with --parallel 1 (CPU/container) or
+# --parallel 2 (GPU).  With --parallel 1, any concurrency > 1 forces serial
+# queuing; with --parallel 2, concurrency > 2 queues.  A cap of 4 means:
+#   * GPU (2 slots): at most 2 requests queued — well within the 600 ms budget
+#     on fast hardware.
+#   * CPU (1 slot): at most 3 requests queued — each adds ~1.2–1.8 s, but the
+#     batch deadline reaps the rest before they start, so wall-clock stays
+#     bounded.
+#
+# This knob is independent of max_candidates() (which controls how many
+# fragments are scored, not how many HTTP requests are in-flight simultaneously).
+_rerank_semaphore = threading.Semaphore(4)
 # 600ms budget before Stage B times out and falls through to deterministic
 # retrieval. Raised from 300ms: a cold/loaded reranker (CPU llama-server, longer
 # fragments) routinely crossed 300ms and passed through, so the stage rarely ran.
@@ -72,11 +89,12 @@ _DEFAULT_TIMEOUT_MS = 600
 # knob LM_ASSIST_KEEP_THRESHOLD ships.
 _DEFAULT_KEEP_THRESHOLD = 0.0
 _DEFAULT_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
-# Cap on fragments scored per composition (env LM_ASSIST_MAX_CANDIDATES). Default
-# 8 == the reranker's ``--parallel`` slot count, so a compose Stage B fans out
-# exactly one wave-set. This single knob also sizes the FragmentScorer thread pool
-# (below) and is shared by BOTH scorer singletons (compose Stage B + signal intent),
-# so the two consumers can never re-oversubscribe the shared reranker's slots.
+# Cap on fragments scored per composition (env LM_ASSIST_MAX_CANDIDATES).
+# Default is 8 — a reasonable starting point that balances breadth vs latency.
+# This knob only limits the number of fragments sent to the scorer; concurrency
+# to the reranker server is independently bounded by the shared semaphore
+# (``_rerank_semaphore``), so the two consumers can never oversubscribe the
+# server's KV slots regardless of max_candidates() value.
 _DEFAULT_MAX_CANDIDATES = 8
 # Per-fragment runtime char cap applied before prompt assembly (env
 # LM_ASSIST_DOC_CAP_CHARS). 2400 chars (~600 tok) is a prefill bound, not an
@@ -292,29 +310,34 @@ class FragmentScorer:
             timeout=httpx.Timeout(per_req_s),
             headers={"Authorization": "Bearer not-needed"},
         )
-        # Pool width keyed to the SAME knob as the candidate cap (max_candidates())
-        # so it can never drift from --parallel; bounds both scorer singletons.
+        # Pool width keyed to max_candidates() so the thread pool can serve all
+        # documents in a single batch.  Actual concurrency to the reranker server
+        # is independently bounded by the shared semaphore (_rerank_semaphore).
         self._pool = ThreadPoolExecutor(
             max_workers=max_candidates(), thread_name_prefix="lm-assist"
         )
 
     def _score_one(self, task: str, document: str) -> float:
-        payload: dict[str, Any] = {
-            "model": self._config.model,
-            # Truncate to the runtime doc cap before prompt assembly — a prefill
-            # bound that keeps fat-corpus outliers inside the budget.
-            "prompt": build_prompt(
-                task, document[: self._config.doc_cap_chars], instruct=self._config.instruct
-            ),
-            "max_tokens": 1,
-            "temperature": 0.0,
-            "n_probs": 20,
-            "logprobs": 20,
-        }
-        resp = self._client.post("/v1/completions", json=payload)
-        resp.raise_for_status()
-        top = _parse_completion_logprobs(resp.json())
-        return score_from_logprobs(top)
+        # Gate through the shared semaphore so BOTH scorers never exceed the
+        # server's KV-slot capacity.  The context-manager form blocks until a
+        # slot is available (bounded by the batch deadline below).
+        with _rerank_semaphore:
+            payload: dict[str, Any] = {
+                "model": self._config.model,
+                # Truncate to the runtime doc cap before prompt assembly — a prefill
+                # bound that keeps fat-corpus outliers inside the budget.
+                "prompt": build_prompt(
+                    task, document[: self._config.doc_cap_chars], instruct=self._config.instruct
+                ),
+                "max_tokens": 1,
+                "temperature": 0.0,
+                "n_probs": 20,
+                "logprobs": 20,
+            }
+            resp = self._client.post("/v1/completions", json=payload)
+            resp.raise_for_status()
+            top = _parse_completion_logprobs(resp.json())
+            return score_from_logprobs(top)
 
     def score(self, task: str, documents: list[str]) -> ScoreResult:
         """Score every document; never raises. Empty input → HIT with []."""
@@ -460,7 +483,10 @@ def max_candidates() -> int:
     LM_ASSIST_MAX_CANDIDATES, default ``_DEFAULT_MAX_CANDIDATES``).
 
     Resolved at call time so the env override is honored, and clamped to >= 1 so a
-    misconfigured value can never crash the ThreadPoolExecutor. This single knob
-    also sizes the scorer thread pool, keeping pool width == --parallel slot count.
+    misconfigured value can never crash the ThreadPoolExecutor.  This knob
+    controls *how many* fragments are scored, not *how many HTTP requests fire
+    simultaneously* — that is independently bounded by the shared semaphore
+    (``_rerank_semaphore``) so the two scorer singletons can never oversubscribe
+    the reranker server's KV slots.
     """
     return max(1, _env_int("LM_ASSIST_MAX_CANDIDATES", _DEFAULT_MAX_CANDIDATES))
