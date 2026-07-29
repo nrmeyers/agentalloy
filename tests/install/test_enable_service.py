@@ -416,13 +416,35 @@ class TestWriteLlamaUnits:
         assert written == []
 
     def test_writes_units_without_gpu_device(self, tmp_path: Path) -> None:
-        written = _write_llama_units(embed_gpu_device=None, rerank_gpu_device=None)
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                return_value=MagicMock(returncode=0, stderr=""),
+            ),
+        ):
+            written = _write_llama_units(embed_gpu_device=None, rerank_gpu_device=None)
         for unit_path in written:
             content = Path(unit_path).read_text()
             assert "Environment=" not in content
 
     def test_writes_gpu_env_vars_when_device_set(self, tmp_path: Path) -> None:
-        written = _write_llama_units(embed_gpu_device=1, rerank_gpu_device=0)
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                return_value=MagicMock(returncode=0, stderr=""),
+            ),
+        ):
+            written = _write_llama_units(embed_gpu_device=1, rerank_gpu_device=0)
         embed_unit = next(p for p in written if "embed" in p)
         embed_content = Path(embed_unit).read_text()
         assert "Environment=CUDA_VISIBLE_DEVICES=1" in embed_content
