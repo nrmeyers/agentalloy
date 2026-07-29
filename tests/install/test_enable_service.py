@@ -22,6 +22,7 @@ from agentalloy.install.subcommands.enable_service import (
     _render_systemd_unit,  # pyright: ignore[reportPrivateUsage]
     _resolve_preset,  # pyright: ignore[reportPrivateUsage]
     _write_llama_launchd_agents,  # pyright: ignore[reportPrivateUsage]
+    _write_llama_units,  # pyright: ignore[reportPrivateUsage]
     enable_service,
 )
 
@@ -184,6 +185,29 @@ class TestRenderLlamaUnits:
         assert "-ngl" not in embed
         assert "-ngl" not in rerank
 
+    def test_embed_unit_adds_env_for_gpu_device(self) -> None:
+        """GPU device pinning adds CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES."""
+        embed = _render_llama_embed_unit(
+            "/usr/bin/llama-server", Path("/m/e.gguf"), 999, gpu_device=1
+        )
+        assert "Environment=CUDA_VISIBLE_DEVICES=1" in embed
+        assert "Environment=HIP_VISIBLE_DEVICES=1" in embed
+
+    def test_rerank_unit_adds_env_for_gpu_device(self) -> None:
+        """GPU device pinning adds CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES."""
+        rerank = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/m/r.gguf"), 999, gpu_device=0
+        )
+        assert "Environment=CUDA_VISIBLE_DEVICES=0" in rerank
+        assert "Environment=HIP_VISIBLE_DEVICES=0" in rerank
+
+    def test_units_omit_env_when_gpu_device_none(self) -> None:
+        """When gpu_device is None, no Environment lines are added."""
+        embed = _render_llama_embed_unit("/usr/bin/llama-server", Path("/m/e.gguf"))
+        rerank = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"))
+        assert "Environment=" not in embed
+        assert "Environment=" not in rerank
+
 
 class TestResolvePreset:
     """Regression coverage for the hardware-preset resolution that selects -ngl.
@@ -218,6 +242,10 @@ class TestResolvePreset:
 
     def test_falls_back_to_state_then_none(self) -> None:
         # No recommend-models.json present -> fall back to install state, then None.
+        out = install_state.outputs_dir()
+        rm = out / "recommend-models.json"
+        if rm.exists():
+            rm.unlink()
         assert _resolve_preset({"preset": "nvidia"}) == "nvidia"
         assert _resolve_preset({}) is None
 
@@ -288,6 +316,26 @@ class TestRenderLlamaLaunchdPlist:
         assert "<string>47952</string>" in content
         assert "<string>ai.agentalloy.rerank</string>" in content
 
+    def test_plist_adds_env_vars_for_gpu_device(self) -> None:
+        """GPU device pinning adds CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES."""
+        content = _render_llama_launchd_plist(
+            "ai.agentalloy.embed",
+            ["/usr/bin/llama-server", "--embeddings", "--port", "47951"],
+            gpu_device=1,
+        )
+        assert "<key>CUDA_VISIBLE_DEVICES</key>" in content
+        assert "<string>1</string>" in content
+        assert "<key>HIP_VISIBLE_DEVICES</key>" in content
+
+    def test_plist_omits_env_vars_when_gpu_device_none(self) -> None:
+        """When gpu_device is None, no EnvironmentVariables block is added."""
+        content = _render_llama_launchd_plist(
+            "ai.agentalloy.embed",
+            ["/usr/bin/llama-server", "--embeddings", "--port", "47951"],
+        )
+        assert "CUDA_VISIBLE_DEVICES" not in content
+        assert "HIP_VISIBLE_DEVICES" not in content
+
 
 class TestWriteLlamaLaunchdAgents:
     """``_write_llama_launchd_agents`` — the macOS mirror of ``_write_llama_units``."""
@@ -330,6 +378,81 @@ class TestWriteLlamaLaunchdAgents:
         # launchctl load was invoked for both labels (plus unload calls).
         load_cmds = [c for c in loaded if "load" in c]
         assert len(load_cmds) == 2
+
+    def test_writes_gpu_env_vars_when_device_set(self, tmp_path: Path) -> None:
+        """GPU device pinning adds EnvironmentVariables to the plist."""
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                return_value=MagicMock(returncode=0, stderr=""),
+            ),
+            patch("agentalloy.install.subcommands.enable_service.os.chmod"),
+        ):
+            _write_llama_launchd_agents(embed_gpu_device=1, rerank_gpu_device=0)
+
+        agents_dir = tmp_path / "Library" / "LaunchAgents"
+        embed_content = (agents_dir / "ai.agentalloy.embed.plist").read_text()
+        assert "<key>CUDA_VISIBLE_DEVICES</key>" in embed_content
+        assert "<string>1</string>" in embed_content
+        rerank_content = (agents_dir / "ai.agentalloy.rerank.plist").read_text()
+        assert "<key>CUDA_VISIBLE_DEVICES</key>" in rerank_content
+        assert "<string>0</string>" in rerank_content
+
+
+class TestWriteLlamaUnits:
+    """``_write_llama_units`` — the Linux systemd mirror of ``_write_llama_launchd_agents``."""
+
+    def test_skips_gracefully_when_llama_server_absent(self) -> None:
+        with patch(
+            "agentalloy.install.subcommands.enable_service.shutil.which",
+            return_value=None,
+        ):
+            written = _write_llama_units()
+        assert written == []
+
+    def test_writes_units_without_gpu_device(self, tmp_path: Path) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                return_value=MagicMock(returncode=0, stderr=""),
+            ),
+        ):
+            written = _write_llama_units(embed_gpu_device=None, rerank_gpu_device=None)
+        for unit_path in written:
+            content = Path(unit_path).read_text()
+            assert "Environment=" not in content
+
+    def test_writes_gpu_env_vars_when_device_set(self, tmp_path: Path) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                return_value=MagicMock(returncode=0, stderr=""),
+            ),
+        ):
+            written = _write_llama_units(embed_gpu_device=1, rerank_gpu_device=0)
+        embed_unit = next(p for p in written if "embed" in p)
+        embed_content = Path(embed_unit).read_text()
+        assert "Environment=CUDA_VISIBLE_DEVICES=1" in embed_content
+        assert "Environment=HIP_VISIBLE_DEVICES=1" in embed_content
+        rerank_unit = next(p for p in written if "rerank" in p)
+        rerank_content = Path(rerank_unit).read_text()
+        assert "Environment=CUDA_VISIBLE_DEVICES=0" in rerank_content
+        assert "Environment=HIP_VISIBLE_DEVICES=0" in rerank_content
 
 
 class TestReadEnvFile:

@@ -18,6 +18,8 @@ import pytest
 from agentalloy.install.subcommands.simple_setup import (
     _derive_host_target as _derive_host_target,  # type: ignore[attr-defined]
     _discover_packs as _discover_packs,  # type: ignore[attr-defined]
+    _count_gpus as _count_gpus,  # type: ignore[attr-defined]
+    _gpu_label as _gpu_label,  # type: ignore[attr-defined]
     _prompt as _prompt,  # type: ignore[attr-defined]
     _prompt_context as _prompt_context,  # type: ignore[attr-defined]
     _prompt_for_packs as _prompt_for_packs,  # type: ignore[attr-defined]
@@ -2123,3 +2125,103 @@ class TestSetupConfigUpstreamDefaults:
         """SetupConfig defaults upstream_api_key to empty string."""
         cfg = SetupConfig()
         assert cfg.upstream_api_key == ""
+
+
+# ---------------------------------------------------------------------------
+# GPU detection helpers
+# ---------------------------------------------------------------------------
+
+
+class TestCountGpusNvidia:
+    """Tests for _count_gpus with NVIDIA (CUDA) hardware target."""
+
+    def test_returns_count_from_nvidia_smi(self) -> None:
+        result = MagicMock(returncode=0, stdout="2\n")
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("nvidia") == 2
+
+    def test_returns_one_gpu(self) -> None:
+        result = MagicMock(returncode=0, stdout="1\n")
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("nvidia") == 1
+
+    def test_returns_zero_on_missing_binary(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert _count_gpus("nvidia") == 0
+
+    def test_returns_zero_on_timeout(self) -> None:
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)):
+            assert _count_gpus("nvidia") == 0
+
+    def test_returns_zero_on_non_numeric_output(self) -> None:
+        result = MagicMock(returncode=0, stdout="garbage\n")
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("nvidia") == 0
+
+
+class TestCountGpusAmd:
+    """Tests for _count_gpus with AMD (ROCm) hardware target."""
+
+    def test_returns_count_from_rocm_smi(self) -> None:
+        # rocm-smi --showgpu outputs a header line then one line per GPU.
+        result = MagicMock(
+            returncode=0,
+            stdout="  GPU  Temp    Power\nGPU [0] Temp...\nGPU [1] Temp...\n",
+        )
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("radeon") == 2
+
+    def test_returns_one_gpu(self) -> None:
+        result = MagicMock(
+            returncode=0,
+            stdout="  GPU  Temp    Power\nGPU [0] Temp...\n",
+        )
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("radeon") == 1
+
+    def test_skips_header_line(self) -> None:
+        result = MagicMock(returncode=0, stdout="  GPU  Temp    Power\nGPU [0] 45C   100W\n")
+        with patch("subprocess.run", return_value=result):
+            assert _count_gpus("radeon") == 1
+
+    def test_returns_zero_on_missing_binary(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert _count_gpus("radeon") == 0
+
+    def test_returns_zero_on_timeout(self) -> None:
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)):
+            assert _count_gpus("radeon") == 0
+
+
+class TestGpuLabel:
+    """Tests for _gpu_label GPU name retrieval."""
+
+    def test_nvidia_returns_gpu_name(self) -> None:
+        result = MagicMock(
+            returncode=0, stdout="NVIDIA GeForce RTX 4090\nNVIDIA GeForce RTX 3080\n"
+        )
+        with patch("subprocess.run", return_value=result):
+            assert _gpu_label("nvidia", 0) == "NVIDIA GeForce RTX 4090"
+            assert _gpu_label("nvidia", 1) == "NVIDIA GeForce RTX 3080"
+
+    def test_nvidia_fallback_on_index_out_of_range(self) -> None:
+        result = MagicMock(returncode=0, stdout="NVIDIA RTX 4090\n")
+        with patch("subprocess.run", return_value=result):
+            assert _gpu_label("nvidia", 5) == "NVIDIA GPU 5"
+
+    def test_nvidia_fallback_on_missing_binary(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert _gpu_label("nvidia", 0) == "NVIDIA GPU 0"
+
+    def test_nvidia_fallback_on_timeout(self) -> None:
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)):
+            assert _gpu_label("nvidia", 0) == "NVIDIA GPU 0"
+
+    def test_radeon_returns_product_name(self) -> None:
+        result = MagicMock(returncode=0, stdout="GPU [0] Product Name: AMD Radeon RX 7900 XT\n")
+        with patch("subprocess.run", return_value=result):
+            assert _gpu_label("radeon", 0) == "GPU [0] Product Name: AMD Radeon RX 7900 XT"
+
+    def test_radeon_fallback_on_missing_binary(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert _gpu_label("radeon", 0) == "RADEON GPU 0"

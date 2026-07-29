@@ -205,6 +205,8 @@ class SetupConfig:
     # Which context modules to enable: "injector" (default), "code-index", "both".
     modules: str = "injector"
     hardware_target: str = ""  # explicit user choice: "nvidia", "radeon", "apple-silicon", "cpu"
+    embed_gpu_device: int | None = None  # CUDA/HIP device index for embed server
+    rerank_gpu_device: int | None = None  # CUDA/HIP device index for rerank server
 
     # Deployment type: "native" (default) or "container"
     deployment: str = ""
@@ -323,6 +325,9 @@ def _build_namespace(cfg: SetupConfig, **overrides: Any) -> argparse.Namespace: 
         "legacy": False,  # wire_harness legacy mode
         "quiet": True,  # suppress JSON stdout when called from wizard
         "json": False,  # human-readable output (not raw JSON)
+        "gpu_device": None,  # overridden per-server below
+        "embed_gpu_device": None,
+        "rerank_gpu_device": None,
     }
     attrs.update(overrides)  # type: ignore[arg-type]
     return argparse.Namespace(**attrs)
@@ -458,6 +463,80 @@ def _ensure_code_index_module(modules: str) -> str:
         )
     _print("  [yellow]Continuing with the code-index module off.[/yellow]")
     return "injector"
+
+
+def _count_gpus(hardware_target: str) -> int:
+    """Count available GPUs for the given hardware target.
+
+    Uses CUDA for NVIDIA and rocm-smi for AMD to detect GPU count.
+    Returns 0 if the tool is unavailable or an error occurs.
+    """
+    if hardware_target == "nvidia":
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=count", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+        except (FileNotFoundError, ValueError, subprocess.TimeoutExpired):
+            pass
+    elif hardware_target == "radeon":
+        try:
+            result = subprocess.run(
+                ["rocm-smi", "--showgpu"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                # rocm-smi --showgpu outputs one line per GPU after a header.
+                lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+                # First line is the header; remaining lines are per-GPU.
+                return max(0, len(lines) - 1)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    return 0
+
+
+def _gpu_label(hardware_target: str, index: int) -> str:
+    """Get a human-readable label for a specific GPU.
+
+    For NVIDIA, queries the GPU name via nvidia-smi.
+    For AMD, queries via rocm-smi.
+    Falls back to a generic label if detection fails.
+    """
+    if hardware_target == "nvidia":
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+                if index < len(lines):
+                    return lines[index]
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    elif hardware_target == "radeon":
+        try:
+            result = subprocess.run(
+                ["rocm-smi", "--showproductname"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+                if index < len(lines):
+                    return lines[index]
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    return f"{hardware_target.upper()} GPU {index}"
 
 
 def _prompt_hardware(default: str) -> str:
@@ -1838,6 +1917,65 @@ def run_setup(cfg: SetupConfig) -> int:
             cfg.hardware_target = detected
     _print(f"  Hardware: {_HW_LABELS.get(cfg.hardware_target, cfg.hardware_target)}")
 
+    # 2b. GPU device selection (only for GPU hardware targets). When the host
+    # has multiple GPUs, the user picks which GPU each server uses.
+    if cfg.hardware_target in ("nvidia", "radeon") and not cfg.non_interactive:
+        # Check for multiple GPUs via the runtime (CUDA for NVIDIA, rocm-smi for AMD).
+        num_gpus = _count_gpus(cfg.hardware_target)
+        if num_gpus > 1:
+            _print(f"\n  Detected {num_gpus} GPUs. Select which GPU each server uses.")
+            for i in range(num_gpus):
+                gpu_label = _gpu_label(cfg.hardware_target, i)
+                _print(f"    [{i}] GPU {i}: {gpu_label}")
+            while True:
+                try:
+                    raw = input("  Embed GPU index [0]: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if raw == "":
+                    break
+                try:
+                    idx = int(raw)
+                    if 0 <= idx < num_gpus:
+                        cfg.embed_gpu_device = idx
+                        break
+                    _print(f"  [red]Please enter 0–{num_gpus - 1}[/red]")
+                except ValueError:
+                    _print("  [red]Invalid index[/red]")
+            if cfg.embed_gpu_device is not None:
+                _print(f"  Embed GPU: {cfg.embed_gpu_device}")
+            # Reranker: default to next GPU (or same if only one was selected).
+            if cfg.embed_gpu_device is not None and cfg.embed_gpu_device + 1 < num_gpus:
+                rerank_default = cfg.embed_gpu_device + 1
+            else:
+                rerank_default = 0
+            _print(f"\n  Reranker GPU index [{rerank_default}]: ", end="", flush=True)
+            try:
+                raw = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                raw = ""
+            if raw == "":
+                cfg.rerank_gpu_device = rerank_default
+            else:
+                try:
+                    idx = int(raw)
+                    if 0 <= idx < num_gpus:
+                        cfg.rerank_gpu_device = idx
+                    else:
+                        _print(f"  [red]Please enter 0–{num_gpus - 1}[/red]")
+                        cfg.rerank_gpu_device = rerank_default
+                except ValueError:
+                    _print("  [red]Invalid index, using default[/red]")
+                    cfg.rerank_gpu_device = rerank_default
+            _print(f"  Reranker GPU: {cfg.rerank_gpu_device}")
+        elif num_gpus == 1:
+            cfg.embed_gpu_device = 0
+            cfg.rerank_gpu_device = 0
+            _print("  Embed GPU: 0")
+            _print("  Reranker GPU: 0")
+
     # 3. Model (embed GGUF; reranker GGUF is fixed)
     default_model = _DEFAULT_EMBED_MODEL
     if not cfg.non_interactive:
@@ -2074,7 +2212,9 @@ def run_setup(cfg: SetupConfig) -> int:
 
     # Step f: Start embed server (llama-server, port 47951)
     _print("  [dim]-> Starting embed server[/dim]")
-    rc = start_embed_server.run(_build_namespace(cfg, models=str(models_fp), timeout=120.0))
+    rc = start_embed_server.run(
+        _build_namespace(cfg, models=str(models_fp), timeout=120.0, gpu_device=cfg.embed_gpu_device)
+    )
     if rc not in (0, 4):
         _print(f"  [red]  start-embed-server failed (exit {rc}).[/red]")
         return rc
@@ -2088,6 +2228,7 @@ def run_setup(cfg: SetupConfig) -> int:
             models=str(models_fp),
             hardware_target=cfg.hardware_target or cfg.recommended_host or "cpu",
             timeout=120.0,
+            gpu_device=cfg.rerank_gpu_device,
         )
     )
     if rc not in (0, 4):
@@ -2146,7 +2287,16 @@ def run_setup(cfg: SetupConfig) -> int:
     # Step i: Enable service
     _print("  [dim]-> Enabling service[/dim]")
     mode_flag = "native" if cfg.mode == "persistent" else "manual"
-    rc = enable_service.run(_build_namespace(cfg, mode=mode_flag, runtime=None, port=cfg.port))
+    rc = enable_service.run(
+        _build_namespace(
+            cfg,
+            mode=mode_flag,
+            runtime=None,
+            port=cfg.port,
+            embed_gpu_device=cfg.embed_gpu_device,
+            rerank_gpu_device=cfg.rerank_gpu_device,
+        )
+    )
     if rc not in (0, 4):
         _print(f"  [red]  enable-service failed (exit {rc}).[/red]")
         return rc
