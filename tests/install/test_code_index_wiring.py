@@ -336,3 +336,53 @@ class TestOfferIndex:
         monkeypatch.setattr(ciw, "service_module_status", lambda port: "disabled")
         ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
         assert submitted == []
+
+
+class TestServiceBaseUrl:
+    """The seam that keeps wiring off a live service (2026-07-28 leak).
+
+    `offer_index` POSTs /code/index for the repo being wired. In tests that
+    repo is a `tmp_path`, and a live :47950 resolves the developer's REAL data
+    dir — so every wire/add test indexed its temp dir into
+    `~/.local/share/agentalloy/code_index/repos/`, 32 of them by the time it
+    was caught. `tests/conftest.py` pins STATE_SERVICE_URL autouse; these pin
+    the behaviour that pin depends on.
+    """
+
+    def test_defaults_to_the_local_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("STATE_SERVICE_URL", raising=False)
+        assert ciw.service_base_url(47950) == "http://127.0.0.1:47950"
+
+    def test_env_override_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STATE_SERVICE_URL", "http://127.0.0.1:1")
+        assert ciw.service_base_url(47950) == "http://127.0.0.1:1"
+
+    def test_every_http_call_honours_the_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No caller may build its own URL — that is how one escapes the pin."""
+        seen: list[str] = []
+
+        class _Resp:
+            status = 200
+
+            def read(self) -> bytes:
+                return b"[]"
+
+            def __enter__(self) -> _Resp:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        def _fake_urlopen(req: Any, timeout: float = 0) -> _Resp:
+            seen.append(req.full_url)
+            return _Resp()
+
+        monkeypatch.setenv("STATE_SERVICE_URL", "http://127.0.0.1:1")
+        monkeypatch.setattr(ciw.urllib.request, "urlopen", _fake_urlopen)
+
+        ciw.service_module_status(47950)
+        ciw.registry_slugs(47950)
+        ciw.submit_index_job(47950, Path("/tmp/does-not-matter"))
+
+        assert len(seen) == 3
+        assert all(url.startswith("http://127.0.0.1:1/") for url in seen), seen
