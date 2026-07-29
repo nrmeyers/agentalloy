@@ -1128,6 +1128,9 @@ def uninstall(
         ".codex/config.toml",  # codex repo-local CODEX_HOME config
         ".codex/.agentalloy-env",  # codex CODEX_HOME activation env file
         ".codex/.gitignore",  # codex repo-local state gitignore
+        "mise.toml",  # hermes-agent mise [env] carrier (HERMES_HOME)
+        ".mise.toml",  # hermes-agent alternate mise path
+        ".envrc",  # hermes-agent direnv activation carrier
     )
     root_resolved = root.resolve()
     # Trusted user-scope prefixes, resolved. A prefix that is itself a symlink
@@ -1663,6 +1666,31 @@ def uninstall(
         if pruned:
             st["harness_files_written"] = kept
             install_state.save_state(st)
+
+    # Deduplicate repeated "Service is running" warnings — they all share
+    # the same root cause (the state service holds the DuckDB lock) and
+    # listing every repo path is noise. Collapse into a single summary.
+    service_warnings: list[str] = []
+    other_warnings: list[str] = []
+    for w in warnings:
+        if w.startswith("Service is running"):
+            # Extract the repo_root from "left store rows for {repo_root} in place"
+            try:
+                after_dash = w.split(" — ", 1)[1]  # "left store rows for …"
+                repo_root = after_dash.split(" for ", 1)[1].split(" in place")[0]
+                service_warnings.append(repo_root)
+            except (IndexError, ValueError):
+                # Fallback: keep the original warning if parsing fails
+                other_warnings.append(w)
+        else:
+            other_warnings.append(w)
+    if service_warnings:
+        other_warnings.append(
+            f"Service is running — left store rows in place for "
+            f"{len(service_warnings)} repo(s): {', '.join(service_warnings)}. "
+            "Stop the service and re-run to drop them."
+        )
+    warnings = other_warnings
 
     # Build result: use new key name, keep deprecated alias for one release.
     # 9. Return result dict
