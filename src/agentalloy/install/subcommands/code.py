@@ -33,6 +33,7 @@ import httpx
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.code_index.staleness import check_staleness
 from agentalloy.install import state as install_state
+from agentalloy.install.code_index_wiring import service_base_url
 
 _TERMINAL_JOB_STATES = frozenset({"done", "failed", "cancelled", "interrupted"})
 _POLL_INTERVAL_S = 0.5
@@ -48,8 +49,12 @@ def _resolve_port(args: argparse.Namespace) -> int:
 
 
 def _make_client(port: int) -> httpx.Client:
-    """One httpx client per invocation. Tests monkeypatch this seam."""
-    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30.0)
+    """One httpx client per invocation. Tests monkeypatch this seam.
+
+    The base URL goes through ``service_base_url`` so ``STATE_SERVICE_URL``
+    redirects it — the pin that keeps the suite off a live service.
+    """
+    return httpx.Client(base_url=service_base_url(port), timeout=30.0)
 
 
 def _service_down_error(port: int, exc: Exception) -> int:

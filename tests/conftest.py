@@ -79,6 +79,12 @@ _DEFAULT_PORT = 47950
 _REAL_HOME_SENTINELS = (
     Path.home() / ".claude" / "settings.json",
     Path.home() / ".agentalloy",
+    # Fourth incident class: wiring's code-index calls leave the process, so
+    # XDG redirection does not cover them. A test that reached the developer's
+    # live :47950 had its tmp_path indexed into the REAL per-repo store (32
+    # pytest dirs accumulated there by 2026-07-28). The env pin in
+    # `_pin_state_service_unreachable` is the fix; this is the tripwire.
+    Path.home() / ".local" / "share" / "agentalloy" / "code_index" / "repos",
 )
 
 
@@ -136,6 +142,11 @@ def _pin_state_service_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     passes on CI, where nothing is listening, and fails or corrupts locally).
     Port 1 is never bound, so ``is_running()`` is deterministically False.
     Tests that want a fake service re-set this env var themselves.
+
+    ``install.code_index_wiring`` reads the same variable (its endpoints are on
+    the same service and port), so this pin also covers ``wire``/``add``, whose
+    ``offer_index`` step would otherwise POST /code/index for a tmp_path repo
+    and have the live service index it into the developer's real store.
     """
     monkeypatch.setenv("STATE_SERVICE_URL", "http://127.0.0.1:1")
 
