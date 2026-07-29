@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "207124efd4a2",
+  "strategy": "manual-commit",
+  "branch": "fix/upgrade-state-import-race",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/agentalloy/install/subcommands/upgrade.py",
+    "tests/install/test_upgrade_state_import.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/20/7124efd4a2/0/metadata.json",
+      "transcript": "/20/7124efd4a2/0/full.jsonl",
+      "compact_transcript": "/20/7124efd4a2/0/transcript.jsonl",
+      "content_hash": "/20/7124efd4a2/0/content_hash.txt",
+      "prompt": "/20/7124efd4a2/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 114,
+    "cache_creation_tokens": 91134,
+    "cache_read_tokens": 4067716,
+    "output_tokens": 18884,
+    "api_call_count": 59
+  }
+}

@@ -1,0 +1,11 @@
+we have a bug on the ugprade: Warnings
+! phase state migration skipped for /home/nmeyers/dev/hermes/Harborlight — the file still works; re-run `agentalloy upgrade` once the service is up
+! phase state migration skipped for /home/nmeyers/dev/hermes/ai-job-search — the file still works; re-run `agentalloy upgrade` once the service is up
+! phase state migration skipped for /home/nmeyers/dev/hermes/agentalloy — the file still works; re-run `agentalloy upgrade` once the service is up
+! phase state migration skipped for /home/nmeyers/dev/qwen/agentalloy — the file still works; re-run `agentalloy upgrade` once the service is up
+! phase state migration skipped for /home/nmeyers/dev/qwen/aatest — the file still works; re-run `agentalloy upgrade` once the service is up
+! phase state migration skipped for /home/nmeyers/dev/claude/agentalloy — the file still works; re-run `agentalloy upgrade` once the service is up
+
+---
+
+do we need a patch PR?
