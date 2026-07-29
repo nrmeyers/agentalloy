@@ -1467,14 +1467,23 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Update modelProviders.openai[] — preserve existing entries, update proxy
+    # Add a proxy entry to modelProviders.openai[] — do NOT overwrite existing
+    # provider entries. The top-level model.baseUrl is redirected to the proxy
+    # (see below), so Qwen Code routes all calls through the proxy; the existing
+    # providers stay intact for direct-use scenarios.
     if "modelProviders" in settings_data and isinstance(settings_data["modelProviders"], dict):
         providers = cast("dict[str, Any]", settings_data["modelProviders"])
         openai_providers = providers.get("openai")
         if isinstance(openai_providers, list):
-            for entry in openai_providers:
-                if isinstance(entry, dict):
-                    entry["baseUrl"] = proxy_base
+            # Only add if we don't already have a proxy entry.
+            proxy_exists = any(
+                isinstance(e, dict) and "/proj/" in str(e.get("baseUrl", ""))
+                for e in openai_providers
+            )
+            if not proxy_exists:
+                openai_providers.append(
+                    {"id": "agentalloy-proxy", "name": "AgentAlloy", "baseUrl": proxy_base}
+                )
         else:
             providers["openai"] = [
                 {"id": "agentalloy-proxy", "name": "AgentAlloy", "baseUrl": proxy_base}
