@@ -21,6 +21,7 @@ takes over.
 from __future__ import annotations
 
 import copy
+import fnmatch
 import json
 import logging
 import threading
@@ -114,6 +115,19 @@ CREATE INDEX IF NOT EXISTS idx_sdd_contract_slug
 
 CREATE INDEX IF NOT EXISTS idx_sdd_contract_status
     ON sdd_contract (status);
+
+CREATE TABLE IF NOT EXISTS sdd_artifact (
+    repo               TEXT NOT NULL,
+    phase              TEXT NOT NULL,
+    slug               TEXT NOT NULL,
+    name               TEXT NOT NULL,
+    content            TEXT,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo, phase, slug, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sdd_artifact_phase
+    ON sdd_artifact (repo, phase);
 """
 
 # State kinds and their properties
@@ -1167,6 +1181,120 @@ class DuckDBStateStore:
         result = self.conn.execute(sql, params)
         count = result.fetchall()
         return count and count[0][0] > 0
+
+    # -- artifact CRUD ---------------------------------------------------------
+    # Deliverable bodies (docs/spec/<slug>.md, docs/design/<slug>/{approach,
+    # tasks,test-plan}.md) live here, keyed by (phase, slug, name) rather than
+    # folded into sdd_contract: design has three named bodies per slug, spec
+    # has one — a single `body` column (as sdd_contract has, for the contract
+    # itself) can't hold that shape.
+
+    def set_artifact(self, phase: str, slug: str, name: str, content: str) -> dict[str, Any]:
+        """Upsert an artifact body. Returns the stored row as a dict."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing = self.conn.execute(
+            "SELECT 1 FROM sdd_artifact WHERE repo=? AND phase=? AND slug=? AND name=?",
+            (repo, phase, slug, name),
+        ).fetchone()
+        if existing:
+            self.conn.execute(
+                "UPDATE sdd_artifact SET content=?, updated_at=? "
+                "WHERE repo=? AND phase=? AND slug=? AND name=?",
+                (content, ts, repo, phase, slug, name),
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO sdd_artifact (repo, phase, slug, name, content, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (repo, phase, slug, name, content, ts),
+            )
+        return {
+            "phase": phase,
+            "slug": slug,
+            "name": name,
+            "content": content,
+            "updated_at": ts,
+        }
+
+    def get_artifact(self, phase: str, slug: str, name: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT phase, slug, name, content, updated_at FROM sdd_artifact "
+            "WHERE repo=? AND phase=? AND slug=? AND name=?",
+            (self._repo(), phase, slug, name),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "phase": row[0],
+            "slug": row[1],
+            "name": row[2],
+            "content": row[3],
+            "updated_at": row[4],
+        }
+
+    def list_artifacts(
+        self,
+        phase: str,
+        *,
+        slug: str | None = None,
+        name_glob: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List artifacts for a phase, optionally filtered by slug and a
+        ``fnmatch``-style ``name_glob`` (the store-side equivalent of globbing
+        ``docs/<phase>/**/<name_glob>`` on disk).
+        """
+        conditions = ["repo=?", "phase=?"]
+        params: list[Any] = [self._repo(), phase]
+        if slug is not None:
+            conditions.append("slug=?")
+            params.append(slug)
+        where = " AND ".join(conditions)
+        rows = self.conn.execute(
+            "SELECT phase, slug, name, content, updated_at FROM sdd_artifact "
+            f"WHERE {where} ORDER BY updated_at DESC",
+            params,
+        ).fetchall()
+        results = [
+            {"phase": r[0], "slug": r[1], "name": r[2], "content": r[3], "updated_at": r[4]}
+            for r in rows
+        ]
+        if name_glob is not None:
+            results = [r for r in results if fnmatch.fnmatch(r["name"], name_glob)]
+        return results
+
+    # -- approval marker -------------------------------------------------------
+    # Thin wrappers over the generic sdd_state read/write, using the already
+    # -registered "approved" kind (REPO_SCOPED_KINDS/LEASED_KINDS above) which
+    # predates this migration but had no reader/writer until now.
+
+    def set_approval(
+        self,
+        phase: str,
+        artifact_digest: str,
+        *,
+        approver: str | None = None,
+        owner: str | None = None,
+    ) -> None:
+        value = json.dumps(
+            {
+                "artifact_digest": artifact_digest,
+                "approver": approver,
+                "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        self.write("approved", value, session_key=phase, owner=owner)
+
+    def get_approval(self, phase: str) -> dict[str, Any] | None:
+        raw = self.read("approved", session_key=phase)
+        if raw is None:
+            return None
+        try:
+            return cast(dict[str, Any], json.loads(raw))
+        except json.JSONDecodeError:
+            return None
 
     # -- repo management -----------------------------------------------------
 

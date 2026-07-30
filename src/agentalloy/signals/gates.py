@@ -395,10 +395,24 @@ def decide_transition(
     if not should_transition and current_phase != to_phase:
         from agentalloy.signals.prefilter import (
             _extract_gate_paths,  # pyright: ignore[reportPrivateUsage]
+            _extract_gate_store_specs,  # pyright: ignore[reportPrivateUsage]
         )
 
         required = dict.fromkeys(_extract_gate_paths(gate_spec))
         missing = [p for p in required if not _glob_files(ctx.project_root, p)]
+
+        # Store-backed artifacts (spec/design, post-migration): no filesystem
+        # glob to check, so report what's missing by querying the store instead.
+        store_specs = dict.fromkeys(_extract_gate_store_specs(gate_spec))
+        for phase_name, name_glob in store_specs:
+            rows = ctx.store.list_artifacts(phase_name, name_glob=name_glob) if ctx.store else []
+            if not rows:
+                advisories.append(
+                    f"Phase '{current_phase}' isn't complete yet, so staying in "
+                    f"'{current_phase}'. To advance to '{to_phase}', record its exit "
+                    f"artifact: `agentalloy contract artifact-set --phase {phase_name} "
+                    f"--slug <slug> --name {name_glob}`."
+                )
         # Split missing paths into "wrote it somewhere wrong" vs "doesn't exist at
         # all". A near-miss (the deliverable exists but at the wrong path — e.g.
         # `linkvault-spec.md` at the repo root vs the gate's `docs/spec/*.md`) gets
@@ -441,11 +455,17 @@ def decide_transition(
 # Approval-since paths keyed by the phase they're associated with.
 # These are globs for the phase's exit artifacts — the approval marker
 # (.agentalloy/approved/<phase>) must be newer than any matching file.
+#
+# spec/design moved to the artifact store (specs/final_migration.md); their
+# staleness check is a store-side name_glob (_APPROVAL_STORE_NAME_GLOB), not a
+# filesystem glob. sdd-fast/add-skill are unmigrated and keep the disk glob.
 _APPROVAL_SINCE: dict[str, str] = {
-    "spec": "docs/spec/*.md",
-    "design": "docs/design/**/*.md",
     "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
+}
+_APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
+    "spec": "*.md",
+    "design": "*.md",
 }
 
 
@@ -491,29 +511,36 @@ def evaluate_phase_gate(
     # require a recorded human approval marker. --force does NOT bypass
     # this checkpoint.
     if target_phase == _PHASE_GRAPH.get(current_phase) and approval_required(current_phase):
-        since = _APPROVAL_SINCE.get(current_phase, "")
-        if since and project_root:
-            # Exit artifact doesn't exist yet — skip approval gate,
-            # let the forward (completeness) gate handle it.
-            if not any(p.is_file() for p in project_root.glob(since)):
-                pass  # skip approval gate
-            else:
+        approval_blocked = False
+        if current_phase in _APPROVAL_STORE_NAME_GLOB and project_root:
+            name_glob = _APPROVAL_STORE_NAME_GLOB[current_phase]
+            rows = store.list_artifacts(current_phase, name_glob=name_glob) if store else []
+            if rows:  # nothing produced yet → let the forward gate handle it
                 ctx = PredicateContext(
-                    project_root=project_root,
-                    current_phase=current_phase,
-                    store=store,
+                    project_root=project_root, current_phase=current_phase, store=store
+                )
+                result = eval_approval_recorded({"since_name_glob": name_glob}, ctx)
+                approval_blocked = result == PredicateResult.NOT_MET
+        else:
+            since = _APPROVAL_SINCE.get(current_phase, "")
+            # Exit artifact doesn't exist yet — skip approval gate, let the
+            # forward (completeness) gate handle it.
+            if since and project_root and any(p.is_file() for p in project_root.glob(since)):
+                ctx = PredicateContext(
+                    project_root=project_root, current_phase=current_phase, store=store
                 )
                 result = eval_approval_recorded({"since": since}, ctx)
-                if result == PredicateResult.NOT_MET:
-                    return {
-                        "result": "approval",
-                        "reason": "approval",
-                        "advisories": [
-                            f"'{current_phase}' requires human approval before advancing "
-                            f"to '{target_phase}'. Run `agentalloy approve {current_phase}` "
-                            f"once the user has approved."
-                        ],
-                    }
+                approval_blocked = result == PredicateResult.NOT_MET
+        if approval_blocked:
+            return {
+                "result": "approval",
+                "reason": "approval",
+                "advisories": [
+                    f"'{current_phase}' requires human approval before advancing "
+                    f"to '{target_phase}'. Run `agentalloy approve {current_phase}` "
+                    f"once the user has approved."
+                ],
+            }
 
     # Override flag: skip the forward (completeness) gate
     if override:

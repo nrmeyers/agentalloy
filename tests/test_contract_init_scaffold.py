@@ -186,21 +186,20 @@ class TestConcretizeGlob:
 
 
 class TestScaffoldPhaseDocs:
-    def test_design_scaffolds_three_docs_with_required_headings(self, tmp_path: Path) -> None:
+    def test_design_scaffolds_nothing_post_migration(self, tmp_path: Path) -> None:
+        # spec/design moved to the artifact store (specs/final_migration.md): their
+        # exit gates carry `phase`/`name`, not a `path` glob, so
+        # `_extract_artifact_contains_specs` (which requires `path`) finds nothing
+        # to scaffold — no docs/design/ files appear anymore.
         created = _scaffold_phase_docs("design", "calendar-web-ui", tmp_path)
-        base = tmp_path / "docs" / "design" / "calendar-web-ui"
-        assert "## Approach" in (base / "approach.md").read_text()
-        assert "## Tasks" in (base / "tasks.md").read_text()
-        assert "## Test Cases" in (base / "test-plan.md").read_text()
-        assert sorted(created) == [
-            "docs/design/calendar-web-ui/approach.md",
-            "docs/design/calendar-web-ui/tasks.md",
-            "docs/design/calendar-web-ui/test-plan.md",
-        ]
+        assert created == []
+        assert not (tmp_path / "docs" / "design").exists()
 
     def test_qa_scaffolds_slug_named_doc_with_headings(self, tmp_path: Path) -> None:
         # Regression for B4: the qa gate glob `docs/qa/*.md` (bare `*`) previously
         # concretized to None and scaffolded nothing. It must seed docs/qa/<slug>.md.
+        # qa is unmigrated (still disk-glob-based) — unaffected by the artifact-store
+        # migration, so this scaffolding path still applies here.
         created = _scaffold_phase_docs("qa", "big-calendar-ui", tmp_path)
         doc = tmp_path / "docs" / "qa" / "big-calendar-ui.md"
         assert doc.exists()
@@ -209,12 +208,11 @@ class TestScaffoldPhaseDocs:
         assert "## Review" in text
         assert created == ["docs/qa/big-calendar-ui.md"]
 
-    def test_spec_scaffolds_slug_named_doc(self, tmp_path: Path) -> None:
+    def test_spec_scaffolds_nothing_post_migration(self, tmp_path: Path) -> None:
+        # Same reasoning as design above — spec's exit gate is store-backed now.
         created = _scaffold_phase_docs("spec", "big-calendar-ui", tmp_path)
-        doc = tmp_path / "docs" / "spec" / "big-calendar-ui.md"
-        assert doc.exists()
-        assert "## Acceptance Criteria" in doc.read_text()
-        assert created == ["docs/spec/big-calendar-ui.md"]
+        assert created == []
+        assert not (tmp_path / "docs" / "spec").exists()
 
     def test_never_overwrites_existing_file(self, tmp_path: Path) -> None:
         base = tmp_path / "docs" / "design" / "feat"

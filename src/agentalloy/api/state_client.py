@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -301,6 +302,88 @@ class StateClient:
         """Supersede a contract with a new revision."""
         return self._post(f"/contracts/{contract_id}/supersede", new_contract)
 
+    # -- artifact operations -------------------------------------------------
+
+    def set_artifact(self, phase: str, slug: str, name: str, content: str) -> dict[str, Any]:
+        """Upsert a deliverable artifact body via the service."""
+        return self._put(
+            "/state/artifact", {"phase": phase, "slug": slug, "name": name, "content": content}
+        )
+
+    def list_artifacts(
+        self,
+        phase: str,
+        *,
+        slug: str | None = None,
+        name_glob: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List deliverable artifacts for a phase, optionally filtered."""
+        params: list[tuple[str, str]] = [("phase", phase)]
+        if slug is not None:
+            params.append(("slug", slug))
+        if name_glob is not None:
+            params.append(("name_glob", name_glob))
+        try:
+            resp = urllib.request.urlopen(
+                self._url("/state/artifact", params), timeout=self._timeout
+            )
+            data = json.loads(resp.read().decode())
+            return data.get("artifacts", [])
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def get_artifact(self, phase: str, slug: str, name: str) -> dict[str, Any] | None:
+        """Fetch a single artifact by (phase, slug, name), or None if absent."""
+        rows = self.list_artifacts(phase, slug=slug, name_glob=name)
+        for row in rows:
+            if row.get("name") == name:
+                return row
+        return None
+
+    def set_approval(
+        self, phase: str, artifact_digest: str, *, approver: str | None = None
+    ) -> dict[str, Any]:
+        """Record human approval for *phase* with the artifact digest it covers.
+
+        Reuses the existing ``POST /state/approve`` write path (session_key
+        scopes the "approved" kind's row to this phase) with a JSON value
+        carrying the digest + timestamp — mirrors
+        ``DuckDBStateStore.set_approval`` so in-process and HTTP callers agree
+        on the value's shape.
+        """
+        value = json.dumps(
+            {
+                "artifact_digest": artifact_digest,
+                "approver": approver,
+                "approved_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        return self._post("/state/approve", {"value": value, "session_key": phase})
+
+    def get_approval(self, phase: str) -> dict[str, Any] | None:
+        """Fetch the recorded approval for *phase*, or None if never approved."""
+        try:
+            resp = urllib.request.urlopen(
+                self._url("/state/approved", [("session_key", phase)]), timeout=self._timeout
+            )
+            data = json.loads(resp.read().decode())
+            raw = data.get("value")
+            if raw is None:
+                return None
+            try:
+                return cast(dict[str, Any], json.loads(raw))
+            except json.JSONDecodeError:
+                return None
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
     def get_resume(self) -> dict[str, Any]:
         """Get assembled resume data for cold-session bootstrap.
 
@@ -359,6 +442,27 @@ class StateClient:
                 return json.loads(raw)
             except (json.JSONDecodeError, ValueError):
                 return {"result": raw}
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def _put(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        repo_root: str | None = None,
+    ) -> dict[str, Any]:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(self._url(path, repo_root=repo_root), data=data, method="PUT")
+        req.add_header("Content-Type", "application/json")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+            return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
             raise StateClientError(
                 f"agentalloy service returned HTTP {exc.code}: {exc.reason}",

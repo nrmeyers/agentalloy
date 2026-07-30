@@ -346,14 +346,21 @@ def test_phase_vocabulary_sites_stay_in_lockstep() -> None:
     # MCP exposes compose-target phases only: everything except the intake
     # front door (never a compose probe target).
     assert set(mcp_server.MCP_PHASES) == phases - {"intake"}
-    # The approve CLI and the phase CLI keep twin approval-artifact maps — same
-    # phases, same globs, or staleness detection and approval disagree.
+    # The approve CLI and the phase CLI keep twin approval-artifact maps for the
+    # unmigrated (disk-backed) phases, and twin store-backed-phase sets for the
+    # migrated ones (specs/final_migration.md) — same phases either way, or
+    # staleness detection and approval disagree.
     assert (
-        approve_cli._EXIT_ARTIFACT_GLOB  # pyright: ignore[reportPrivateUsage]
+        approve_cli._DISK_EXIT_ARTIFACT_GLOB  # pyright: ignore[reportPrivateUsage]
         == phase_cli._APPROVAL_SINCE  # pyright: ignore[reportPrivateUsage]
     )
-    assert set(approve_cli._APPROVABLE) == set(  # pyright: ignore[reportPrivateUsage]
-        approve_cli._EXIT_ARTIFACT_GLOB  # pyright: ignore[reportPrivateUsage]
+    assert (
+        approve_cli._STORE_BACKED_PHASES  # pyright: ignore[reportPrivateUsage]
+        == set(phase_cli._APPROVAL_STORE_NAME_GLOB)  # pyright: ignore[reportPrivateUsage]
+    )
+    assert set(approve_cli._APPROVABLE) == (  # pyright: ignore[reportPrivateUsage]
+        set(approve_cli._DISK_EXIT_ARTIFACT_GLOB)  # pyright: ignore[reportPrivateUsage]
+        | approve_cli._STORE_BACKED_PHASES  # pyright: ignore[reportPrivateUsage]
     )
 
 

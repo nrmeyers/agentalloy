@@ -85,10 +85,10 @@ def test_design_exit_gate_has_three_enforcement_nodes() -> None:
 
 
 def test_design_approval_node_keys_on_design_docs() -> None:
-    # approval `since` must be the design docs, not the build contracts (so editing
-    # a contract during build doesn't re-stale the approval).
+    # approval `since_name_glob` must cover the design artifacts, not the build
+    # contracts (so editing a contract during build doesn't re-stale the approval).
     all_of = _pack("sdd-design-and-planning.yaml")["exit_gates"]["all_of"]
     appr = next(
         n["approval_recorded"] for n in all_of if isinstance(n, dict) and "approval_recorded" in n
     )
-    assert appr["since"] == "docs/design/**/*.md"
+    assert appr["since_name_glob"] == "*.md"

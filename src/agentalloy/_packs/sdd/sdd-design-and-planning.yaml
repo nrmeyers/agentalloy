@@ -1,6 +1,6 @@
 skill_id: sdd-design-and-planning
 canonical_name: SDD — Design and Planning (sdd-design)
-description: "Turn the spec into a technical design, an ordered task plan, and the unit test cases that prove it — written to a docs/design/<slug>/ folder (approach.md + tasks.md + test-plan.md, plus component files as the work needs) that build executes test-first."
+description: "Turn the spec into a technical design, an ordered task plan, and the unit test cases that prove it — recorded as three named artifacts (approach.md, tasks.md, test-plan.md) via `agentalloy contract artifact-set --phase design --slug <slug>` that build executes test-first."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -22,21 +22,27 @@ prose_invariants:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: docs/design/**/approach.md
+        phase: design
+        name: approach.md
     - artifact_contains:
-        path: docs/design/**/approach.md
+        phase: design
+        name: approach.md
         sections:
           - Approach
     - artifact_exists:
-        path: docs/design/**/tasks.md
+        phase: design
+        name: tasks.md
     - artifact_contains:
-        path: docs/design/**/tasks.md
+        phase: design
+        name: tasks.md
         sections:
           - Tasks
     - artifact_exists:
-        path: docs/design/**/test-plan.md
+        phase: design
+        name: test-plan.md
     - artifact_contains:
-        path: docs/design/**/test-plan.md
+        phase: design
+        name: test-plan.md
         sections:
           - Test Cases
     # §6 density floor (#12): ONE build contract PER TASK, not one whole-feature
@@ -51,7 +57,7 @@ exit_gates:
     # `build` until 2026-07-28, so _resolve_workitem_slug queried build contracts,
     # found != 1, returned None, and the whole gate failed open as UNKNOWN.
     - build_contracts_cover_tasks:
-        tasks: docs/design/{slug}/tasks.md
+        tasks_from_store: true
         phase: design
         slug: "{slug}"
     # Tag-focus hard gate (#12b): each build contract must center ONE dominant tech
@@ -63,10 +69,11 @@ exit_gates:
         phase: design
         slug: "{slug}"
     # Human-in-the-loop checkpoint (#10): design→build requires a recorded approval.
-    # `since` = the design docs (NOT the build contracts) so editing a contract
-    # during build doesn't re-stale the approval. --force never bypasses this.
+    # `since_name_glob` covers all three design artifacts (NOT the build
+    # contracts) so editing a contract during build doesn't re-stale the
+    # approval. --force never bypasses this.
     - approval_recorded:
-        since: docs/design/**/*.md
+        since_name_glob: "*.md"
 signal_keywords:
   - done with design
   - ready to build
@@ -93,8 +100,9 @@ contract_template: |
 
   ## Design
 
-  Approach, task plan, and test cases live in docs/design/{{task_slug}}/
-  (approach.md, tasks.md, test-plan.md).
+  Approach, task plan, and test cases are recorded as design artifacts
+  (approach.md, tasks.md, test-plan.md) via
+  `agentalloy contract artifact-set --phase design --slug {{task_slug}}`.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -104,21 +112,24 @@ change_summary: "cursor-scope the design→build density + tag-focus gates to th
 raw_prose: |
   # SDD — Design
 
-  **Checkpoint first.** You MUST confirm `docs/spec/<slug>.md` exists and carries its
-  **Acceptance Criteria** before designing — if it does not, you skipped spec; STOP and write it.
-  You MUST NOT write any `src/` code in this phase: design produces documents only
-  (`docs/design/<slug>/{approach,tasks,test-plan}.md`). If you are editing source, you are in the
-  wrong phase.
+  **Checkpoint first.** You MUST confirm the spec artifact exists (`agentalloy
+  contract artifact-list --phase spec --slug <slug>`) and carries its
+  **Acceptance Criteria** before designing — if it does not, you skipped spec;
+  STOP and record it. You MUST NOT write any `src/` code in this phase: design
+  produces artifacts only, recorded via `agentalloy contract artifact-set
+  --phase design --slug <slug> --name {approach,tasks,test-plan}.md`. There is
+  no file to write — if you are editing source, you are in the wrong phase.
 
   Spec settled *what* and *done*. Design settles *how* — the approach, the
   decisions you're committing to, and an ordered plan build can execute without
   re-deciding anything. Skipping straight to code is the classic SDD failure:
   you thrash on architecture you should have chosen on paper. Stay read-only
-  here — design produces a document, not a diff.
+  here — design produces artifacts, not a diff.
 
   ## 1. Start from the spec
 
-  Read `docs/spec/<slug>.md` and your work-item contract
+  Read the spec artifact (`agentalloy contract artifact-list --phase spec
+  --slug <slug>`) and your work-item contract
   (`agentalloy contract show <slug>`, which spec authored — the proxy
   already front-loaded its design skills on entry); acceptance and non-goals are
   fixed, you don't reopen them. Then read the code you'll touch: existing
@@ -159,18 +170,22 @@ raw_prose: |
   test is where you catch a design that can't actually be verified — better here
   than mid-build.
 
-  ## 5. Write it + hand off
+  ## 5. Record it + hand off
 
-  Design fans out into a per-slug folder build reads from — three load-bearing
-  files, with the exact section headers the gate checks:
+  Design fans out into named artifacts build reads from — three load-bearing
+  ones, with the exact section headers the gate checks:
 
-      docs/design/<task-slug>/approach.md    # the how + decisions, under `## Approach`
-      docs/design/<task-slug>/tasks.md       # the ordered worklist, under `## Tasks`
-      docs/design/<task-slug>/test-plan.md   # the unit cases, under `## Test Cases`
+      agentalloy contract artifact-set --phase design --slug <task-slug> \
+        --name approach.md   --body <text>   # the how + decisions, under `## Approach`
+      agentalloy contract artifact-set --phase design --slug <task-slug> \
+        --name tasks.md      --body <text>   # the ordered worklist, under `## Tasks`
+      agentalloy contract artifact-set --phase design --slug <task-slug> \
+        --name test-plan.md  --body <text>   # the unit cases, under `## Test Cases`
 
-  Add more files as the work needs them — a data model, an interface contract, a
-  subsystem's design — one file per concern, in the same folder. Don't cram a
-  large design into one file; don't split a small one for the sake of it.
+  Add more artifacts as the work needs them — a data model, an interface
+  contract, a subsystem's design — one artifact per concern, same slug. Don't
+  cram a large design into one artifact; don't split a small one for the sake
+  of it.
 
   ## 6. Emit one build contract per task
 

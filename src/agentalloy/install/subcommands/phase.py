@@ -33,11 +33,18 @@ SCHEMA_VERSION = 1
 # Per-phase exit-artifact glob used to detect a *stale* approval (artifact edited
 # after the marker was written). Shared in spirit with approve.py's map. Phases
 # absent here are existence-only / not approval-gated.
+#
+# spec/design moved to the artifact store (see specs/final_migration.md) — their
+# staleness check is a store-side name_glob, not a filesystem glob, matched by
+# ``_APPROVAL_STORE_NAME_GLOB`` below. sdd-fast/add-skill are unmigrated and keep
+# the disk glob.
 _APPROVAL_SINCE = {
-    "spec": "docs/spec/*.md",
-    "design": "docs/design/**/*.md",
     "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
+}
+_APPROVAL_STORE_NAME_GLOB = {
+    "spec": "*.md",
+    "design": "*.md",
 }
 
 
@@ -143,11 +150,19 @@ def _approval_gate_blocks(
         return False, []  # backward / bail / non-linear → unguarded
     if not approval_required(current):
         return False, []
-    since = _APPROVAL_SINCE.get(current, "")
-    if since and not any(p.is_file() for p in root.glob(since)):
-        return False, []  # nothing produced yet → completeness gate handles it
+
     ctx = PredicateContext(project_root=root, current_phase=current, store=store)
-    result = eval_approval_recorded({"since": since}, ctx)
+    if current in _APPROVAL_STORE_NAME_GLOB:
+        name_glob = _APPROVAL_STORE_NAME_GLOB[current]
+        rows = store.list_artifacts(current, name_glob=name_glob) if store is not None else []
+        if not rows:
+            return False, []  # nothing produced yet → completeness gate handles it
+        result = eval_approval_recorded({"since_name_glob": name_glob}, ctx)
+    else:
+        since = _APPROVAL_SINCE.get(current, "")
+        if since and not any(p.is_file() for p in root.glob(since)):
+            return False, []  # nothing produced yet → completeness gate handles it
+        result = eval_approval_recorded({"since": since}, ctx)
     if result != PredicateResult.NOT_MET:
         return False, []  # MET or UNKNOWN → allow
     return True, [

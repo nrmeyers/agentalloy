@@ -151,7 +151,31 @@ def _query_store_contracts(
         return None
 
 
+def _list_store_artifacts(
+    ctx: PredicateContext, *, phase: str, name_glob: str | None = None
+) -> list[dict[str, Any]] | None:
+    """Query the store for artifacts. ``None`` means "can't tell" — no store
+    bound, or the bound store errored — callers must fail closed (UNKNOWN),
+    never treat it as "no artifacts" (NOT_MET would incorrectly block a gate
+    whose predicates own the fail-open rule, not the caller; see
+    ``test_no_store_handle_fails_open``). Only a store that is present AND
+    answers (even with an empty list) yields a real result.
+    """
+    if ctx.store is None:
+        return None
+    try:
+        return ctx.store.list_artifacts(phase, name_glob=name_glob)
+    except Exception:
+        return None
+
+
 def eval_artifact_exists(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    phase = args.get("phase")
+    if phase is not None:
+        rows = _list_store_artifacts(ctx, phase=str(phase), name_glob=args.get("name"))
+        if rows is None:
+            return PredicateResult.UNKNOWN
+        return PredicateResult.MET if rows else PredicateResult.NOT_MET
     pattern = args.get("path", "")
     if not pattern:
         return PredicateResult.UNKNOWN
@@ -246,17 +270,40 @@ def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> Predi
       (case-insensitive, word-boundary — see ``_section_present``).
     - ``pattern``: the regex must match in every file.
     Returns NOT_MET if any file fails any check, MET if all files pass all checks,
-    UNKNOWN on IO failure.
+    UNKNOWN on IO failure (or on a store error, for the store-backed SDD path).
     """
+    phase = args.get("phase")
+    sections = args.get("sections")
+    regex_pattern = args.get("pattern")
+
+    if phase is not None:
+        rows = _list_store_artifacts(ctx, phase=str(phase), name_glob=args.get("name"))
+        if rows is None:
+            return PredicateResult.UNKNOWN
+        if not rows:
+            return PredicateResult.NOT_MET
+        for row in rows:
+            content = row.get("content")
+            if content is None:
+                return PredicateResult.UNKNOWN
+            if sections is not None:
+                headings = _parse_markdown_headings(content)
+                if not all(_section_present(s, headings) for s in sections):
+                    return PredicateResult.NOT_MET
+            if regex_pattern is not None:
+                try:
+                    if not re.search(regex_pattern, content, re.MULTILINE):
+                        return PredicateResult.NOT_MET
+                except re.error:
+                    return PredicateResult.UNKNOWN
+        return PredicateResult.MET
+
     pattern = args.get("path", "")
     if not pattern:
         return PredicateResult.UNKNOWN
     files = _glob_files(ctx.project_root, pattern)
     if not files:
         return PredicateResult.NOT_MET
-
-    sections = args.get("sections")
-    regex_pattern = args.get("pattern")
 
     for f in files:
         content = _read_file(f)
@@ -393,19 +440,59 @@ def approval_marker_path(project_root: Path, phase: str) -> Path:
     return project_root / ".agentalloy" / "approved" / phase
 
 
+def _artifact_digest(rows: list[dict[str, Any]]) -> str:
+    """Stable digest over artifact bodies, order-independent (sorted by name)."""
+    import hashlib
+
+    parts = [
+        f"{r['name']}\0{r.get('content') or ''}" for r in sorted(rows, key=lambda r: r["name"])
+    ]
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
 def eval_approval_recorded(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
     """MET when leaving the current phase is permitted by the human-approval gate.
 
-    The marker path is *derived from phase* (not a ``path`` arg) so the prefilter's
-    gate-path walker never collects it and never emits a misleading "produce its
-    exit artifact" advisory. ``since`` (the exit-artifact glob) makes the marker go
-    stale when the artifact is edited after approval.
+    Store-backed, when the gate YAML declares ``since_name_glob`` (spec/design,
+    post-migration): the marker is ``ctx.store.get_approval(phase)``, a JSON blob
+    carrying the sha256 digest of the phase's artifact bodies at approval time.
+    Staleness = the CURRENT digest (recomputed from ``since_name_glob``-matching
+    artifacts) no longer matching the recorded one — the digest equivalent of the
+    old marker-mtime-vs-artifact-mtime comparison, but immune to a
+    touch-without-edit false staleness.
+
+    The branch is keyed on the gate arg shape, NOT on ``ctx.store`` truthiness:
+    phases that still declare the legacy ``since`` (a filesystem glob — sdd-fast,
+    add-skill, pending their own migration) must keep working unchanged even
+    when a store happens to be bound for this call.
+
+    Disk-backed (gate YAML declares ``since``, a filesystem glob): the legacy
+    ``.agentalloy/approved/<phase>`` marker file + mtime comparison against the
+    exit-artifact glob, unchanged from before this migration.
     """
     phase = args.get("phase") or ctx.current_phase
     if phase is None:
         return PredicateResult.UNKNOWN
     if not approval_required(phase):
         return PredicateResult.MET  # route is not approval-gated → satisfied
+
+    if "since_name_glob" in args:
+        if ctx.store is None:
+            return PredicateResult.UNKNOWN  # store required but unavailable → fail closed
+        since_name_glob = args.get("since_name_glob")
+        try:
+            rows = ctx.store.list_artifacts(str(phase), name_glob=since_name_glob)
+            approval = ctx.store.get_approval(str(phase))
+        except Exception:
+            return PredicateResult.UNKNOWN
+        if approval is None:
+            return PredicateResult.NOT_MET  # awaiting approval
+        if not rows:
+            return PredicateResult.NOT_MET  # nothing produced → nothing approvable
+        current_digest = _artifact_digest(rows)
+        recorded_digest = approval.get("artifact_digest")
+        return PredicateResult.MET if current_digest == recorded_digest else PredicateResult.NOT_MET
+
     marker = approval_marker_path(ctx.project_root, str(phase))
     if not marker.is_file():
         return PredicateResult.NOT_MET  # awaiting approval
@@ -739,25 +826,41 @@ def eval_build_contracts_cover_tasks(
     to the item's own build contracts (:func:`_item_build_contracts`). Returns
     UNKNOWN (fail-open) when no single work-item resolves, no tasks.md exists, or
     one is unreadable — a preceding artifact node owns the missing-file case.
+
+    ``tasks_from_store: true`` (set by the design pack post-migration) reads
+    ``tasks.md`` from the artifact store instead of disk. This is a distinct
+    switch from ``ctx.store`` being set: ``ctx.store`` is also bound to resolve
+    the build-contract count below, independent of where ``tasks.md`` lives, so
+    branching on its mere presence would silently stop reading a
+    still-on-disk ``tasks.md`` for any caller that happens to pass a store.
     """
     phase = str(args.get("phase") or "design")
     slug = _resolve_workitem_slug(ctx, phase)
     if slug is None:
         return PredicateResult.UNKNOWN
-    tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
 
     # Legacy glob tolerance: pass through if present (traces deprecation)
     contracts_glob: str | None = args.get("contracts")
 
-    task_files = _glob_files(ctx.project_root, tasks_glob)
-    if not task_files:
-        return PredicateResult.UNKNOWN
-    task_count = 0
-    for f in task_files:
-        content = _read_file(f)
-        if content is None:
+    if args.get("tasks_from_store") and ctx.store is not None:
+        try:
+            artifact = ctx.store.get_artifact(phase, slug, "tasks.md")
+        except Exception:
+            return PredicateResult.UNKNOWN  # store error → fail closed, never MET
+        if artifact is None or artifact.get("content") is None:
             return PredicateResult.UNKNOWN
-        task_count += _count_task_items(content)
+        task_count = _count_task_items(artifact["content"])
+    else:
+        tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
+        task_files = _glob_files(ctx.project_root, tasks_glob)
+        if not task_files:
+            return PredicateResult.UNKNOWN
+        task_count = 0
+        for f in task_files:
+            content = _read_file(f)
+            if content is None:
+                return PredicateResult.UNKNOWN
+            task_count += _count_task_items(content)
     task_count = max(1, task_count)
     contract_count = len(_item_build_contracts(ctx, slug, contracts_glob=contracts_glob))
     return PredicateResult.MET if contract_count >= task_count else PredicateResult.NOT_MET
