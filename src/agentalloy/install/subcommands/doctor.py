@@ -525,11 +525,11 @@ def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
             "name": "code_index",
             "passed": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": "code-index module failed to load ([code-index] extra missing)",
+            "error": "code-index module failed to load (dependencies missing)",
             "repairable": "code_index_extra",
             "remediation": (
-                "Install the extra: `agentalloy code enable` (or `uv tool install "
-                "'agentalloy[code-index]'`), then restart the service. "
+                "Install dependencies: `agentalloy code enable` (or `uv sync`), "
+                "then restart the service. "
                 "`agentalloy doctor --repair` does this automatically."
             ),
         }

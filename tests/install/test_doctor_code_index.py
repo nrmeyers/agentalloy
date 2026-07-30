@@ -32,7 +32,7 @@ class TestCheckCodeIndex:
         )
         result = doctor._check_code_index({"CODE_INDEX_ENABLED": "1"}, 47950)  # pyright: ignore[reportPrivateUsage]
         assert result["passed"] is False
-        assert "agentalloy[code-index]" in result["remediation"]
+        assert "uv sync" in result["remediation"]
 
     def test_disabled_in_service_warns_restart(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(

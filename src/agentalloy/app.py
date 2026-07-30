@@ -459,8 +459,8 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
         except ImportError as exc:
             logger.error(
                 "CODE_INDEX_ENABLED is set but the code-index module is not "
-                "installed — starting without it. Install with: "
-                "uv tool install 'agentalloy[code-index]' (%s)",
+                "installed — starting without it. Install the code-index "
+                "dependencies (`uv sync`) and restart the service. (%s)",
                 exc,
             )
             modules["code_index"] = "unavailable"
