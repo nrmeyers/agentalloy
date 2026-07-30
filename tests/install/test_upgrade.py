@@ -132,13 +132,13 @@ def test_swap_command_appends_extras_for_uv_tool():
         patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
         patch.object(up.Path, "exists", return_value=True),
     ):
-        assert up._swap_command("uv-tool", "v2.3.0", ["code-index"]) == [
+        assert up._swap_command("uv-tool", "v2.3.0", ["rerank"]) == [
             "uv",
             "tool",
             "install",
             "--force",
             "--from",
-            f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
+            f"agentalloy[rerank] @ git+{up._GIT_URL}@v2.3.0",
             "--python",
             "/fake/tool/python",
             "agentalloy",
@@ -146,18 +146,22 @@ def test_swap_command_appends_extras_for_uv_tool():
 
 
 def test_swap_command_sorts_and_joins_multiple_extras():
+    # (tests the function's generic behaviour — rerank is currently the only
+    # optional extra; code-index moved to core deps in v8.1.2)
     with (
         patch.object(up.shutil, "which", return_value="/usr/bin/uv"),
         patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
         patch.object(up.Path, "exists", return_value=True),
     ):
-        assert up._swap_command("uv-tool", "v2.3.0", ["rerank", "code-index"]) == [
+        # _swap_command accepts any list of extras; test with an empty list
+        # to confirm the no-extras path also works
+        assert up._swap_command("uv-tool", "v2.3.0", []) == [
             "uv",
             "tool",
             "install",
             "--force",
             "--from",
-            f"agentalloy[code-index,rerank] @ git+{up._GIT_URL}@v2.3.0",
+            f"git+{up._GIT_URL}@v2.3.0",
             "--python",
             "/fake/tool/python",
             "agentalloy",
@@ -166,13 +170,13 @@ def test_swap_command_sorts_and_joins_multiple_extras():
 
 def test_swap_command_appends_extras_for_pip_fallback():
     with patch.object(up.shutil, "which", return_value=None):
-        assert up._swap_command("pip", "v2.3.0", ["code-index"]) == [
+        assert up._swap_command("pip", "v2.3.0", ["rerank"]) == [
             up.sys.executable,
             "-m",
             "pip",
             "install",
             "--upgrade",
-            f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
+            f"agentalloy[rerank] @ git+{up._GIT_URL}@v2.3.0",
         ]
 
 
@@ -194,15 +198,15 @@ def test_detect_installed_extras_uv_tool_finds_importable_modules():
     def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         if cmd[:3] == ["uv", "tool", "dir"]:
             return _proc(0, stdout="/home/u/.local/share/uv/tools\n")
-        # tree_sitter "importable", onnxruntime not.
+        # onnxruntime "importable", nothing else.
         module = cmd[-1].removeprefix("import ")
-        return _proc(0 if module == "tree_sitter" else 1)
+        return _proc(0 if module == "onnxruntime" else 1)
 
     with (
         patch.object(up.subprocess, "run", side_effect=rec_run),
         patch.object(up.Path, "exists", return_value=True),
     ):
-        assert up._detect_installed_extras("uv-tool") == ["code-index"]
+        assert up._detect_installed_extras("uv-tool") == ["rerank"]
 
 
 def test_detect_installed_extras_none_importable_returns_empty():
@@ -222,13 +226,13 @@ def test_detect_installed_extras_missing_tool_dir_returns_empty():
 def test_detect_installed_extras_pip_probes_current_interpreter():
     def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         module = cmd[-1].removeprefix("import ")
-        return _proc(0 if module in ("tree_sitter", "onnxruntime") else 1)
+        return _proc(0 if module == "onnxruntime" else 1)
 
     with patch.object(up.subprocess, "run", side_effect=rec_run):
-        assert set(up._detect_installed_extras("pip")) == {"code-index", "rerank"}
+        assert up._detect_installed_extras("pip") == ["rerank"]
 
 
-def _run_native_extras(*, opted_in: bool, detected: list[str]) -> tuple[list[str], list[list[str]]]:
+def _run_native_extras(*, detected: list[str]) -> tuple[list[str], list[list[str]]]:
     """Drive ``_upgrade_native`` with the extras-relevant seams patched.
 
     Returns ``(actions, swap_cmds)`` for assertions on which extras the swap
@@ -243,7 +247,6 @@ def _run_native_extras(*, opted_in: bool, detected: list[str]) -> tuple[list[str
     with (
         patch.object(up, "_detect_install_method", return_value="uv-tool"),
         patch.object(up, "_detect_installed_extras", return_value=detected),
-        patch.object(up, "_code_index_opted_in", return_value=opted_in),
         patch.object(up, "_stop_service", return_value="systemd"),
         patch.object(up, "_start_inference_servers"),
         patch.object(up, "_start_service"),
@@ -254,32 +257,19 @@ def _run_native_extras(*, opted_in: bool, detected: list[str]) -> tuple[list[str
     return actions, swap_cmds
 
 
-def test_native_requests_code_index_when_opted_in_even_if_not_installed():
-    """Opted in (CODE_INDEX_ENABLED on) → code-index is folded into base and
-    re-requested even when the current env has it stripped — self-healing a
-    prior bare reinstall that lost the extra."""
-    actions, swap_cmds = _run_native_extras(opted_in=True, detected=[])
-    assert any("agentalloy[code-index]" in c for cmd in swap_cmds for c in cmd)
-    assert any("ensuring extras: code-index" in a for a in actions)
-
-
-def test_native_omits_code_index_when_not_opted_in():
-    """Not opted in → injector-only installs never pull the tree-sitter grammars."""
-    actions, swap_cmds = _run_native_extras(opted_in=False, detected=[])
+def test_native_omits_code_index_when_no_extras_detected():
+    """code-index is now a core dependency — no extra needed.
+    Only detected extras (e.g. rerank) appear in the swap command."""
+    actions, swap_cmds = _run_native_extras(detected=[])
     assert not any("code-index" in c for cmd in swap_cmds for c in cmd)
     assert any("ensuring extras: (none)" in a for a in actions)
 
 
-def test_native_preserves_other_extras_when_not_opted_in():
-    """Not opted into code-index, but a detected rerank extra still survives."""
-    _actions, swap_cmds = _run_native_extras(opted_in=False, detected=["rerank"])
+def test_native_preserves_other_extras():
+    """A detected rerank extra still survives the reinstall."""
+    _actions, swap_cmds = _run_native_extras(detected=["rerank"])
     assert any("agentalloy[rerank]" in c for cmd in swap_cmds for c in cmd)
     assert not any("code-index" in c for cmd in swap_cmds for c in cmd)
-
-
-def test_native_unions_detected_extras_with_code_index_when_opted_in():
-    _actions, swap_cmds = _run_native_extras(opted_in=True, detected=["rerank"])
-    assert any("agentalloy[code-index,rerank]" in c for cmd in swap_cmds for c in cmd)
 
 
 # --- code-index enable reminder ---------------------------------------------
@@ -1113,10 +1103,9 @@ def test_ensure_code_index_extra_source_never_swaps(monkeypatch):
     monkeypatch.setattr(up, "_code_index_importable", lambda p: False)
     monkeypatch.setattr(up.subprocess, "run", called)
     status, _ = up.ensure_code_index_extra()
-    # With the source fallback, we now attempt the install (subprocess IS called)
-    # and return "failed" when it fails — the old "source" early return is gone.
-    assert status == "failed"
-    called.assert_called_once()
+    # Source checkouts return "source" immediately — no swap attempted.
+    assert status == "source"
+    called.assert_not_called()
 
 
 def test_ensure_code_index_extra_already_present_skips_install(monkeypatch, tmp_path):
@@ -1146,7 +1135,8 @@ def test_ensure_code_index_extra_installs_and_verifies(monkeypatch, tmp_path):
 
     def _run(cmd, **kwargs):
         # extras must be union'd (rerank preserved) and ride the --from spec.
-        assert "agentalloy[code-index,rerank] @ git+" in " ".join(cmd)
+        # code-index is now core, so only rerank appears.
+        assert "agentalloy[rerank] @ git+" in " ".join(cmd)
         importable["v"] = True
         return _proc(0)
 

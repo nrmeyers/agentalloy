@@ -1,9 +1,9 @@
 """Live-image test for the code-index module inside the deploy container.
 
 Builds the deploy image (``Containerfile``) with real podman and boots it with
-``CODE_INDEX_ENABLED=1``, proving the image ships the ``[code-index]`` extra
-(tree-sitter + grammars) and serves ``/code/*`` when the operator flips the
-env toggle. Module toggling is env-driven, so the baked entrypoint needs no
+``CODE_INDEX_ENABLED=1``, proving the image ships tree-sitter + grammars
+(core dependencies) and serves ``/code/*`` when the operator flips the env
+toggle. Module toggling is env-driven, so the baked entrypoint needs no
 changes — the test overrides the entrypoint to launch uvicorn directly,
 skipping the GGUF download / llama-server bootstrap (irrelevant here and far
 too heavy for a test).
@@ -95,7 +95,7 @@ def deploy_image(podman: str) -> str:
 
 def test_image_serves_code_index_when_enabled(podman: str, deploy_image: str) -> None:
     """CODE_INDEX_ENABLED=1 → /health reports the module enabled and /code/*
-    responds — i.e. the image really ships the [code-index] extra."""
+    responds — i.e. the image ships tree-sitter (core dependency)."""
     name = f"agentalloy-test-code-index-{uuid.uuid4().hex[:8]}"
     port = _free_port()
     run = subprocess.run(

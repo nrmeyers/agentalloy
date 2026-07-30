@@ -516,6 +516,7 @@ def _bm25_fallback_result(
         categories=_pool_categories(),
         phases=None,
         deprecated_skill_ids=deprecated_ids,
+        domain_tags=contract_tags,
         k=pool_size,
     )
 
@@ -707,6 +708,7 @@ def retrieve_domain_candidates(
             categories=_pool_categories(),
             phases=None,
             deprecated_skill_ids=deprecated_ids,
+            domain_tags=contract_tags,
             k=pool_size,
         )
     else:
@@ -726,6 +728,7 @@ def retrieve_domain_candidates(
         categories=_pool_categories(),
         phases=None,
         deprecated_skill_ids=deprecated_ids,
+        domain_tags=contract_tags,
         k=pool_size,
     )
     bm25_ids = [h.fragment_id for h in bm25_hits]

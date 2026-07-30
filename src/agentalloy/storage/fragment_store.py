@@ -56,6 +56,7 @@ FRAGMENTS_SCHEMA = pa.schema(
         pa.field("embedding_model", pa.string(), nullable=False),
         pa.field("prose", pa.string(), nullable=False),
         pa.field("phase_scope", pa.list_(pa.string()), nullable=True),
+        pa.field("domain_tags", pa.list_(pa.string()), nullable=True),
     ]
 )
 
@@ -79,6 +80,7 @@ def _build_filter(
     phases: Sequence[str] | None,
     fragment_types: Sequence[str] | None,
     deprecated_skill_ids: Sequence[str] | None,
+    domain_tags: Sequence[str] | None = None,
 ) -> str | None:
     """Build a Lance SQL filter mirroring the v5.3 DuckDB predicates.
 
@@ -100,6 +102,8 @@ def _build_filter(
         clauses.append(f"fragment_type IN {_in_list(fragment_types)}")
     if deprecated_skill_ids:
         clauses.append(f"skill_id NOT IN {_in_list(deprecated_skill_ids)}")
+    if domain_tags:
+        clauses.append(f"array_has_any(domain_tags, {_arr_list(domain_tags)})")
     return " AND ".join(clauses) if clauses else None
 
 
@@ -143,6 +147,7 @@ class LanceFragmentStore:
             "embedding_model": f.embedding_model,
             "prose": f.prose or "",
             "phase_scope": list(f.phase_scope) if f.phase_scope else None,
+            "domain_tags": list(f.domain_tags) if f.domain_tags else None,
         }
 
     @staticmethod
@@ -242,6 +247,7 @@ class LanceFragmentStore:
         phases: list[str] | None = None,
         fragment_types: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
         k: int = 10,
         exact: bool = True,
     ) -> list[SimilarityHit]:
@@ -271,6 +277,7 @@ class LanceFragmentStore:
             phases=phases,
             fragment_types=fragment_types,
             deprecated_skill_ids=deprecated_skill_ids,
+            domain_tags=domain_tags,
         )
         if flt:
             search = search.where(flt, prefilter=True)
@@ -291,6 +298,7 @@ class LanceFragmentStore:
         categories: list[str] | None = None,
         phases: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
         k: int = 10,
     ) -> list[BM25Hit]:
         """Native BM25 (Tantivy) over the prose column. Returns [] if no FTS index."""
@@ -303,6 +311,7 @@ class LanceFragmentStore:
                 phases=phases,
                 fragment_types=None,
                 deprecated_skill_ids=deprecated_skill_ids,
+                domain_tags=domain_tags,
             )
             if flt:
                 search = search.where(flt, prefilter=True)

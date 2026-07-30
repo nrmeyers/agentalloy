@@ -105,7 +105,7 @@ class TestModuleDisabled:
         _mock_client(monkeypatch, handler)
         args = _parse(["code", "status", "--port", "47950"])
         assert args.func(args) == 1
-        assert "agentalloy[code-index]" in capsys.readouterr().err
+        assert "uv sync" in capsys.readouterr().err
 
 
 class TestStatus:

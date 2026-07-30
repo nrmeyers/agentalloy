@@ -525,11 +525,11 @@ def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
             "name": "code_index",
             "passed": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": "code-index module failed to load ([code-index] extra missing)",
+            "error": "code-index module failed to load (dependencies missing)",
             "repairable": "code_index_extra",
             "remediation": (
-                "Install the extra: `agentalloy code enable` (or `uv tool install "
-                "'agentalloy[code-index]'`), then restart the service. "
+                "Install dependencies: `agentalloy code enable` (or `uv sync`), "
+                "then restart the service. "
                 "`agentalloy doctor --repair` does this automatically."
             ),
         }
@@ -1251,12 +1251,10 @@ def _repair(result: dict[str, Any]) -> int:
                 print_rich(f"[red]  server-restart exited {restart_rc}[/red]")
                 rc = 1
         elif status == "source":
-            print_rich(
-                "[yellow]  Source/editable checkout — run `uv sync --extra code-index`.[/yellow]"
-            )
+            print_rich("[yellow]  Source/editable checkout — run `uv sync`.[/yellow]")
             rc = 1
         else:
-            print_rich(f"[red]  [code-index] extra install failed: {detail}[/red]")
+            print_rich(f"[red]  code-index install failed: {detail}[/red]")
             rc = 1
 
     # Step 4: re-diagnose and print after-picture

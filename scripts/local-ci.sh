@@ -4,8 +4,8 @@
 # Exit codes: 0 = all green, 1 = check(s) failed
 set -euo pipefail
 
-# Ensure code-index extra is available (CI quality job installs it too).
-uv sync --frozen --extra code-index 2>/dev/null || true
+# tree-sitter is now a core dependency — no --extra flag needed.
+uv sync --frozen 2>/dev/null || true
 
 PASS=0
 FAIL=0

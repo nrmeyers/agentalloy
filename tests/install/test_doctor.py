@@ -889,7 +889,7 @@ class TestRepairCodeIndexExtra:
                 {
                     "name": "code_index",
                     "passed": False,
-                    "error": "code-index module failed to load ([code-index] extra missing)",
+                    "error": "code-index module failed to load (dependencies missing)",
                     "repairable": "code_index_extra",
                 }
             ],

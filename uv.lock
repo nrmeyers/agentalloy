@@ -4,9 +4,11 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "agentalloy"
-version = "8.1.2"
+version = "8.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "defusedxml" },
+    { name = "docstring-parser" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -16,16 +18,8 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "tomli-w" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "watchdog" },
-]
-
-[package.optional-dependencies]
-code-index = [
-    { name = "defusedxml" },
-    { name = "docstring-parser" },
     { name = "toml" },
+    { name = "tomli-w" },
     { name = "tree-sitter" },
     { name = "tree-sitter-c-sharp" },
     { name = "tree-sitter-go" },
@@ -34,7 +28,11 @@ code-index = [
     { name = "tree-sitter-python" },
     { name = "tree-sitter-rust" },
     { name = "tree-sitter-typescript" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "watchdog" },
 ]
+
+[package.optional-dependencies]
 dev = [
     { name = "httpx" },
     { name = "pre-commit" },
@@ -65,8 +63,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "defusedxml", marker = "extra == 'code-index'", specifier = ">=0.7.1" },
-    { name = "docstring-parser", marker = "extra == 'code-index'", specifier = ">=0.16" },
+    { name = "defusedxml", specifier = ">=0.7.1" },
+    { name = "docstring-parser", specifier = ">=0.16" },
     { name = "duckdb", specifier = ">=1.5.4" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
@@ -85,21 +83,21 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.9" },
     { name = "tokenizers", marker = "extra == 'rerank'", specifier = ">=0.20" },
-    { name = "toml", marker = "extra == 'code-index'", specifier = ">=0.10.2" },
+    { name = "toml", specifier = ">=0.10.2" },
     { name = "tomli-w", specifier = ">=1.0" },
-    { name = "tree-sitter", marker = "extra == 'code-index'", specifier = "==0.25.2" },
-    { name = "tree-sitter-c-sharp", marker = "extra == 'code-index'", specifier = ">=0.23.5" },
-    { name = "tree-sitter-go", marker = "extra == 'code-index'", specifier = ">=0.23.4" },
-    { name = "tree-sitter-java", marker = "extra == 'code-index'", specifier = ">=0.23.5" },
-    { name = "tree-sitter-javascript", marker = "extra == 'code-index'", specifier = ">=0.23.1" },
-    { name = "tree-sitter-python", marker = "extra == 'code-index'", specifier = ">=0.23.6" },
-    { name = "tree-sitter-rust", marker = "extra == 'code-index'", specifier = ">=0.24.0" },
-    { name = "tree-sitter-typescript", marker = "extra == 'code-index'", specifier = ">=0.23.2" },
+    { name = "tree-sitter", specifier = "==0.25.2" },
+    { name = "tree-sitter-c-sharp", specifier = ">=0.23.5" },
+    { name = "tree-sitter-go", specifier = ">=0.23.4" },
+    { name = "tree-sitter-java", specifier = ">=0.23.5" },
+    { name = "tree-sitter-javascript", specifier = ">=0.23.1" },
+    { name = "tree-sitter-python", specifier = ">=0.23.6" },
+    { name = "tree-sitter-rust", specifier = ">=0.24.0" },
+    { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]
-provides-extras = ["rerank", "code-index", "dev"]
+provides-extras = ["rerank", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

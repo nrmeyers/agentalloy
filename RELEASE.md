@@ -68,7 +68,7 @@ Five required checks on `main`: **`quality`**, **`container-tests`**,
 version bump; required so auto-merge can't fire on an un-bumped SHA). A PR
 cannot merge red.
 
-- `quality`: `uv sync --frozen --extra code-index` → ruff check → ruff format
+- `quality`: `uv sync --frozen --no-dev` → ruff check → ruff format
   --check (formatting is checked **separately** from lint; run `uv run ruff
   format` before pushing) → pyright → `pytest -m "not integration and not
   container"` → pack version-bump guard.
