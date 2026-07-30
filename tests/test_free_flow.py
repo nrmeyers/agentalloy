@@ -485,8 +485,8 @@ class TestOpenAISurfaceFreeFlow:
         assert "DOMAIN-SKILL-PROSE" in joined
         for needle in _STEERING_NEEDLES:
             assert needle not in joined
-        # System message untouched.
-        assert forwarded["messages"][0]["content"] == "SYSTEM-CACHED"
+        # System message has phase prose injected (system prompt injection).
+        assert "SYSTEM-CACHED" in forwarded["messages"][0]["content"]
         rows = store.query_traces()
         store.close()
         assert len(rows) == 1

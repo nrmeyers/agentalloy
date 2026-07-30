@@ -283,7 +283,6 @@ def test_banner_appended_after_workflow_block_upstream(tmp_path: Path) -> None:
     assert _BANNER in content
     assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
     assert content.count("BEGIN AGENTALLOY-BANNER") == 1
-    # System untouched, and the workflow announce marker still committed (banner is
-    # additive — it doesn't disturb the cadence).
-    assert _system_content(captured) == "SYSTEM-CACHED"
+    # System has phase prose injected (system prompt injection).
+    assert "SYSTEM-CACHED" in _system_content(captured)
     assert _announced_file(tmp_path) == "build\tsess-1"

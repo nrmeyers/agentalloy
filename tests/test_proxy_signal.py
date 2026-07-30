@@ -759,14 +759,10 @@ class TestBuildBanner:
     def test_directive_from_phase_map(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
 
-        # A known SDD phase uses its hand-tuned MUST directive; no artifact yet → no
-        # progress suffix.
+        # A known SDD phase uses its hand-tuned directive; no artifact yet → no
+        # progress suffix. Directive now points to system prompt.
         banner = build_banner("spec", _gates_with_sections(), tmp_path)
-        assert banner == (
-            "[agentalloy · spec] MUST record the spec artifact "
-            "(`agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`, "
-            "Acceptance Criteria + Out of Scope) before designing or coding"
-        )
+        assert banner == "[agentalloy · spec] Review system prompt for phase instructions"
 
     def test_unknown_phase_falls_back_to_gate_path(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
@@ -859,15 +855,17 @@ class TestBuildBanner:
     def test_slug_resolved_in_directive(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
 
+        # Directive is a generic pointer; slug is resolved in the progress suffix.
         banner = build_banner("design", _design_gates(), tmp_path, slug="calendar-web-ui")
-        assert "--slug calendar-web-ui" in banner
+        assert "[agentalloy · design] Review system prompt for phase instructions" in banner
         assert "<slug>" not in banner
 
     def test_slug_left_literal_when_unknown(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
 
+        # Directive is a generic pointer; no <slug> placeholder in the directive itself.
         banner = build_banner("design", _design_gates(), tmp_path)
-        assert "<slug>" in banner
+        assert "[agentalloy · design] Review system prompt for phase instructions" in banner
 
 
 class TestEvaluateSignalBanner:

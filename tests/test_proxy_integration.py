@@ -246,9 +246,9 @@ class TestFullProxyFlow:
         assert last_user["role"] == "user"
         assert "phase=build" in last_user["content"]
         assert compose_output in last_user["content"]
-        # System message is byte-identical (untouched).
+        # System message has phase prose injected (system prompt injection).
         assert sent["messages"][0]["role"] == "system"
-        assert sent["messages"][0]["content"] == "You are an assistant."
+        assert "You are an assistant." in sent["messages"][0]["content"]
 
         # Telemetry should show composed status
         app.state.telemetry_store.record_composition_trace.assert_called_once()
