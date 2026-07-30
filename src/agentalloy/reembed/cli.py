@@ -363,6 +363,8 @@ def reembed_fragments(
                             embedded_at=now,
                             embedding_model=embedding_model,
                             prose=indexed,
+                            phase_scope=frag.phase_scope if hasattr(frag, 'phase_scope') else None,
+                            domain_tags=frag.domain_tags if frag.domain_tags else None,
                         )
                     ]
                 )
@@ -452,6 +454,7 @@ def insert_cards(
                     embedded_at=now,
                     embedding_model=embedding_model,
                     prose=text,
+                    domain_tags=rep.domain_tags if rep.domain_tags else None,
                 )
             ]
         )
@@ -739,6 +742,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                                     embedded_at=now,
                                     embedding_model=model_id,
                                     prose=indexed,
+                                    domain_tags=frag.domain_tags if frag.domain_tags else None,
                                 )
                             ]
                         )
@@ -793,6 +797,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                                     embedded_at=card_now,
                                     embedding_model=model_id,
                                     prose=text,
+                                    domain_tags=rep.domain_tags if rep.domain_tags else None,
                                 )
                             ]
                         )

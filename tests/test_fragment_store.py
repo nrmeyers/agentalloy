@@ -30,6 +30,7 @@ def _frag(i: int) -> FragmentEmbedding:
         embedding_model="nomic-embed-text-v1.5",
         prose=f"fragment {i} about testing lance retrieval and duckdb",
         phase_scope=(["build"], ["design", "build"], None)[i % 3],
+        domain_tags=(["python"], ["testing", "pytest"], None)[i % 3],
     )
 
 
@@ -103,6 +104,32 @@ def test_presence_counts_deletes(store):
     n = store.delete_skill("s0")
     assert n >= 1
     assert store.count_embeddings() == 6 - n
+
+
+def test_domain_tags_filter_search_similar(store):
+    store.insert_embeddings([_frag(i) for i in range(6)])
+    hits = store.search_similar(_vec(0.0), domain_tags=["python"], k=10)
+    # Only f0, f3 have domain_tags=["python"] (i%3==0)
+    hit_ids = {h.fragment_id for h in hits}
+    assert hit_ids == {"f0", "f3"}
+    assert len(hits) == 2
+
+
+def test_domain_tags_filter_bm25(store):
+    store.insert_embeddings([_frag(i) for i in range(6)])
+    store.rebuild_fts_index()
+    hits = store.search_bm25("fragment", domain_tags=["testing"])
+    # Only f1, f4 have domain_tags=["testing", "pytest"] (i%3==1)
+    hit_ids = {h.fragment_id for h in hits}
+    assert hit_ids == {"f1", "f4"}
+    assert len(hits) == 2
+
+
+def test_domain_tags_none_excluded(store):
+    """Fragments with domain_tags=None should NOT match a non-empty filter."""
+    store.insert_embeddings([_frag(i) for i in range(6)])
+    hits = store.search_similar(_vec(0.0), domain_tags=["nonexistent"], k=10)
+    assert len(hits) == 0
 
 
 def test_bulk_replace_and_delete_all(store):

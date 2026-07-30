@@ -88,6 +88,7 @@ class FragmentEmbedding:
     embedding_model: str
     prose: str = ""  # raw fragment text; indexed for BM25
     phase_scope: tuple[str, ...] | None = None
+    domain_tags: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +269,7 @@ class FragmentStore(Protocol):
         phases: list[str] | None = None,
         fragment_types: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
         k: int = 10,
     ) -> list[SimilarityHit]: ...
     def search_bm25(
@@ -277,6 +279,7 @@ class FragmentStore(Protocol):
         categories: list[str] | None = None,
         phases: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
         k: int = 10,
     ) -> list[BM25Hit]: ...
     def backfill_phase_scope(self, scope_by_skill: dict[str, list[str] | None]) -> int: ...

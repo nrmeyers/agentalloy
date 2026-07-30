@@ -202,6 +202,7 @@ def reembed_corpus(
                     embedding_model=model,
                     prose=f.content,
                     phase_scope=f.phase_scope,
+                    domain_tags=f.domain_tags if f.domain_tags else None,
                 )
             )
     fs.bulk_replace(items)
