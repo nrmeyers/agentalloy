@@ -40,6 +40,7 @@ from agentalloy.code_index.ingest.embed_text import (
 )
 from agentalloy.code_index.ingest.markdown import (
     MarkdownChunk,
+    chunk_markdown,
     collect_markdown_chunks,
     compose_markdown_embed_text,
 )
@@ -146,6 +147,13 @@ def _markdown_symbol(chunk: MarkdownChunk, digest: str) -> CodeSymbol:
 # are decision-bearing. Both live approach.md shapes are covered. docs/ship and
 # docs/qa are process/PR narrative, not rationale, so they are excluded by
 # default (add here if a repo puts rationale there).
+#
+# "docs/design/*/approach.md" also matches the SYNTHETIC chunks
+# `_collect_store_design_chunks` builds from the artifact store — the on-disk
+# file and the store row use the same repo-relative path shape on purpose, so
+# this glob (and the GOVERNS-edge logic below) needed no changes for the
+# migration off disk (specs/final_migration.md). docs/solutions/*.md stays
+# disk-only: hand-written retrospectives, not an SDD phase artifact.
 _DECISION_SOURCE_GLOBS: tuple[str, ...] = (
     "docs/solutions/*.md",
     "docs/design/*/approach.md",
@@ -153,6 +161,41 @@ _DECISION_SOURCE_GLOBS: tuple[str, ...] = (
 )
 
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+
+
+def _collect_store_design_chunks(repo_root: Path) -> list[MarkdownChunk]:
+    """Design ``approach.md`` bodies for a repo whose SDD contracts moved to
+    the artifact store (see specs/final_migration.md) — ``docs/design/<slug>/
+    approach.md`` no longer exists on disk, so :func:`collect_markdown_chunks`
+    can't see it. Synthesized chunks use the SAME ``file_path`` shape the
+    ``docs/design/*/approach.md`` decision-source glob already expects, so
+    :func:`_is_decision_source` and the GOVERNS-edge logic need no changes.
+
+    Best-effort: no bound store, an unreachable one, or a repo with no design
+    artifacts all fall through to ``[]`` rather than failing ingest.
+    """
+    try:
+        from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+        from agentalloy.storage.state_store import process_store  # noqa: PLC0415
+    except Exception:
+        return []
+
+    store = process_store()
+    if store is None:
+        return []
+    try:
+        scoped = store.for_repo(_repo_key_for(str(repo_root)))
+        rows = scoped.list_artifacts("design", name_glob="approach.md")
+    except Exception:
+        return []
+
+    chunks: list[MarkdownChunk] = []
+    for row in rows:
+        content, slug = row.get("content"), row.get("slug")
+        if not content or not slug:
+            continue
+        chunks.extend(chunk_markdown(f"docs/design/{slug}/approach.md", content))
+    return chunks
 
 
 def _is_decision_source(doc_path: str) -> bool:
@@ -564,6 +607,7 @@ async def _index_markdown(
     embedded count and the change sets (for the decision phase)."""
     graph, vectors = handles.graph, handles.vectors
     chunks = await asyncio.to_thread(collect_markdown_chunks, repo_path)
+    chunks += await asyncio.to_thread(_collect_store_design_chunks, repo_path)
     texts = {c.qualified_name: finalize_embed_text(compose_markdown_embed_text(c)) for c in chunks}
     hashes = {qn: text_hash(t) for qn, t in texts.items()}
 
