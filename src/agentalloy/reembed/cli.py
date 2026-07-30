@@ -363,7 +363,7 @@ def reembed_fragments(
                             embedded_at=now,
                             embedding_model=embedding_model,
                             prose=indexed,
-                            phase_scope=frag.phase_scope if hasattr(frag, 'phase_scope') else None,
+                            phase_scope=frag.phase_scope if hasattr(frag, "phase_scope") else None,
                             domain_tags=frag.domain_tags if frag.domain_tags else None,
                         )
                     ]
