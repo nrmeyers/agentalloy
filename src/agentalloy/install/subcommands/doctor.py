@@ -1251,9 +1251,7 @@ def _repair(result: dict[str, Any]) -> int:
                 print_rich(f"[red]  server-restart exited {restart_rc}[/red]")
                 rc = 1
         elif status == "source":
-            print_rich(
-                "[yellow]  Source/editable checkout — run `uv sync`.[/yellow]"
-            )
+            print_rich("[yellow]  Source/editable checkout — run `uv sync`.[/yellow]")
             rc = 1
         else:
             print_rich(f"[red]  code-index install failed: {detail}[/red]")

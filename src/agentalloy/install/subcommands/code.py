@@ -77,8 +77,7 @@ def _module_state_error(state: str | None) -> int:
             file=sys.stderr,
         )
         print(
-            "FIX:   Install the code-index dependencies (`uv sync`) "
-            "and restart the service.",
+            "FIX:   Install the code-index dependencies (`uv sync`) and restart the service.",
             file=sys.stderr,
         )
         return 1

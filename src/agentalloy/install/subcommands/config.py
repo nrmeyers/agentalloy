@@ -128,9 +128,7 @@ def run(args: argparse.Namespace) -> int:
                 )
             else:
                 suffix = f": {detail}" if detail else ""
-                print(
-                    f"  [red]Cannot enable code-index: install failed{suffix}.[/red]"
-                )
+                print(f"  [red]Cannot enable code-index: install failed{suffix}.[/red]")
                 print(
                     "  [yellow]Reinstall agentalloy (pipx upgrade / pip install --force-reinstall), "
                     "then re-run: agentalloy config enable code-index[/yellow]"
