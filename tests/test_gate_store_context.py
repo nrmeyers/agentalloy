@@ -48,7 +48,13 @@ def design_repo(tmp_path: Path) -> Path:
 
 
 def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> DuckDBStateStore:
-    """Store carrying one design contract for SLUG and ``n_build`` build contracts."""
+    """Store carrying one design contract for SLUG, ``n_build`` build contracts,
+    the design artifacts (post-migration: artifact_exists/contains/approval_recorded
+    read the store, not the ``design_repo`` fixture's disk files), and a matching
+    recorded approval.
+    """
+    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+
     store = DuckDBStateStore(tmp_path / "gate_state.db")
     store.open()
     store.migrate()
@@ -68,6 +74,13 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
         "(repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at) "
         "VALUES " + ", ".join(rows) + ";"
     )
+    store.set_artifact("design", SLUG, "approach.md", "# x\n\n## Approach\n\nprose\n")
+    store.set_artifact("design", SLUG, "test-plan.md", "# x\n\n## Test Cases\n\n- a test\n")
+    store.set_artifact(
+        "design", SLUG, "tasks.md", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
+    )
+    artifact_rows = store.list_artifacts("design", name_glob="*.md")
+    store.set_approval("design", _artifact_digest(artifact_rows))
     return store
 
 

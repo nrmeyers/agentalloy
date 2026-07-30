@@ -6,7 +6,6 @@ Maps to plan: agentalloy phase CLI — set/get/clear phase lock file.
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 import pytest
@@ -210,19 +209,28 @@ class TestPhaseRecordShape:
 
 
 def _write_spec_doc(repo_root: Path) -> None:
-    """Write a spec doc that satisfies the `spec` phase's exit gate."""
-    spec = repo_root / "docs" / "spec"
-    spec.mkdir(parents=True, exist_ok=True)
-    (spec / "x.md").write_text("# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
+    """Record a spec artifact that satisfies the `spec` phase's exit gate."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    handle = phase_access(repo_root).contracts_handle()
+    handle.set_artifact(
+        "spec", "x", "spec.md", "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+    )
 
 
 def _approve(repo_root: Path, phase: str, since_glob: str) -> None:
-    """Write a fresh approval marker for `phase`, newer than its exit artifact."""
-    marker = repo_root / ".agentalloy" / "approved" / phase
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text('approver: t\napproved_at: "2026-01-01T00:00:00Z"\nartifact_sha256: x\n')
-    base = max((p.stat().st_mtime for p in repo_root.glob(since_glob) if p.is_file()), default=0.0)
-    os.utime(marker, (base + 10, base + 10))
+    """Record a fresh approval for `phase`, matching its current artifact digest.
+
+    `since_glob` is retained as a param for call-site parity with the pre-migration
+    signature; store-backed phases (spec/design) ignore it and digest all `*.md`
+    artifacts instead.
+    """
+    from agentalloy.install.subcommands._state import phase_access
+    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+
+    handle = phase_access(repo_root).contracts_handle()
+    rows = handle.list_artifacts(phase, name_glob="*.md")
+    handle.set_approval(phase, _artifact_digest(rows))
 
 
 class TestGuardedAdvance:
@@ -232,13 +240,13 @@ class TestGuardedAdvance:
     """
 
     def test_forward_guard_blocks_when_artifact_missing(self, repo_root: Path) -> None:
-        # TC15: in `spec` with no docs/spec/*.md → spec→design refuses.
+        # TC15: in `spec` with no recorded artifact → spec→design refuses.
         run_phase_set("spec", root=repo_root)
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is True
         assert result["phase"] == "spec"  # unchanged
         assert result["target"] == "design"
-        assert any("docs/spec" in a for a in result["advisories"])
+        assert any("artifact-set --phase spec" in a for a in result["advisories"])
         # phase file still says spec
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
@@ -284,6 +292,12 @@ class TestGuardedAdvance:
         # NOT_MET blocks.
         import agentalloy.signals.skill_loader as skill_loader
 
+        # This gate is a disk-based fake, deliberately independent of the real
+        # (now store-backed) spec pack — it isolates the deterministic-vs-UNKNOWN
+        # forward-gate behavior from the artifact-store migration. The approval
+        # half of `evaluate_phase_gate` is store-backed unconditionally for
+        # "spec", so `_write_spec_doc`/`_approve` (store-backed) are still used
+        # for that half; the disk file below satisfies only this fake gate.
         gate = {
             "all_of": [
                 {"artifact_exists": {"path": "docs/spec/*.md"}},
@@ -291,16 +305,19 @@ class TestGuardedAdvance:
             ]
         }
         monkeypatch.setattr(skill_loader, "exit_gates_for_phase", lambda _phase: gate)
+        spec_dir = repo_root / "docs" / "spec"
 
         # deterministic part MET, semantic part UNKNOWN → allowed (UNKNOWN doesn't block)
         run_phase_set("spec", root=repo_root)
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "x.md").write_text("# x\n")
         _write_spec_doc(repo_root)
         _approve(repo_root, "spec", "docs/spec/*.md")  # #10: clear the approval gate
         assert run_phase_set("design", root=repo_root)["blocked"] is False
 
         # deterministic part NOT_MET → blocked, regardless of the UNKNOWN semantic part
         run_phase_clear(root=repo_root)
-        for p in (repo_root / "docs" / "spec").glob("*.md"):
+        for p in spec_dir.glob("*.md"):
             p.unlink()
         run_phase_set("spec", root=repo_root)
         assert run_phase_set("design", root=repo_root)["blocked"] is True
@@ -312,7 +329,7 @@ class TestGuardedAdvance:
 
         spec_gate = exit_gates_for_phase("spec")
         assert spec_gate is not None
-        assert "docs/spec" in str(spec_gate)
+        assert "'phase': 'spec'" in str(spec_gate)
 
         for phase in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast"):
             assert exit_gates_for_phase(phase) is not None
@@ -340,12 +357,13 @@ class TestApprovalGate:
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
     def test_force_bypasses_completeness_not_approval(self, repo_root: Path) -> None:
-        # Approval recorded but the spec doc is missing its required sections:
+        # Approval recorded but the spec artifact is missing its required sections:
         # --force waives the completeness gate and advances.
+        from agentalloy.install.subcommands._state import phase_access
+
         run_phase_set("spec", root=repo_root)
-        spec = repo_root / "docs" / "spec"
-        spec.mkdir(parents=True, exist_ok=True)
-        (spec / "x.md").write_text("# spec only, no required sections\n")
+        handle = phase_access(repo_root).contracts_handle()
+        handle.set_artifact("spec", "x", "spec.md", "# spec only, no required sections\n")
         _approve(repo_root, "spec", "docs/spec/*.md")
         result = run_phase_set("design", root=repo_root, force=True)
         assert result["blocked"] is False
@@ -361,12 +379,12 @@ class TestApprovalGate:
 
     def test_missing_artifact_defers_to_completeness_gate(self, repo_root: Path) -> None:
         # No exit artifact at all → approval gate steps aside; the completeness
-        # gate drives the "produce docs/spec" message (no reason='approval').
+        # gate drives the "record its exit artifact" message (no reason='approval').
         run_phase_set("spec", root=repo_root)
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is True
         assert result.get("reason") != "approval"
-        assert any("docs/spec" in a for a in result["advisories"])
+        assert any("artifact-set --phase spec" in a for a in result["advisories"])
 
 
 class TestShipResetAutoArchive:

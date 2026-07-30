@@ -27,6 +27,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from agentalloy.api.state_models import (
     ALL_KINDS,
+    ArtifactListResponse,
+    ArtifactResponse,
+    ArtifactSetRequest,
     ContractCreateRequest,
     ContractListResponse,
     ContractPatchRequest,
@@ -456,6 +459,9 @@ async def clear_phase(
 )
 async def read_state(
     kind: str,
+    session_key: str | None = Query(
+        default=None, description="Session-scoped kinds (and phase-scoped 'approved') use this."
+    ),
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateReadResponse:
     """Read one kind's stored value verbatim.
@@ -476,7 +482,7 @@ async def read_state(
             status_code=404,
             detail=f"Unknown state kind {kind!r}; expected one of {sorted(ALL_KINDS)}",
         )
-    value = await asyncio.to_thread(store.read, kind)
+    value = await asyncio.to_thread(store.read, kind, session_key)
     return StateReadResponse(kind=kind, value=value)
 
 
@@ -700,7 +706,9 @@ async def write_approve(
     req: StateWriteRequest,
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
-    result = await asyncio.to_thread(store.write, "approved", req.value, owner=req.owner)
+    result = await asyncio.to_thread(
+        store.write, "approved", req.value, session_key=req.session_key, owner=req.owner
+    )
     http_status, response = _write_result_to_response(result)
     if http_status != 200:
         raise HTTPException(
@@ -932,3 +940,38 @@ async def supersede_contract(
     if row is None:
         raise HTTPException(status_code=500, detail="New contract disappeared after write")
     return _contract_row_to_response(row)
+
+
+# ---------------------------------------------------------------------------
+# PUT/GET /state/artifact — deliverable artifact bodies (docs/spec/<slug>.md,
+# docs/design/<slug>/{approach,tasks,test-plan}.md), store-backed replacement
+# for the on-disk scaffolding these used to require.
+# ---------------------------------------------------------------------------
+
+
+@router.put(
+    "/artifact",
+    response_model=ArtifactResponse,
+    summary="Upsert a deliverable artifact body",
+)
+async def set_artifact(
+    req: ArtifactSetRequest,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> ArtifactResponse:
+    row = await asyncio.to_thread(store.set_artifact, req.phase, req.slug, req.name, req.content)
+    return ArtifactResponse(**row)
+
+
+@router.get(
+    "/artifact",
+    response_model=ArtifactListResponse,
+    summary="List deliverable artifacts for a phase",
+)
+async def list_artifacts(
+    phase: str = Query(description="Phase to list artifacts for"),
+    slug: str | None = Query(default=None, description="Filter by slug"),
+    name_glob: str | None = Query(default=None, description="fnmatch pattern over name"),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> ArtifactListResponse:
+    rows = await asyncio.to_thread(store.list_artifacts, phase, slug=slug, name_glob=name_glob)
+    return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in rows])

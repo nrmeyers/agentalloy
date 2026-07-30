@@ -40,6 +40,29 @@ def _extract_gate_paths(gate_spec: Any) -> list[str]:
 extract_gate_paths = _extract_gate_paths
 
 
+def _extract_gate_store_specs(gate_spec: Any) -> list[tuple[str, str]]:
+    """Walk gate_spec recursively and collect ``(phase, name)`` pairs.
+
+    The store-backed sibling of :func:`_extract_gate_paths`: post-migration
+    ``artifact_exists``/``artifact_contains`` nodes for spec/design carry
+    ``phase``/``name`` instead of a filesystem ``path`` glob, so the missing-
+    artifact advisory in :func:`agentalloy.signals.gates.decide_transition`
+    needs its own walker to still name what's missing.
+    """
+    specs: list[tuple[str, str]] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        if "phase" in gate_d and "name" in gate_d:
+            specs.append((str(gate_d["phase"]), str(gate_d["name"])))
+        for v in gate_d.values():
+            specs.extend(_extract_gate_store_specs(v))
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            specs.extend(_extract_gate_store_specs(item))
+    return specs
+
+
 def _extract_gate_sections(gate_spec: Any) -> list[str]:
     """Walk gate_spec recursively and collect all `artifact_contains.sections` values.
 

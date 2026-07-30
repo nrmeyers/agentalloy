@@ -1,6 +1,6 @@
 skill_id: sdd-spec-and-scoping
 canonical_name: SDD — Spec and Scoping (sdd-spec)
-description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — written to docs/spec/<slug>.md."
+description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via `agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -20,22 +20,25 @@ prose_invariants:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: docs/spec/*.md
+        phase: spec
+        name: "*.md"
     - artifact_contains:
-        path: docs/spec/*.md
+        phase: spec
+        name: "*.md"
         sections:
           - Acceptance Criteria
           - Out of Scope
     # Human-in-the-loop checkpoint (#10): spec→design requires a recorded
-    # approval. `since` = the spec docs so editing a spec doc after approval
-    # invalidates the marker (file mtime > marker mtime → unapproved again).
-    # `agentalloy approve spec` writes the marker. The CLI gate
-    # (`phase.py::_approval_gate_blocks`) is the HARD enforcement and runs
-    # even under `--force`; this exit_gate node is the composed advisory that
-    # surfaces the awaiting-approval message in-proxy BEFORE the user tries
-    # to advance. Matches the design node at sdd-design-and-planning.yaml.
+    # approval. `since_name_glob` = the spec artifact name so editing it after
+    # approval invalidates the marker (current digest != recorded digest →
+    # unapproved again). `agentalloy approve spec` writes the marker.
+    # The CLI/service gate (`gates.py::evaluate_phase_gate`) is the HARD
+    # enforcement and runs even under `--force`; this exit_gate node is the
+    # composed advisory that surfaces the awaiting-approval message in-proxy
+    # BEFORE the user tries to advance. Matches the design node at
+    # sdd-design-and-planning.yaml.
     - approval_recorded:
-        since: docs/spec/**/*.md
+        since_name_glob: "*.md"
 signal_keywords:
   - done with spec
   - ready to design
@@ -63,7 +66,8 @@ contract_template: |
 
   ## Spec
 
-  Acceptance criteria and out-of-scope live in docs/spec/{{task_slug}}.md.
+  Acceptance criteria and out-of-scope live in the spec artifact
+  (agentalloy contract artifact-set --phase spec --slug {{task_slug}} --name spec.md).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -76,8 +80,11 @@ raw_prose: |
   **Checkpoint first.** You MUST confirm intake's contract exists
   (`agentalloy contract show <slug>`) before scoping — if it does not, you skipped
   intake; STOP and go back.
-  You MUST write `docs/spec/<slug>.md` with its **Acceptance Criteria** and **Out of Scope**
-  sections. You MUST NOT design solutions or touch `src/` here — spec settles *what* and *done*,
+  You MUST record the spec via `agentalloy contract artifact-set --phase spec
+  --slug <slug> --name spec.md --body <text>` (or `--body-file -` for stdin)
+  with its **Acceptance Criteria** and **Out of Scope** sections. There is no
+  file to write — this is a store write, not a docs/ document. You MUST NOT
+  design solutions or touch `src/` here — spec settles *what* and *done*,
   never *how*.
 
   Intake handed you a contract: the *what*, and a decision that this needs the
@@ -119,11 +126,12 @@ raw_prose: |
   Write the non-goals down. An "Out of Scope" list is the cheapest scope control
   there is, and the first thing you point at when the work starts to sprawl.
 
-  ## 5. Write it + hand off
+  ## 5. Record it + hand off
 
-  The **spec doc** is the deliverable and the single source of truth for
-  acceptance — write it to **`docs/spec/<task-slug>.md`** with
-  `## Acceptance Criteria` and `## Out of Scope`. That file completes spec.
+  The **spec artifact** is the deliverable and the single source of truth for
+  acceptance — record it with `agentalloy contract artifact-set --phase spec
+  --slug <task-slug> --name spec.md --body <text>`, carrying
+  `## Acceptance Criteria` and `## Out of Scope` sections. That completes spec.
 
   Then seed **design's work-item** — the contract the design phase opens on,
   reusing the slug so the work chains:
@@ -145,7 +153,7 @@ raw_prose: |
   `agentalloy resume` rebuilds context. If anything's still unresolved — an
   assumption the user hasn't confirmed, an acceptance criterion you can't make
   checkable — **stop and surface it** instead of advancing; resolve it first. The
-  phase guard refuses the jump until `docs/spec/<slug>.md` exists with its
+  phase guard refuses the jump until the spec artifact is recorded with its
   required sections AND a human approval is recorded, so a premature `phase set`
   or `approve` just tells you what's still missing.
 

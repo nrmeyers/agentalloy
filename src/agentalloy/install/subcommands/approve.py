@@ -5,48 +5,39 @@
     agentalloy approve sdd-fast  — sign off the fast lane (gated only when enabled)
     agentalloy approve add-skill — sign off the custom skill, then return to intake
 
-The marker lives at ``.agentalloy/approved/<phase>`` and records who approved,
-when, and a SHA-256 over the phase's exit artifact(s). The digest gives post-hoc
-detectability of *which* artifact state was approved — a cooperative-trust model
-(consistent with the existing ``--force`` parity), not hard unforgeability.
+The marker lives in the state store (``sdd_state``, kind ``approved``, scoped by
+phase) and records a SHA-256 digest over the phase's artifact bodies at approval
+time. The digest gives post-hoc detectability of *which* artifact state was
+approved — a cooperative-trust model (consistent with the existing ``--force``
+parity), not hard unforgeability.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import hashlib
 import os
 import sys
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from agentalloy.api.state_client import StateClientError
 
 _APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
-_EXIT_ARTIFACT_GLOB = {
-    "spec": "docs/spec/*.md",
-    "design": "docs/design/**/*.md",
+_STORE_BACKED_PHASES = frozenset({"spec", "design"})
+# sdd-fast (docs/fast/*.md) and add-skill (a custom-skill YAML, not a phase
+# deliverable body at all) keep their packs' disk-glob exit gates for now —
+# only spec/design packs were moved to the artifact store by this migration
+# (see specs/final_migration.md). Extending the rest is a follow-up.
+_DISK_EXIT_ARTIFACT_GLOB = {
     "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 
 
-def _digest(root: Path, glob: str) -> str:
-    """Stable SHA-256 over the phase's exit artifact(s): path + content, sorted."""
-    files = sorted(p for p in root.glob(glob) if p.is_file())
-    h = hashlib.sha256()
-    for p in files:
-        h.update(str(p.relative_to(root)).encode())
-        h.update(b":")
-        h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode())
-        h.update(b"\n")
-    return h.hexdigest()
-
-
 def _atomic_write(path: Path, text: str) -> None:
+    import contextlib
+    import uuid
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
@@ -56,6 +47,20 @@ def _atomic_write(path: Path, text: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+def _digest_disk(root: Path, glob: str) -> str:
+    """Stable SHA-256 over the phase's exit artifact(s) on disk: path + content, sorted."""
+    import hashlib
+
+    files = sorted(p for p in root.glob(glob) if p.is_file())
+    h = hashlib.sha256()
+    for p in files:
+        h.update(str(p.relative_to(root)).encode())
+        h.update(b":")
+        h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode())
+        h.update(b"\n")
+    return h.hexdigest()
 
 
 def run_approve(
@@ -85,12 +90,12 @@ def run_approve(
     from agentalloy.signals.gates import (  # noqa: PLC0415
         _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
     )
-    from agentalloy.signals.predicates import approval_marker_path  # noqa: PLC0415
 
     root = root or _repo_root()
+    access = phase_access(root)
 
     try:
-        existing = phase_access(root).read()
+        existing = access.read()
     except StateClientError as exc:
         fail_on_state_error(exc)
         raise  # unreachable
@@ -98,18 +103,38 @@ def run_approve(
     if current != phase:
         return {"ok": False, "error": f"current phase is '{current}', not '{phase}'"}
 
-    glob = _EXIT_ARTIFACT_GLOB[phase]
-    if not any(p.is_file() for p in root.glob(glob)):
-        return {"ok": False, "error": f"no exit artifact at '{glob}' to approve"}
-
     approver = approver or os.environ.get("USER") or "unknown"
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sha = _digest(root, glob)
-    marker = approval_marker_path(root, phase)
-    _atomic_write(
-        marker,
-        f'approver: {approver}\napproved_at: "{now}"\nartifact_sha256: {sha}\n',
-    )
+    marker_desc: str
+
+    if phase in _STORE_BACKED_PHASES:
+        from agentalloy.signals.predicates import _artifact_digest  # noqa: PLC0415
+
+        handle = access.contracts_handle()
+        rows = handle.list_artifacts(phase)
+        if not rows:
+            return {
+                "ok": False,
+                "error": f"no exit artifact recorded for phase '{phase}' to approve",
+            }
+        digest = _artifact_digest(rows)
+        handle.set_approval(phase, digest, approver=approver)
+        marker_desc = f"state store (approved/{phase})"
+    else:
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        from agentalloy.signals.predicates import approval_marker_path  # noqa: PLC0415
+
+        glob = _DISK_EXIT_ARTIFACT_GLOB[phase]
+        if not any(p.is_file() for p in root.glob(glob)):
+            return {"ok": False, "error": f"no exit artifact at '{glob}' to approve"}
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        sha = _digest_disk(root, glob)
+        marker = approval_marker_path(root, phase)
+        _atomic_write(
+            marker,
+            f'approver: {approver}\napproved_at: "{now}"\nartifact_sha256: {sha}\n',
+        )
+        marker_desc = str(marker)
 
     nxt = _PHASE_GRAPH.get(phase, phase)
     advanced = run_phase_set(nxt, root=root)  # marker now exists → approval gate passes
@@ -117,7 +142,7 @@ def run_approve(
         "ok": True,
         "phase": phase,
         "approver": approver,
-        "marker": str(marker),
+        "marker": marker_desc,
         "advanced": advanced,
     }
 

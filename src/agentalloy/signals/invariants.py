@@ -30,7 +30,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from agentalloy.signals.prefilter import extract_gate_paths
+from agentalloy.signals.prefilter import (
+    _extract_gate_store_specs,  # pyright: ignore[reportPrivateUsage]
+    extract_gate_paths,
+)
 
 _GLOB_CHARS = "*?[]"
 
@@ -121,6 +124,11 @@ def derive_invariants(shipped_skill: dict[str, Any]) -> list[str]:
         tok = _normalize_gate_path(glob)
         if tok:
             tokens.append(tok)
+    # Store-backed artifact gates (spec/design, post-migration) carry no `path`
+    # glob — the artifact name (e.g. "approach.md") is the literal token instead.
+    for _phase, name in _extract_gate_store_specs(shipped_skill.get("exit_gates") or {}):
+        if name and not _has_glob(name):
+            tokens.append(name)
     for tok in cast("list[Any]", shipped_skill.get("prose_invariants") or []):
         if isinstance(tok, str) and tok.strip():
             tokens.append(tok)

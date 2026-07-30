@@ -264,6 +264,31 @@ class ContractListResponse(BaseModel):
     contracts: list[ContractResponse]
 
 
+class ArtifactSetRequest(BaseModel):
+    """Input to PUT /state/artifact — upsert a deliverable artifact body."""
+
+    phase: ContractPhase
+    slug: Annotated[str, Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, description="e.g. 'spec.md', 'approach.md'")]
+    content: str
+
+
+class ArtifactResponse(BaseModel):
+    """Response for artifact read/write endpoints."""
+
+    phase: str
+    slug: str
+    name: str
+    content: str | None
+    updated_at: str
+
+
+class ArtifactListResponse(BaseModel):
+    """Response for GET /state/artifact."""
+
+    artifacts: list[ArtifactResponse]
+
+
 class PhaseAdvanceResponse(BaseModel):
     """Response for POST /state/phase when a contract is included.
 

@@ -461,6 +461,58 @@ def _edit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _artifact_set(args: argparse.Namespace) -> int:
+    """Upsert a deliverable artifact body (docs/spec/<slug>.md and friends,
+    store-backed) via StateClient. This is the write path an agent uses in
+    place of its file-write tool once phase gates no longer read the disk."""
+    client = _get_client()
+    body = args.body
+    if args.body_file is not None:
+        body = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+    if body is None:
+        print("Error: provide --body or --body-file.", file=sys.stderr)
+        return 1
+
+    try:
+        result_data = client.set_artifact(args.phase, args.slug, args.name, body)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    result = {
+        "phase": result_data.get("phase", args.phase),
+        "slug": result_data.get("slug", args.slug),
+        "name": result_data.get("name", args.name),
+        "updated_at": result_data.get("updated_at"),
+    }
+    write_result(
+        result,
+        args,
+        human_fn=lambda r: print_rich(f"[green]Stored[/] {r['phase']}/{r['slug']}/{r['name']}"),
+    )
+    return 0
+
+
+def _artifact_list(args: argparse.Namespace) -> int:
+    """List deliverable artifacts for a phase via StateClient."""
+    client = _get_client()
+    try:
+        rows = client.list_artifacts(args.phase, slug=args.slug, name_glob=args.name_glob)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    result = {"artifacts": rows}
+    write_result(
+        result,
+        args,
+        human_fn=lambda r: print_rich(
+            "\n".join(f"{a['phase']}/{a['slug']}/{a['name']}" for a in r["artifacts"]) or "(none)"
+        ),
+    )
+    return 0
+
+
 def _supersede(args: argparse.Namespace) -> int:
     """Supersede a contract with a new revision via StateClient."""
     client = _get_client()
@@ -510,6 +562,8 @@ _HANDLERS = {
     "validate": _validate,
     "edit": _edit,
     "supersede": _supersede,
+    "artifact-set": _artifact_set,
+    "artifact-list": _artifact_list,
 }
 
 
@@ -591,13 +645,35 @@ def add_parser(
     )
     add_json_flag(sup_p)
 
+    # artifact-set
+    aset_p = sub.add_parser(
+        "artifact-set", help="Store a deliverable artifact body (spec.md, approach.md, ...)."
+    )
+    aset_p.add_argument("--phase", required=True, help="Phase (spec, design, ...).")
+    aset_p.add_argument("--slug", required=True, help="Task slug.")
+    aset_p.add_argument("--name", required=True, help="Artifact name, e.g. 'spec.md'.")
+    aset_p.add_argument("--body", default=None, help="Artifact content.")
+    aset_p.add_argument("--body-file", default=None, help="Read content from file ('-' for stdin).")
+    add_json_flag(aset_p)
+
+    # artifact-list
+    alist_p = sub.add_parser("artifact-list", help="List deliverable artifacts for a phase.")
+    alist_p.add_argument("--phase", required=True, help="Phase to list.")
+    alist_p.add_argument("--slug", default=None, help="Filter by slug.")
+    alist_p.add_argument("--name-glob", default=None, help="fnmatch pattern over name.")
+    add_json_flag(alist_p)
+
     p.set_defaults(func=_run)
 
 
 def _run(args: argparse.Namespace) -> int:
     cmd = getattr(args, "contract_cmd", None)
     if not cmd:
-        print("  Usage: agentalloy contract {init,show,validate,edit,supersede}", file=sys.stderr)
+        print(
+            "  Usage: agentalloy contract "
+            "{init,show,validate,edit,supersede,artifact-set,artifact-list}",
+            file=sys.stderr,
+        )
         return 1
     handler = _HANDLERS.get(cmd)
     if not handler:

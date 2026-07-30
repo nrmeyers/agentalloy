@@ -72,15 +72,35 @@ def _wired_repos() -> dict[str, list[str]]:
     return grouped
 
 
-def _approval_state(root: Path, phase: str | None) -> tuple[bool, bool]:
+def _approval_state(
+    root: Path, phase: str | None, store: DuckDBStateStore | None = None
+) -> tuple[bool, bool]:
     """(required, pending) — pending means required and not satisfied/stale."""
     from agentalloy.install.subcommands.phase import (
         _APPROVAL_SINCE,  # pyright: ignore[reportPrivateUsage]
+        _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
     )
-    from agentalloy.signals.predicates import approval_marker_path, approval_required
+    from agentalloy.signals.predicates import (
+        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+        approval_marker_path,
+        approval_required,
+    )
 
     if phase is None or not approval_required(phase):
         return (False, False)
+
+    if phase in _APPROVAL_STORE_NAME_GLOB:
+        if store is None:
+            return (True, True)  # no store handle → can't confirm, treat as pending
+        name_glob = _APPROVAL_STORE_NAME_GLOB[phase]
+        rows = store.list_artifacts(phase, name_glob=name_glob)
+        approval = store.get_approval(phase)
+        if approval is None:
+            return (True, True)
+        if rows and _artifact_digest(rows) != approval.get("artifact_digest"):
+            return (True, True)  # stale — artifact changed after sign-off
+        return (True, False)
+
     marker = approval_marker_path(root, phase)
     if not marker.is_file():
         return (True, True)
@@ -145,7 +165,7 @@ def _repo_info(
         profile = detect_profile(root).name
     except Exception:  # noqa: BLE001 — profile detection is decoration here
         profile = None
-    required, pending = _approval_state(root, phase)
+    required, pending = _approval_state(root, phase, store)
     return RepoInfo(
         repo_root=root_str,
         harnesses=harnesses,
@@ -200,6 +220,7 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
     def _build() -> GateStatus:
         from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import (
+            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
             _forward_gate_blocks,  # pyright: ignore[reportPrivateUsage]
         )
         from agentalloy.install.subcommands.status import (
@@ -211,20 +232,26 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
         phase = _repo_phase(repo)
         nxt = _PHASE_GRAPH.get(phase) if phase else None
         blocked, advisories = (False, [])
+        # The gate's contract predicates query through this handle; in the
+        # service it is the bound store.
+        store = phase_access(root, autostart=False).contracts_handle()
         if phase and nxt and nxt != phase:
-            # The gate's contract predicates query through this handle; in the
-            # service it is the bound store.
-            store = phase_access(root, autostart=False).contracts_handle()
             blocked, advisories = _forward_gate_blocks(phase, nxt, root, store)
-        required, pending = _approval_state(root, phase)
+        required, pending = _approval_state(root, phase, store)
         approver = approved_at = None
         if phase and required and not pending:
-            marker = approval_marker_path(root, phase)
-            for line in marker.read_text().splitlines():
-                if line.startswith("approver:"):
-                    approver = line.partition(":")[2].strip()
-                elif line.startswith("approved_at:"):
-                    approved_at = line.partition(":")[2].strip().strip('"')
+            if phase in _APPROVAL_STORE_NAME_GLOB:
+                approval = store.get_approval(phase)
+                if approval:
+                    approver = approval.get("approver")
+                    approved_at = approval.get("approved_at")
+            else:
+                marker = approval_marker_path(root, phase)
+                for line in marker.read_text().splitlines():
+                    if line.startswith("approver:"):
+                        approver = line.partition(":")[2].strip()
+                    elif line.startswith("approved_at:"):
+                        approved_at = line.partition(":")[2].strip().strip('"')
         return GateStatus(
             repo=repo,
             phase=phase,
@@ -263,10 +290,11 @@ class ApprovalsResponse(BaseModel):
     response_model=ApprovalsResponse,
     summary="Pending approval gates across all wired repos",
 )
-async def list_approvals() -> ApprovalsResponse:
+async def list_approvals(store: DuckDBStateStore = Depends(get_state_store)) -> ApprovalsResponse:
     def _build() -> ApprovalsResponse:
         from agentalloy.install.subcommands.phase import (
             _APPROVAL_SINCE,  # pyright: ignore[reportPrivateUsage]
+            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
         )
         from agentalloy.install.subcommands.status import (
             _repo_phase,  # pyright: ignore[reportPrivateUsage]
@@ -280,16 +308,23 @@ async def list_approvals() -> ApprovalsResponse:
             if not root.is_dir():
                 continue
             phase = _repo_phase(root_str)
-            required, is_pending = _approval_state(root, phase)
+            required, is_pending = _approval_state(root, phase, store)
             if not (phase and required and is_pending):
                 continue
-            glob = _APPROVAL_SINCE.get(phase)
-            artifacts = (
-                sorted(str(p.relative_to(root)) for p in root.glob(glob) if p.is_file())
-                if glob
-                else []
-            )
-            if glob and not artifacts:
+
+            if phase in _APPROVAL_STORE_NAME_GLOB:
+                rows = store.list_artifacts(phase, name_glob=_APPROVAL_STORE_NAME_GLOB[phase])
+                artifacts = sorted(f"{r['phase']}/{r['slug']}/{r['name']}" for r in rows)
+                stale = store.get_approval(phase) is not None
+            else:
+                glob = _APPROVAL_SINCE.get(phase)
+                artifacts = (
+                    sorted(str(p.relative_to(root)) for p in root.glob(glob) if p.is_file())
+                    if glob
+                    else []
+                )
+                stale = approval_marker_path(root, phase).is_file()
+            if not artifacts:
                 # Nothing to approve yet — `approve` would refuse ("no exit
                 # artifact"). The gate is still a blocker (see /api/repos/gates),
                 # but the queue lists only actionable sign-offs.
@@ -299,7 +334,7 @@ async def list_approvals() -> ApprovalsResponse:
                     repo=root_str,
                     phase=phase,
                     next_phase=_PHASE_GRAPH.get(phase),
-                    stale=approval_marker_path(root, phase).is_file(),
+                    stale=stale,
                     artifacts=artifacts,
                 )
             )

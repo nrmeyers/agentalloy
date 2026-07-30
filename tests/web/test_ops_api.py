@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +17,7 @@ from agentalloy.api.state_router import (
     get_state_store,
 )
 from agentalloy.app import create_app
-from agentalloy.storage.state_store import open_state_store
+from agentalloy.storage.state_store import DuckDBStateStore, open_state_store
 
 _CSRF = {"X-AgentAlloy-CSRF": "1"}
 
@@ -38,12 +37,18 @@ def _set_phase(root: Path, phase: str) -> None:
     run_phase_set(phase, root=root, force=True)
 
 
-def _write_spec_doc(root: Path) -> Path:
-    spec = root / "docs" / "spec"
-    spec.mkdir(parents=True, exist_ok=True)
-    doc = spec / "x.md"
-    doc.write_text("# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
-    return doc
+def _write_spec_doc(store: DuckDBStateStore, root: Path) -> None:
+    """Record the spec artifact into BOTH store scopes ops_api reads from —
+    a pre-existing split, unrelated to the artifact-store migration:
+    `/api/approvals` and `/api/repos` read the fixture's fixed-repo `store`
+    (`Depends(get_state_store)`, no per-request `.for_repo()`), while
+    `/api/repos/approve` calls `run_approve` -> `phase_access(root)`, which
+    IS root-scoped. Writing to only one leaves the other blind."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    content = "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+    store.set_artifact("spec", "x", "spec.md", content)
+    phase_access(root).contracts_handle().set_artifact("spec", "x", "spec.md", content)
 
 
 @pytest.fixture
@@ -105,7 +110,7 @@ def test_approvals_pending_then_approve_advances(
     client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = _make_repo(tmp_path, "r2", phase="spec")
-    _write_spec_doc(repo)
+    _write_spec_doc(client.store, repo)
     _wire(monkeypatch, repo)
 
     pending = client.get("/api/approvals").json()
@@ -114,7 +119,7 @@ def test_approvals_pending_then_approve_advances(
     assert entry["phase"] == "spec"
     assert entry["next_phase"] == "design"
     assert entry["stale"] is False  # never approved, not stale
-    assert entry["artifacts"] == ["docs/spec/x.md"]
+    assert entry["artifacts"] == ["spec/x/spec.md"]
 
     r = client.post("/api/repos/approve", json={"repo": str(repo), "phase": "spec"})
     assert r.status_code == 403  # CSRF required
@@ -131,16 +136,26 @@ def test_approvals_pending_then_approve_advances(
 
 def test_approvals_stale_marker_reappears(client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = _make_repo(tmp_path, "r3", phase="spec")
-    doc = _write_spec_doc(repo)
+    _write_spec_doc(client.store, repo)
     _wire(monkeypatch, repo)
+    from agentalloy.install.subcommands._state import phase_access
+
     r = client.post("/api/repos/approve", json={"repo": str(repo), "phase": "spec"}, headers=_CSRF)
     assert r.status_code == 200
-    # Back to spec (simulate rework), edit the artifact after the marker.
-    _set_phase(repo, "spec")
-    future = time.time() + 5
-    import os
+    # `run_approve` recorded the approval into `phase_access(repo)`'s own scope
+    # (the correct read path for the approve endpoint); mirror it into the
+    # fixture's fixed-repo scope too, since `/api/approvals` reads that one —
+    # same pre-existing split noted in `_write_spec_doc`.
+    approval = phase_access(repo).contracts_handle().get_approval("spec")
+    assert approval is not None
+    client.store.set_approval("spec", approval["artifact_digest"])
 
-    os.utime(doc, (future, future))
+    # Back to spec (simulate rework), edit the artifact after the marker — the
+    # recorded digest no longer matches the current artifact content.
+    _set_phase(repo, "spec")
+    client.store.set_artifact(
+        "spec", "x", "spec.md", "# x (reworked)\n## Acceptance Criteria\n- a\n"
+    )
 
     pending = client.get("/api/approvals").json()
     assert pending["total"] == 1

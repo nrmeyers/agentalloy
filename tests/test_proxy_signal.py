@@ -763,8 +763,9 @@ class TestBuildBanner:
         # progress suffix.
         banner = build_banner("spec", _gates_with_sections(), tmp_path)
         assert banner == (
-            "[agentalloy · spec] MUST write docs/spec/<slug>.md "
-            "(Acceptance Criteria + Out of Scope) before designing or coding"
+            "[agentalloy · spec] MUST record the spec artifact "
+            "(`agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`, "
+            "Acceptance Criteria + Out of Scope) before designing or coding"
         )
 
     def test_unknown_phase_falls_back_to_gate_path(self, tmp_path: Path) -> None:
@@ -859,7 +860,7 @@ class TestBuildBanner:
         from agentalloy.api.proxy_signal import build_banner
 
         banner = build_banner("design", _design_gates(), tmp_path, slug="calendar-web-ui")
-        assert "docs/design/calendar-web-ui/" in banner
+        assert "--slug calendar-web-ui" in banner
         assert "<slug>" not in banner
 
     def test_slug_left_literal_when_unknown(self, tmp_path: Path) -> None:

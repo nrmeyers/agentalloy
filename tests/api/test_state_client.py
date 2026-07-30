@@ -267,22 +267,24 @@ class TestPhaseSetPersistence:
 
 
 class TestApproveRouting:
-    def test_records_the_marker_file(self, tmp_path: Path) -> None:
-        """The approval marker is a repo file by design; only phase moved."""
+    def test_records_the_marker_in_the_store(self, tmp_path: Path) -> None:
+        """The approval marker is a store row now (spec/design migrated); only
+        the transport moved, not the fact that something durable is recorded."""
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.approve import run_approve
         from agentalloy.install.subcommands.phase import run_phase_set
 
-        # Create a spec doc so the exit artifact check passes
-        spec = tmp_path / "docs" / "spec"
-        spec.mkdir(parents=True)
-        (spec / "x.md").write_text("# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
-
         run_phase_set("spec", root=tmp_path)
+        handle = phase_access(tmp_path).contracts_handle()
+        handle.set_artifact(
+            "spec", "x", "spec.md", "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+        )
         result = run_approve("spec", root=tmp_path, approver="test")
         assert result["ok"] is True
-        marker = tmp_path / ".agentalloy" / "approved" / "spec"
-        assert marker.exists()
-        assert "approver: test" in marker.read_text()
+        assert result["marker"] == "state store (approved/spec)"
+        approval = phase_access(tmp_path).contracts_handle().get_approval("spec")
+        assert approval is not None
+        assert "artifact_digest" in approval
 
     def test_advance_lands_in_the_store(self, tmp_path: Path) -> None:
         """Approving the current phase advances it — in the store, not a file.
@@ -295,10 +297,11 @@ class TestApproveRouting:
         from agentalloy.install.subcommands.approve import run_approve
         from agentalloy.install.subcommands.phase import run_phase_set
 
-        spec = tmp_path / "docs" / "spec"
-        spec.mkdir(parents=True)
-        (spec / "x.md").write_text("# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
         run_phase_set("spec", root=tmp_path)
+        handle = phase_access(tmp_path).contracts_handle()
+        handle.set_artifact(
+            "spec", "x", "spec.md", "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+        )
 
         result = run_approve("spec", root=tmp_path, approver="test")
 

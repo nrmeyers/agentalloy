@@ -220,8 +220,8 @@ def _resolve_current_contract(
 # for an unrecognized phase. Mirrors the MUST/MUST-NOT framing of each phase's orientation.
 _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
     "intake": "MUST capture the request as a contract before any spec, design, or code",
-    "spec": "MUST write docs/spec/<slug>.md (Acceptance Criteria + Out of Scope) before designing or coding",
-    "design": "MUST write docs/design/<slug>/{approach,tasks,test-plan}.md before any src/ code",
+    "spec": "MUST record the spec artifact (`agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`, Acceptance Criteria + Out of Scope) before designing or coding",
+    "design": "MUST record the design artifacts (`agentalloy contract artifact-set --phase design --slug <slug> --name {approach,tasks,test-plan}.md`) before any src/ code",
     "build": "MUST work the design's tasks with tests — no new architecture or acceptance decisions here",
     "qa": "MUST record docs/qa/<slug>.md (Checks + Review) before shipping",
     "ship": "MUST write docs/ship/<slug>.md (Summary + Rollback); ship only what QA approved",

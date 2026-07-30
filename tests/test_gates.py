@@ -332,7 +332,8 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
     dc.mkdir(parents=True, exist_ok=True)
     (dc / "01-task.md").write_text("---\nphase: design\ntask_slug: 01-task\n---\n\n# 01-task\n")
 
-    # Store: create if needed and insert design contract
+    # Store: create if needed and insert design contract + the design artifacts
+    # (post-migration: artifact_exists/artifact_contains read the store, not disk).
     db = tmp_path / "test_state.db"
     if not db.exists():
         store = DuckDBStateStore(db)
@@ -346,6 +347,9 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
         f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
         VALUES ('{repo}', 'design-01-task', '01-task', '[]', NULL, 'design', 'active', CURRENT_TIMESTAMP)"""
     )
+    store.set_artifact("design", "01-task", "approach.md", "# x\n\n## Approach\n\nhow\n")
+    store.set_artifact("design", "01-task", "tasks.md", "# x\n\n## Tasks\n\n- t1\n")
+    store.set_artifact("design", "01-task", "test-plan.md", "# x\n\n## Test Cases\n\n- AC-1\n")
     store.close()
 
 
@@ -400,13 +404,15 @@ def test_design_gate_blocks_without_build_contract(tmp_path: Path):
 
 
 def _approve_design(tmp_path: Path) -> None:
-    """Record a design approval marker newer than the design docs (#10 gate)."""
-    marker = tmp_path / ".agentalloy" / "approved" / "design"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text('approver: t\napproved_at: "2026-01-01T00:00:00Z"\nartifact_sha256: x\n')
-    docs = list((tmp_path / "docs" / "design").rglob("*.md"))
-    base = max((p.stat().st_mtime for p in docs), default=0.0)
-    os.utime(marker, (base + 10, base + 10))
+    """Record a design approval matching the current store artifact digest (#10 gate)."""
+    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    rows = store.list_artifacts("design", name_glob="*.md")
+    store.set_approval("design", _artifact_digest(rows))
+    store.close()
 
 
 def test_design_gate_passes_with_build_contract(tmp_path: Path):
