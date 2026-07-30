@@ -36,7 +36,10 @@ from agentalloy.api.proxy_apply import (
     commit_outcome,
 )
 from agentalloy.api.proxy_context import decode_proj_token
-from agentalloy.api.proxy_injection import inject_into_anthropic_messages
+from agentalloy.api.proxy_injection import (
+    inject_into_anthropic_messages,
+    inject_into_anthropic_system_prompt,
+)
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import (
     get_embed_client,
@@ -46,6 +49,7 @@ from agentalloy.api.proxy_router import (
 from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
+from agentalloy.providers.base import filter_tools_for_phase
 
 if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
@@ -257,10 +261,22 @@ async def _maybe_inject(
         # composed text but couldn't inject it does NOT burn the marker.
         phase = signal.phase
         before = current
+
+        def _inject_anthropic(text: str) -> dict[str, Any] | None:
+            # Inject into the last user message (existing behaviour)
+            injected = inject_into_anthropic_messages(before, text, phase=phase)
+            if injected is before:
+                return None
+            # Also inject into the system prompt (highest-compliance location).
+            sys_injected = inject_into_anthropic_system_prompt(injected, text, phase=phase)
+            if sys_injected is not None:
+                injected = sys_injected
+            return injected
+
         outcome = await apply_signal(
             signal=signal,
             orchestrator=orchestrator,
-            inject=lambda text: inject_into_anthropic_messages(before, text, phase=phase),
+            inject=_inject_anthropic,
             delivered=lambda out: out is not before,
         )
         if outcome.injected is not None:
@@ -278,6 +294,16 @@ async def _maybe_inject(
             current = bannered
 
     injected_payload = current if current is not payload else None
+
+    # Filter tools for the current phase (harness-agnostic tool gating).
+    # Applied to the final payload so it catches both injected and non-injected paths.
+    if injected_payload is not None and signal.phase is not None:
+        raw_tools = injected_payload.get("tools")
+        if isinstance(raw_tools, list):
+            filtered = filter_tools_for_phase(cast("list[dict[str, Any]]", raw_tools), signal.phase)
+            if filtered is not raw_tools:
+                injected_payload = {**injected_payload, "tools": filtered}
+
     return injected_payload, outcome, signal
 
 

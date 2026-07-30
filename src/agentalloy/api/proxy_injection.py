@@ -490,3 +490,113 @@ def inject_into_openai_messages(
     new_messages = list(messages)
     new_messages[idx] = target.model_copy(update={"content": new_content})
     return new_messages
+
+
+# ---------------------------------------------------------------------------
+# System-prompt injection (both surfaces)
+#
+# Injects the full SDD phase prose into the system prompt so the LLM sees
+# it at the highest-compliance location.  Uses phase-stamped markers so
+# the injection is idempotent within a phase; a stale block from a prior
+# phase is replaced on transition.
+#
+# Prompt-cache trade-off: the system prompt changes on phase transition,
+# breaking the cache for that one turn.  Phases change ~once per 20 turns,
+# so the cache is warm the vast majority of the time.  The compliance gain
+# from system-prompt-level instructions outweighs the occasional cache miss.
+# ---------------------------------------------------------------------------
+
+
+def inject_into_openai_system_prompt(
+    messages: list[ProxyMessage], block: str, *, phase: str
+) -> list[ProxyMessage] | None:
+    """Inject *block* into the first ``role == "system"`` message.
+
+    Uses phase-stamped workflow markers so the injection is idempotent within
+    a phase; a stale block from a prior phase is stripped before injecting.
+
+    Returns a NEW list with only the system message replaced, or ``None`` on
+    every no-op:
+    - no system message to inject into (and we don't create one — the harness
+      owns that),
+    - the target already carries the current-phase marker (idempotent),
+    - an unexpected content shape.
+    """
+    sys_idx: int | None = None
+    for i, msg in enumerate(messages):
+        if msg.role == "system":
+            sys_idx = i
+            break
+    if sys_idx is None:
+        return None
+
+    begin = anthropic_marker_begin(phase)
+    end = ANTHROPIC_MARKER_END
+    target = messages[sys_idx]
+    content = target.content
+
+    # Idempotent: current-phase block already present.
+    if isinstance(content, str):
+        if begin in content:
+            return None
+        stripped = _strip_workflow_block(content)
+        new_block = _block_text(begin, block, end)
+        new_content: str | list[dict[str, Any]] = (
+            f"{stripped}\n\n{new_block}" if stripped else new_block
+        )
+    elif isinstance(content, list):
+        if any(_text_block_contains(b, begin) for b in content):
+            return None
+        blocks = [b for b in content if not _text_block_contains(b, _workflow_begin_any())]
+        new_block = _block_text(begin, block, end)
+        new_content = [*blocks, {"type": "text", "text": new_block}]
+    else:
+        return None
+
+    new_messages = list(messages)
+    new_messages[sys_idx] = target.model_copy(update={"content": new_content})
+    return new_messages
+
+
+def inject_into_anthropic_system_prompt(
+    payload: dict[str, Any], block: str, *, phase: str
+) -> dict[str, Any] | None:
+    """Inject *block* into the Anthropic top-level ``system`` field.
+
+    The Anthropic ``system`` field can be a string or a list of content blocks.
+    Uses phase-stamped workflow markers for idempotency within a phase.
+
+    Returns a NEW payload dict on a real injection, or ``None`` on every no-op:
+    - no ``system`` field present,
+    - the system already carries the current-phase marker (idempotent),
+    - an unexpected content shape.
+    """
+    system = payload.get("system")
+    if system is None:
+        return None
+
+    begin = anthropic_marker_begin(phase)
+    end = ANTHROPIC_MARKER_END
+
+    if isinstance(system, str):
+        if begin in system:
+            return None
+        stripped = _strip_workflow_block(system)
+        new_block = _block_text(begin, block, end)
+        new_system: str | list[Any] = f"{stripped}\n\n{new_block}" if stripped else new_block
+    elif isinstance(system, list):
+        if any(
+            _text_block_contains(d, begin) for d in (_as_dict(b) for b in system) if d is not None
+        ):
+            return None
+        blocks = []
+        for b in system:
+            d = _as_dict(b)
+            if d is None or not _text_block_contains(d, _workflow_begin_any()):
+                blocks.append(b)
+        new_block = _block_text(begin, block, end)
+        new_system = [*blocks, {"type": "text", "text": new_block}]
+    else:
+        return None
+
+    return {**payload, "system": new_system}

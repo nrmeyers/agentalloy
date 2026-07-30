@@ -211,8 +211,8 @@ def test_inject_into_last_user_message_system_untouched(tmp_path: Path) -> None:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
-    # system block byte-unchanged (prompt-cache safe)
-    assert sent["system"] == "SYSTEM-CACHED-BLOCK"
+    # system has phase prose injected (system prompt injection) — original text preserved
+    assert "SYSTEM-CACHED-BLOCK" in sent["system"]
     # injected into the LAST user message, phase-stamped
     last_user = sent["messages"][-1]
     assert last_user["role"] == "user"
@@ -470,8 +470,8 @@ def test_banner_appended_after_workflow_block(tmp_path: Path) -> None:
     assert _BANNER in content
     assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
     assert content.count("BEGIN AGENTALLOY-BANNER") == 1
-    # System untouched.
-    assert sent["system"] == "SYSTEM-CACHED-BLOCK"
+    # System has phase prose injected (system prompt injection).
+    assert "SYSTEM-CACHED-BLOCK" in sent["system"]
 
 
 def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: Path) -> None:
