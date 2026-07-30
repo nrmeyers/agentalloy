@@ -447,20 +447,20 @@ def _ensure_code_index_module(modules: str) -> str:
 
     from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
 
-    _print("  [dim]The [code-index] extra isn't installed yet — installing it now…[/dim]")
+    _print("  [dim]Code-index dependencies aren't installed yet — installing them now…[/dim]")
     status, detail = ensure_code_index_extra()
     if status in ("already", "installed"):
-        _print("  [green]code-index extra ready.[/green]")
+        _print("  [green]code-index dependencies ready.[/green]")
         return modules
 
     if status == "source":
         _print(
-            "  [yellow]Running from a source/editable checkout — add the extra with "
-            "`uv sync --extra code-index`, then re-run setup.[/yellow]"
+            "  [yellow]Running from a source/editable checkout — run `uv sync`, "
+            "then re-run setup.[/yellow]"
         )
     else:
         suffix = f": {detail}" if detail else ""
-        _print(f"  [yellow]Could not install the [code-index] extra{suffix}.[/yellow]")
+        _print(f"  [yellow]Could not install the code-index dependencies{suffix}.[/yellow]")
         _print(
             "  [yellow]Install it manually with: uv tool install 'agentalloy[code-index]'.[/yellow]"
         )

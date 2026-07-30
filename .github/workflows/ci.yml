@@ -30,10 +30,8 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        # --extra code-index: the vendored engine's tests need tree-sitter +
-        # grammars. The pipx-smoke job stays core-only to prove the base
-        # wheel works without the extra.
-        run: uv sync --frozen --extra code-index
+        # tree-sitter is now a core dependency — no --extra flag needed.
+        run: uv sync --frozen --no-dev
 
       - name: Lint
         # --fix mirrors pre-commit's ruff hook (which also uses --fix) so CI
@@ -100,7 +98,8 @@ jobs:
 
       - name: Install dependencies
         if: steps.gate.outputs.run == 'true'
-        run: uv sync --frozen --extra code-index
+        # tree-sitter is now a core dependency — no --extra flag needed.
+        run: uv sync --frozen --no-dev
 
       # ubuntu-latest ships podman 5.x, which emits OCI runtime spec v1.2.1.
       # The runner's bundled crun predates 1.14.3 and can't parse that spec
@@ -182,9 +181,9 @@ jobs:
           agentalloy --help | grep -qw code
           agentalloy code --help > /dev/null
 
-      - name: Smoke — CODE_INDEX_ENABLED degrades gracefully on the core wheel
-        # The core wheel ships no tree-sitter; enabling the module must start
-        # the app with modules.code_index == "unavailable", not crash.
+      - name: Smoke — CODE_INDEX_ENABLED=1 enables code index
+        # tree-sitter is now a core dependency; the wheel always ships it.
+        # Verify the module loads when explicitly enabled.
         run: |
           CODE_INDEX_ENABLED=1 "$(uv tool dir)/agentalloy/bin/python" - <<'PY'
           from agentalloy.app import create_app
@@ -192,7 +191,7 @@ jobs:
           app = create_app(use_default_lifespan=False)
           status = app.state.module_status
           print(f"module_status: {status}")
-          assert status["code_index"] == "unavailable", status
+          assert status["code_index"] == "enabled", status
           PY
 
       - name: Smoke — wheel-bundled packs discoverable

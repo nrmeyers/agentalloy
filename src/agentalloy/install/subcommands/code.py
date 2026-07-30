@@ -73,11 +73,11 @@ def _module_state_error(state: str | None) -> int:
             "ERROR: The code-index module failed to load in the running service.", file=sys.stderr
         )
         print(
-            "CAUSE: CODE_INDEX_ENABLED is on but the [code-index] extra is not installed.",
+            "CAUSE: CODE_INDEX_ENABLED is on but the code-index dependencies are missing.",
             file=sys.stderr,
         )
         print(
-            "FIX:   Install the extra (`uv tool install 'agentalloy[code-index]'`) "
+            "FIX:   Install the code-index dependencies (`uv sync`) "
             "and restart the service.",
             file=sys.stderr,
         )
@@ -630,10 +630,10 @@ def _run_remove(args: argparse.Namespace) -> int:
 # Deliberately NOT `write-env` (which re-renders a whole preset template and
 # refuses a hand-edited .env without --force): this is a surgical one-line
 # patch, safe to run on any .env regardless of provenance, so it can never
-# clobber unrelated settings. Enabling *is* opting into code-index, so when the
-# [code-index] extra isn't installed yet this toggle installs it on demand
-# rather than refusing — from there `agentalloy upgrade` keeps it (the extra is
-# folded into base only for opted-in users; see upgrade._code_index_opted_in).
+# clobber unrelated settings. Enabling *is* opting into code-index, so when
+# the dependencies aren't installed yet this toggle installs them on demand
+# rather than refusing — from there `agentalloy upgrade` keeps them (core deps,
+# always included in new installs; see upgrade.ensure_code_index_extra).
 # ---------------------------------------------------------------------------
 
 
@@ -665,10 +665,10 @@ def _patch_env_key(key: str, value: str) -> Path:
 
 
 def _run_module_toggle(*, enabled: bool) -> int:
-    # Enabling code-index requires the [code-index] extra — otherwise the service
-    # starts with modules.code_index=unavailable. Enabling *is* opting in, so
-    # install the extra on demand rather than refusing; only abort if it can't
-    # be provided (source checkout, or a failed install).
+    # Enabling code-index requires its dependencies (tree-sitter + grammars,
+    # now core deps). Enabling *is* opting in, so install on demand rather than
+    # refusing; only abort if it can't be provided (source checkout, or a
+    # failed install).
     if enabled:
         import importlib
 
@@ -677,25 +677,24 @@ def _run_module_toggle(*, enabled: bool) -> int:
         except ImportError:
             from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
 
-            print("Installing the [code-index] extra…", file=sys.stderr)
+            print("Installing code-index dependencies…", file=sys.stderr)
             status, detail = ensure_code_index_extra()
             if status not in ("installed", "already"):
                 if status == "source":
                     print(
-                        "  [red]Cannot enable code-index: source/editable checkout — add the "
-                        "extra with `uv sync --extra code-index`, then re-run.[/red]",
+                        "  [red]Cannot enable code-index: source/editable checkout — run "
+                        "`uv sync`, then re-run.[/red]",
                         file=sys.stderr,
                     )
                 else:
                     suffix = f": {detail}" if detail else ""
                     print(
-                        f"  [red]Cannot enable code-index: installing the [code-index] extra "
-                        f"failed{suffix}.[/red]",
+                        f"  [red]Cannot enable code-index: install failed{suffix}.[/red]",
                         file=sys.stderr,
                     )
                     print(
-                        "  [yellow]Install it manually with: uv tool install "
-                        "'agentalloy[code-index]', then re-run: agentalloy code enable[/yellow]",
+                        "  [yellow]Reinstall agentalloy (pipx upgrade / pip install --force-reinstall), "
+                        "then re-run: agentalloy code enable[/yellow]",
                         file=sys.stderr,
                     )
                 return 1

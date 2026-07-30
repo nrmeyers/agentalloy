@@ -1252,11 +1252,11 @@ def _repair(result: dict[str, Any]) -> int:
                 rc = 1
         elif status == "source":
             print_rich(
-                "[yellow]  Source/editable checkout — run `uv sync --extra code-index`.[/yellow]"
+                "[yellow]  Source/editable checkout — run `uv sync`.[/yellow]"
             )
             rc = 1
         else:
-            print_rich(f"[red]  [code-index] extra install failed: {detail}[/red]")
+            print_rich(f"[red]  code-index install failed: {detail}[/red]")
             rc = 1
 
     # Step 4: re-diagnose and print after-picture

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Ensure code-index extra is available (CI quality job installs it too).
-uv sync --frozen --extra code-index 2>/dev/null || true
+uv sync --frozen --no-dev 2>/dev/null || true
 
 PASS=0
 FAIL=0

@@ -107,10 +107,10 @@ def run(args: argparse.Namespace) -> int:
     env_var = _FEATURE_TO_ENV[feature_name]
     new_value = "True" if args.config_subcommand == "enable" else "False"
 
-    # Enabling code-index requires the [code-index] extra — otherwise the service
-    # starts with modules.code_index=unavailable. Enabling *is* opting in, so
-    # install the extra on demand rather than refusing; only abort if it can't
-    # be provided (source checkout, or a failed install).
+    # Enabling code-index requires its dependencies (tree-sitter + grammars,
+    # now core deps). Enabling *is* opting in, so install on demand rather than
+    # refusing; only abort if it can't be provided (source checkout, or a
+    # failed install).
     if (
         args.config_subcommand == "enable"
         and feature_name == "code-index"
@@ -118,23 +118,22 @@ def run(args: argparse.Namespace) -> int:
     ):
         from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
 
-        print("Installing the [code-index] extra…")
+        print("Installing code-index dependencies…")
         status, detail = ensure_code_index_extra()
         if status not in ("installed", "already"):
             if status == "source":
                 print(
-                    "  [red]Cannot enable code-index: source/editable checkout — add the extra "
-                    "with `uv sync --extra code-index`, then re-run.[/red]"
+                    "  [red]Cannot enable code-index: source/editable checkout — run "
+                    "`uv sync`, then re-run.[/red]"
                 )
             else:
                 suffix = f": {detail}" if detail else ""
                 print(
-                    f"  [red]Cannot enable code-index: installing the [code-index] extra "
-                    f"failed{suffix}.[/red]"
+                    f"  [red]Cannot enable code-index: install failed{suffix}.[/red]"
                 )
                 print(
-                    "  [yellow]Install it manually with: uv tool install "
-                    "'agentalloy[code-index]', then re-run: agentalloy config enable code-index[/yellow]"
+                    "  [yellow]Reinstall agentalloy (pipx upgrade / pip install --force-reinstall), "
+                    "then re-run: agentalloy config enable code-index[/yellow]"
                 )
             return 1
 

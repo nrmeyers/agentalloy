@@ -66,10 +66,8 @@ COPY pyproject.toml uv.lock ./
 
 # Install third-party deps without trying to build the project itself
 # (needs README.md, src/, etc. — added in the next layer).
-# --extra code-index: ship tree-sitter + grammars so the image can serve the
-# optional code-index module when the operator sets CODE_INDEX_ENABLED=1
-# (module stays off by default; the entrypoint needs no changes).
-RUN uv sync --frozen --no-dev --no-install-project --extra code-index
+# tree-sitter is now a core dependency — no --extra flag needed.
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy the project source and README (used by hatchling for metadata),
 # then install the project itself.
@@ -99,7 +97,7 @@ COPY --from=webui /web/dist /app/web-dist/
 COPY container/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-RUN uv sync --frozen --no-dev --extra code-index
+RUN uv sync --frozen --no-dev
 
 # Runtime configuration. The two llama-server daemons are addressed here:
 # the embed server on 47951 (RUNTIME_EMBED_BASE_URL) and the reranker server

@@ -158,9 +158,8 @@ def _detect_install_method() -> str:
 # (and plain `pip install --upgrade`) install bare `agentalloy` with no memory
 # of which extras a prior install had, so an upgrade silently dropped
 # tree-sitter/onnxruntime even when the user had deliberately enabled
-# code-index/rerank, degrading the module to "unavailable" post-upgrade.
+# rerank only — code-index moved to core deps in v8.1.2.
 _EXTRA_PROBE_MODULES: dict[str, str] = {
-    "code-index": "tree_sitter",
     "rerank": "onnxruntime",
 }
 
@@ -294,64 +293,40 @@ def _code_index_importable(python: Path) -> bool:
 
 
 def ensure_code_index_extra(*, show_progress: bool = True) -> tuple[str, str]:
-    """Ensure the ``[code-index]`` extra is present in the running install.
+    """Ensure the code-index dependencies are present in the running install.
 
-    Reinstalls ``agentalloy`` at the current version with the code-index extra
-    (union'd with any already-installed extras, so a prior ``rerank`` survives)
-    via the same ``uv tool install --force`` swap :func:`upgrade` uses. This lets
-    the setup wizard honour a ``code-index``/``both`` module choice by actually
-    installing the extra instead of telling the user to run a manual command.
+    Since tree-sitter moved to core dependencies (v8.1.2+), there is no
+    separate extra to install. This function checks importability and, if
+    missing, suggests a reinstall.
 
     Returns ``(status, detail)`` where ``status`` is one of:
 
-    - ``"already"``   — the extra was already importable; nothing changed.
-    - ``"installed"`` — the extra was installed and now imports.
+    - ``"already"``   — code-index is importable; nothing changed.
+    - ``"installed"`` — a reinstall was performed and code-index now imports.
     - ``"source"``    — a source/editable checkout; caller must not swap it.
-    - ``"failed"``    — the swap ran but the extra still isn't importable
+    - ``"failed"``    — the swap ran but code-index still isn't importable
       (``detail`` carries the reason).
 
     Never raises.
     """
     method = _detect_install_method()
 
-    # When detection returns "source", attempt to install anyway via the
-    # standard swap path before giving up. This catches misclassifications
-    # (e.g. a uv-tool install running from a dev checkout) where the user
-    # still needs the extra.
-    if method == "source":
-        # Try the normal swap path — it will likely fail for a true source
-        # checkout but will succeed if the detection was a false positive.
-        tool_py = Path(sys.executable)
-        if tool_py.exists() and _code_index_importable(tool_py):
-            return "already", ""
-        extras = sorted({"code-index", *_detect_installed_extras(method)})
-        ref = f"v{_current_version()}"
-        swap = _swap_command(method, ref, extras)
-        try:
-            with progress_activity(
-                f"installing [code-index] extra via {method}", enabled=show_progress
-            ):
-                subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
-        except subprocess.CalledProcessError as exc:
-            tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
-            detail = " / ".join(line.strip() for line in tail) if tail else f"exit {exc.returncode}"
-            return "failed", detail
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return "failed", str(exc)
-        verify_py = Path(sys.executable)
-        if verify_py.exists() and _code_index_importable(verify_py):
-            return "installed", ref
-        return "failed", "extra still not importable after install"
-
-    tool_py = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
-    if tool_py is not None and tool_py.exists() and _code_index_importable(tool_py):
+    # Quick path: already importable.
+    tool_py = Path(sys.executable)
+    if tool_py.exists() and _code_index_importable(tool_py):
         return "already", ""
-    extras = sorted({"code-index", *_detect_installed_extras(method)})
+
+    # Source/editable checkout — can't swap; caller should tell user to `uv sync`.
+    if method == "source":
+        return "source", ""
+
+    # pip/pipx/uv-tool: reinstall the wheel to pull in core deps.
+    extras: list[str] = sorted(_detect_installed_extras(method))
     ref = f"v{_current_version()}"
     swap = _swap_command(method, ref, extras)
     try:
         with progress_activity(
-            f"installing [code-index] extra via {method}", enabled=show_progress
+            f"reinstalling code-index dependencies via {method}", enabled=show_progress
         ):
             subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
@@ -365,7 +340,7 @@ def ensure_code_index_extra(*, show_progress: bool = True) -> tuple[str, str]:
     verify_py = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
     if verify_py is not None and verify_py.exists() and _code_index_importable(verify_py):
         return "installed", ref
-    return "failed", "extra still not importable after install"
+    return "failed", "code-index still not importable after install"
 
 
 # ---------------------------------------------------------------------------
@@ -559,17 +534,9 @@ def _upgrade_native(
 
     # Detect extras BEFORE anything changes — --force replaces the installed
     # files, so this is the only point where the pre-upgrade env is intact.
-    # code-index is (re)requested only when the user opted into it
-    # (CODE_INDEX_ENABLED truthy — see _code_index_opted_in): this folds the
-    # extra into the effective base install for code-index users, so an upgrade
-    # never strips it even if a prior bare reinstall already did — while leaving
-    # injector-only installs free of the tree-sitter grammars. Other
-    # already-installed extras (e.g. rerank) are always preserved. Turning the
-    # module on later goes through `agentalloy code enable`, which installs the
-    # extra on demand, so a not-yet-opted-in user never hits "extra not installed".
+    # code-index moved to core deps in v8.1.2, so it's always included.
+    # Other already-installed extras (e.g. rerank) are always preserved.
     wanted = set(_detect_installed_extras(method))
-    if _code_index_opted_in():
-        wanted.add("code-index")
     extras = sorted(wanted)
     actions.append(f"ensuring extras: {', '.join(extras) or '(none)'}")
 
