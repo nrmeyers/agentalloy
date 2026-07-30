@@ -1467,6 +1467,41 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
         except (json.JSONDecodeError, OSError):
             pass
 
+    # Inherit envKey / context window from the previously active default provider
+    # entry, so the proxy entry is a drop-in replacement rather than a stripped-down
+    # duplicate that Qwen Code refuses to switch to.
+    old_model_name = None
+    model_block = settings_data.get("model")
+    if isinstance(model_block, dict):
+        old_model_name = model_block.get("name")
+
+    inherited_context_window: int | None = None
+    inherited_env_key = "OPENAI_API_KEY"
+    existing_providers = settings_data.get("modelProviders")
+    if isinstance(existing_providers, dict):
+        existing_openai = existing_providers.get("openai")
+        if isinstance(existing_openai, list):
+            for entry in existing_openai:
+                if isinstance(entry, dict) and entry.get("id") == old_model_name:
+                    gen_cfg = entry.get("generationConfig")
+                    if isinstance(gen_cfg, dict) and isinstance(
+                        gen_cfg.get("contextWindowSize"), int
+                    ):
+                        inherited_context_window = gen_cfg["contextWindowSize"]
+                    env_key = entry.get("envKey")
+                    if isinstance(env_key, str) and env_key:
+                        inherited_env_key = env_key
+                    break
+
+    proxy_provider_entry: dict[str, Any] = {
+        "id": "agentalloy-proxy",
+        "name": "AgentAlloy",
+        "baseUrl": proxy_base,
+        "envKey": inherited_env_key,
+    }
+    if inherited_context_window is not None:
+        proxy_provider_entry["generationConfig"] = {"contextWindowSize": inherited_context_window}
+
     # Add a proxy entry to modelProviders.openai[] — do NOT overwrite existing
     # provider entries. The top-level model.baseUrl is redirected to the proxy
     # (see below), so Qwen Code routes all calls through the proxy; the existing
@@ -1481,23 +1516,27 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
                 for e in openai_providers
             )
             if not proxy_exists:
-                openai_providers.append(
-                    {"id": "agentalloy-proxy", "name": "AgentAlloy", "baseUrl": proxy_base}
-                )
+                openai_providers.append(proxy_provider_entry)
         else:
-            providers["openai"] = [
-                {"id": "agentalloy-proxy", "name": "AgentAlloy", "baseUrl": proxy_base}
-            ]
+            providers["openai"] = [proxy_provider_entry]
     else:
-        settings_data["modelProviders"] = {
-            "openai": [{"id": "agentalloy-proxy", "name": "AgentAlloy", "baseUrl": proxy_base}]
-        }
+        settings_data["modelProviders"] = {"openai": [proxy_provider_entry]}
 
     # Update top-level model.baseUrl
     if "model" in settings_data and isinstance(settings_data["model"], dict):
         settings_data["model"]["baseUrl"] = proxy_base
     else:
         settings_data["model"] = {"baseUrl": proxy_base}
+
+    # Point defaultModel at the proxy entry — otherwise Qwen Code keeps using
+    # the old default and never routes through the proxy.
+    default_auth_type = "openai"
+    existing_default = settings_data.get("defaultModel")
+    if isinstance(existing_default, dict):
+        auth_type = existing_default.get("authType")
+        if isinstance(auth_type, str) and auth_type:
+            default_auth_type = auth_type
+    settings_data["defaultModel"] = {"authType": default_auth_type, "modelId": "agentalloy-proxy"}
 
     # Ensure auth type is openai
     if "security" in settings_data and isinstance(settings_data["security"], dict):
