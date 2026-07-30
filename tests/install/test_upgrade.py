@@ -1108,10 +1108,13 @@ def test_dismiss_writes_dismissed_version(tmp_path, monkeypatch):
 def test_ensure_code_index_extra_source_never_swaps(monkeypatch):
     monkeypatch.setattr(up, "_detect_install_method", lambda: "source")
     called = MagicMock()
+    monkeypatch.setattr(up, "_code_index_importable", lambda p: False)
     monkeypatch.setattr(up.subprocess, "run", called)
     status, _ = up.ensure_code_index_extra()
-    assert status == "source"
-    called.assert_not_called()
+    # With the source fallback, we now attempt the install (subprocess IS called)
+    # and return "failed" when it fails — the old "source" early return is gone.
+    assert status == "failed"
+    called.assert_called_once()
 
 
 def test_ensure_code_index_extra_already_present_skips_install(monkeypatch, tmp_path):
@@ -1361,6 +1364,7 @@ def test_detect_source_when_package_in_git_checkout_with_pyproject(monkeypatch, 
     pkg_dir.mkdir()
     (pkg_dir / "__init__.py").write_text('__version__ = "0.0.0+unknown"\n')
     (pkg_dir / "pyproject.toml").write_text("[project]\nname = 'agentalloy'\n")
+    (pkg_dir / "py.typed").write_text("")  # Both pyproject.toml AND py.typed required
     (tmp_path / ".git").mkdir()  # .git in parent
 
     monkeypatch.setattr(up, "_current_version", lambda: "0.0.0+unknown")
