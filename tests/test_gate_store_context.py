@@ -53,7 +53,9 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
     read the store, not the ``design_repo`` fixture's disk files), and a matching
     recorded approval.
     """
-    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.signals.predicates import (
+        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+    )
 
     store = DuckDBStateStore(tmp_path / "gate_state.db")
     store.open()

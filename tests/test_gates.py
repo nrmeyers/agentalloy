@@ -405,7 +405,9 @@ def test_design_gate_blocks_without_build_contract(tmp_path: Path):
 
 def _approve_design(tmp_path: Path) -> None:
     """Record a design approval matching the current store artifact digest (#10 gate)."""
-    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.signals.predicates import (
+        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+    )
 
     db = tmp_path / "test_state.db"
     store = DuckDBStateStore(db)

@@ -219,13 +219,13 @@ def _resolve_current_contract(
 # schema that carries no banner column; the gate-path derivation below is the fallback
 # for an unrecognized phase. Mirrors the MUST/MUST-NOT framing of each phase's orientation.
 _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
-    "intake": "MUST capture the request as a contract before any spec, design, or code",
-    "spec": "MUST record the spec artifact (`agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`, Acceptance Criteria + Out of Scope) before designing or coding",
-    "design": "MUST record the design artifacts (`agentalloy contract artifact-set --phase design --slug <slug> --name {approach,tasks,test-plan}.md`) before any src/ code",
-    "build": "MUST work the design's tasks with tests — no new architecture or acceptance decisions here",
-    "qa": "MUST record docs/qa/<slug>.md (Checks + Review) before shipping",
-    "ship": "MUST write docs/ship/<slug>.md (Summary + Rollback); ship only what QA approved",
-    "sdd-fast": "MUST write docs/fast/<slug>.md (Acceptance + Approach + Test Cases) and pass tests before ship",
+    "intake": "Review system prompt for phase instructions",
+    "spec": "Review system prompt for phase instructions",
+    "design": "Review system prompt for phase instructions",
+    "build": "Review system prompt for phase instructions",
+    "qa": "Review system prompt for phase instructions",
+    "ship": "Review system prompt for phase instructions",
+    "sdd-fast": "Review system prompt for phase instructions",
 }
 
 

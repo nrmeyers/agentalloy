@@ -262,6 +262,44 @@ _PHASE_ARTIFACT: dict[str, str] = {
     "design": "docs/design/<slug>/{approach,tasks,test-plan}.md",
 }
 
+# ---------------------------------------------------------------------------
+# Proxy-level tool gating (harness-agnostic)
+# ---------------------------------------------------------------------------
+
+# Tool names that produce writes to src/ or tests/.  Checked against the
+# Anthropic ``name`` field and the OpenAI ``function.name`` field.  During
+# denied phases these tools are stripped from the upstream request so the
+# LLM cannot call them regardless of the harness's own permission config.
+GATED_TOOL_NAMES: frozenset[str] = frozenset({"write_file", "edit", "notebook_edit"})
+
+
+def _tool_name(tool: dict[str, Any]) -> str | None:
+    """Extract the tool name from an Anthropic or OpenAI tool definition."""
+    # Anthropic format: {"name": "write_file", "description": ..., "input_schema": ...}
+    if "name" in tool and "function" not in tool:
+        return tool.get("name")
+    # OpenAI format: {"type": "function", "function": {"name": "write_file", ...}}
+    fn = tool.get("function")
+    if isinstance(fn, dict):
+        return fn.get("name")
+    return None
+
+
+def filter_tools_for_phase(tools: list[dict[str, Any]], phase: str) -> list[dict[str, Any]]:
+    """Return *tools* with code-writing tools removed during denied phases.
+
+    During ``intake``, ``spec``, and ``design`` the LLM is stripped of
+    ``write_file``, ``edit``, and ``notebook_edit`` so it cannot produce
+    source or test code.  All other tools (read_file, glob, grep_search,
+    shell, ask_user_question, etc.) remain available.
+
+    Handles both Anthropic tool format (``name`` at top level) and OpenAI
+    format (``function.name``).
+    """
+    if phase not in DENIED_PHASES:
+        return tools
+    return [t for t in tools if _tool_name(t) not in GATED_TOOL_NAMES]
+
 
 def is_tier_a_enforced(harness: str) -> bool:
     """Return True if *harness* supports Tier A (harness-level deny rules)."""

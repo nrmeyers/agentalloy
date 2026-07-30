@@ -355,8 +355,8 @@ def test_phase_vocabulary_sites_stay_in_lockstep() -> None:
         == phase_cli._APPROVAL_SINCE  # pyright: ignore[reportPrivateUsage]
     )
     assert (
-        approve_cli._STORE_BACKED_PHASES  # pyright: ignore[reportPrivateUsage]
-        == set(phase_cli._APPROVAL_STORE_NAME_GLOB)  # pyright: ignore[reportPrivateUsage]
+        set(phase_cli._APPROVAL_STORE_NAME_GLOB)  # pyright: ignore[reportPrivateUsage]
+        == approve_cli._STORE_BACKED_PHASES  # pyright: ignore[reportPrivateUsage]
     )
     assert set(approve_cli._APPROVABLE) == (  # pyright: ignore[reportPrivateUsage]
         set(approve_cli._DISK_EXIT_ARTIFACT_GLOB)  # pyright: ignore[reportPrivateUsage]

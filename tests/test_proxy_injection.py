@@ -19,7 +19,9 @@ from agentalloy.api.proxy_injection import (
     anthropic_has_marker,
     anthropic_marker_begin,
     inject_into_anthropic_messages,
+    inject_into_anthropic_system_prompt,
     inject_into_openai_messages,
+    inject_into_openai_system_prompt,
 )
 from agentalloy.api.proxy_models import ProxyMessage
 
@@ -577,3 +579,161 @@ class TestOpenAIBannerInjection:
     def test_banner_none_content_returns_none(self) -> None:
         messages = [ProxyMessage(role="user", content=None)]
         assert inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner") is None
+
+
+# ---------------------------------------------------------------------------
+# System prompt injection tests
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAISystemPromptInjection:
+    """Tests for inject_into_openai_system_prompt."""
+
+    def test_injects_into_first_system_message(self) -> None:
+        messages = [
+            ProxyMessage(role="system", content="You are a helpful assistant."),
+            ProxyMessage(role="user", content="Hello"),
+        ]
+        result = inject_into_openai_system_prompt(
+            messages, "Phase: intake — capture the request.", phase="intake"
+        )
+        assert result is not None
+        assert result[0].role == "system"
+        content = result[0].content
+        assert isinstance(content, str)
+        assert anthropic_marker_begin("intake") in content
+        assert ANTHROPIC_MARKER_END in content
+        assert "Phase: intake" in content
+
+    def test_idempotent_within_phase(self) -> None:
+        messages = [
+            ProxyMessage(role="system", content="You are helpful."),
+            ProxyMessage(role="user", content="Hello"),
+        ]
+        once = inject_into_openai_system_prompt(messages, "Phase instructions", phase="design")
+        assert once is not None
+        # Second call with same phase returns None (no-op, already has marker)
+        twice = inject_into_openai_system_prompt(once, "Different text", phase="design")
+        assert twice is None  # idempotent: no change needed
+        # Original content preserved
+        content = once[0].content
+        assert isinstance(content, str)
+        assert content.count(anthropic_marker_begin("design")) == 1
+        assert "Phase instructions" in content
+        assert "Different text" not in content
+
+    def test_replaces_on_phase_transition(self) -> None:
+        messages = [
+            ProxyMessage(role="system", content="You are helpful."),
+            ProxyMessage(role="user", content="Hello"),
+        ]
+        once = inject_into_openai_system_prompt(messages, "Phase: intake", phase="intake")
+        assert once is not None
+        twice = inject_into_openai_system_prompt(once, "Phase: build", phase="build")
+        assert twice is not None
+        content = twice[0].content
+        assert isinstance(content, str)
+        assert "Phase: intake" not in content
+        assert "Phase: build" in content
+        assert content.count(anthropic_marker_begin("build")) == 1
+
+    def test_no_system_message_returns_none(self) -> None:
+        messages = [ProxyMessage(role="user", content="Hello")]
+        result = inject_into_openai_system_prompt(messages, "Phase instructions", phase="intake")
+        assert result is None  # no system message to inject into
+
+    def test_string_content_preserved(self) -> None:
+        messages = [
+            ProxyMessage(role="system", content="Original system text"),
+            ProxyMessage(role="user", content="Hello"),
+        ]
+        result = inject_into_openai_system_prompt(messages, "Phase instructions", phase="intake")
+        assert result is not None
+        content = result[0].content
+        assert isinstance(content, str)
+        assert "Original system text" in content
+
+
+class TestAnthropicSystemPromptInjection:
+    """Tests for inject_into_anthropic_system_prompt."""
+
+    def test_injects_into_string_system(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        system = result["system"]
+        assert isinstance(system, str)
+        assert anthropic_marker_begin("intake") in system
+        assert ANTHROPIC_MARKER_END in system
+        assert "Phase: intake" in system
+
+    def test_injects_into_list_system(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [{"type": "text", "text": "You are helpful."}],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        system = result["system"]
+        assert isinstance(system, list)
+        joined = "\n".join(b.get("text", "") for b in system if b.get("type") == "text")
+        assert anthropic_marker_begin("intake") in joined
+        assert "Phase: intake" in joined
+
+    def test_idempotent_within_phase_string_system(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        once = inject_into_anthropic_system_prompt(payload, "Phase instructions", phase="design")
+        assert once is not None
+        # Second call with same phase returns None (no-op, already has marker)
+        twice = inject_into_anthropic_system_prompt(once, "Different text", phase="design")
+        assert twice is None  # idempotent: no change needed
+        # Original content preserved
+        system = once["system"]
+        assert isinstance(system, str)
+        assert system.count(anthropic_marker_begin("design")) == 1
+        assert "Phase instructions" in system
+        assert "Different text" not in system
+
+    def test_replaces_on_phase_transition(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        once = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert once is not None
+        twice = inject_into_anthropic_system_prompt(once, "Phase: build", phase="build")
+        assert twice is not None
+        system = twice["system"]
+        assert isinstance(system, str)
+        assert "Phase: intake" not in system
+        assert "Phase: build" in system
+
+    def test_no_system_field_returns_none(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase instructions", phase="intake")
+        assert result is None
+
+    def test_original_system_text_preserved(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "Original system text",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase instructions", phase="intake")
+        assert result is not None
+        system = result["system"]
+        assert isinstance(system, str)
+        assert "Original system text" in system

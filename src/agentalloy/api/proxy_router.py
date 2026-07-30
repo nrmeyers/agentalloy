@@ -33,12 +33,16 @@ from agentalloy.api.proxy_context import (
     read_upstream,
     resolve_working_dir,
 )
-from agentalloy.api.proxy_injection import inject_into_openai_messages
+from agentalloy.api.proxy_injection import (
+    inject_into_openai_messages,
+    inject_into_openai_system_prompt,
+)
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import extract_session_header, resolve_session_key
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
 from agentalloy.api.upstream.error_sse import error_sse_plain
+from agentalloy.providers.base import filter_tools_for_phase
 
 if TYPE_CHECKING:
     from agentalloy.config import Settings as AppSettings
@@ -279,12 +283,19 @@ def _resolve_model(model: str, upstream_model: str | None) -> str | None:
     return model
 
 
-def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> dict[str, Any]:
+def _build_payload(
+    request: ProxyRequest,
+    upstream_model: str | None = None,
+    phase: str | None = None,
+) -> dict[str, Any]:
     """Build the JSON payload to forward to the upstream LLM.
 
     If *upstream_model* is set, overrides ``request.model`` so that synthetic
     model names (e.g. "agentalloy-proxy" from Continue) are mapped to the
     actual upstream model.
+
+    If *phase* is set, tools are filtered through ``filter_tools_for_phase``
+    so code-writing tools are removed during denied phases.
 
     Raises ``ValueError`` if the resolved model is ``None`` (i.e., the
     client sent ``"agentalloy-proxy"`` but no upstream model is configured).
@@ -325,7 +336,10 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
         if upstream_metadata:
             payload["metadata"] = upstream_metadata
     if request.tools is not None:
-        payload["tools"] = request.tools
+        tools = request.tools
+        if phase is not None:
+            tools = filter_tools_for_phase(tools, phase)
+        payload["tools"] = tools
     if request.tool_choice is not None:
         payload["tool_choice"] = request.tool_choice
     return payload
@@ -524,12 +538,17 @@ async def proxy_chat_completions(
             before = current
 
             def _inject_openai(text: str) -> ProxyRequest | None:
+                # Inject into the last user message (existing behaviour)
                 new_msgs = inject_into_openai_messages(before.messages, text, phase=phase)
-                return (
-                    before.model_copy(update={"messages": new_msgs})
-                    if new_msgs is not None
-                    else None
-                )
+                if new_msgs is None:
+                    return None
+                # Also inject into the system prompt (highest-compliance location).
+                # Phase-stamped marker makes this idempotent within a phase; stale
+                # blocks are replaced on phase transition.
+                sys_msgs = inject_into_openai_system_prompt(new_msgs, text, phase=phase)
+                if sys_msgs is not None:
+                    new_msgs = sys_msgs
+                return before.model_copy(update={"messages": new_msgs})
 
             inject_outcome = await apply_signal(
                 signal=signal_result,
@@ -584,7 +603,7 @@ async def proxy_chat_completions(
 
     # --- Step 5: Forward to upstream ---
     try:
-        payload = _build_payload(modified_request, upstream_model)
+        payload = _build_payload(modified_request, upstream_model, phase=phase)
     except ValueError as e:
         return JSONResponse(
             status_code=503,

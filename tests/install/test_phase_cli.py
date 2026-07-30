@@ -226,7 +226,9 @@ def _approve(repo_root: Path, phase: str, since_glob: str) -> None:
     artifacts instead.
     """
     from agentalloy.install.subcommands._state import phase_access
-    from agentalloy.signals.predicates import _artifact_digest  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.signals.predicates import (
+        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+    )
 
     handle = phase_access(repo_root).contracts_handle()
     rows = handle.list_artifacts(phase, name_glob="*.md")

@@ -6,8 +6,9 @@ Covers:
   - TestCapability (2 tests)
   - TestProtocol (1 test)
   - TestWireRecord (6 tests)
+  - TestToolGating (6 tests)
 
-Total: 22 unit tests.
+Total: 28 unit tests.
 """
 
 from __future__ import annotations
@@ -15,10 +16,16 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
+from typing import Any
 from unittest import TestCase, main
 
 # Import agentalloy providers (must be before sys.path modification for E402)
 from agentalloy.providers import REGISTRY, Capability, HarnessSpec, Protocol, WireRecord
+from agentalloy.providers.base import (
+    DENIED_PHASES,
+    GATED_TOOL_NAMES,
+    filter_tools_for_phase,
+)
 
 # Ensure the src directory is on the path so we can import agentalloy.
 _src = Path(__file__).resolve().parent.parent / "src"
@@ -370,6 +377,63 @@ class TestTypeStubs(TestCase):
         self.assertTrue(callable(_noop_install))
         result = _noop_install(8080, Path("/tmp"), force=True)
         self.assertIsInstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# Tool gating tests
+# ---------------------------------------------------------------------------
+
+
+class TestToolGating(TestCase):
+    """Tests for filter_tools_for_phase and related constants."""
+
+    def test_denied_phases_are_correct(self):
+        """DENIED_PHASES contains intake, spec, design."""
+        self.assertEqual(DENIED_PHASES, frozenset({"intake", "spec", "design"}))
+
+    def test_gated_tool_names_are_correct(self):
+        """GATED_TOOL_NAMES contains write_file, edit, notebook_edit."""
+        self.assertEqual(GATED_TOOL_NAMES, frozenset({"write_file", "edit", "notebook_edit"}))
+
+    def test_filter_tools_for_phase_allows_all_in_allowed_phase(self):
+        """Tools are NOT filtered in allowed phases (build, qa, ship)."""
+        tools: list[dict[str, Any]] = [
+            {"name": "write_file", "input_schema": {}},
+            {"name": "read_file", "input_schema": {}},
+            {"name": "edit", "input_schema": {}},
+        ]
+        result = filter_tools_for_phase(tools, "build")
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result, tools)  # same list, no copy
+
+    def test_filter_tools_for_phase_removes_gated_tools_in_denied_phase(self):
+        """Gated tools are stripped in denied phases."""
+        tools: list[dict[str, Any]] = [
+            {"name": "write_file", "input_schema": {}},
+            {"name": "read_file", "input_schema": {}},
+            {"name": "edit", "input_schema": {}},
+            {"name": "glob", "input_schema": {}},
+            {"name": "notebook_edit", "input_schema": {}},
+        ]
+        result = filter_tools_for_phase(tools, "intake")
+        names = [t["name"] for t in result]
+        self.assertEqual(names, ["read_file", "glob"])
+
+    def test_filter_tools_for_phase_openai_format(self):
+        """OpenAI format tools (function.name) are correctly filtered."""
+        tools: list[dict[str, Any]] = [
+            {"type": "function", "function": {"name": "write_file", "description": "writes"}},
+            {"type": "function", "function": {"name": "read_file", "description": "reads"}},
+            {"type": "function", "function": {"name": "edit", "description": "edits"}},
+        ]
+        result = filter_tools_for_phase(tools, "design")
+        names = [t["function"]["name"] for t in result]
+        self.assertEqual(names, ["read_file"])
+
+    def test_filter_tools_for_phase_empty_list(self):
+        """Empty tool list returns empty list."""
+        result = filter_tools_for_phase([], "intake")
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":
