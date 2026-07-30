@@ -10,8 +10,10 @@ recreate (incl. `-full` tag preservation).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -1108,10 +1110,13 @@ def test_dismiss_writes_dismissed_version(tmp_path, monkeypatch):
 def test_ensure_code_index_extra_source_never_swaps(monkeypatch):
     monkeypatch.setattr(up, "_detect_install_method", lambda: "source")
     called = MagicMock()
+    monkeypatch.setattr(up, "_code_index_importable", lambda p: False)
     monkeypatch.setattr(up.subprocess, "run", called)
     status, _ = up.ensure_code_index_extra()
-    assert status == "source"
-    called.assert_not_called()
+    # With the source fallback, we now attempt the install (subprocess IS called)
+    # and return "failed" when it fails — the old "source" early return is gone.
+    assert status == "failed"
+    called.assert_called_once()
 
 
 def test_ensure_code_index_extra_already_present_skips_install(monkeypatch, tmp_path):
@@ -1290,3 +1295,132 @@ def test_container_upgrade_also_migrates():
         up._upgrade_container("v3.0.6", state, assume_yes=True)
 
     assert _migrate_calls(run_cli), "container path skipped the code-index migration"
+
+
+# --- _detect_install_method unit tests --------------------------------------
+
+
+def test_detect_uv_tool_when_uv_tool_list_succeeds(monkeypatch):
+    """uv-tool list succeeds → uv-tool, regardless of __version__."""
+    monkeypatch.setattr(up, "_current_version", lambda: "0.0.0+unknown")
+    monkeypatch.setattr(
+        up.subprocess,
+        "run",
+        lambda *a, **k: _proc(0, stdout="agentalloy v8.0.8\nother-tool"),
+    )
+    assert up._detect_install_method() == "uv-tool"
+
+
+def test_detect_uv_tool_when_version_is_unknown(monkeypatch, tmp_path):
+    """The original bug: dev checkout (version=0.0.0+unknown) + uv-tool install.
+
+    The CLI runs from the dev checkout (so __version__ is "0.0.0+unknown"),
+    but the actual installed package is a uv-tool copy. uv-tool list is the
+    ground truth and should win.
+    """
+    monkeypatch.setattr(up, "_current_version", lambda: "0.0.0+unknown")
+    monkeypatch.setattr(
+        up.subprocess,
+        "run",
+        lambda *a, **k: _proc(0, stdout="agentalloy v8.0.8\n"),
+    )
+    assert up._detect_install_method() == "uv-tool"
+
+
+@contextlib.contextmanager
+def _reimport_agentalloy_from(monkeypatch, fake_root: Path):
+    """Force the next ``import agentalloy`` (inside ``_detect_install_method``,
+    which imports it lazily at call time — no ``importlib.reload`` needed) to
+    resolve against a fake package tree rooted at *fake_root*, then restore the
+    REAL cached module afterward.
+
+    ``monkeypatch.syspath_prepend`` auto-restores ``sys.path`` at teardown, but
+    that alone isn't enough: deleting ``sys.modules["agentalloy"]`` and leaving
+    it deleted meant the next test's `import agentalloy` (or any submodule
+    import, e.g. ``agentalloy.profiles``) re-resolved through whatever was
+    LEFT on ``sys.path`` — and a prior test's fake dir, if not yet unwound by
+    monkeypatch, would shadow the real package with a stub containing only
+    ``__init__.py``, breaking every subsequent test in the same worker with
+    ``ModuleNotFoundError``/``AttributeError`` on real subpackages. Explicitly
+    saving and restoring the real module object closes that gap regardless of
+    path-restore ordering.
+    """
+    monkeypatch.syspath_prepend(str(fake_root))
+    real_agentalloy = sys.modules.get("agentalloy")
+    del sys.modules["agentalloy"]
+    try:
+        yield
+    finally:
+        if real_agentalloy is not None:
+            sys.modules["agentalloy"] = real_agentalloy
+        else:
+            sys.modules.pop("agentalloy", None)
+
+
+def test_detect_pip_when_uv_tool_list_fails(monkeypatch, tmp_path):
+    """No uv-tool → pip, regardless of version."""
+    monkeypatch.setattr(
+        up.subprocess,
+        "run",
+        lambda *a, **k: _proc(1, stderr="uv not found"),
+    )
+
+    # Create a fake site-packages agentalloy (no pyproject.toml = not source)
+    pkg_dir = tmp_path / "site-packages" / "agentalloy"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text('__version__ = "8.0.8"\n')
+    monkeypatch.setattr(up, "_current_version", lambda: "8.0.8")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "site-packages"))
+
+    with _reimport_agentalloy_from(monkeypatch, tmp_path / "site-packages"):
+        assert up._detect_install_method() == "pip"
+
+
+def test_detect_source_when_package_in_git_checkout_with_pyproject(monkeypatch, tmp_path):
+    """A true source/editable checkout: package dir contains pyproject.toml and .git is a parent."""
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+
+    # Simulate a dev checkout: package dir is inside a git repo and has pyproject.toml
+    pkg_dir = tmp_path / "agentalloy"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text('__version__ = "0.0.0+unknown"\n')
+    (pkg_dir / "pyproject.toml").write_text("[project]\nname = 'agentalloy'\n")
+    (pkg_dir / "py.typed").write_text("")  # Both pyproject.toml AND py.typed required
+    (tmp_path / ".git").mkdir()  # .git in parent
+
+    monkeypatch.setattr(up, "_current_version", lambda: "0.0.0+unknown")
+    monkeypatch.setattr(
+        up.subprocess,
+        "run",
+        lambda *a, **k: _proc(1, stderr="uv not found"),
+    )
+
+    with _reimport_agentalloy_from(monkeypatch, tmp_path):
+        assert up._detect_install_method() == "source"
+
+
+def test_detect_pip_when_git_in_parent_but_no_pyproject(monkeypatch, tmp_path):
+    """Package is in site-packages nested in a repo tree → pip, not source.
+
+    This catches the case where the agentalloy repo is installed into a .venv
+    that lives inside the repo (the .git is a grandparent, but the package
+    itself has no pyproject.toml).
+    """
+    # Simulate: .git → repo root → .venv → site-packages → agentalloy
+    site_packages = tmp_path / ".venv" / "lib" / "site-packages"
+    pkg_dir = site_packages / "agentalloy"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text('__version__ = "8.0.8"\n')
+    # No pyproject.toml in the package dir
+    (tmp_path / ".git").mkdir()  # .git at repo root (grandparent of package)
+
+    monkeypatch.setenv("PYTHONPATH", str(site_packages))
+    monkeypatch.setattr(up, "_current_version", lambda: "8.0.8")
+    monkeypatch.setattr(
+        up.subprocess,
+        "run",
+        lambda *a, **k: _proc(1, stderr="uv not found"),
+    )
+
+    with _reimport_agentalloy_from(monkeypatch, site_packages):
+        assert up._detect_install_method() == "pip"
