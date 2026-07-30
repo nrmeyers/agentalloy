@@ -99,17 +99,17 @@ def _detect_install_method() -> str:
 
     Returns ``"source"`` (dev/editable checkout — don't touch it), ``"uv-tool"``
     (the documented native install), or ``"pip"`` (plain pip env).
-    """
-    if _current_version() == "0.0.0+unknown":
-        return "source"
-    import agentalloy
 
-    pkg_dir = Path(agentalloy.__file__).resolve().parent
-    probe = pkg_dir
-    for _ in range(6):
-        if (probe / ".git").exists():
-            return "source"
-        probe = probe.parent
+    **Detection order matters.** ``uv tool list`` is the primary signal because
+    it directly queries the uv-tool registry and never depends on Python import
+    state. The ``__version__`` check is only used for non-uv-tool installs: when
+    running CLI from a dev checkout, ``agentalloy.__version__`` is
+    ``"0.0.0+unknown"`` (the dev fallback), but the actual running binary is
+    the uv-tool installed copy — so checking version first would misclassify
+    uv-tool installs as "source" (this was the original bug).
+    """
+    # Primary: uv-tool registry is the ground truth — it doesn't depend on
+    # Python import state, version strings, or filesystem layout.
     try:
         out = subprocess.run(
             ["uv", "tool", "list"], capture_output=True, text=True, timeout=15, check=False
@@ -118,6 +118,37 @@ def _detect_install_method() -> str:
             return "uv-tool"
     except (OSError, subprocess.SubprocessError):
         pass
+
+    # Secondary: check if the installed package is a source/editable checkout.
+    import agentalloy
+
+    pkg_dir = Path(agentalloy.__file__).resolve().parent
+    probe = pkg_dir
+    for _ in range(6):
+        if (probe / ".git").exists():
+            # .git found: could be a source checkout or a uv-tool venv that
+            # happens to be inside a repo (e.g. the agentalloy repo itself
+            # checked out to ~/.local/share/uv/tools/). Only call it "source"
+            # when the .git tree contains the agentalloy package we're running
+            # from — i.e., the package lives *inside* a git worktree.
+            # For uv-tool installs the package lives in
+            # ~/.local/share/uv/tools/agentalloy/lib/... which is NOT inside
+            # a .git tree (uv-tools are symlinks/copies, not git worktrees).
+            # Check if the package directory has a pyproject.toml/py.typed
+            # marker that indicates this is an editable/source install.
+            # For source checkouts the markers live at the repo root (parent of
+            # .git), not inside pkg_dir — so we must check both locations.
+            repo_root = probe.parent
+            has_pyproject = (pkg_dir / "pyproject.toml").exists() or (
+                repo_root / "pyproject.toml"
+            ).exists()
+            has_py_typed = (pkg_dir / "py.typed").exists()
+            if has_pyproject and has_py_typed:
+                return "source"
+            # If .git is in a parent but the package is in site-packages,
+            # it's not a source install — it's a regular pip/uv-tool install
+            # that happens to be nested in a repo tree.
+        probe = probe.parent
     return "pip"
 
 
@@ -282,8 +313,36 @@ def ensure_code_index_extra(*, show_progress: bool = True) -> tuple[str, str]:
     Never raises.
     """
     method = _detect_install_method()
+
+    # When detection returns "source", attempt to install anyway via the
+    # standard swap path before giving up. This catches misclassifications
+    # (e.g. a uv-tool install running from a dev checkout) where the user
+    # still needs the extra.
     if method == "source":
-        return "source", "source/editable checkout"
+        # Try the normal swap path — it will likely fail for a true source
+        # checkout but will succeed if the detection was a false positive.
+        tool_py = Path(sys.executable)
+        if tool_py.exists() and _code_index_importable(tool_py):
+            return "already", ""
+        extras = sorted({"code-index", *_detect_installed_extras(method)})
+        ref = f"v{_current_version()}"
+        swap = _swap_command(method, ref, extras)
+        try:
+            with progress_activity(
+                f"installing [code-index] extra via {method}", enabled=show_progress
+            ):
+                subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
+            detail = " / ".join(line.strip() for line in tail) if tail else f"exit {exc.returncode}"
+            return "failed", detail
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return "failed", str(exc)
+        verify_py = Path(sys.executable)
+        if verify_py.exists() and _code_index_importable(verify_py):
+            return "installed", ref
+        return "failed", "extra still not importable after install"
+
     tool_py = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
     if tool_py is not None and tool_py.exists() and _code_index_importable(tool_py):
         return "already", ""
