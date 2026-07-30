@@ -10,8 +10,10 @@ recreate (incl. `-full` tag preservation).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -1325,6 +1327,36 @@ def test_detect_uv_tool_when_version_is_unknown(monkeypatch, tmp_path):
     assert up._detect_install_method() == "uv-tool"
 
 
+@contextlib.contextmanager
+def _reimport_agentalloy_from(monkeypatch, fake_root: Path):
+    """Force the next ``import agentalloy`` (inside ``_detect_install_method``,
+    which imports it lazily at call time — no ``importlib.reload`` needed) to
+    resolve against a fake package tree rooted at *fake_root*, then restore the
+    REAL cached module afterward.
+
+    ``monkeypatch.syspath_prepend`` auto-restores ``sys.path`` at teardown, but
+    that alone isn't enough: deleting ``sys.modules["agentalloy"]`` and leaving
+    it deleted meant the next test's `import agentalloy` (or any submodule
+    import, e.g. ``agentalloy.profiles``) re-resolved through whatever was
+    LEFT on ``sys.path`` — and a prior test's fake dir, if not yet unwound by
+    monkeypatch, would shadow the real package with a stub containing only
+    ``__init__.py``, breaking every subsequent test in the same worker with
+    ``ModuleNotFoundError``/``AttributeError`` on real subpackages. Explicitly
+    saving and restoring the real module object closes that gap regardless of
+    path-restore ordering.
+    """
+    monkeypatch.syspath_prepend(str(fake_root))
+    real_agentalloy = sys.modules.get("agentalloy")
+    del sys.modules["agentalloy"]
+    try:
+        yield
+    finally:
+        if real_agentalloy is not None:
+            sys.modules["agentalloy"] = real_agentalloy
+        else:
+            sys.modules.pop("agentalloy", None)
+
+
 def test_detect_pip_when_uv_tool_list_fails(monkeypatch, tmp_path):
     """No uv-tool → pip, regardless of version."""
     monkeypatch.setattr(
@@ -1340,19 +1372,8 @@ def test_detect_pip_when_uv_tool_list_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(up, "_current_version", lambda: "8.0.8")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "site-packages"))
 
-    # Force the import to pick up our fake package
-    import importlib
-    import sys
-
-    sys.path.insert(0, str(tmp_path / "site-packages"))
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
-    importlib.reload(up)  # reload to pick up the new sys.path
-
-    assert up._detect_install_method() == "pip"
-    # Clean up
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
+    with _reimport_agentalloy_from(monkeypatch, tmp_path / "site-packages"):
+        assert up._detect_install_method() == "pip"
 
 
 def test_detect_source_when_package_in_git_checkout_with_pyproject(monkeypatch, tmp_path):
@@ -1374,18 +1395,8 @@ def test_detect_source_when_package_in_git_checkout_with_pyproject(monkeypatch, 
         lambda *a, **k: _proc(1, stderr="uv not found"),
     )
 
-    import importlib
-    import sys
-
-    sys.path.insert(0, str(tmp_path))
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
-    importlib.reload(up)
-
-    assert up._detect_install_method() == "source"
-    # Clean up
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
+    with _reimport_agentalloy_from(monkeypatch, tmp_path):
+        assert up._detect_install_method() == "source"
 
 
 def test_detect_pip_when_git_in_parent_but_no_pyproject(monkeypatch, tmp_path):
@@ -1411,15 +1422,5 @@ def test_detect_pip_when_git_in_parent_but_no_pyproject(monkeypatch, tmp_path):
         lambda *a, **k: _proc(1, stderr="uv not found"),
     )
 
-    import importlib
-    import sys
-
-    sys.path.insert(0, str(site_packages))
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
-    importlib.reload(up)
-
-    assert up._detect_install_method() == "pip"
-    # Clean up
-    if "agentalloy" in sys.modules:
-        del sys.modules["agentalloy"]
+    with _reimport_agentalloy_from(monkeypatch, site_packages):
+        assert up._detect_install_method() == "pip"
