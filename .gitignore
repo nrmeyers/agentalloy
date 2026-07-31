@@ -64,6 +64,7 @@ eval/runs/
 .env
 .env.local
 .env.*.local
+.env.eval
 
 .agentalloy/
 
