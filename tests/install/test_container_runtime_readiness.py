@@ -47,10 +47,11 @@ class TestEntrypointScript:
         # #8: the entrypoint honors LOG_LEVEL (default info) instead of a
         # hardcoded `--log-level info`; the value is lowercased defensively
         # (uppercase preset values crash-looped uvicorn at v6.6.0).
+        # --workers is wired in for multi-worker capacity (default 2).
         assert (
             "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 "
-            "--log-level \"$(echo \"${LOG_LEVEL:-info}\" | tr '[:upper:]' '[:lower:]')\" &"
-            in script
+            "--log-level \"$(echo \"${LOG_LEVEL:-info}\" | tr '[:upper:]' '[:lower:]')\" "
+            '--workers "$WORKERS" &' in script
         )
         assert "UVICORN_PID=$!" in script
 
