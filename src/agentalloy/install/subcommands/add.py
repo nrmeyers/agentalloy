@@ -13,6 +13,7 @@ harness at *repo* scope.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -22,6 +23,8 @@ import yaml
 from agentalloy.api.proxy_context import UPSTREAM_FILE, Upstream
 from agentalloy.install import state as install_state
 from agentalloy.providers import REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 def add_parser(
@@ -136,9 +139,10 @@ def adopt_and_wire(
     render. Callers are responsible for validating *harness* against
     ``REGISTRY`` first.
 
-    No lifecycle state is written here in either mode: the phase lives only in
-    the state store and is seeded lazily on the repo's first proxy request, so
-    adopting a harness never needs a running service.
+    For ``full`` lifecycle repos with no existing phase, the phase is seeded
+    to ``intake`` here (via the state store) so the first real prompt triggers
+    intake rather than silently passing through. This is a best-effort write:
+    a missing or unreachable service is not fatal to wiring.
 
     ``lifecycle_mode`` follows ``wire``'s precedence: an explicit value wins;
     ``None`` prompts when the repo defines its own agent workflow (TTY only)
@@ -173,7 +177,9 @@ def adopt_and_wire(
         _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
     )
     from agentalloy.signals.skill_loader import (
+        _read_phase,  # pyright: ignore[reportPrivateUsage]
         _write_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
+        _write_phase_atomic,  # pyright: ignore[reportPrivateUsage]
     )
 
     # Lifecycle mode is repo-global (one workflow machine per repo, however
@@ -183,6 +189,14 @@ def adopt_and_wire(
         detected = _detect_custom_workflow(root)
         mode = _prompt_lifecycle_mode(detected) if detected and sys.stdin.isatty() else "full"
     _write_lifecycle_mode(root, mode)
+
+    # Seed phase to intake for new full-lifecycle repos so the first prompt
+    # doesn't silently passthrough. Only if no phase is already recorded.
+    if mode == "full" and _read_phase(root) is None:
+        try:
+            _write_phase_atomic(root, "intake")
+        except Exception:
+            logger.debug("phase seed to intake skipped for %s (store unavailable)", root, exc_info=True)
 
     result = _wire_harness_core(harness, port=port, root=root, scope="repo")
     result["lifecycle_mode"] = mode

@@ -94,9 +94,7 @@ class TestAddRun:
         )
         assert add._run(args) == 1
 
-    def test_add_default_lifecycle_writes_config_only(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_add_default_lifecycle_seeds_intake(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         home = tmp_path / "home"
         _global_hermes_config(home)
         repo = tmp_path / "repo"
@@ -114,9 +112,35 @@ class TestAddRun:
         )
         assert add._run(args) == 0
         assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: full\n"
-        # `full` used to seed the entry phase here. Adopting a harness now
-        # writes configuration and nothing else — the proxy seeds the phase on
-        # the repo's first request, so this never needs a running service.
+        # full lifecycle: add seeds intake so the first real prompt triggers
+        # the workflow rather than silently passing through.
+        from agentalloy.install.subcommands.status import (
+            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        assert _repo_phase(str(repo)) == "intake"
+
+    def test_add_lifecycle_off_does_not_seed_phase(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_hermes_config(home)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+        monkeypatch.chdir(repo)
+
+        args = argparse.Namespace(
+            harness="hermes-agent",
+            port=47950,
+            upstream_url=None,
+            upstream_model=None,
+            key_env=None,
+            lifecycle_mode="off",
+        )
+        assert add._run(args) == 0
+        assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: off\n"
+        # off lifecycle: no workflow, no phase seeding.
         from agentalloy.install.subcommands.status import (
             _repo_phase,  # pyright: ignore[reportPrivateUsage]
         )
