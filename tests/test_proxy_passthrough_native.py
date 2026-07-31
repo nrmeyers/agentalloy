@@ -202,7 +202,7 @@ def test_tc1_query_string_preserved(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_inject_into_last_user_message_system_untouched(tmp_path: Path) -> None:
+def test_inject_into_last_user_message_system_also_injected(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
     # announce=True: an entry turn emits the orchestrator orientation block.
@@ -211,8 +211,11 @@ def test_inject_into_last_user_message_system_untouched(tmp_path: Path) -> None:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
-    # system has phase prose injected (system prompt injection) — original text preserved
+    # system has phase prose injected (system prompt injection) — original text
+    # preserved AND the composed block landed alongside it.
     assert "SYSTEM-CACHED-BLOCK" in sent["system"]
+    assert "phase=build" in sent["system"]
+    assert "INJECTED-PROSE" in sent["system"]
     # injected into the LAST user message, phase-stamped
     last_user = sent["messages"][-1]
     assert last_user["role"] == "user"
@@ -237,8 +240,66 @@ def test_idempotent_when_phase_block_already_present(tmp_path: Path) -> None:
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     sent = json.loads(captured["body"])
-    # No second injection: still exactly one marker.
+    # No second injection into the user message: still exactly one marker there.
     assert sent["messages"][-1]["content"].count("BEGIN AGENTALLOY-CONTEXT") == 1
+    # The system field was NOT pre-marked, so the system-prompt leg still fires
+    # independently even though the user-message leg no-opped.
+    assert "phase=build" in sent["system"]
+    assert "INJECTED-PROSE" in sent["system"]
+
+
+def test_both_legs_no_op_when_both_already_marked(tmp_path: Path) -> None:
+    """Both the user message and the system field already carry the current-phase
+    marker -> both legs no-op -> request forwarded unchanged, cadence marker not
+    burned."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
+    body = _anthropic_body()
+    marker_block = "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+    body["messages"][-1]["content"] = f"the real task\n\n{marker_block}"
+    body["system"] = f"SYSTEM-CACHED-BLOCK\n\n{marker_block}"
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="t",
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
+    assert resp.status_code == 200
+    assert json.loads(captured["body"]) == body
+    assert _announced_file(tmp_path) is None
+
+
+def test_system_only_changed_records_delivery(tmp_path: Path) -> None:
+    """User-message leg no-ops (already marked); system leg still fires -> the
+    turn IS recorded as delivered (cadence marker committed)."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
+    body = _anthropic_body()
+    body["messages"][-1]["content"] = (
+        "the real task\n\n<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+    )
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="t",
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
+    assert resp.status_code == 200
+    sent = json.loads(captured["body"])
+    # System field received the block; user message unchanged from input.
+    assert "phase=build" in sent["system"]
+    assert "INJECTED-PROSE" in sent["system"]
+    assert sent["messages"][-1]["content"] == body["messages"][-1]["content"]
+    # Composition IS recorded as delivered.
+    assert _announced_file(tmp_path) == "build\tsess-1"
 
 
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
@@ -425,7 +486,7 @@ def test_announce_marker_not_committed_on_streaming_529(tmp_path: Path) -> None:
 # a banner-only turn (no announce / no workflow block).
 # --------------------------------------------------------------------------- #
 
-_BANNER = "[agentalloy · build] MUST produce out.md before advancing · 1/2 sections (missing: B)"
+_BANNER = "[agentalloy · build] out.md not yet produced · 1/2 sections (missing: B)"
 
 
 def test_banner_only_turn_injects_into_last_user(tmp_path: Path) -> None:
@@ -475,10 +536,15 @@ def test_banner_appended_after_workflow_block(tmp_path: Path) -> None:
 
 
 def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: Path) -> None:
-    # Tier 1 composes real orientation text, but the request has NO user message, so
-    # inject_into_anthropic_messages returns the payload UNCHANGED (nowhere to inject).
-    # The block never reached Claude → the marker must NOT be committed, so the next
-    # turn re-announces instead of the session being silently burned.
+    # Tier 1 composes real orientation text; the request has NO user message, so
+    # inject_into_anthropic_messages returns the payload UNCHANGED (nowhere to
+    # inject) for the workflow leg. The wrapper treats this as an all-or-nothing
+    # no-op -- even though the system-prompt leg *could* deliver independently,
+    # counting that as "delivered" would burn the announced marker and forfeit
+    # the workflow block for the rest of this phase/session (should_compose
+    # would never fire again). So the request must be forwarded unchanged and
+    # the marker must NOT be committed -- the next turn (once a user message
+    # exists) re-announces instead.
     (tmp_path / ".agentalloy").mkdir()
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("ORIENTATION-PROSE"))
@@ -500,7 +566,7 @@ def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: 
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     assert resp.status_code == 200
-    # Body forwarded unchanged (nothing injected) AND the marker is NOT burned.
+    # Original body forwarded unchanged AND the marker is NOT burned → re-announces.
     assert json.loads(captured["body"]) == body
     assert _announced_file(tmp_path) is None
 
