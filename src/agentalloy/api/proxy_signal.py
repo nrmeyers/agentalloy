@@ -301,9 +301,7 @@ def build_banner(
         except Exception:
             paths = []
         directive = (
-            f"{paths[0]} not yet produced"
-            if paths
-            else f"{phase} exit gate not yet satisfied"
+            f"{paths[0]} not yet produced" if paths else f"{phase} exit gate not yet satisfied"
         )
     if slug:
         directive = directive.replace("<slug>", slug)

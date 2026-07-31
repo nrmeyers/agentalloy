@@ -256,7 +256,9 @@ def test_both_legs_no_op_when_both_already_marked(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
     body = _anthropic_body()
-    marker_block = "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+    marker_block = (
+        "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+    )
     body["messages"][-1]["content"] = f"the real task\n\n{marker_block}"
     body["system"] = f"SYSTEM-CACHED-BLOCK\n\n{marker_block}"
     signal = SignalResult(

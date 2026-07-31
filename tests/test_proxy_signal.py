@@ -775,9 +775,7 @@ class TestBuildBanner:
         from agentalloy.api.proxy_signal import build_banner
 
         banner = build_banner("mystery", {}, tmp_path)
-        assert (
-            banner == "[agentalloy · mystery] mystery exit gate not yet satisfied"
-        )
+        assert banner == "[agentalloy · mystery] mystery exit gate not yet satisfied"
 
     def test_progress_appended_when_artifact_exists(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
