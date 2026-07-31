@@ -306,7 +306,7 @@ class TestEvaluateSignalFreeFlow:
 _STEERING_NEEDLES = (
     "AGENTALLOY-BANNER",  # per-turn phase banner
     "[agentalloy-eval]",  # gate advisories
-    "[agentalloy ·",  # banner body ("[agentalloy · <phase>] MUST ...")
+    "[agentalloy ·",  # banner body ("[agentalloy · <phase>] phase instructions: ...")
     "INTAKE-ORIENTATION",
 )
 
