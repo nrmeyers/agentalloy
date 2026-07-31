@@ -213,6 +213,24 @@ class StateClient:
             return None
         return cast("dict[str, Any]", body)
 
+    def delete_repo_rows(self, *, repo_root: str | None = None) -> int:
+        """Drop all state + contract rows for a repo via the service.
+
+        Idempotent — deleting an already-empty repo returns 0.
+        """
+        req = urllib.request.Request(self._url("/state/repo", repo_root=repo_root), method="DELETE")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+            body = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+        return int(body.get("deleted_rows", 0)) if isinstance(body, dict) else 0
+
     def clear_phase(self, *, repo_root: str | None = None) -> None:
         """Delete the phase row.  Idempotent — clearing an absent phase is fine."""
         req = urllib.request.Request(

@@ -354,7 +354,7 @@ class TestTE3UninstallSweepsAllRepos:
         ):
             _unwire_repo_local(repo, set(), warnings=[], remove_lifecycle=True)
 
-        mock_store.delete_repo_rows.assert_called_once_with(str(repo))
+        mock_store.delete_repo_rows.assert_called_once_with(repo.name)
         mock_store.close.assert_not_called()
 
     def test_unwire_repo_local_opens_directly_when_nothing_is_listening(
@@ -388,16 +388,15 @@ class TestTE3UninstallSweepsAllRepos:
         ):
             _unwire_repo_local(repo, set(), warnings=[], remove_lifecycle=True)
 
-        mock_store.delete_repo_rows.assert_called_once_with(str(repo))
+        mock_store.delete_repo_rows.assert_called_once_with(repo.name)
         mock_store.close.assert_called_once()
 
-    def test_unwire_repo_local_will_not_open_a_writer_behind_a_live_service(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unwire_repo_local_drops_rows_via_service_when_live(self, tmp_path: Path) -> None:
         """The deadlock guard: a running service means no second writer handle.
 
         Out of process with the service up, opening ``state.duck`` read-write
-        blocks on DuckDB's lock. Warn and leave the rows rather than hang.
+        blocks on DuckDB's lock — so this goes over HTTP to the service's own
+        handle instead, rather than skipping the rows entirely.
         """
         from agentalloy.install.subcommands.uninstall import _unwire_repo_local
 
@@ -416,11 +415,43 @@ class TestTE3UninstallSweepsAllRepos:
                 return_value=True,
             ),
             patch("agentalloy.storage.state_store.open_state_store") as mock_open,
+            patch("agentalloy.api.state_client.StateClient.delete_repo_rows", return_value=5),
+        ):
+            _, files_removed = _unwire_repo_local(repo, set(), warnings_list, remove_lifecycle=True)
+
+        mock_open.assert_not_called()
+        assert warnings_list == []
+        store_actions = [f for f in files_removed if f.get("action") == "dropped_store_rows"]
+        assert store_actions == [
+            {"repo": str(repo), "action": "dropped_store_rows", "deleted_rows": 5}
+        ]
+
+    def test_unwire_repo_local_warns_when_service_delete_fails(self, tmp_path: Path) -> None:
+        from agentalloy.api.state_client import StateClientError
+        from agentalloy.install.subcommands.uninstall import _unwire_repo_local
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        aa = repo / ".agentalloy"
+        aa.mkdir()
+        (aa / "config").write_text("harness: claude-code\n")
+
+        warnings_list: list[str] = []
+
+        with (
+            patch("agentalloy.storage.state_store.process_store", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.uninstall._state_service_running",
+                return_value=True,
+            ),
+            patch(
+                "agentalloy.api.state_client.StateClient.delete_repo_rows",
+                side_effect=StateClientError("boom"),
+            ),
         ):
             _unwire_repo_local(repo, set(), warnings_list, remove_lifecycle=True)
 
-        mock_open.assert_not_called()
-        assert any("Service is running" in w for w in warnings_list)
+        assert any("Failed to drop store rows" in w for w in warnings_list)
 
     def test_unwire_repo_local_records_deleted_rows(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.uninstall import _unwire_repo_local
