@@ -449,6 +449,27 @@ async def clear_phase(
 # ---------------------------------------------------------------------------
 
 
+@router.delete(
+    "/repo",
+    summary="Drop all state + contract rows for a repo",
+)
+async def delete_repo(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> dict[str, int]:
+    """Delete every ``sdd_state``/``sdd_contract`` row keyed to this repo.
+
+    Keys on the same canonical slug ``get_repo_store`` uses
+    (:func:`_repo_key_for`), not the raw ``repo_root`` path — rows are written
+    under the slug, so deleting by path silently matches nothing. This is the
+    HTTP counterpart to the direct-store branch in ``uninstall._unwire_repo_local``,
+    for callers (e.g. ``agentalloy unwire``) that cannot safely open a second
+    DuckDB writer while the service holds the file.
+    """
+    deleted = await asyncio.to_thread(store.delete_repo_rows, _repo_key_for(str(root)))
+    return {"deleted_rows": deleted}
+
+
 @router.get(
     "/{kind}",
     response_model=StateReadResponse,

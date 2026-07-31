@@ -850,31 +850,43 @@ def _unwire_repo_local(
     # Drop store rows for this repo (state + contracts) instead of removing
     # phase files — the store is the source of truth now.
     try:
+        from agentalloy.code_index.slug import repo_slug  # noqa: PLC0415
         from agentalloy.config import get_settings  # noqa: PLC0415
         from agentalloy.storage.state_store import (
             open_state_store,  # noqa: PLC0415
             process_store,  # noqa: PLC0415
         )
 
+        # Rows are keyed by the canonical slug (same as the HTTP router's
+        # get_repo_store -> _repo_key_for), not the raw repo_root path — a
+        # git-remote-derived slug for repos with an origin, else the directory
+        # basename. Deleting by path silently matches nothing.
+        repo_key = repo_slug(repo_root)
+
         # Never open a second writer against the store the service holds — that
         # is the DuckDB lock deadlock the repo-scoped migration exists to avoid.
-        # In-process (or service-hosted) the bound handle is the store; out of
-        # process the direct open is safe only while nothing is listening.
+        # In-process (or service-hosted) the bound handle is the store; the
+        # service call is safe whenever it's reachable; out of process with
+        # nothing listening, the direct open is safe.
         bound = process_store()
         if bound is not None:
-            deleted = bound.delete_repo_rows(str(repo_root))
+            deleted = bound.delete_repo_rows(repo_key)
         elif _state_service_running():
-            if warnings is not None:
-                warnings.append(
-                    f"Service is running — left store rows for {repo_root} in place. "
-                    "Stop the service and re-run to drop them."
+            from agentalloy.api.state_client import StateClient, StateClientError  # noqa: PLC0415
+
+            try:
+                deleted = StateClient(repo_root=str(repo_root)).delete_repo_rows(
+                    repo_root=str(repo_root)
                 )
-            deleted = 0
+            except StateClientError as exc:
+                if warnings is not None:
+                    warnings.append(f"Failed to drop store rows for {repo_root} via service: {exc}")
+                deleted = 0
         else:
             settings = get_settings()
             store = open_state_store(settings.duckdb_path, read_only=False)
             try:
-                deleted = store.delete_repo_rows(str(repo_root))
+                deleted = store.delete_repo_rows(repo_key)
             finally:
                 store.close()
         if deleted:
