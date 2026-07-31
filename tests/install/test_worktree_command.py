@@ -95,10 +95,9 @@ class TestWorktreeRun:
         assert decode_proj_token(token) == wt.resolve()
         assert token != encode_proj_token(repo.resolve())
 
-        # No phase is seeded — wiring writes configuration only, and the
-        # worktree gets its own phase on its first proxy request. What makes it
-        # independent of main is the distinct /proj token above, not a phase.
-        assert read_phase(wt) is None
+        # full-lifecycle repos get intake seeded on add/worktree so the first
+        # prompt triggers the workflow rather than silently passing through.
+        assert read_phase(wt) == "intake"
         assert (wt / ".agentalloy" / "README.md").is_file()
 
     def test_not_in_repo_errors(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
