@@ -127,15 +127,11 @@ class LanceFragmentStore:
         this and drop + recreate so the store stays usable after a schema change.
         """
         try:
-            return self._db.create_table(
-                self._table_name, schema=FRAGMENTS_SCHEMA, exist_ok=True
-            )
+            return self._db.create_table(self._table_name, schema=FRAGMENTS_SCHEMA, exist_ok=True)
         except Exception as exc:
             if "schema" not in str(exc).lower():
                 raise
-            logger.warning(
-                "fragments table schema mismatch — dropping and recreating (%s)", exc
-            )
+            logger.warning("fragments table schema mismatch — dropping and recreating (%s)", exc)
             self._db.drop_table(self._table_name)
             return self._db.create_table(self._table_name, schema=FRAGMENTS_SCHEMA)
 

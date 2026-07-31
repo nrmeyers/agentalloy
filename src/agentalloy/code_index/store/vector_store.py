@@ -69,10 +69,26 @@ class LanceCodeVectorStore:
         # wants the parent dir and a table name whose .lance dir is that path.
         self._db = lancedb.connect(str(p.parent))
         self._table_name = p.stem  # "vectors"
-        self._table = self._db.create_table(
-            self._table_name, schema=CODE_VECTORS_SCHEMA, exist_ok=True
-        )
+        self._table = self._open_or_create_table()
         self._has_vector_index = self._vector_index_present()
+
+    def _open_or_create_table(self):
+        """Open existing table or create a new one, handling schema drift.
+
+        ``create_table(..., exist_ok=True)`` fails with a schema error when the
+        existing table has a different schema than the one we provide. Detect
+        this and drop + recreate so the store stays usable after a schema change.
+        """
+        try:
+            return self._db.create_table(
+                self._table_name, schema=CODE_VECTORS_SCHEMA, exist_ok=True
+            )
+        except Exception as exc:
+            if "schema" not in str(exc).lower():
+                raise
+            logger.warning("code vectors table schema mismatch — dropping and recreating (%s)", exc)
+            self._db.drop_table(self._table_name)
+            return self._db.create_table(self._table_name, schema=CODE_VECTORS_SCHEMA)
 
     # -- internal ------------------------------------------------------------
 
