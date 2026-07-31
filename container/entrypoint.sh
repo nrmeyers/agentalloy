@@ -222,8 +222,10 @@ if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
 fi
 
 # Start uvicorn AFTER bootstrap completes to avoid DuckDB single-writer lock conflicts.
-echo ">> Starting uvicorn..."
-uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')" &
+# Workers: default 2 for capacity, override via AGENTALLOY_WORKERS.
+WORKERS=${AGENTALLOY_WORKERS:-2}
+echo ">> Starting uvicorn (${WORKERS} worker(s))..."
+uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')" --workers "$WORKERS" &
 UVICORN_PID=$!
 
 # Block on uvicorn — its exit is the container's exit.
