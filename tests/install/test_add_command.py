@@ -94,9 +94,7 @@ class TestAddRun:
         )
         assert add._run(args) == 1
 
-    def test_add_default_lifecycle_seeds_intake(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_add_default_lifecycle_seeds_intake(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         home = tmp_path / "home"
         _global_hermes_config(home)
         repo = tmp_path / "repo"
