@@ -227,7 +227,7 @@ def test_carrier_gate_tools_none_does_not_announce(tmp_path: Path) -> None:
 # flip `composed` in telemetry.
 # --------------------------------------------------------------------------- #
 
-_BANNER = "[agentalloy · build] MUST produce out.md before advancing · 1/2 sections (missing: B)"
+_BANNER = "[agentalloy · build] out.md not yet produced · 1/2 sections (missing: B)"
 
 
 def _last_user_content(captured: dict[str, Any]) -> str:

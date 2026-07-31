@@ -263,15 +263,32 @@ async def _maybe_inject(
         before = current
 
         def _inject_anthropic(text: str) -> dict[str, Any] | None:
-            # Inject into the last user message (existing behaviour)
-            injected = inject_into_anthropic_messages(before, text, phase=phase)
-            if injected is before:
+            # Inject into the last user message and the system prompt
+            # (highest-compliance location) independently -- each leg has
+            # its own idempotency state, so one no-opping must not skip
+            # the other. EXCEPTION: if there is no user message at all,
+            # `inject_into_anthropic_messages` can never deliver the
+            # workflow block this turn or any later turn this phase/session
+            # (the announced marker would be burned on commit, permanently
+            # forfeiting that delivery). Preserve the original all-or-nothing
+            # behavior in that case rather than counting a system-only
+            # delivery as sufficient.
+            raw_messages = before.get("messages")
+            has_user_message = isinstance(raw_messages, list) and any(
+                isinstance(m, dict) and m.get("role") == "user" for m in raw_messages
+            )
+            if not has_user_message:
                 return None
-            # Also inject into the system prompt (highest-compliance location).
-            sys_injected = inject_into_anthropic_system_prompt(injected, text, phase=phase)
+            injected = inject_into_anthropic_messages(before, text, phase=phase)
+            user_changed = injected is not before
+            sys_injected = inject_into_anthropic_system_prompt(
+                injected if user_changed else before, text, phase=phase
+            )
             if sys_injected is not None:
-                injected = sys_injected
-            return injected
+                return sys_injected
+            if user_changed:
+                return injected
+            return None
 
         outcome = await apply_signal(
             signal=signal,

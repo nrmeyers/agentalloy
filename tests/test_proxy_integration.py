@@ -196,11 +196,11 @@ class TestFullProxyFlow:
         assert trace.status == "proxy_passthrough"
 
     def test_signal_match_compose_and_inject(self, tmp_path: Path) -> None:
-        """Signal match -> compose -> inject into LAST USER message -> forward.
+        """Signal match -> compose -> inject into last user message AND system prompt.
 
         Parity with the Anthropic passthrough: the composed block lands in the
-        last user message (phase-stamped), and the system message stays
-        byte-identical (prompt-cache safe).
+        last user message (phase-stamped), and is also injected into the
+        system message (highest-compliance location, PR #484).
         """
         compose_output = "# Skill: Test\nAlways be helpful."
         orchestrator = _make_mock_orchestrator(compose_output=compose_output)
@@ -249,8 +249,111 @@ class TestFullProxyFlow:
         # System message has phase prose injected (system prompt injection).
         assert sent["messages"][0]["role"] == "system"
         assert "You are an assistant." in sent["messages"][0]["content"]
+        assert "phase=build" in sent["messages"][0]["content"]
+        assert compose_output in sent["messages"][0]["content"]
 
         # Telemetry should show composed status
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
+        assert trace.status == "proxy_composed"
+
+    def test_both_legs_no_op_when_both_already_marked(self, tmp_path: Path) -> None:
+        """Both the last user message and the system message already carry the
+        current-phase marker -> both injection legs no-op -> request forwarded
+        unchanged, telemetry reports passthrough."""
+        compose_output = "# Skill: Test\nAlways be helpful."
+        orchestrator = _make_mock_orchestrator(compose_output=compose_output)
+        captured: dict[str, Any] = {}
+        app = _make_app(mock_orchestrator=orchestrator, captured=captured)
+
+        marker_block = (
+            "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+        )
+        messages = [
+            {"role": "system", "content": f"You are an assistant.\n\n{marker_block}"},
+            {"role": "user", "content": f"Implement feature X\n\n{marker_block}"},
+        ]
+        signal_result = SignalResult(
+            should_compose=True,
+            announce=True,
+            phase="build",
+            task="implement feature",
+            workflow_prose="operate like so",
+            pre_filter_matched="prompt_keyword",
+            gates_met=["test_passed"],
+        )
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": messages,
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+
+        assert resp.status_code == 200
+        sent = captured["payload"]
+        assert sent["messages"] == messages
+
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
+        assert trace.status == "proxy_passthrough"
+
+    def test_system_only_changed_records_delivery(self, tmp_path: Path) -> None:
+        """User-message leg no-ops (already marked); system leg still fires ->
+        the turn IS recorded as a real composition."""
+        compose_output = "# Skill: Test\nAlways be helpful."
+        orchestrator = _make_mock_orchestrator(compose_output=compose_output)
+        captured: dict[str, Any] = {}
+        app = _make_app(mock_orchestrator=orchestrator, captured=captured)
+
+        marker_block = (
+            "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
+        )
+        user_content = f"Implement feature X\n\n{marker_block}"
+        messages = [
+            {"role": "system", "content": "You are an assistant."},
+            {"role": "user", "content": user_content},
+        ]
+        signal_result = SignalResult(
+            should_compose=True,
+            announce=True,
+            phase="build",
+            task="implement feature",
+            workflow_prose="operate like so",
+            pre_filter_matched="prompt_keyword",
+            gates_met=["test_passed"],
+        )
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": messages,
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+
+        assert resp.status_code == 200
+        sent = captured["payload"]
+        # System field received the block; user message unchanged from input.
+        assert "phase=build" in sent["messages"][0]["content"]
+        assert compose_output in sent["messages"][0]["content"]
+        assert sent["messages"][-1]["content"] == user_content
+
         app.state.telemetry_store.record_composition_trace.assert_called_once()
         trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_composed"

@@ -214,18 +214,26 @@ def _resolve_current_contract(
     return cid, None  # path deprecated — consumers load from store via cid
 
 
-# Per-phase banner directive — the imperative core of the per-turn recency banner,
+# Per-phase banner status line — the declarative core of the per-turn recency banner,
 # keyed by SDD phase. Hand-tuned here because the pack corpus loads through a DuckDB
 # schema that carries no banner column; the gate-path derivation below is the fallback
-# for an unrecognized phase. Mirrors the MUST/MUST-NOT framing of each phase's orientation.
+# for an unrecognized phase.
+#
+# Deliberately phrased as a fact about state ("phase instructions: system prompt"),
+# not a command ("Review..."/"MUST..."). This banner rides in the last USER message,
+# unattributed except for the marker comment — an imperative voice there reads as an
+# unattributed third party issuing orders inside the user's own turn, which is exactly
+# the shape Claude's injected-content defenses are tuned to refuse. State the fact and
+# let the model act on it; don't tell the model what to do from inside content that
+# isn't the user or the system.
 _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
-    "intake": "Review system prompt for phase instructions",
-    "spec": "Review system prompt for phase instructions",
-    "design": "Review system prompt for phase instructions",
-    "build": "Review system prompt for phase instructions",
-    "qa": "Review system prompt for phase instructions",
-    "ship": "Review system prompt for phase instructions",
-    "sdd-fast": "Review system prompt for phase instructions",
+    "intake": "phase instructions: system prompt",
+    "spec": "phase instructions: system prompt",
+    "design": "phase instructions: system prompt",
+    "build": "phase instructions: system prompt",
+    "qa": "phase instructions: system prompt",
+    "ship": "phase instructions: system prompt",
+    "sdd-fast": "phase instructions: system prompt",
 }
 
 
@@ -269,10 +277,11 @@ def build_banner(
 
     Format: ``[agentalloy · {phase}] {directive}{progress}{checkpoint}``.
 
-    - **directive**: the hand-tuned :data:`_PHASE_BANNER_DIRECTIVE` entry for the phase;
-      for an unrecognized phase, the fallback ``MUST produce {artifact} before advancing``
-      (first gate ``path`` via :func:`_extract_gate_paths`), or ``MUST satisfy the {phase}
-      exit gate before advancing``. When *slug* is known, the literal ``<slug>`` placeholder
+    - **directive**: the hand-tuned :data:`_PHASE_BANNER_DIRECTIVE` entry for the phase,
+      phrased as a fact about state rather than a command (see the comment above that
+      table for why); for an unrecognized phase, the fallback ``{artifact} not yet
+      produced`` (first gate ``path`` via :func:`_extract_gate_paths`), or ``{phase} exit
+      gate not yet satisfied``. When *slug* is known, the literal ``<slug>`` placeholder
       is resolved so the path is copy-paste-able.
     - **progress**: appended once at least one target artifact exists —
       `` · {present}/{total} sections (missing: a, b, c)``. Scored PER GATE
@@ -292,9 +301,7 @@ def build_banner(
         except Exception:
             paths = []
         directive = (
-            f"MUST produce {paths[0]} before advancing"
-            if paths
-            else f"MUST satisfy the {phase} exit gate before advancing"
+            f"{paths[0]} not yet produced" if paths else f"{phase} exit gate not yet satisfied"
         )
     if slug:
         directive = directive.replace("<slug>", slug)

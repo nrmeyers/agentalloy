@@ -538,17 +538,29 @@ async def proxy_chat_completions(
             before = current
 
             def _inject_openai(text: str) -> ProxyRequest | None:
-                # Inject into the last user message (existing behaviour)
-                new_msgs = inject_into_openai_messages(before.messages, text, phase=phase)
-                if new_msgs is None:
+                # Inject into the last user message and the system prompt
+                # (highest-compliance location) independently -- each leg has
+                # its own idempotency state, so one no-opping must not skip
+                # the other. Phase-stamped markers make both idempotent
+                # within a phase; stale blocks are replaced on phase
+                # transition. EXCEPTION: if there is no user message at
+                # all, the workflow leg can never deliver this turn or any
+                # later turn this phase/session (the announced marker would
+                # be burned on commit, permanently forfeiting that
+                # delivery). Preserve the original all-or-nothing behavior
+                # rather than counting a system-only delivery as sufficient.
+                if not any(m.role == "user" for m in before.messages):
                     return None
-                # Also inject into the system prompt (highest-compliance location).
-                # Phase-stamped marker makes this idempotent within a phase; stale
-                # blocks are replaced on phase transition.
-                sys_msgs = inject_into_openai_system_prompt(new_msgs, text, phase=phase)
-                if sys_msgs is not None:
-                    new_msgs = sys_msgs
-                return before.model_copy(update={"messages": new_msgs})
+                new_msgs = inject_into_openai_messages(before.messages, text, phase=phase)
+                user_changed = new_msgs is not None
+                sys_msgs = inject_into_openai_system_prompt(
+                    new_msgs if user_changed else before.messages, text, phase=phase
+                )
+                system_changed = sys_msgs is not None
+                if not user_changed and not system_changed:
+                    return None
+                result_msgs = sys_msgs if system_changed else new_msgs
+                return before.model_copy(update={"messages": result_msgs})
 
             inject_outcome = await apply_signal(
                 signal=signal_result,

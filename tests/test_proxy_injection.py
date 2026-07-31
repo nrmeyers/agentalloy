@@ -26,8 +26,8 @@ from agentalloy.api.proxy_injection import (
 from agentalloy.api.proxy_models import ProxyMessage
 
 ANTHRO_BLOCK = "# Workflow prose\nDo the design work."
-BANNER_1 = "[agentalloy · build] MUST produce x before advancing · 1/2 sections (missing: B)"
-BANNER_2 = "[agentalloy · build] MUST produce x before advancing · 2/2 sections"
+BANNER_1 = "[agentalloy · build] x not yet produced · 1/2 sections (missing: B)"
+BANNER_2 = "[agentalloy · build] x not yet produced · 2/2 sections"
 
 
 def _text_blocks(content: Any) -> list[dict[str, Any]]:
