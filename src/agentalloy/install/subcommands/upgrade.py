@@ -735,7 +735,7 @@ def _repos_with_state_files() -> list[str]:
     return roots
 
 
-STATE_SERVICE_READY_TIMEOUT_S = 60.0
+STATE_SERVICE_READY_TIMEOUT_S = 180.0
 _STATE_SERVICE_POLL_S = 1.0
 
 
@@ -791,7 +791,9 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
             warnings.append(
                 "phase state migration skipped — the service did not come up within "
                 f"{STATE_SERVICE_READY_TIMEOUT_S:.0f}s; the file mirror still works, "
-                "re-run `agentalloy upgrade` once the service is up"
+                "re-run `agentalloy upgrade` once the service is up\n"
+                "  Hint: check `systemctl status agentalloy` or `journalctl -u agentalloy` "
+                "for startup errors"
             )
             return
         for root in roots:
