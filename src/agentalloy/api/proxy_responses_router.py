@@ -5,9 +5,12 @@ modern codex speaks ONLY this wire). No Responses↔ChatCompletions translation:
 
 1. decode the ``/proj/<token>`` discriminator → the per-repo project dir,
 2. run the signal layer + compose engine for that repo's phase,
-3. inject the composed prose into the **last user message input item** (the
-   top-level ``instructions`` field is the harness's cached system prompt and
-   stays byte-identical),
+3. inject, in three legs: the retrieval-derived compose output and the per-turn
+   banner into the **last user message input item**, and the SDD workflow prose
+   into the top-level ``instructions`` field. Legs 2 and 3 fire on every carrier
+   turn and carry no cadence marker; only leg 1 is gated on ``should_compose``
+   and flips ``composed`` telemetry. ``instructions`` is therefore byte-identical
+   **within a phase**, changing only on a phase transition,
 4. forward the request **verbatim** to a Responses-capable upstream
    (``RESPONSES_UPSTREAM_URL``, default api.openai.com), carrying the caller's
    own credential, and relay the response (raw SSE byte relay when streaming).
@@ -29,7 +32,10 @@ from fastapi.responses import StreamingResponse
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import InjectOutcome, apply_signal
 from agentalloy.api.proxy_context import decode_proj_token
-from agentalloy.api.proxy_injection import inject_into_responses_input
+from agentalloy.api.proxy_injection import (
+    inject_into_responses_input,
+    inject_into_responses_instructions,
+)
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_passthrough_router import (
     _forward_once,  # pyright: ignore[reportPrivateUsage]
@@ -150,6 +156,18 @@ async def _maybe_inject(
         )
         if bannered is not current:
             current = bannered
+
+    # Leg 3: workflow prose onto the system leg (`instructions`). Fires on EVERY
+    # carrier turn -- outside `should_compose`, outside `apply_signal`, and it
+    # commits no cadence marker. A "delivered once" record here would recreate the
+    # bug #499 fixed: the harness rebuilds each request from its own local history
+    # and never observes proxy mutations, so the prose would vanish from turn 2 on.
+    # Last of the three legs: it writes a different field than the banner, so a
+    # failure here cannot cost the banner. Does not flip `composed` telemetry.
+    if signal.workflow_system_prose and signal.phase is not None:
+        current = inject_into_responses_instructions(
+            current, signal.workflow_system_prose, phase=signal.phase
+        )
 
     injected_payload = current if current is not payload else None
     return injected_payload, outcome, signal

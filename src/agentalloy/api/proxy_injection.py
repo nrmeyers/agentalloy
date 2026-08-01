@@ -279,8 +279,9 @@ def inject_into_anthropic_messages(
 #
 # A Responses user turn is {"type": "message", "role": "user", "content":
 # [{"type": "input_text", "text": ...}]}; `input` may also be a bare string.
-# The top-level `instructions` field is the harness's cached system prompt and
-# is never touched. Spec: docs/responses-surface.md.
+# The helpers below touch only `input`; the top-level `instructions` field is
+# the system leg and belongs to `inject_into_responses_instructions`.
+# Spec: docs/responses-surface.md.
 # ---------------------------------------------------------------------------
 
 
@@ -347,7 +348,8 @@ def inject_into_responses_input(
     same marker families and idempotence/stale-strip semantics, operating on
     ``payload["input"]`` (str or item list). Returns a NEW payload on a real
     injection and the SAME object on every no-op (identity = delivered). The
-    top-level ``instructions`` field is never touched.
+    top-level ``instructions`` field is not touched here — it is the system leg,
+    written separately by :func:`inject_into_responses_instructions`.
     """
     if kind == "system":
         begin, end = SYSTEM_MARKER_BEGIN, SYSTEM_MARKER_END
@@ -493,12 +495,13 @@ def inject_into_openai_messages(
 
 
 # ---------------------------------------------------------------------------
-# System-prompt injection (both surfaces)
+# System-prompt injection (all three surfaces)
 #
 # Injects the full SDD phase prose into the system prompt so the LLM sees
-# it at the highest-compliance location.  Uses phase-stamped markers so
-# the injection is idempotent within a phase; a stale block from a prior
-# phase is replaced on transition.
+# it at the highest-compliance location -- the Chat Completions `system`
+# message, or the Responses top-level `instructions` field.  Uses
+# phase-stamped markers so the injection is idempotent within a phase; a
+# stale block from a prior phase is replaced on transition.
 #
 # Prompt-cache trade-off: the system prompt changes on phase transition,
 # breaking the cache for that one turn.  Phases change ~once per 20 turns,
@@ -556,6 +559,46 @@ def inject_into_openai_system_prompt(
     new_messages = list(messages)
     new_messages[sys_idx] = target.model_copy(update={"content": new_content})
     return new_messages
+
+
+def inject_into_responses_instructions(
+    payload: dict[str, Any], block: str, *, phase: str
+) -> dict[str, Any]:
+    """Inject *block* into a Responses payload's top-level ``instructions``.
+
+    The Responses-surface sibling of :func:`inject_into_openai_system_prompt`:
+    same phase-stamped workflow markers, same idempotence and stale-strip
+    semantics, but ``instructions`` is an optional top-level ``str`` rather
+    than a message in an array.
+
+    Follows the convention of its own surface (:func:`inject_into_responses_input`),
+    NOT the ``-> None`` convention of the Chat Completions helpers: returns a NEW
+    payload on a real injection and the SAME object on every no-op, so the router's
+    ``current is not payload`` test reads as "delivered".
+
+    ``instructions`` absent / ``None`` / empty is a real injection: the field is
+    created and set to the block alone.  Unlike the Chat Completions side -- where
+    no system message means synthesizing a message into an array the harness owns --
+    setting an optional scalar the harness left unset disturbs nothing.
+
+    No-ops (same object returned):
+    - the value already carries the current-phase begin marker (idempotent),
+    - ``instructions`` is present but neither ``str`` nor ``None``.
+    """
+    current = payload.get("instructions")
+    begin = anthropic_marker_begin(phase)
+    new_block = _block_text(begin, block, ANTHROPIC_MARKER_END)
+
+    if current is None or current == "":
+        return {**payload, "instructions": new_block}
+    if not isinstance(current, str):
+        return payload
+    if begin in current:
+        return payload
+
+    stripped = _strip_workflow_block(current)
+    new_value = f"{stripped}\n\n{new_block}" if stripped else new_block
+    return {**payload, "instructions": new_value}
 
 
 # Anthropic allows at most 4 `cache_control` breakpoints per request; a 5th is a 400.

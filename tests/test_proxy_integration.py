@@ -196,11 +196,14 @@ class TestFullProxyFlow:
         assert trace.status == "proxy_passthrough"
 
     def test_signal_match_compose_and_inject(self, tmp_path: Path) -> None:
-        """Signal match -> compose -> inject into last user message AND system prompt.
+        """Signal match -> compose -> inject into the last user message ONLY.
 
-        Parity with the Anthropic passthrough: the composed block lands in the
-        last user message (phase-stamped), and is also injected into the
-        system message (highest-compliance location, PR #484).
+        Parity with the Anthropic passthrough: the retrieval-derived block is leg 1
+        and lands in the last user message (phase-stamped). It is NOT copied into
+        the system message -- that is leg 3's target, and leg 3 carries different
+        content (the phase prose) on a different cadence. This fixture leaves
+        `workflow_system_prose` unset, so the system message must come through
+        byte-identical.
         """
         compose_output = "# Skill: Test\nAlways be helpful."
         orchestrator = _make_mock_orchestrator(compose_output=compose_output)
@@ -246,21 +249,22 @@ class TestFullProxyFlow:
         assert last_user["role"] == "user"
         assert "phase=build" in last_user["content"]
         assert compose_output in last_user["content"]
-        # System message has phase prose injected (system prompt injection).
+        # The system message is untouched: leg 1 does not write it, and leg 3 is
+        # silent because this fixture sets no `workflow_system_prose`.
         assert sent["messages"][0]["role"] == "system"
-        assert "You are an assistant." in sent["messages"][0]["content"]
-        assert "phase=build" in sent["messages"][0]["content"]
-        assert compose_output in sent["messages"][0]["content"]
+        assert sent["messages"][0]["content"] == "You are an assistant."
 
         # Telemetry should show composed status
         app.state.telemetry_store.record_composition_trace.assert_called_once()
         trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_composed"
 
-    def test_both_legs_no_op_when_both_already_marked(self, tmp_path: Path) -> None:
-        """Both the last user message and the system message already carry the
-        current-phase marker -> both injection legs no-op -> request forwarded
-        unchanged, telemetry reports passthrough."""
+    def test_no_op_when_user_and_system_already_marked(self, tmp_path: Path) -> None:
+        """Same as above with the system message ALSO pre-marked.
+
+        Leg 1 no-ops on the user message; leg 3 is silent (no
+        `workflow_system_prose`) and would no-op on the pre-marked system message
+        anyway. Request forwarded unchanged, telemetry reports passthrough."""
         compose_output = "# Skill: Test\nAlways be helpful."
         orchestrator = _make_mock_orchestrator(compose_output=compose_output)
         captured: dict[str, Any] = {}
@@ -306,9 +310,15 @@ class TestFullProxyFlow:
         trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_passthrough"
 
-    def test_system_only_changed_records_delivery(self, tmp_path: Path) -> None:
-        """User-message leg no-ops (already marked); system leg still fires ->
-        the turn IS recorded as a real composition."""
+    def test_user_leg_no_op_is_not_a_delivery(self, tmp_path: Path) -> None:
+        """Leg 1's user message is already marked -> nothing delivered -> passthrough.
+
+        This used to record a composition, because leg 1 had a system-message
+        fallback: a system-only write counted as delivery. Leg 1 is now
+        user-message-only (the system message belongs to leg 3, which carries the
+        phase prose, not the composed block), so a no-op on the user leg is a no-op
+        for the whole composition -- and the announce cadence must not be burned.
+        """
         compose_output = "# Skill: Test\nAlways be helpful."
         orchestrator = _make_mock_orchestrator(compose_output=compose_output)
         captured: dict[str, Any] = {}
@@ -349,14 +359,15 @@ class TestFullProxyFlow:
 
         assert resp.status_code == 200
         sent = captured["payload"]
-        # System field received the block; user message unchanged from input.
-        assert "phase=build" in sent["messages"][0]["content"]
-        assert compose_output in sent["messages"][0]["content"]
+        # Nothing moved: the user message still carries only its pre-existing
+        # marker block, and the system message never sees the composed output.
         assert sent["messages"][-1]["content"] == user_content
+        assert sent["messages"][0]["content"] == "You are an assistant."
+        assert compose_output not in sent["messages"][0]["content"]
 
         app.state.telemetry_store.record_composition_trace.assert_called_once()
         trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
-        assert trace.status == "proxy_composed"
+        assert trace.status == "proxy_passthrough"
 
     def test_compose_failure_soft_fail(self, tmp_path: Path) -> None:
         """Signal match but composition fails -> soft-fail passthrough."""

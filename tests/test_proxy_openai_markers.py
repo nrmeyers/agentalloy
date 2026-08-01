@@ -220,11 +220,11 @@ def test_carrier_gate_tools_none_does_not_announce(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Per-turn phase banner (OpenAI surface).
+# Per-turn phase banner (OpenAI surface) — leg 2.
 # The banner injects on EVERY carrier turn into the last user message of the
-# upstream payload, AFTER any workflow block, leaving the system message
-# byte-identical. It fires even on a banner-only turn (no announce). It must NOT
-# flip `composed` in telemetry.
+# upstream payload, AFTER any workflow block. It fires even on a banner-only turn
+# (no announce). It must NOT flip `composed` in telemetry. It never writes the
+# system message — that is leg 3's target, covered further down.
 # --------------------------------------------------------------------------- #
 
 _BANNER = "[agentalloy · build] out.md not yet produced · 1/2 sections (missing: B)"
@@ -283,6 +283,265 @@ def test_banner_appended_after_workflow_block_upstream(tmp_path: Path) -> None:
     assert _BANNER in content
     assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
     assert content.count("BEGIN AGENTALLOY-BANNER") == 1
-    # System has phase prose injected (system prompt injection).
-    assert "SYSTEM-CACHED" in _system_content(captured)
+    # Leg 1's composed output stays out of the system message; this fixture sets no
+    # `workflow_system_prose`, so leg 3 is silent and the system message is untouched.
+    assert _system_content(captured) == "SYSTEM-CACHED"
     assert _announced_file(tmp_path) == "build\tsess-1"
+
+
+# --------------------------------------------------------------------------- #
+# Workflow prose on the system message (OpenAI surface) — leg 3.
+#
+# Fires on EVERY carrier turn, outside the `should_compose` guard and outside
+# `apply_signal`, and commits no cadence marker. A "delivered once" record here
+# would recreate the bug #499 fixed: the harness rebuilds each request from its own
+# local history and never observes proxy mutations, so the prose would vanish from
+# turn 2 on. That failure mode is INVISIBLE on a single turn, which is why the
+# two-turn test below is the load-bearing one.
+#
+# NOTE for anyone adding coverage here: `evaluate_signal` is patched wholesale and
+# `SignalResult` is hand-built, so a fixture that does not explicitly set
+# `workflow_system_prose` leaves leg 3 inert. A green run of a fixture that forgot
+# the field proves nothing.
+# --------------------------------------------------------------------------- #
+
+_PROSE = "# SDD — Build\nWork the design's task slices as written."
+
+
+def _prose_signal(**over: Any) -> SignalResult:
+    base: dict[str, Any] = {
+        "should_compose": False,
+        "phase": "build",
+        "task": "t",
+        "workflow_system_prose": _PROSE,
+    }
+    base.update(over)
+    return SignalResult(**base)
+
+
+def test_prose_lands_on_system_message(tmp_path: Path) -> None:
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+    with patch(_SIGNAL, return_value=_prose_signal()), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+    assert resp.status_code == 200
+    system = _system_content(captured)
+    # Harness's own system prompt preserved, prose appended under one marker pair.
+    assert system.startswith("SYSTEM-CACHED")
+    assert _PROSE in system
+    assert system.count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+    assert system.count("END AGENTALLOY-CONTEXT") == 1
+
+
+def test_prose_fires_on_a_quiet_turn(tmp_path: Path) -> None:
+    """should_compose=False, no banner: leg 3 still delivers (it is outside the guard)."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+    with patch(_SIGNAL, return_value=_prose_signal(banner=None)), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+    assert resp.status_code == 200
+    assert _PROSE in _system_content(captured)
+    # Nothing landed on the user message this turn.
+    assert _last_user_content(captured) == "the real task"
+
+
+def test_prose_repeats_byte_identically_across_turns(tmp_path: Path) -> None:
+    """The deliver-once regression guard. Turn 1 passing proves nothing on its own.
+
+    The harness rebuilds each request from its own history, so turn 2 sends the
+    SAME body it sent on turn 1 — proxy mutations are never echoed back. If leg 3
+    ever grows a cadence marker, turn 2 goes silent here and nowhere else.
+    """
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+    seen: list[str] = []
+    with patch(_SIGNAL, return_value=_prose_signal(banner=_BANNER)), TestClient(app) as client:
+        for _ in range(2):
+            resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+            assert resp.status_code == 200
+            seen.append(_system_content(captured))
+
+    assert _PROSE in seen[0]
+    assert seen[1] == seen[0]  # byte-identical within a phase
+    assert seen[1].count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+
+
+def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+
+    # Turn 1 at build, then turn 2 at qa — with the harness replaying the system
+    # message the proxy produced on turn 1 (a codex-style harness that persists what
+    # it was handed would do exactly this).
+    with patch(_SIGNAL, return_value=_prose_signal()), TestClient(app) as client:
+        client.post("/v1/chat/completions", json=_body(tmp_path))
+    build_system = _system_content(captured)
+
+    replayed = _body(tmp_path)
+    replayed["messages"][0]["content"] = build_system
+    qa_prose = "# SDD — QA\nProve the acceptance criteria."
+    with (
+        patch(_SIGNAL, return_value=_prose_signal(phase="qa", workflow_system_prose=qa_prose)),
+        TestClient(app) as client,
+    ):
+        resp = client.post("/v1/chat/completions", json=replayed)
+    assert resp.status_code == 200
+
+    system = _system_content(captured)
+    assert "phase=build" not in system
+    assert _PROSE not in system
+    assert qa_prose in system
+    assert system.count("BEGIN AGENTALLOY-CONTEXT phase=qa") == 1
+    assert system.startswith("SYSTEM-CACHED")
+
+
+def test_composed_block_does_not_reach_the_system_message(tmp_path: Path) -> None:
+    """Leg 1 and leg 3 carry DIFFERENT content to DIFFERENT messages.
+
+    Before the split, `_inject_openai` wrote the composed output into both the last
+    user message and the system message. Pin that it no longer does.
+    """
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("ORIENTATION-PROSE"), captured=captured)
+    signal = _prose_signal(
+        should_compose=True,
+        announce=True,
+        task="the real task",
+        workflow_prose="operate like so",
+        banner=_BANNER,
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+    assert resp.status_code == 200
+
+    user = _last_user_content(captured)
+    system = _system_content(captured)
+    assert "ORIENTATION-PROSE" in user
+    assert "ORIENTATION-PROSE" not in system
+    assert _PROSE in system
+    assert _PROSE not in user
+    assert _BANNER in user
+    assert _BANNER not in system
+    # Leg 1 still burns its own cadence marker; legs 2 and 3 add none.
+    assert _announced_file(tmp_path) == "build\tsess-1"
+
+
+def test_no_system_message_is_a_no_op_for_prose(tmp_path: Path) -> None:
+    """Helper deliberately does not create a system message; other legs still land."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+    body = _body(tmp_path)
+    body["messages"] = [{"role": "user", "content": "the real task"}]
+    with patch(_SIGNAL, return_value=_prose_signal(banner=_BANNER)), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=body)
+    assert resp.status_code == 200
+    sent = json.loads(captured["body"])
+    assert [m["role"] for m in sent["messages"]] == ["user"]
+    assert _PROSE not in json.dumps(sent)
+    assert _BANNER in _last_user_content(captured)
+
+
+def test_prose_leg_does_not_burn_the_announce_marker(tmp_path: Path) -> None:
+    """No user message: leg 1 cannot deliver, so the cadence must stay unburned even
+    though leg 3 successfully writes the system message."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("ORIENTATION-PROSE"), captured=captured)
+    signal = _prose_signal(
+        should_compose=True,
+        announce=True,
+        workflow_prose="operate like so",
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=_no_user_body(tmp_path))
+    assert resp.status_code == 200
+    assert _PROSE in _system_content(captured)
+    assert _announced_file(tmp_path) is None
+
+
+# --------------------------------------------------------------------------- #
+# Cross-cutting guards (§D of the test plan).
+# --------------------------------------------------------------------------- #
+
+
+def test_free_flow_and_non_carrier_turns_stay_silent(tmp_path: Path) -> None:
+    """D1/D2: no phase (free-flow) and no prose (non-carrier) → nothing injected.
+
+    `workflow_system_prose` is populated upstream in `evaluate_signal`, which leaves it
+    None outside a governed phase. Leg 3's guard must respect BOTH halves of that:
+    prose set but `phase is None` is also silent, since there is no phase to stamp.
+    """
+    (tmp_path / ".agentalloy").mkdir()
+    for signal in (
+        SignalResult(should_compose=False),  # free-flow: no phase, no prose
+        SignalResult(should_compose=False, phase="build", task="t"),  # carrier, no prose
+        SignalResult(should_compose=False, phase=None, workflow_system_prose=_PROSE),
+    ):
+        captured: dict[str, Any] = {}
+        app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
+        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+            resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+        assert resp.status_code == 200
+        assert json.loads(captured["body"])["messages"] == _body(tmp_path)["messages"]
+
+
+def test_prose_leg_failure_does_not_cost_the_other_legs(tmp_path: Path) -> None:
+    """D3: leg 3 is ordered last and try/except-wrapped, so a raising helper degrades
+    to "no prose this turn" rather than dropping the banner or the composed block."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("ORIENTATION-PROSE"), captured=captured)
+    signal = _prose_signal(
+        should_compose=True,
+        announce=True,
+        task="the real task",
+        workflow_prose="operate like so",
+        banner=_BANNER,
+        pending_announce=("build", ["sess-1"]),
+    )
+    with (
+        patch(_SIGNAL, return_value=signal),
+        patch(
+            "agentalloy.api.proxy_router.inject_into_openai_system_prompt",
+            side_effect=RuntimeError("boom"),
+        ),
+        TestClient(app) as client,
+    ):
+        resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+    assert resp.status_code == 200
+    user = _last_user_content(captured)
+    assert "ORIENTATION-PROSE" in user
+    assert _BANNER in user
+    assert _system_content(captured) == "SYSTEM-CACHED"
+
+
+def test_no_anthropic_cache_keys_on_the_openai_wire(tmp_path: Path) -> None:
+    """D4: `cache_control`/ttl/breakpoints are an Anthropic-only concern. OpenAI does
+    implicit prefix caching with no knob, so 3cb8ac1's ttl mirroring has no analog here
+    and must not leak into the forwarded body."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(orchestrator=_orchestrator("ORIENTATION-PROSE"), captured=captured)
+    signal = _prose_signal(
+        should_compose=True,
+        announce=True,
+        task="the real task",
+        workflow_prose="operate like so",
+        banner=_BANNER,
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post("/v1/chat/completions", json=_body(tmp_path))
+    assert resp.status_code == 200
+    body = captured["body"].decode()
+    assert "cache_control" not in body
+    assert '"ttl"' not in body
+    assert "ephemeral" not in body

@@ -158,7 +158,9 @@ def test_banner_injects_into_last_user_item(tmp_path: Path) -> None:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/responses", json=_responses_body())
     assert resp.status_code == 200
     forwarded = json.loads(captured["body"])
-    # instructions stay byte-identical (prompt caching).
+    # Leg 2 writes only `input`. This fixture sets no `workflow_system_prose`, so
+    # leg 3 is silent and `instructions` comes through byte-identical — pinning the
+    # two legs' independence.
     assert forwarded["instructions"] == "CACHED-SYSTEM-PROMPT"
     last_user = forwarded["input"][2]
     texts = [b["text"] for b in last_user["content"] if b["type"] == "input_text"]
@@ -234,3 +236,175 @@ def test_no_user_item_is_a_noop() -> None:
     payload = {"model": "m", "input": [{"type": "message", "role": "assistant", "content": []}]}
     out = inject_into_responses_input(payload, "BLOCK", phase="build")
     assert out is payload
+
+
+# --------------------------------------------------------------------------- #
+# Leg 3: SDD workflow prose on the top-level `instructions` field.
+#
+# Fires on EVERY carrier turn — outside the `should_compose` guard, outside
+# `apply_signal` — and commits no cadence marker. A "delivered once" record here
+# would recreate the bug #499 fixed: codex rebuilds each request from its own local
+# history and never observes proxy mutations, so the prose would vanish from turn 2
+# on. That is INVISIBLE on a single turn; the two-turn test below is the one that
+# catches it.
+#
+# NOTE for anyone adding coverage here: `evaluate_signal` is patched wholesale and
+# `SignalResult` is hand-built, so a fixture that does not explicitly set
+# `workflow_system_prose` leaves leg 3 inert and proves nothing.
+# --------------------------------------------------------------------------- #
+
+_PROSE = "# SDD — Build\nWork the design's task slices as written."
+
+
+def _prose_signal(**over: Any) -> SignalResult:
+    base: dict[str, Any] = {
+        "should_compose": False,
+        "phase": "build",
+        "task": "the real task",
+        "workflow_system_prose": _PROSE,
+    }
+    base.update(over)
+    return SignalResult(**base)
+
+
+def _post(app: Any, tmp_path: Path, signal: SignalResult, body: dict[str, Any]) -> Any:
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        return client.post(f"/proj/{_token(tmp_path)}/v1/responses", json=body)
+
+
+def test_prose_lands_on_instructions(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(), _responses_body())
+    assert resp.status_code == 200
+
+    forwarded = json.loads(captured["body"])
+    instructions = forwarded["instructions"]
+    assert instructions.startswith("CACHED-SYSTEM-PROMPT")
+    assert _PROSE in instructions
+    assert instructions.count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+    assert instructions.count("END AGENTALLOY-CONTEXT") == 1
+    # `input` is leg 1/2 territory — untouched by leg 3.
+    assert forwarded["input"] == _responses_body()["input"]
+
+
+def test_prose_fires_on_a_quiet_turn(tmp_path: Path) -> None:
+    """should_compose=False and no banner: leg 3 still delivers."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(banner=None), _responses_body())
+    assert resp.status_code == 200
+    forwarded = json.loads(captured["body"])
+    assert _PROSE in forwarded["instructions"]
+    assert forwarded["input"] == _responses_body()["input"]
+
+
+def test_prose_repeats_byte_identically_across_turns(tmp_path: Path) -> None:
+    """The deliver-once regression guard; turn 1 alone proves nothing.
+
+    codex rebuilds each request from its own history, so turn 2 sends the SAME body
+    it sent on turn 1 — proxy mutations are never echoed back. If leg 3 ever grows a
+    cadence marker, turn 2 goes silent here and nowhere else.
+    """
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    seen: list[str] = []
+    signal = _prose_signal(banner="PHASE: build")
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        for _ in range(2):
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/responses", json=_responses_body())
+            assert resp.status_code == 200
+            seen.append(json.loads(captured["body"])["instructions"])
+
+    assert _PROSE in seen[0]
+    assert seen[1] == seen[0]  # byte-identical within a phase
+    assert seen[1].count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+
+
+def test_banner_and_prose_land_on_different_fields(tmp_path: Path) -> None:
+    """Legs 2 and 3 are independent: banner → last input item, prose → instructions."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(banner="PHASE: build"), _responses_body())
+    assert resp.status_code == 200
+
+    forwarded = json.loads(captured["body"])
+    instructions = forwarded["instructions"]
+    texts = "\n".join(
+        b["text"] for b in forwarded["input"][2]["content"] if b["type"] == "input_text"
+    )
+    assert "AGENTALLOY-BANNER" in texts and "PHASE: build" in texts
+    assert _PROSE not in texts
+    assert _PROSE in instructions
+    assert "AGENTALLOY-BANNER" not in instructions
+    # Earlier input items untouched.
+    assert forwarded["input"][:2] == _responses_body()["input"][:2]
+
+
+def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+
+    _post(app, tmp_path, _prose_signal(), _responses_body())
+    build_instructions = json.loads(captured["body"])["instructions"]
+
+    # A harness that persists what it was handed replays the mutated instructions.
+    replayed = _responses_body()
+    replayed["instructions"] = build_instructions
+    qa_prose = "# SDD — QA\nProve the acceptance criteria."
+    resp = _post(
+        app,
+        tmp_path,
+        _prose_signal(phase="qa", workflow_system_prose=qa_prose),
+        replayed,
+    )
+    assert resp.status_code == 200
+
+    instructions = json.loads(captured["body"])["instructions"]
+    assert "phase=build" not in instructions
+    assert _PROSE not in instructions
+    assert qa_prose in instructions
+    assert instructions.count("BEGIN AGENTALLOY-CONTEXT phase=qa") == 1
+    assert instructions.startswith("CACHED-SYSTEM-PROMPT")
+
+
+def test_prose_creates_instructions_when_absent(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    body = _responses_body()
+    del body["instructions"]
+    resp = _post(app, tmp_path, _prose_signal(), body)
+    assert resp.status_code == 200
+    forwarded = json.loads(captured["body"])
+    assert _PROSE in forwarded["instructions"]
+
+
+def test_prose_alone_forces_the_reserialized_body(tmp_path: Path) -> None:
+    """Prose is the ONLY leg firing: the payload must still be recognised as
+    injected, so the re-serialized body is forwarded rather than the original bytes."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(banner=None), _responses_body())
+    assert resp.status_code == 200
+    assert json.loads(captured["body"]) != _responses_body()
+
+
+def test_no_prose_leaves_instructions_byte_identical(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(workflow_system_prose=None), _responses_body())
+    assert resp.status_code == 200
+    assert json.loads(captured["body"])["instructions"] == "CACHED-SYSTEM-PROMPT"
+
+
+def test_no_anthropic_cache_keys_on_the_responses_wire(tmp_path: Path) -> None:
+    """D4: `cache_control`/ttl/breakpoints are Anthropic-only. The Responses API caches
+    implicitly with no knob, so none of that may leak into the forwarded body."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    resp = _post(app, tmp_path, _prose_signal(banner="PHASE: build"), _responses_body())
+    assert resp.status_code == 200
+    body = captured["body"].decode()
+    assert "cache_control" not in body
+    assert '"ttl"' not in body
+    assert "ephemeral" not in body
