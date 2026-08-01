@@ -236,7 +236,6 @@ def test_toolless_session_is_a_carrier_via_fingerprint(tmp_path: Path) -> None:
     assert _eval(_req("another task", tools=False), tmp_path).announce is True
 
 
-
 def test_fingerprint_session_reorients_when_first_message_changes(tmp_path: Path) -> None:
     # No header → fingerprint. A genuinely new conversation (different opening
     # message) re-orients; resending history (same opening) stays quiet.

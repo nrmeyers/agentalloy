@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
-from agentalloy.api.proxy_session import SOURCE_FINGERPRINT, resolve_session_key
+from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
