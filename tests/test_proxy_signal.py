@@ -28,9 +28,9 @@ from tests.support import seed_phase
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
     # Carries a tool array by default, modelling a genuine agent turn. Pass
-    # tools=False (with a session_id header at the call site) to model a background
-    # micro-request that must not burn markers; tool-less requests without a header
-    # are fingerprint-keyed and DO carry.
+    # tools=False to model tool-less harnesses; with a session_id the request is
+    # still a carrier (session_key present => carrier), and without one it resolves
+    # by fingerprint.
     return ProxyRequest(
         model="gpt-4",
         messages=[ProxyMessage(role="user", content=prompt)],
@@ -890,7 +890,7 @@ class TestEvaluateSignalBanner:
         assert result.banner is not None
         assert result.banner.startswith("[agentalloy · spec]")
 
-    def test_tool_less_request_leaves_banner_none(self, tmp_path: Path) -> None:
+    def test_tool_less_carrier_request_sets_banner(self, tmp_path: Path) -> None:
         _set_phase(tmp_path, "spec")
         with (
             mock.patch(
@@ -907,13 +907,14 @@ class TestEvaluateSignalBanner:
                 return_value=None,
             ),
         ):
-            # tools=None on a header-keyed session → non-carrier → no banner.
-            # (A session header is what makes a tool-less turn a background ping;
-            # tool-less fingerprint sessions — aider — DO carry.)
+            # Unified carrier gate: session_key present => carrier, regardless of tools.
+            # A tool-less request with a session_id now gets the same treatment as a
+            # tool-bearing one (including banner). This is the fix for the
+            # "no orientation block" bug where header-sourced sessions were starved.
             result = asyncio.run(
                 evaluate_signal(_req("work", tools=False), tmp_path, session_id="sess-bg")
             )
-        assert result.banner is None
+        assert result.banner is not None
 
     def test_lifecycle_off_leaves_banner_none(self, tmp_path: Path) -> None:
         d = tmp_path / ".agentalloy"
