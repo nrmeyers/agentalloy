@@ -277,3 +277,51 @@ class TestCLIPhaseWritesAreRepoScoped:
         """
         assert build_claude_code_permissions("free-flow:design")["deny"] == []
         assert build_claude_code_permissions("design")["deny"] != []
+
+
+# ---------------------------------------------------------------------------
+# Free-flow bypass (TD10 — free-flow should allow writes in denied phases)
+# ---------------------------------------------------------------------------
+
+
+class TestTD10FreeFlowBypass:
+    """Free-flow mode should bypass write gating in all three layers."""
+
+    def test_filter_tools_free_flow_bypasses_deny(self) -> None:
+        """filter_tools_for_phase with free_mode=True should not strip tools."""
+        from agentalloy.providers.base import filter_tools_for_phase
+
+        tools = [{"name": "write_file"}, {"name": "read_file"}, {"name": "edit"}]
+        # Without free_mode, tools are stripped in denied phases
+        stripped = filter_tools_for_phase(tools, "intake", free_mode=False)
+        names = [t["name"] for t in stripped]
+        assert "write_file" not in names
+        assert "edit" not in names
+        assert "read_file" in names
+        # With free_mode=True, all tools pass through
+        all_tools = filter_tools_for_phase(tools, "intake", free_mode=True)
+        all_names = [t["name"] for t in all_tools]
+        assert "write_file" in all_names
+        assert "edit" in all_names
+
+    def test_claude_code_permissions_free_flow(self) -> None:
+        """build_claude_code_permissions with free_mode=True should have empty deny."""
+        # Without free_mode, denied phases have deny rules
+        assert build_claude_code_permissions("intake")["deny"] != []
+        # With free_mode=True, deny is empty even in denied phases
+        assert build_claude_code_permissions("intake", free_mode=True)["deny"] == []
+
+    def test_codex_workspace_write_free_flow(self) -> None:
+        """build_codex_workspace_write with free_mode=True should have no restriction."""
+        # Without free_mode, denied phases narrow writable roots
+        assert build_codex_workspace_write("design")["writable_roots"] != []
+        # With free_mode=True, returns empty (no restriction)
+        assert build_codex_workspace_write("design", free_mode=True) == {}
+
+    def test_non_denied_phase_ignores_free_mode(self) -> None:
+        """Free mode is a no-op in non-denied phases (idempotent)."""
+        # build, qa, ship should be open regardless
+        assert build_claude_code_permissions("build")["deny"] == []
+        assert build_claude_code_permissions("build", free_mode=True)["deny"] == []
+        assert build_codex_workspace_write("build") == {}
+        assert build_codex_workspace_write("build", free_mode=True) == {}

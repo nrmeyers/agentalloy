@@ -61,6 +61,16 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
             }
         since = _now_iso()
         access.write(phase, mode="free", free_since=since)
+        # Immediately update Tier A harness configs so free-flow writes take effect.
+        # The posture rewrite reads the flow state to determine if deny rules should be active.
+        try:
+            from agentalloy.install.subcommands.wire_harness import (
+                rewrite_enforcement_posture,
+            )
+
+            rewrite_enforcement_posture(root, phase)
+        except Exception:
+            pass  # soft: a posture failure must not block free-flow
     except StateClientError as exc:
         fail_on_state_error(exc)
         raise  # unreachable
