@@ -25,6 +25,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from agentalloy.api.state_client import StateClient
 from tests.harness_e2e.upstream_stub import UpstreamStub, start_upstream_stub
 
 EXPECT_INJECTION = os.environ.get("HARNESS_E2E_EXPECT_INJECTION") == "1"
@@ -53,18 +54,20 @@ def bare_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     Point both at THIS sandboxed, phase-seeded dir: the matrix then exercises
     that documented deployment shape, and the proxy can never read (or mutate —
     it did, before this fixture) the developer's checkout state.
+
+    Phase is NOT seeded here — this fixture has no running service to seed it
+    through, and an in-process ``run_phase_set`` would autostart a detached
+    background service that permanently holds the DuckDB write lock, starving
+    the ``proxy`` fixture's own subprocess. ``proxy`` seeds phase over HTTP
+    once it's up.
     """
     root = tmp_path_factory.mktemp("bare-root")
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True)
-    # Wiring no longer seeds a phase (the proxy does, lazily), so an e2e repo
-    # that must start *at* intake sets it explicitly.
-    from agentalloy.install.subcommands.phase import run_phase_set
     from agentalloy.install.subcommands.wire import (
         _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
     )
 
     _seed_repo_metadata(root)
-    run_phase_set("intake", root=root, force=True)
     return root
 
 
@@ -153,6 +156,15 @@ def proxy(
                     f"proxy failed to become healthy; log:\n{log_path.read_text()[-4000:]}"
                 )
             time.sleep(0.5)
+        # Seed bare_root's phase now, over HTTP against the proxy that's already
+        # listening. Seeding in-process (``run_phase_set``) here — or earlier, in
+        # ``bare_root`` itself — would trigger ``require_service``'s autostart
+        # before any service exists, spawning a second, detached background
+        # service that holds the DuckDB write lock forever and starves this
+        # subprocess (``LockHeldError``).
+        StateClient(base_url=f"http://127.0.0.1:{port}").set_phase(
+            "intake", repo_root=str(bare_root)
+        )
         yield port
     finally:
         proc.terminate()
@@ -164,12 +176,14 @@ def proxy(
 
 
 @pytest.fixture
-def work_repo(tmp_path: Path) -> Path:
+def work_repo(tmp_path: Path, proxy: int) -> Path:
     """A minimal git repo for the harness to operate in.
 
-    Seeded with the entry phase via the same helper ``agentalloy wire`` uses:
-    composition short-circuits when ``.agentalloy/phase`` is absent, so a
-    wired-but-phaseless repo is inert and the nightly injection assertion
+    Seeded with the entry phase via a direct HTTP call to the already-running
+    ``proxy`` service (not the in-process ``run_phase_set``, which would
+    autostart a second, lock-holding service): composition short-circuits
+    when phase is absent, so a wired-but-phaseless
+    repo is inert and the nightly injection assertion
     (``HARNESS_E2E_EXPECT_INJECTION=1``) can never pass without it.
     """
     subprocess.run(
@@ -192,13 +206,10 @@ def work_repo(tmp_path: Path) -> Path:
         check=True,
         capture_output=True,
     )
-    # Wiring no longer seeds a phase (the proxy does, lazily), so an e2e repo
-    # that must start *at* intake sets it explicitly.
-    from agentalloy.install.subcommands.phase import run_phase_set
     from agentalloy.install.subcommands.wire import (
         _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
     )
 
     _seed_repo_metadata(tmp_path)
-    run_phase_set("intake", root=tmp_path, force=True)
+    StateClient(base_url=f"http://127.0.0.1:{proxy}").set_phase("intake", repo_root=str(tmp_path))
     return tmp_path
