@@ -574,6 +574,34 @@ def _count_cache_breakpoints(value: Any) -> int:
     return 0
 
 
+def _forward_ttl(payload: dict[str, Any]) -> str | None:
+    """Return the ttl our `system` breakpoint must carry, or None for the 5m default.
+
+    Anthropic renders `tools -> system -> messages` and rejects a ttl='1h' block that
+    comes after a ttl='5m' one. We append at the END of `system`, so only what comes
+    AFTER us constrains us: if any message block carries ttl='1h', ours must too or the
+    whole request 400s. Deliberately NOT a max over the whole payload — copying a '1h'
+    seen in `tools` or an earlier `system` block would put a 1h AFTER a 5m and make us
+    the violating block instead.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return None
+    return "1h" if _has_ttl(messages, "1h") else None
+
+
+def _has_ttl(value: Any, ttl: str) -> bool:
+    """True if any `cache_control` anywhere in *value* declares this ttl."""
+    if isinstance(value, dict):
+        cc = value.get("cache_control")
+        if isinstance(cc, dict) and cc.get("ttl") == ttl:
+            return True
+        return any(_has_ttl(v, ttl) for k, v in value.items() if k != "cache_control")
+    if isinstance(value, list):
+        return any(_has_ttl(v, ttl) for v in value)
+    return False
+
+
 def inject_into_anthropic_system_prompt(
     payload: dict[str, Any], block: str, *, phase: str
 ) -> dict[str, Any] | None:
@@ -625,6 +653,14 @@ def inject_into_anthropic_system_prompt(
         # turn. The prose is phase-pure, so with a breakpoint here the bytes are stable
         # across a phase and we pay one write per phase change instead.
         #
+        # Note the blast radius: a breakpoint at the tail of `system` puts our block in
+        # the prefix of every downstream *message* cache entry too, so a phase change
+        # invalidates those as well, not just the system prefix. Still once per phase,
+        # just wider than "one system write".
+        #
+        # The ttl must match what the harness uses further down the request or the API
+        # rejects the whole thing — see `_forward_ttl`.
+        #
         # Counted against the post-strip blocks, not `payload`: a stale workflow block
         # from an earlier phase (carrying last turn's breakpoint) was just removed, and
         # counting it would make us yield to a breakpoint that no longer exists.
@@ -635,7 +671,11 @@ def inject_into_anthropic_system_prompt(
             {k: v for k, v in payload.items() if k != "system"}
         )
         if spent < _CACHE_BREAKPOINT_LIMIT:
-            entry["cache_control"] = {"type": "ephemeral"}
+            cache_control: dict[str, Any] = {"type": "ephemeral"}
+            ttl = _forward_ttl(payload)
+            if ttl is not None:
+                cache_control["ttl"] = ttl
+            entry["cache_control"] = cache_control
         new_system = [*blocks, entry]
     else:
         return None
