@@ -21,7 +21,7 @@ from pathlib import Path
 
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
-from tests.support import seed_phase
+from tests.support import seed_announced, seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -37,9 +37,7 @@ def _set_phase(tmp: Path, phase: str, *, transitioned_by: str | None = None) -> 
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    (d / "announced").write_text(f"{phase}\t{','.join(keys)}")
+    seed_announced(tmp, phase, keys)
 
 
 def _ship_record(tmp: Path, slug: str = "some-feature") -> None:

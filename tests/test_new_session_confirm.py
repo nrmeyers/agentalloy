@@ -15,7 +15,7 @@ from pathlib import Path
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.skill_loader import _read_phase  # pyright: ignore[reportPrivateUsage]
-from tests.support import seed_phase
+from tests.support import seed_announced, seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -33,11 +33,9 @@ def _set_phase(tmp: Path, phase: str) -> None:
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
-    """Record `(phase, keys)` as already-oriented — the `.agentalloy/announced`
-    format is `<phase>\\t<key1>,<key2>`. A session key NOT in `keys` is 'new'."""
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    (d / "announced").write_text(f"{phase}\t{','.join(keys)}")
+    """Record `(phase, keys)` as already-oriented in the store. A session key
+    NOT in `keys` is 'new'."""
+    seed_announced(tmp, phase, keys)
 
 
 def _ship_record(tmp: Path, slug: str = "some-feature") -> None:

@@ -23,7 +23,10 @@ from agentalloy.api import proxy_signal
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.prefilter import PreFilterMatch
-from tests.support import seed_phase
+from agentalloy.signals.skill_loader import (
+    _read_announced as _store_read_announced,  # pyright: ignore[reportPrivateUsage]
+)
+from tests.support import seed_announced, seed_phase
 
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
@@ -57,18 +60,12 @@ def _set_announced(tmp_path: Path, phase: str, *sessions: str) -> None:
 
     Defaults to :data:`SESSION` so the matching ``session_id=SESSION`` turn is quiet.
     """
-    d = tmp_path / ".agentalloy"
-    d.mkdir(exist_ok=True)
-    keys = ",".join(sessions or (SESSION,))
-    (d / "announced").write_text(f"{phase}\t{keys}\n")
+    seed_announced(tmp_path, phase, list(sessions or (SESSION,)))
 
 
 def _read_announced(tmp_path: Path) -> str | None:
-    """Return the announced *phase* (the announced file stores ``phase\\tkeys``)."""
-    f = tmp_path / ".agentalloy" / "announced"
-    if not f.exists():
-        return None
-    return f.read_text().strip().partition("\t")[0] or None
+    """Return the announced *phase* from the store."""
+    return _store_read_announced(tmp_path)
 
 
 def _skill(

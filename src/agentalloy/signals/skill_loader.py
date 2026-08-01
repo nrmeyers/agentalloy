@@ -71,11 +71,12 @@ FLOW_MODES = ("workflow", "free")
 # CLI process, where nothing is bound, reaches the same row over HTTP.
 
 
-def _phase_view(project_root: Path) -> DuckDBStateStore | None:
+def _state_view(project_root: Path) -> DuckDBStateStore | None:
     """The store handle re-scoped to *project_root*'s repo, or ``None``.
 
     ``None`` means the store is out of reach from this process — not that the
-    repo has no phase. Callers distinguish the two.
+    repo has no state. Callers distinguish the two. Shared by every store-backed
+    kind (``phase``, ``announced``, ``banner-turns``, ...).
     """
     from agentalloy.storage.state_store import process_store
 
@@ -85,6 +86,15 @@ def _phase_view(project_root: Path) -> DuckDBStateStore | None:
     from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
 
     return store.for_repo(_repo_key_for(str(project_root)))
+
+
+def _phase_view(project_root: Path) -> DuckDBStateStore | None:
+    """The store handle re-scoped to *project_root*'s repo, or ``None``.
+
+    ``None`` means the store is out of reach from this process — not that the
+    repo has no phase. Callers distinguish the two.
+    """
+    return _state_view(project_root)
 
 
 def _phase_state(project_root: Path) -> PhaseState | None:
@@ -206,26 +216,31 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
 # Announce-state helpers (once-per-entry injection cadence)
 # ---------------------------------------------------------------------------
 #
-# `.agentalloy/announced` records the last phase whose orientation block was
-# injected. The proxy announces a phase's workflow block exactly once on entry
-# (when `announced != phase`), then stays quiet until a transition changes the
-# phase — at which point `announced` no longer matches and the new phase is
-# announced. This decouples the heavy orientation block from per-turn injection:
-# the marker-echo dedup it replaces was structurally dead (Claude Code never
-# persists injected markers back into the next request), so cadence must live in
-# durable state here, not in the request body.
+# ``announced`` (store kind, repo-scoped row) records the last phase whose
+# orientation block was injected. The proxy announces a phase's workflow block
+# exactly once on entry (when `announced != phase`), then stays quiet until a
+# transition changes the phase — at which point `announced` no longer matches
+# and the new phase is announced. This decouples the heavy orientation block
+# from per-turn injection: the marker-echo dedup it replaces was structurally
+# dead (Claude Code never persists injected markers back into the next
+# request), so cadence must live in durable state here, not in the request
+# body. Like ``phase``, this is proxy-exclusive and store-only — see
+# ``_state_view``.
 
 
-# Proxy-exclusive cadence keys. These churn on (nearly) every proxied turn, and
-# a write inside the repo tree mid-session trips harness file-watchers — Claude
-# Code injects a "a background process modified <file>" reminder that reads as
-# suspicious to the agent and the user. Only the proxy reads/writes these keys,
-# so they can live outside the repo without splitting state with the host CLI
-# (which touches only ``cursor``); ``AGENTALLOY_RUNTIME_STATE_DIR`` (set by the
-# container run to a path on the persistent data volume) relocates them, keyed
-# by the repo's ``/proj`` token. Unset (host CLI, dev, tests) they stay
-# repo-local as before.
-_RUNTIME_STATE_KEYS = frozenset({"announced", "composed", "banner-turns", "free-reminded"})
+# Proxy-exclusive cadence keys that still live on disk. These churn on (nearly)
+# every proxied turn, and a write inside the repo tree mid-session trips harness
+# file-watchers — Claude Code injects a "a background process modified <file>"
+# reminder that reads as suspicious to the agent and the user. Only the proxy
+# reads/writes these keys, so they can live outside the repo without splitting
+# state with the host CLI (which touches only ``cursor``);
+# ``AGENTALLOY_RUNTIME_STATE_DIR`` (set by the container run to a path on the
+# persistent data volume) relocates them, keyed by the repo's ``/proj`` token.
+# Unset (host CLI, dev, tests) they stay repo-local as before.
+#
+# ``announced`` and ``banner-turns`` moved to the store (see below) and are no
+# longer in this set.
+_RUNTIME_STATE_KEYS = frozenset({"composed", "free-reminded"})
 
 
 def _state_file(project_root: Path, name: str) -> Path:
@@ -301,16 +316,24 @@ _MAX_ANNOUNCED_SESSIONS = 8
 
 
 def _read_announced_state(project_root: Path) -> tuple[str | None, list[str]]:
-    """Read ``.agentalloy/announced`` as ``(phase, [session_keys])``.
+    """Read the ``announced`` store row as ``(phase, [session_keys])``.
 
-    The file stores ``"<phase>\\t<key1>,<key2>,..."`` — the phase plus the set of
+    The value is ``"<phase>\\t<key1>,<key2>,..."`` — the phase plus the set of
     sessions already oriented for it — so orientation is keyed per *(phase,
     session)*: a new session on an already-announced phase still re-orients, while
-    a session already in the set stays quiet. A legacy bare-``phase`` file (no tab)
-    parses to ``(phase, [])``, so the next real request re-announces once (benign).
-    ``(None, [])`` means nothing announced yet.
+    a session already in the set stays quiet. A bare ``phase`` (no tab, from the
+    legacy single-value era) parses to ``(phase, [])``, so the next real request
+    re-announces once (benign). ``(None, [])`` means nothing announced yet, or the
+    store is out of reach from this process (proxy-exclusive: see ``_state_view``).
     """
-    raw = _read_state(project_root, "announced")
+    view = _state_view(project_root)
+    if view is None:
+        return None, []
+    try:
+        raw = view.read("announced")
+    except Exception:
+        logger.warning("announced read failed for %s", project_root, exc_info=True)
+        return None, []
     if raw is None:
         return None, []
     phase, _, keys_csv = raw.partition("\t")
@@ -319,11 +342,11 @@ def _read_announced_state(project_root: Path) -> tuple[str | None, list[str]]:
 
 
 def _read_announced(project_root: Path) -> str | None:
-    """Read just the last-announced phase from ``.agentalloy/announced``.
+    """Read just the last-announced phase from the ``announced`` store row.
 
-    ``None`` (absent/unreadable/empty) means "nothing announced yet". Kept as the
-    phase-only view over :func:`_read_announced_state` for callers/tests that only
-    care about the phase.
+    ``None`` (absent/unreadable/empty/store unreachable) means "nothing announced
+    yet". Kept as the phase-only view over :func:`_read_announced_state` for
+    callers/tests that only care about the phase.
     """
     return _read_announced_state(project_root)[0]
 
@@ -331,14 +354,24 @@ def _read_announced(project_root: Path) -> str | None:
 def _write_announced_atomic(
     project_root: Path, phase: str, session_keys: list[str] | None = None
 ) -> None:
-    """Atomically record *(phase, session_keys)* as announced (Tier 1 cadence).
+    """Record *(phase, session_keys)* as announced (Tier 1 cadence).
 
     Writes ``"<phase>\\t<key1>,<key2>,..."``; a bare ``phase`` when no session keys
-    (back-compat with the historical single-value format).
+    (back-compat with the historical single-value format). Best-effort like the
+    rest of this cadence pair: an unreachable store or a write failure is logged
+    and dropped rather than raised, since worst case is one extra re-announce on
+    the next turn, not a broken proxy response.
     """
     keys = [k for k in (session_keys or []) if k]
     value = f"{phase}\t{','.join(keys)}" if keys else phase
-    _write_state_atomic(project_root, "announced", value)
+    view = _state_view(project_root)
+    if view is None:
+        logger.warning("no state store bound — announced write dropped for %s", project_root)
+        return
+    try:
+        view.write("announced", value)
+    except Exception:
+        logger.warning("announced write failed for %s", project_root, exc_info=True)
 
 
 def cli_session_key() -> str | None:
@@ -478,14 +511,21 @@ def _write_composed_atomic(project_root: Path, cursor: str) -> None:
 
 
 def _read_banner_turn(project_root: Path) -> tuple[str | None, str | None, int]:
-    """Read ``.agentalloy/banner-turns`` as ``(phase, session_key, count)``.
+    """Read the ``banner-turns`` store row as ``(phase, session_key, count)``.
 
-    Stores ``"<phase>\\t<session_key>\\t<count>"`` — the carrier-turn counter that
-    paces the per-turn banner (emit once every N turns rather than every turn).
-    ``(None, None, 0)`` when absent/unreadable/malformed, which the caller treats as
-    a fresh start (count 0 → emit the banner this turn).
+    Value is ``"<phase>\\t<session_key>\\t<count>"`` — the carrier-turn counter
+    that paces the per-turn banner (emit once every N turns rather than every
+    turn). ``(None, None, 0)`` when absent/unreadable/malformed/store-unreachable,
+    which the caller treats as a fresh start (count 0 → emit the banner this turn).
     """
-    raw = _read_state(project_root, "banner-turns")
+    view = _state_view(project_root)
+    if view is None:
+        return None, None, 0
+    try:
+        raw = view.read("banner-turns")
+    except Exception:
+        logger.warning("banner-turns read failed for %s", project_root, exc_info=True)
+        return None, None, 0
     if raw is None:
         return None, None, 0
     parts = raw.split("\t")
@@ -502,13 +542,21 @@ def _read_banner_turn(project_root: Path) -> tuple[str | None, str | None, int]:
 def _write_banner_turn_atomic(
     project_root: Path, phase: str, session_key: str | None, count: int
 ) -> None:
-    """Atomically record the banner carrier-turn counter for *(phase, session_key)*.
+    """Record the banner carrier-turn counter for *(phase, session_key)*.
 
-    Written eagerly at evaluate time (not via the deferred commit seam): the banner is
-    best-effort and the commit path is a no-op on quiet/banner-only turns, so a one-off
-    miscount on an upstream error is harmless.
+    Written eagerly at evaluate time (not via the deferred commit seam): the banner
+    is best-effort and the commit path is a no-op on quiet/banner-only turns, so a
+    one-off miscount on an upstream error (or a store write failure, logged and
+    dropped below) is harmless.
     """
-    _write_state_atomic(project_root, "banner-turns", f"{phase}\t{session_key or ''}\t{count}")
+    view = _state_view(project_root)
+    if view is None:
+        logger.warning("no state store bound — banner-turns write dropped for %s", project_root)
+        return
+    try:
+        view.write("banner-turns", f"{phase}\t{session_key or ''}\t{count}")
+    except Exception:
+        logger.warning("banner-turns write failed for %s", project_root, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

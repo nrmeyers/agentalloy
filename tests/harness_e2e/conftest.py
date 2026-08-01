@@ -75,9 +75,17 @@ def _reset_bare_markers(bare_root: Path) -> None:
     All bare-surface harnesses send the SAME prompt, so they share a session
     fingerprint — without a reset, whichever runs first burns the announce
     marker for the rest and their injection assertions fail on shared state.
+
+    ``announced`` and ``banner-turns`` moved to the DuckDB store (living inside
+    the proxy subprocess, not this process), so this can no longer reset them —
+    there is no cross-process state-clear route for a single kind today (only
+    ``DELETE /state/phase`` and whole-repo ``DELETE /state``, neither of which
+    fits here). Harmless for the default run: marker assertions only fire under
+    ``HARNESS_E2E_EXPECT_INJECTION=1`` (nightly). If that starts flaking on
+    shared marker state, this needs a real fix (a per-kind clear route), not a
+    workaround here.
     """
-    for name in ("announced", "composed", "banner-turns"):
-        (bare_root / ".agentalloy" / name).unlink(missing_ok=True)
+    (bare_root / ".agentalloy" / "composed").unlink(missing_ok=True)
 
 
 @pytest.fixture(scope="session")
