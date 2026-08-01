@@ -287,6 +287,8 @@ def _build_payload(
     request: ProxyRequest,
     upstream_model: str | None = None,
     phase: str | None = None,
+    *,
+    free_mode: bool = False,
 ) -> dict[str, Any]:
     """Build the JSON payload to forward to the upstream LLM.
 
@@ -295,7 +297,8 @@ def _build_payload(
     actual upstream model.
 
     If *phase* is set, tools are filtered through ``filter_tools_for_phase``
-    so code-writing tools are removed during denied phases.
+    so code-writing tools are removed during denied phases.  When *free_mode*
+    is ``True``, write gating is skipped regardless of phase.
 
     Raises ``ValueError`` if the resolved model is ``None`` (i.e., the
     client sent ``"agentalloy-proxy"`` but no upstream model is configured).
@@ -338,7 +341,7 @@ def _build_payload(
     if request.tools is not None:
         tools = request.tools
         if phase is not None:
-            tools = filter_tools_for_phase(tools, phase)
+            tools = filter_tools_for_phase(tools, phase, free_mode=free_mode)
         payload["tools"] = tools
     if request.tool_choice is not None:
         payload["tool_choice"] = request.tool_choice
@@ -615,7 +618,12 @@ async def proxy_chat_completions(
 
     # --- Step 5: Forward to upstream ---
     try:
-        payload = _build_payload(modified_request, upstream_model, phase=phase)
+        payload = _build_payload(
+            modified_request,
+            upstream_model,
+            phase=phase,
+            free_mode=signal_result.free_mode if signal_result else False,
+        )
     except ValueError as e:
         return JSONResponse(
             status_code=503,

@@ -2067,12 +2067,15 @@ def _has_any_wire_record(root: Path) -> bool:
     return any(entry.get("repo_root") == repo_str for entry in st.get("harness_files_written", []))
 
 
-def _apply_claude_code_posture(root: Path, phase: str) -> bool:
+def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = False) -> bool:
     """Rewrite ``.claude/settings.local.json`` with the enforcement posture.
 
     Merges the ``permissions`` block into the existing settings, preserving
     all other keys (``env``, MCP toggles, etc.).  During denied phases the
     deny list is populated; during all other phases it is empty (unlocked).
+
+    When *free_mode* is ``True`` (repo is in free-flow mode), deny rules are
+    skipped entirely so the LLM retains full write access regardless of phase.
 
     Returns True if the file was written, False if it did not exist.
     """
@@ -2092,7 +2095,7 @@ def _apply_claude_code_posture(root: Path, phase: str) -> bool:
     if not isinstance(data, dict):
         return False
 
-    permissions = build_claude_code_permissions(phase)
+    permissions = build_claude_code_permissions(phase, free_mode=free_mode)
     data["permissions"] = permissions
 
     try:
@@ -2104,12 +2107,15 @@ def _apply_claude_code_posture(root: Path, phase: str) -> bool:
         return False
 
 
-def _apply_codex_posture(root: Path, phase: str) -> bool:
+def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> bool:
     """Rewrite ``.codex/config.toml`` with the enforcement posture.
 
     Merges the ``workspace-write`` block into the existing TOML config.
     During denied phases narrows ``writable_roots`` to docs/.agentalloy;
     during all other phases removes the restriction.
+
+    When *free_mode* is ``True`` (repo is in free-flow mode), writable
+    roots are unrestricted regardless of phase.
 
     Returns True if the file was written, False if it did not exist.
     """
@@ -2133,7 +2139,7 @@ def _apply_codex_posture(root: Path, phase: str) -> bool:
     if not isinstance(data, dict):
         return False
 
-    ww = build_codex_workspace_write(phase)
+    ww = build_codex_workspace_write(phase, free_mode=free_mode)
     if ww:
         data["workspace-write"] = ww
     elif "workspace-write" in data:
@@ -2154,6 +2160,9 @@ def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
     Called after a phase transition to update deny rules.  Only touches repos
     that have a ``WireRecord`` — an unwired repo is never modified.
 
+    When the repo is in free-flow mode, deny rules are skipped entirely so
+    the LLM retains full write access regardless of phase.
+
     Args:
         root: The repository root.
         phase: The new phase value.
@@ -2165,14 +2174,24 @@ def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
     if not _has_any_wire_record(root):
         return []
 
+    # Read flow state from the phase row — free-flow disables write gating.
+    from agentalloy.signals.skill_loader import (
+        read_flow_state,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    flow_mode, _ = read_flow_state(root)
+    free_mode = flow_mode == "free"
+
     rewritten: list[str] = []
 
     if _has_wire_record_for_harness(root, "claude-code") and _apply_claude_code_posture(
-        root, phase
+        root, phase, free_mode=free_mode
     ):
         rewritten.append("claude-code")
 
-    if _has_wire_record_for_harness(root, "codex") and _apply_codex_posture(root, phase):
+    if _has_wire_record_for_harness(root, "codex") and _apply_codex_posture(
+        root, phase, free_mode=free_mode
+    ):
         rewritten.append("codex")
 
     return rewritten

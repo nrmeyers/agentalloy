@@ -471,6 +471,21 @@ async def delete_repo(
 
 
 @router.get(
+    "/artifact",
+    response_model=ArtifactListResponse,
+    summary="List deliverable artifacts for a phase",
+)
+async def list_artifacts(
+    phase: str = Query(description="Phase to list artifacts for"),
+    slug: str | None = Query(default=None, description="Filter by slug"),
+    name_glob: str | None = Query(default=None, description="fnmatch pattern over name"),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> ArtifactListResponse:
+    rows = await asyncio.to_thread(store.list_artifacts, phase, slug=slug, name_glob=name_glob)
+    return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in rows])
+
+
+@router.get(
     "/{kind}",
     response_model=StateReadResponse,
     responses={
@@ -981,18 +996,3 @@ async def set_artifact(
 ) -> ArtifactResponse:
     row = await asyncio.to_thread(store.set_artifact, req.phase, req.slug, req.name, req.content)
     return ArtifactResponse(**row)
-
-
-@router.get(
-    "/artifact",
-    response_model=ArtifactListResponse,
-    summary="List deliverable artifacts for a phase",
-)
-async def list_artifacts(
-    phase: str = Query(description="Phase to list artifacts for"),
-    slug: str | None = Query(default=None, description="Filter by slug"),
-    name_glob: str | None = Query(default=None, description="fnmatch pattern over name"),
-    store: DuckDBStateStore = Depends(get_repo_store),
-) -> ArtifactListResponse:
-    rows = await asyncio.to_thread(store.list_artifacts, phase, slug=slug, name_glob=name_glob)
-    return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in rows])

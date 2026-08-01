@@ -285,7 +285,12 @@ def _tool_name(tool: dict[str, Any]) -> str | None:
     return None
 
 
-def filter_tools_for_phase(tools: list[dict[str, Any]], phase: str) -> list[dict[str, Any]]:
+def filter_tools_for_phase(
+    tools: list[dict[str, Any]],
+    phase: str,
+    *,
+    free_mode: bool = False,
+) -> list[dict[str, Any]]:
     """Return *tools* with code-writing tools removed during denied phases.
 
     During ``intake``, ``spec``, and ``design`` the LLM is stripped of
@@ -293,9 +298,15 @@ def filter_tools_for_phase(tools: list[dict[str, Any]], phase: str) -> list[dict
     source or test code.  All other tools (read_file, glob, grep_search,
     shell, ask_user_question, etc.) remain available.
 
+    When *free_mode* is ``True`` (repo is in free-flow mode), write gating
+    is skipped entirely so the LLM retains all tool access regardless of
+    phase.
+
     Handles both Anthropic tool format (``name`` at top level) and OpenAI
     format (``function.name``).
     """
+    if free_mode:
+        return tools
     if phase not in DENIED_PHASES:
         return tools
     return [t for t in tools if _tool_name(t) not in GATED_TOOL_NAMES]
@@ -306,26 +317,40 @@ def is_tier_a_enforced(harness: str) -> bool:
     return harness in TIER_A_HARNESSES
 
 
-def build_claude_code_permissions(phase: str) -> dict[str, object]:
+def build_claude_code_permissions(
+    phase: str,
+    *,
+    free_mode: bool = False,
+) -> dict[str, object]:
     """Build the ``permissions`` block for ``.claude/settings.local.json``.
 
     During denied phases returns ``{"deny": [...patterns]}``; during all other
     phases returns ``{"deny": []}`` (posture present but unlocked).
+
+    When *free_mode* is ``True`` (repo is in free-flow mode), deny rules are
+    skipped entirely so the LLM retains full write access regardless of phase.
     """
-    if phase in DENIED_PHASES:
-        return {"deny": list(DENY_PATTERNS)}
-    return {"deny": []}
+    if free_mode or phase not in DENIED_PHASES:
+        return {"deny": []}
+    return {"deny": list(DENY_PATTERNS)}
 
 
-def build_codex_workspace_write(phase: str) -> dict[str, object]:
+def build_codex_workspace_write(
+    phase: str,
+    *,
+    free_mode: bool = False,
+) -> dict[str, object]:
     """Build the ``workspace-write`` block for codex's ``config.toml``.
 
     During denied phases narrows ``writable_roots`` to docs/.agentalloy;
     during all other phases returns an empty dict (no restriction).
+
+    When *free_mode* is ``True`` (repo is in free-flow mode), writable
+    roots are unrestricted regardless of phase.
     """
-    if phase in DENIED_PHASES:
-        return {"writable_roots": list(CODEX_ALLOWED_ROOTS)}
-    return {}
+    if free_mode or phase not in DENIED_PHASES:
+        return {}
+    return {"writable_roots": list(CODEX_ALLOWED_ROOTS)}
 
 
 def build_denial_message(phase: str, owed_artifacts: list[str] | None = None) -> str:
