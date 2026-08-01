@@ -191,6 +191,36 @@ class TestEvaluateSignalFreeFlow:
         assert r.phase == "build"
         assert r.pending_announce is not None and r.pending_announce[0] == "__free__"
 
+    def test_no_banner_or_system_prose_on_any_free_return(self, tmp_path: Path) -> None:
+        """Free flow is silent on BOTH workflow-steering legs, on every return path.
+
+        `_evaluate_free_flow` has three returns (anonymous, quiet, compose) and returns
+        before the banner-cadence block, so neither leg can fire. This pins that down:
+        the banner is a phase/gate recency anchor and `workflow_system_prose` is the
+        phase's operating instructions — in free flow there is no phase being driven,
+        so steering the agent with either is wrong.
+        """
+        _write_phase_file(tmp_path, "build", free=True)
+
+        # 1. Anonymous -> not a carrier. Needs an empty message list: with any user
+        #    text, `resolve_session_key` fingerprints one even when session_id is None,
+        #    so a session-less request is still a carrier.
+        anon = _eval(_req(), tmp_path, session_id=None)
+        assert anon.free_mode is True and anon.should_compose is False
+        assert anon.banner is None and anon.workflow_system_prose is None
+
+        # 2. Compose turn (first for the session).
+        first = _eval(_req("poke around"), tmp_path, session_id="s1")
+        assert first.should_compose is True
+        assert first.banner is None and first.workflow_system_prose is None
+        commit_markers(tmp_path, first, announce_emitted=True, cursor_emitted=False)
+
+        # 3. Quiet turn (same session, already announced) — the path that in workflow
+        #    mode carries both the banner and the per-turn system leg.
+        quiet = _eval(_req("poke around", "more"), tmp_path, session_id="s1")
+        assert quiet.should_compose is False
+        assert quiet.banner is None and quiet.workflow_system_prose is None
+
     def test_mode_absent_is_not_free(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         with (

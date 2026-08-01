@@ -207,16 +207,24 @@ def test_inject_into_last_user_message_system_also_injected(tmp_path: Path) -> N
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
     # announce=True: an entry turn emits the orchestrator orientation block.
-    signal = SignalResult(should_compose=True, announce=True, phase="build", task="the real task")
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="the real task",
+        workflow_system_prose="WORKFLOW-PROSE",
+    )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
-    # system has phase prose injected (system prompt injection) — original text
-    # preserved AND the composed block landed alongside it.
+    # The system field carries the phase-pure WORKFLOW prose (its own per-turn leg),
+    # with the harness's original system text preserved alongside it.
     assert "SYSTEM-CACHED-BLOCK" in sent["system"]
     assert "phase=build" in sent["system"]
-    assert "INJECTED-PROSE" in sent["system"]
+    assert "WORKFLOW-PROSE" in sent["system"]
+    # ...and NOT the turn-varying composed output, which belongs on the message leg.
+    assert "INJECTED-PROSE" not in sent["system"]
     # injected into the LAST user message, phase-stamped
     last_user = sent["messages"][-1]
     assert last_user["role"] == "user"
@@ -237,22 +245,34 @@ def test_idempotent_when_phase_block_already_present(tmp_path: Path) -> None:
     # announce=True so compose actually produces a block; the request-level
     # injector is still idempotent for the current phase (a marker for phase=build
     # already in this payload short-circuits a second injection).
-    signal = SignalResult(should_compose=True, announce=True, phase="build", task="t")
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="t",
+        workflow_system_prose="WORKFLOW-PROSE",
+    )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     sent = json.loads(captured["body"])
     # No second injection into the user message: still exactly one marker there.
     assert sent["messages"][-1]["content"].count("BEGIN AGENTALLOY-CONTEXT") == 1
-    # The system field was NOT pre-marked, so the system-prompt leg still fires
+    # The system field was NOT pre-marked, so the workflow leg still fires
     # independently even though the user-message leg no-opped.
     assert "phase=build" in sent["system"]
-    assert "INJECTED-PROSE" in sent["system"]
+    assert "WORKFLOW-PROSE" in sent["system"]
 
 
 def test_both_legs_no_op_when_both_already_marked(tmp_path: Path) -> None:
     """Both the user message and the system field already carry the current-phase
     marker -> both legs no-op -> request forwarded unchanged, cadence marker not
-    burned."""
+    burned.
+
+    `workflow_system_prose` is populated deliberately: without it the system leg has
+    nothing to inject and this test would pass vacuously, proving nothing about the
+    marker. With it, the leg is genuinely asked to inject and short-circuits on the
+    phase marker already present in `system`.
+    """
     (tmp_path / ".agentalloy").mkdir()
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
@@ -267,18 +287,28 @@ def test_both_legs_no_op_when_both_already_marked(tmp_path: Path) -> None:
         announce=True,
         phase="build",
         task="t",
+        workflow_system_prose="operate like so",
         pending_announce=("build", ["sess-1"]),
     )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     assert resp.status_code == 200
     assert json.loads(captured["body"]) == body
+    # The system leg was asked to inject and declined on the phase marker — the prose
+    # is absent precisely because the marker short-circuited it, not because the leg
+    # had nothing to say.
+    assert "operate like so" not in json.dumps(json.loads(captured["body"]))
     assert _announced_file(tmp_path) is None
 
 
-def test_system_only_changed_records_delivery(tmp_path: Path) -> None:
-    """User-message leg no-ops (already marked); system leg still fires -> the
-    turn IS recorded as delivered (cadence marker committed)."""
+def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Path) -> None:
+    """User-message leg no-ops (already marked); the workflow system leg still fires.
+
+    The two legs are now independent, so the system leg's success does NOT stand in
+    for the message leg: the composed domain block never reached the request, so the
+    cadence marker stays unwritten and Tier 1 re-fires next turn. The workflow prose
+    itself is not at risk either way — its leg re-sends it every carrier turn.
+    """
     (tmp_path / ".agentalloy").mkdir()
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
@@ -291,18 +321,19 @@ def test_system_only_changed_records_delivery(tmp_path: Path) -> None:
         announce=True,
         phase="build",
         task="t",
+        workflow_system_prose="WORKFLOW-PROSE",
         pending_announce=("build", ["sess-1"]),
     )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
-    # System field received the block; user message unchanged from input.
+    # System field received the workflow prose; user message unchanged from input.
     assert "phase=build" in sent["system"]
-    assert "INJECTED-PROSE" in sent["system"]
+    assert "WORKFLOW-PROSE" in sent["system"]
     assert sent["messages"][-1]["content"] == body["messages"][-1]["content"]
-    # Composition IS recorded as delivered.
-    assert _announced_file(tmp_path) == "build\tsess-1"
+    # The composed block was NOT delivered -> marker withheld, re-fires next turn.
+    assert _announced_file(tmp_path) is None
 
 
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
@@ -386,6 +417,9 @@ def test_announce_marker_committed_after_delivery(tmp_path: Path) -> None:
         phase="build",
         task="the real task",
         workflow_prose="operate like so",
+        # Same prose on the system-prompt leg, as `evaluate_signal` populates it on
+        # every carrier turn. The user-message leg no longer carries workflow prose.
+        workflow_system_prose="operate like so",
         pending_announce=("build", ["sess-1"]),
     )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
@@ -424,6 +458,9 @@ def _entry_signal() -> SignalResult:
         phase="build",
         task="the real task",
         workflow_prose="operate like so",
+        # Same prose on the system-prompt leg, as `evaluate_signal` populates it on
+        # every carrier turn. The user-message leg no longer carries workflow prose.
+        workflow_system_prose="operate like so",
         pending_announce=("build", ["sess-1"]),
     )
 
@@ -520,6 +557,9 @@ def test_banner_appended_after_workflow_block(tmp_path: Path) -> None:
         phase="build",
         task="the real task",
         workflow_prose="operate like so",
+        # Same prose on the system-prompt leg, as `evaluate_signal` populates it on
+        # every carrier turn. The user-message leg no longer carries workflow prose.
+        workflow_system_prose="operate like so",
         banner=_BANNER,
     )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
@@ -563,14 +603,24 @@ def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: 
         phase="build",
         task="t",
         workflow_prose="operate like so",
+        # Same prose on the system-prompt leg, as `evaluate_signal` populates it on
+        # every carrier turn. The user-message leg no longer carries workflow prose.
+        workflow_system_prose="operate like so",
         pending_announce=("build", ["sess-1"]),
     )
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     assert resp.status_code == 200
-    # Original body forwarded unchanged AND the marker is NOT burned → re-announces.
-    assert json.loads(captured["body"]) == body
+    sent = json.loads(captured["body"])
+    # Messages untouched — there was nowhere to put the composed block...
+    assert sent["messages"] == body["messages"]
+    # ...so the marker is NOT burned and Tier 1 re-announces next turn.
     assert _announced_file(tmp_path) is None
+    # The workflow leg is independent of all that: it needs no user message, so the
+    # prose still reaches `system`. Losing orientation entirely on such a turn was
+    # the old all-or-nothing behavior; only the *marker* has to be withheld.
+    assert "operate like so" in sent["system"]
+    assert "SYSTEM-CACHED-BLOCK" in sent["system"]
 
 
 # --------------------------------------------------------------------------- #

@@ -118,6 +118,9 @@ class _ComposedBlock:
     - ``cursor_text``: the Tier 2 leg produced non-empty domain text — when True the
       cursor marker additionally requires delivery, so an undelivered domain block
       re-fires next turn instead of being silently lost.
+    - ``message_text``: ``text`` minus the workflow prose, for surfaces that deliver
+      that prose on a separate system-prompt leg with its own (per-turn) cadence.
+      Surfaces without such a leg use ``text``.
     """
 
     text: str
@@ -125,6 +128,7 @@ class _ComposedBlock:
     cursor_terminal: bool
     cursor_text: bool
     telemetry: ProxyComposeTelemetry
+    message_text: str = ""
 
 
 def _compose_decision_push(
@@ -239,12 +243,19 @@ async def _compose_block(
     # Tier 1: workflow prose (operating instructions) + system-only compose.
     # ``record_trace=False`` suppresses the orchestrator's own per-leg write — this
     # surface folds both legs into one consolidated trace row below.
+    #
+    # The two halves are tracked separately because they have different stability:
+    # ``workflow_prose`` is phase-pure (no retrieval), while the ``legs="system"``
+    # compose is keyed on the task and varies per turn. Only the phase-pure half is
+    # eligible for the prompt-cached system-prompt leg — see ``message_text`` below.
     tier1 = ""
+    tier1_prose = ""
     tier1_result: ComposedResult | EmptyResult | None = None
     if signal.announce:
         parts: list[str] = []
         if signal.workflow_prose:
-            parts.append(signal.workflow_prose.strip())
+            tier1_prose = signal.workflow_prose.strip()
+            parts.append(tier1_prose)
         try:
             system_req = ComposeRequest(
                 task=signal.task or f"Entering {compose_phase}.",
@@ -333,8 +344,18 @@ async def _compose_block(
     text = "\n\n".join(
         p for p in (advisory_block, confirm_block, tier1, tier2, decision_block) if p
     )
+    # Same content minus the workflow prose, for surfaces that deliver that prose on a
+    # separate system-prompt leg (Anthropic passthrough). Without this the announce turn
+    # would carry the prose twice — once in `system`, once in the user message. Surfaces
+    # with no separate leg (OpenAI Responses) keep consuming `text`, so dropping the
+    # prose there is not an option: it would vanish from that surface entirely.
+    tier1_fragments = tier1[len(tier1_prose) :].lstrip("\n") if tier1_prose else tier1
+    message_text = "\n\n".join(
+        p for p in (advisory_block, confirm_block, tier1_fragments, tier2, decision_block) if p
+    )
     return _ComposedBlock(
         text=text,
+        message_text=message_text,
         tier1_text=bool(tier1),
         cursor_terminal=tier2_terminal,
         cursor_text=bool(tier2),
@@ -390,6 +411,9 @@ async def _compose_free_block(
     text = "\n\n".join(p for p in (signal.reminder or "", domain) if p)
     return _ComposedBlock(
         text=text,
+        # Free-flow never carries workflow prose (steering is paused), so there is
+        # nothing for a system-prompt leg to take over — both surfaces get the same text.
+        message_text=text,
         tier1_text=domain_terminal,
         cursor_terminal=False,
         cursor_text=False,
@@ -492,6 +516,7 @@ async def apply_signal[T](
     inject: Callable[[str], T | None],
     delivered: Callable[[T], bool],
     store: DuckDBStateStore | None = None,
+    use_message_text: bool = False,
 ) -> InjectOutcome[T]:
     """Shared inject seam for both proxy surfaces (commit is deferred).
 
@@ -502,6 +527,13 @@ async def apply_signal[T](
     after the upstream forward, gated on a 2xx response, so a turn the model never
     processed (overloaded/errored upstream) leaves the cadence intact and re-fires
     on the harness retry.
+
+    ``use_message_text`` selects the workflow-prose-free variant of the block, for a
+    surface that delivers that prose on its own system-prompt leg (Anthropic
+    passthrough). The prose is then delivered unconditionally every turn by that leg,
+    so an announce turn whose *message* half composes to nothing still commits the
+    Tier 1 marker — there is nothing left to deliver, and withholding the marker would
+    re-run the Tier 1 compose on every subsequent turn for no benefit.
     """
     composed = await _compose_block(signal, orchestrator, store=store)
     if not composed.text:
@@ -512,12 +544,13 @@ async def apply_signal[T](
             cursor_emitted=False,
             telemetry=composed.telemetry,
         )
-    injected = inject(composed.text)
+    inject_text = composed.message_text if use_message_text else composed.text
+    injected = inject(inject_text) if inject_text else None
     was_delivered = injected is not None and delivered(injected)
     return InjectOutcome(
         injected=injected,
         signal=signal,
-        announce_emitted=composed.tier1_text and was_delivered,
+        announce_emitted=composed.tier1_text and (was_delivered or not inject_text),
         cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
         telemetry=composed.telemetry,
     )
