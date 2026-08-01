@@ -74,6 +74,46 @@ class TestWireBlock:
         ciw.wire_code_index_block(tmp_path, 47950)
         assert (tmp_path / ".cursor/rules/agentalloy-code-index.mdc").exists()
 
+    def test_windsurf_dedicated_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / ".windsurf").mkdir()
+        ciw.wire_code_index_block(tmp_path, 47950)
+        assert (tmp_path / ".windsurf/rules/agentalloy.md").exists()
+        content = (tmp_path / ".windsurf/rules/agentalloy.md").read_text()
+        assert ciw.SENTINEL_BEGIN in content
+        assert ciw.SENTINEL_END in content
+
+    def test_windsurf_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / ".windsurfrules").write_text("# Rules\n")
+        ciw.wire_code_index_block(tmp_path, 47950)
+        assert (tmp_path / ".windsurfrules").exists()
+        content = (tmp_path / ".windsurfrules").read_text()
+        assert ciw.SENTINEL_BEGIN in content
+
+    def test_github_copilot_target(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / ".github").mkdir(parents=True)
+        (tmp_path / ".github/copilot-instructions.md").write_text("# Copilot\n")
+        ciw.wire_code_index_block(tmp_path, 47950)
+        content = (tmp_path / ".github/copilot-instructions.md").read_text()
+        assert ciw.SENTINEL_BEGIN in content
+
+    def test_aider_target(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / ".agentalloy-aider-instructions.md").write_text("# Aider\n")
+        ciw.wire_code_index_block(tmp_path, 47950)
+        content = (tmp_path / ".agentalloy-aider-instructions.md").read_text()
+        assert ciw.SENTINEL_BEGIN in content
+
+    def test_opencode_target(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / ".opencode").mkdir(parents=True)
+        (tmp_path / ".opencode/system-prompt.md").write_text("# OpenCode\n")
+        ciw.wire_code_index_block(tmp_path, 47950)
+        content = (tmp_path / ".opencode/system-prompt.md").read_text()
+        assert ciw.SENTINEL_BEGIN in content
+
 
 class TestLegacyMigration:
     def test_legacy_block_replaced_in_place(
@@ -128,6 +168,37 @@ class TestRemoveBlocks:
         ciw.wire_code_index_block(tmp_path, 47950)
         ciw.remove_code_index_blocks(tmp_path)
         assert not (tmp_path / ".cursor/rules/agentalloy-code-index.mdc").exists()
+
+    def test_new_targets_are_cleaned_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """remove_code_index_blocks sweeps all _CANDIDATE_TARGETS including new ones."""
+        _fake_slug(monkeypatch)
+
+        # write_block creates the sentinel block — we manually write blocks to
+        # each new target because detect_target() picks only the highest-priority
+        # target. The remove function sweeps ALL _CANDIDATE_TARGETS on disk.
+        block_content = f"# Repo\n{ciw.SENTINEL_BEGIN}\ncode-index block\n{ciw.SENTINEL_END}\n"
+        targets = [
+            tmp_path / ".windsurf/rules/agentalloy.md",
+            tmp_path / ".windsurfrules",
+            tmp_path / ".github/copilot-instructions.md",
+            tmp_path / ".agentalloy-aider-instructions.md",
+            tmp_path / ".opencode/system-prompt.md",
+        ]
+        for target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(block_content)
+
+        actions = ciw.remove_code_index_blocks(tmp_path)
+        for target in targets:
+            content = target.read_text()
+            assert ciw.SENTINEL_BEGIN not in content
+            assert ciw.LEGACY_SENTINEL_BEGIN not in content
+            assert "# Repo" in content
+        # All 5 targets had blocks removed
+        assert len(actions) == 5
+        assert all(a["action"] == "removed_block" for a in actions)
 
 
 class TestMaybeWire:
@@ -336,6 +407,64 @@ class TestOfferIndex:
         monkeypatch.setattr(ciw, "service_module_status", lambda port: "disabled")
         ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
         assert submitted == []
+
+
+class TestDetectTarget:
+    """detect_target() resolves the correct file for each harness target."""
+
+    def test_windsurf_dedicated_path(self, tmp_path: Path) -> None:
+        """When .windsurf/ exists, returns the dedicated file."""
+        (tmp_path / ".windsurf").mkdir()
+        assert ciw.detect_target(tmp_path) == tmp_path / ".windsurf/rules/agentalloy.md"
+
+    def test_windsurf_fallback_no_windsurf_dir(self, tmp_path: Path) -> None:
+        """When only .windsurfrules exists, returns the shared fallback."""
+        (tmp_path / ".windsurfrules").write_text("# Rules\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".windsurfrules"
+
+    def test_windsurf_dedicated_takes_priority_over_fallback(self, tmp_path: Path) -> None:
+        """When both exist, dedicated file wins."""
+        (tmp_path / ".windsurf").mkdir()
+        (tmp_path / ".windsurfrules").write_text("# Rules\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".windsurf/rules/agentalloy.md"
+
+    def test_github_copilot_target(self, tmp_path: Path) -> None:
+        """When .github/copilot-instructions.md exists, returns it."""
+        (tmp_path / ".github").mkdir(parents=True)
+        (tmp_path / ".github/copilot-instructions.md").write_text("# Copilot\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".github/copilot-instructions.md"
+
+    def test_aider_target(self, tmp_path: Path) -> None:
+        """When .agentalloy-aider-instructions.md exists, returns it."""
+        (tmp_path / ".agentalloy-aider-instructions.md").write_text("# Aider\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".agentalloy-aider-instructions.md"
+
+    def test_opencode_target(self, tmp_path: Path) -> None:
+        """When .opencode/system-prompt.md exists, returns it."""
+        (tmp_path / ".opencode").mkdir(parents=True)
+        (tmp_path / ".opencode/system-prompt.md").write_text("# OpenCode\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".opencode/system-prompt.md"
+
+    def test_no_harness_returns_claude_md_by_default(self, tmp_path: Path) -> None:
+        """When no harness is specified, defaults to CLAUDE.md."""
+        assert ciw.detect_target(tmp_path) == tmp_path / "CLAUDE.md"
+
+    def test_non_claude_harness_returns_none_when_no_target(self, tmp_path: Path) -> None:
+        """When harness is known but no target exists, returns None."""
+        assert ciw.detect_target(tmp_path, harness="qwen-code") is None
+
+    def test_priority_order_shared_targets(self, tmp_path: Path) -> None:
+        """When multiple shared targets exist, returns the highest priority one."""
+        # Create CLAUDE.md and GEMINI.md — GEMINI.md should win
+        (tmp_path / "CLAUDE.md").write_text("# Claude\n")
+        (tmp_path / "GEMINI.md").write_text("# Gemini\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / "GEMINI.md"
+
+    def test_windsurfrules_before_claude_md(self, tmp_path: Path) -> None:
+        """windsurfrules takes priority over CLAUDE.md."""
+        (tmp_path / "CLAUDE.md").write_text("# Claude\n")
+        (tmp_path / ".windsurfrules").write_text("# Rules\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / ".windsurfrules"
 
 
 class TestServiceBaseUrl:
