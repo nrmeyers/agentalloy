@@ -784,6 +784,58 @@ class TestAnthropicSystemPromptInjection:
         assert "Phase: intake" not in json.dumps(twice["system"])
         assert twice["system"][-1]["cache_control"] == {"type": "ephemeral"}
 
+    def test_breakpoint_mirrors_one_hour_ttl_used_in_messages(self) -> None:
+        """A 5m breakpoint in `system` ahead of a 1h one in `messages` is a hard 400.
+
+        Anthropic renders `tools -> system -> messages` and rejects ttl='1h' after
+        ttl='5m'. Claude Code caches its message history at 1h, so a default-ttl block
+        appended to `system` bricked every request through the proxy.
+        """
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [{"type": "text", "text": "You are helpful."}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Hello"},
+                        {
+                            "type": "text",
+                            "text": "history",
+                            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                        },
+                    ],
+                }
+            ],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        assert result["system"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    def test_breakpoint_ignores_one_hour_ttl_that_precedes_us(self) -> None:
+        """A 1h ttl in `tools` or an earlier `system` block must NOT be copied.
+
+        Those render before us, so mirroring them would put a 1h after their 5m
+        successors and make our block the violating one.
+        """
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "tools": [
+                {"name": "t", "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+            ],
+            "system": [
+                {
+                    "type": "text",
+                    "text": "You are helpful.",
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        assert result["system"][-1]["cache_control"] == {"type": "ephemeral"}
+
     def test_no_system_field_returns_none(self) -> None:
         payload: dict[str, Any] = {
             "model": "claude",
