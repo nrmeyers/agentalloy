@@ -203,10 +203,12 @@ class TestEvaluateSignalFreeFlow:
             r = asyncio.run(evaluate_signal(_req("task"), tmp_path, session_id="s1"))
         assert r.free_mode is False
 
-    def test_carrier_gate_holds_in_free_mode(self, tmp_path: Path) -> None:
+    def test_toolless_carrier_composes_in_free_mode(self, tmp_path: Path) -> None:
+        # Unified carrier gate: session_key presence is the sole carrier signal,
+        # so a tool-less request with a session id still composes on first entry.
         _write_phase_file(tmp_path, "build", free=True)
         r = _eval(_req("background ping", tools=False), tmp_path, session_id="s1")
-        assert r.should_compose is False and r.free_mode is True
+        assert r.should_compose is True and r.free_mode is True
 
     def test_once_per_session_cadence(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build", free=True)

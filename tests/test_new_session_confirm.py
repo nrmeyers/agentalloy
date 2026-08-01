@@ -15,7 +15,7 @@ from pathlib import Path
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.skill_loader import _read_phase  # pyright: ignore[reportPrivateUsage]
-from tests.support import seed_phase
+from tests.support import seed_announced, seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -33,11 +33,9 @@ def _set_phase(tmp: Path, phase: str) -> None:
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
-    """Record `(phase, keys)` as already-oriented — the `.agentalloy/announced`
-    format is `<phase>\\t<key1>,<key2>`. A session key NOT in `keys` is 'new'."""
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    (d / "announced").write_text(f"{phase}\t{','.join(keys)}")
+    """Record `(phase, keys)` as already-oriented in the store. A session key
+    NOT in `keys` is 'new'."""
+    seed_announced(tmp, phase, keys)
 
 
 def _ship_record(tmp: Path, slug: str = "some-feature") -> None:
@@ -91,13 +89,13 @@ async def test_precedence_single_directive_on_ship_with_record(tmp_path: Path):
     assert "confirm" in joined and "intake" in joined  # phase-confirm + reset-ask folded
 
 
-async def test_toolless_header_request_does_not_fire(tmp_path: Path):
-    # Carrier gate: a background tool-less header-keyed request must not fire or
-    # burn the confirm (orientation-carrier-request-race).
+async def test_toolless_header_request_still_fires(tmp_path: Path):
+    # Unified carrier gate: session_key presence is the sole carrier signal, so a
+    # tool-less header-keyed request from a new session still confirms.
     _set_phase(tmp_path, "build")
     _seed_announced(tmp_path, "build", ["other"])
     sig = await evaluate_signal(_req(tools=False), tmp_path, session_id="me")
-    assert not sig.confirm_directives
+    assert sig.confirm_directives, "a new session on a non-intake phase must confirm"
 
 
 async def test_new_session_confirm_does_not_write_phase(tmp_path: Path):

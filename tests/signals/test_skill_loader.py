@@ -22,7 +22,7 @@ from agentalloy.signals import skill_loader as sl
 from tests.code_index.conftest import (
     fixture_repo,  # noqa: F401, F811 — re-exported for fixture parameter use
 )
-from tests.support import seed_phase
+from tests.support import read_announced_raw, seed_announced, seed_phase
 
 # ---------------------------------------------------------------------------
 # AC-1: Differential test over signal-layer fixtures
@@ -146,12 +146,10 @@ class TestSessionScopedCadence:
     def test_two_sessions_both_get_orientation(self, fixture_repo: Path) -> None:
         """_read_announced_state returns both session keys for the same phase.
 
-        When two sessions are oriented to the same phase, the announced file
-        should contain both session keys.
+        When two sessions are oriented to the same phase, the announced store
+        row should contain both session keys.
         """
-        # Write the announced file with two sessions.
-        announced_file = fixture_repo / ".agentalloy" / "announced"
-        announced_file.write_text("spec\tsession-aaa,session-bbb\n", encoding="utf-8")
+        seed_announced(fixture_repo, "spec", ["session-aaa", "session-bbb"])
 
         phase, sessions = sl._read_announced_state(fixture_repo)
         assert phase == "spec"
@@ -167,7 +165,8 @@ class TestSessionScopedCadence:
     def test_announced_without_session_keys(self, fixture_repo: Path) -> None:
         """Writing announced without session keys produces legacy format."""
         sl._write_announced_atomic(fixture_repo, "spec")
-        content = (fixture_repo / ".agentalloy" / "announced").read_text()
+        content = read_announced_raw(fixture_repo)
+        assert content is not None
         # Legacy format: just the phase name, no tab.
         assert "\t" not in content
         assert content.strip() == "spec"

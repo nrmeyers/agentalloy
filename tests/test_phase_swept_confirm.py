@@ -21,7 +21,7 @@ from pathlib import Path
 
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
-from tests.support import seed_phase
+from tests.support import seed_announced, seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -37,9 +37,7 @@ def _set_phase(tmp: Path, phase: str, *, transitioned_by: str | None = None) -> 
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    (d / "announced").write_text(f"{phase}\t{','.join(keys)}")
+    seed_announced(tmp, phase, keys)
 
 
 def _ship_record(tmp: Path, slug: str = "some-feature") -> None:
@@ -108,10 +106,10 @@ async def test_swept_confirm_does_not_write_phase(tmp_path: Path):
     assert state.transitioned_by == "other-session"
 
 
-async def test_toolless_header_request_does_not_fire(tmp_path: Path):
-    # Same carrier gate as T1/T2 — a background tool-less header-keyed
-    # request must not fire or burn any marker.
+async def test_toolless_header_request_still_fires(tmp_path: Path):
+    # Unified carrier gate: session_key presence is the sole carrier signal, so a
+    # tool-less header-keyed request still confirms when swept to another phase.
     _set_phase(tmp_path, "design", transitioned_by="other-session")
     _seed_announced(tmp_path, "build", ["me"])
     sig = await evaluate_signal(_req(tools=False), tmp_path, session_id="me")
-    assert not sig.confirm_directives
+    assert sig.confirm_directives, "an existing session swept to a new phase must confirm"

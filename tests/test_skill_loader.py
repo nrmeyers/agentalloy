@@ -371,19 +371,19 @@ class TestRuntimeStateRelocation:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.api.proxy_context import encode_proj_token
-        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+        from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
 
         repo = tmp_path / "repo"
         repo.mkdir()
         state_root = tmp_path / "runtime-state"
         monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(state_root))
 
-        _write_announced_atomic(repo, "intake", ["s1"])
+        _write_composed_atomic(repo, "build/thing.md")
 
-        assert not (repo / ".agentalloy" / "announced").exists()
-        relocated = state_root / encode_proj_token(repo) / "announced"
+        assert not (repo / ".agentalloy" / "composed").exists()
+        relocated = state_root / encode_proj_token(repo) / "composed"
         assert relocated.exists()
-        assert _read_announced(repo) == "intake"
+        assert _read_composed(repo) == "build/thing.md"
 
     def test_cursor_stays_in_repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agentalloy.signals.skill_loader import _read_cursor, _write_cursor_atomic
@@ -400,33 +400,33 @@ class TestRuntimeStateRelocation:
     def test_legacy_in_repo_value_read_then_cleaned_on_write(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+        from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
 
         repo = tmp_path / "repo"
         (repo / ".agentalloy").mkdir(parents=True)
-        (repo / ".agentalloy" / "announced").write_text("spec\n")
+        (repo / ".agentalloy" / "composed").write_text("spec/thing.md\n")
         monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
 
         # Pre-relocation cadence survives the move...
-        assert _read_announced(repo) == "spec"
+        assert _read_composed(repo) == "spec/thing.md"
         # ...and the next write migrates it out and removes the repo copy.
-        _write_announced_atomic(repo, "build")
-        assert not (repo / ".agentalloy" / "announced").exists()
-        assert _read_announced(repo) == "build"
+        _write_composed_atomic(repo, "build/thing.md")
+        assert not (repo / ".agentalloy" / "composed").exists()
+        assert _read_composed(repo) == "build/thing.md"
 
     def test_unset_env_keeps_repo_local_behavior(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+        from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
 
         monkeypatch.delenv("AGENTALLOY_RUNTIME_STATE_DIR", raising=False)
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        _write_announced_atomic(repo, "intake")
+        _write_composed_atomic(repo, "intake/thing.md")
 
-        assert (repo / ".agentalloy" / "announced").exists()
-        assert _read_announced(repo) == "intake"
+        assert (repo / ".agentalloy" / "composed").exists()
+        assert _read_composed(repo) == "intake/thing.md"
 
     def test_clear_state_removes_both_locations(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

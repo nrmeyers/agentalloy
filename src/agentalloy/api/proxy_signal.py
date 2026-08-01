@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
-from agentalloy.api.proxy_session import SOURCE_FINGERPRINT, resolve_session_key
+from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
@@ -439,9 +439,8 @@ def _evaluate_free_flow(
       here (mirroring the banner-turn counter precedent — best-effort cadence, a
       one-off miss on an upstream error is harmless).
 
-    Carrier-gated like workflow mode: a tool-less background request on a
-    header-keyed session neither composes nor burns any cadence (fingerprint
-    sessions carry without tools — see the gate in ``evaluate_signal``).
+    Carrier-gated like workflow mode: only identifiable sessions (``session_key`` present)
+    trigger compose/cadence; anonymous requests are forwarded silently.
     """
     task = _extract_task_from_messages(request)
     repo = str(cwd)
@@ -451,7 +450,7 @@ def _evaluate_free_flow(
     # tool-bearing turns always carry; tool-less turns carry iff the session is
     # fingerprint-keyed (background requests can't share a fingerprint key, so
     # the marker-burn race is header-source-only).
-    if not (request.tools or session_source == SOURCE_FINGERPRINT):
+    if not session_key:
         return SignalResult(
             should_compose=False,
             phase=phase,
@@ -635,27 +634,20 @@ async def evaluate_signal(
     repo = str(cwd)
     session_key, session_source = resolve_session_key(request, session_id)
 
-    # Carrier-request gate. A harness reuses one session id across BOTH its main
-    # agent loop AND background micro-requests — Claude Code sends
-    # `x-claude-code-session-id` on its quota ping and its title / topic-detection
-    # haiku calls too. Those auxiliary requests ship no tool array. Because the
-    # one-shot orientation (Tier 1) and work-item cursor (Tier 2) markers are keyed
-    # on the session, whichever request reaches the proxy first burns them — and when
-    # a tool-less ping wins the race, the real conversation is recorded as oriented
-    # while the agent got nothing (the exact recurring "no orientation block" bug).
+    # Carrier-request gate: only identifiable sessions are carriers.
     #
-    # That race exists only for HEADER-source sessions, where main-loop and
-    # background requests share one key. A FINGERPRINT-source key is derived from
-    # the conversation's own opening message, so a background request (different
-    # content) maps to a different key and cannot burn the main conversation's
-    # orientation. Requiring tools there instead starves harnesses that never send
-    # a tool array — aider gets no injection at all (caught by the harness e2e
-    # matrix). So: a tool-bearing turn is always a carrier; a tool-less turn is a
-    # carrier iff its session is fingerprint-keyed. Residual exposure: the Tier 2
-    # cursor marker is per-repo, so a tool-less fingerprint request (e.g. aider's
-    # commit-message call) can consume a pending domain block — bounded, and
-    # strictly better than never composing for the harness at all.
-    is_carrier = bool(request.tools) or session_source == SOURCE_FINGERPRINT
+    # Every supported harness (Claude Code, Qwen Code, aider, hermes …) is either
+    # header-keyed or fingerprint-keyed, so ``session_key`` is the sole signal:
+    # if we have a session id, we're an identifiable agent session and compose/inject
+    # cadence apply. Anonymous requests (no session header, no user message for
+    # fingerprinting) are forwarded silently — they don't carry enough identity to
+    # justify burning the once-per-session orientation markers.
+    #
+    # The legacy ``request.tools`` carve-out and the ``SOURCE_FINGERPRINT``
+    # special-case are removed: the per-session announcement/confirmation logic
+    # already ensures orientation and cursors are burned exactly once per (phase,
+    # session), so there's no race between main-loop and background requests.
+    is_carrier = bool(session_key)
 
     # Resolve the active work-item contract ONCE here (reused for the banner's <slug>
     # resolution and the Tier 2 cursor cadence further down). `phase` is the in-memory

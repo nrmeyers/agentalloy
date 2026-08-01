@@ -28,6 +28,7 @@ from agentalloy.api.compose_models import ComposedResult, LatencyBreakdown
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
+from tests.support import read_announced_raw
 
 _SIGNAL = "agentalloy.api.proxy_router.evaluate_signal"
 
@@ -121,8 +122,7 @@ def _no_user_body(cwd: Path) -> dict[str, Any]:
 
 
 def _announced_file(tmp_path: Path) -> str | None:
-    f = tmp_path / ".agentalloy" / "announced"
-    return f.read_text().strip() if f.exists() else None
+    return read_announced_raw(tmp_path)
 
 
 # (a) announce marker written after a delivered Tier-1 block.

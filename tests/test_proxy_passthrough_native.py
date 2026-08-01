@@ -27,6 +27,7 @@ from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
+from tests.support import read_announced_raw
 
 _SIGNAL = "agentalloy.api.proxy_passthrough_router.evaluate_signal"
 
@@ -371,8 +372,7 @@ def test_tc13_lifecycle_off_skips_compose_per_repo(tmp_path: Path) -> None:
 
 
 def _announced_file(tmp_path: Path) -> str | None:
-    f = tmp_path / ".agentalloy" / "announced"
-    return f.read_text().strip() if f.exists() else None
+    return read_announced_raw(tmp_path)
 
 
 def test_announce_marker_committed_after_delivery(tmp_path: Path) -> None:
