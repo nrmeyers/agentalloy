@@ -84,6 +84,26 @@ class SignalResult:
     # workflow skill was loaded for the phase.
     workflow_skill_id: str | None = None
 
+    # The phase's operating instructions for the *system-prompt* leg. Same prose as
+    # `workflow_prose`, but with banner-like cadence: populated on EVERY carrier turn,
+    # not just the announce turn. The harness rebuilds each request from its own local
+    # history and never sees our mutation, so a once-per-(phase, session) system block
+    # survives exactly one request and the agent goes blind from turn 2 on. Re-sending
+    # it every turn is what keeps it in front of the model.
+    #
+    # Deliberately NOT marker-tracked, and it does NOT participate in `commit_outcome`
+    # — any cadence marker on this leg would reintroduce the deliver-once bug in a new
+    # place. The banner works for exactly this reason.
+    #
+    # Phase-pure by construction: `_load_workflow_skill_for_phase` is pure in
+    # (phase, cwd) — shipped pack prose plus an on-disk profile override, no task text
+    # and no retrieval — so the bytes are identical for every turn of a phase. That is
+    # a *precondition* for prompt caching, not proof of it: whether this block is
+    # actually cached depends on where the harness places its `cache_control`
+    # breakpoint relative to where we append. See the COST note at the injection site
+    # in `proxy_passthrough_router` — currently unmeasured.
+    workflow_system_prose: str | None = None
+
     # Tier 2 (per-work-item domain). `current_contract` is the absolute path to the
     # work-item contract whose domain skills should be composed (body → prompt,
     # domain_tags → BM25 steer). `announce_cursor` is True when the cursor changed
@@ -701,6 +721,11 @@ async def evaluate_signal(
     signal_keywords: list[str] = skill.get("signal_keywords") or []
     exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
 
+    # System-prompt leg of the workflow prose. Threaded onto EVERY carrier return below
+    # (quiet passthrough included) — unlike `workflow_prose`, which is announce-gated.
+    # See the field docstring on `SignalResult` for why the cadence differs.
+    workflow_system_prose = (skill.get("raw_prose") or None) if is_carrier else None
+
     # Per-turn banner (recency anchor). Built on a carrier turn that lands on the cadence
     # tick (`emit_banner`) under the active lifecycle mode + a valid phase; independent of
     # should_compose / announce / cursor, so it threads onto every return below — quiet
@@ -844,6 +869,10 @@ async def evaluate_signal(
             phase=phase,
             task=task,
             banner=banner,
+            # Quiet for composition, NOT quiet for the system leg: this is the return
+            # taken on every turn after the first of a phase, and it is precisely where
+            # the workflow instructions used to vanish.
+            workflow_system_prose=workflow_system_prose,
             gates_met=gates_met,
             gates_unmet=gates_unmet,
             qwen_calls=qwen_calls,
@@ -877,6 +906,7 @@ async def evaluate_signal(
         should_compose=True,
         announce=announce,
         workflow_prose=skill.get("raw_prose") if announce else None,
+        workflow_system_prose=workflow_system_prose,
         workflow_skill_id=(skill.get("skill_id") or None) if announce else None,
         current_contract=contract_id if announce_cursor else None,
         announce_cursor=announce_cursor,

@@ -558,6 +558,22 @@ def inject_into_openai_system_prompt(
     return new_messages
 
 
+# Anthropic allows at most 4 `cache_control` breakpoints per request; a 5th is a 400.
+# We never know how many the harness already spent, so we count and yield.
+_CACHE_BREAKPOINT_LIMIT = 4
+
+
+def _count_cache_breakpoints(value: Any) -> int:
+    """Count `cache_control` keys anywhere in *value* (dicts/lists, recursively)."""
+    if isinstance(value, dict):
+        return ("cache_control" in value) + sum(
+            _count_cache_breakpoints(v) for k, v in value.items() if k != "cache_control"
+        )
+    if isinstance(value, list):
+        return sum(_count_cache_breakpoints(v) for v in value)
+    return 0
+
+
 def inject_into_anthropic_system_prompt(
     payload: dict[str, Any], block: str, *, phase: str
 ) -> dict[str, Any] | None:
@@ -579,6 +595,13 @@ def inject_into_anthropic_system_prompt(
     end = ANTHROPIC_MARKER_END
 
     if isinstance(system, str):
+        # NOTE: a string `system` has nowhere to hang `cache_control` — that requires
+        # the block-list form. So on this branch the injected prose is uncached and
+        # billed at full input rate on every carrier turn. Left as-is deliberately:
+        # rewriting a harness's string system into a list changes the request shape for
+        # every harness, which is not something to do on an unmeasured hunch. If the
+        # live measurement shows Claude Code sending a string here, converting is the
+        # follow-up (it is valid API); if it sends a list, this branch is moot.
         if begin in system:
             return None
         stripped = _strip_workflow_block(system)
@@ -595,7 +618,25 @@ def inject_into_anthropic_system_prompt(
             if d is None or not _text_block_contains(d, _workflow_begin_any()):
                 blocks.append(b)
         new_block = _block_text(begin, block, end)
-        new_system = [*blocks, {"type": "text", "text": new_block}]
+        entry: dict[str, Any] = {"type": "text", "text": new_block}
+        # Make our block its own cache breakpoint, extending the cached prefix to
+        # include it. Without this it is appended AFTER the harness's last breakpoint
+        # and is therefore fresh input at 1.0x on every turn — and this leg fires every
+        # turn. The prose is phase-pure, so with a breakpoint here the bytes are stable
+        # across a phase and we pay one write per phase change instead.
+        #
+        # Counted against the post-strip blocks, not `payload`: a stale workflow block
+        # from an earlier phase (carrying last turn's breakpoint) was just removed, and
+        # counting it would make us yield to a breakpoint that no longer exists.
+        #
+        # Yielding rather than erroring when the harness already spent all 4: dropping
+        # the breakpoint costs tokens, exceeding the limit costs the whole request.
+        spent = _count_cache_breakpoints(blocks) + _count_cache_breakpoints(
+            {k: v for k, v in payload.items() if k != "system"}
+        )
+        if spent < _CACHE_BREAKPOINT_LIMIT:
+            entry["cache_control"] = {"type": "ephemeral"}
+        new_system = [*blocks, entry]
     else:
         return None
 

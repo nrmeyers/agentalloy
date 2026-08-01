@@ -8,6 +8,7 @@ phase-stamped marker helpers.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agentalloy.api.proxy_injection import (
@@ -717,6 +718,71 @@ class TestAnthropicSystemPromptInjection:
         assert isinstance(system, str)
         assert "Phase: intake" not in system
         assert "Phase: build" in system
+
+    def test_injected_block_is_its_own_cache_breakpoint(self) -> None:
+        """The appended block carries `cache_control`.
+
+        Without it the block lands after the harness's last breakpoint and is fresh
+        input at 1.0x on every carrier turn — and this leg fires every turn.
+        """
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [
+                {
+                    "type": "text",
+                    "text": "You are helpful.",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        assert result["system"][-1]["cache_control"] == {"type": "ephemeral"}
+        # The harness's own breakpoint is left exactly as it was.
+        assert result["system"][0] == payload["system"][0]
+
+    def test_breakpoint_yielded_when_harness_spent_all_four(self) -> None:
+        """At the 4-breakpoint ceiling we inject without one rather than 400 the request.
+
+        Losing the breakpoint costs tokens; exceeding the limit costs the whole call.
+        """
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [
+                {"type": "text", "text": f"blk{i}", "cache_control": {"type": "ephemeral"}}
+                for i in range(4)
+            ],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert result is not None
+        assert "Phase: intake" in result["system"][-1]["text"]
+        assert "cache_control" not in result["system"][-1]
+
+    def test_stale_workflow_breakpoint_does_not_count_against_limit(self) -> None:
+        """A phase transition strips our old block, freeing the breakpoint it held.
+
+        Counting the stripped block would make us yield to a breakpoint that no longer
+        exists, permanently dropping ours after the first phase change.
+        """
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [
+                {"type": "text", "text": f"blk{i}", "cache_control": {"type": "ephemeral"}}
+                for i in range(3)
+            ],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        once = inject_into_anthropic_system_prompt(payload, "Phase: intake", phase="intake")
+        assert once is not None
+        assert once["system"][-1]["cache_control"] == {"type": "ephemeral"}
+        # Now at 4 in-flight. A phase change removes ours, so ours fits again.
+        twice = inject_into_anthropic_system_prompt(once, "Phase: build", phase="build")
+        assert twice is not None
+        assert len(twice["system"]) == 4
+        assert "Phase: intake" not in json.dumps(twice["system"])
+        assert twice["system"][-1]["cache_control"] == {"type": "ephemeral"}
 
     def test_no_system_field_returns_none(self) -> None:
         payload: dict[str, Any] = {

@@ -234,13 +234,18 @@ async def _maybe_inject(
         _proxy_request_from_anthropic(payload), project_dir, embed_client, session_id
     )
 
-    # Two independent injections, both landing in the last user message:
-    #   1. the workflow/cursor block (gated on should_compose), and
-    #   2. the per-turn phase banner (signal.banner), which fires on EVERY carrier turn
-    #      even when no workflow block is composed.
+    # Three independent injections:
+    #   1. the domain/cursor block -> last user message (gated on should_compose),
+    #   2. the per-turn phase banner (signal.banner) -> last user message, on EVERY
+    #      carrier turn even when no block is composed, and
+    #   3. the workflow prose (signal.workflow_system_prose) -> top-level `system`,
+    #      also on every carrier turn.
+    # The split between 1 and 3 is retrieval-derived vs. not: 3 is phase-pure and so
+    # stays byte-identical across a phase (prompt-cache friendly at the front of the
+    # request), while 1 varies per turn and rides at the tail where churn is free.
     # The banner injects AFTER the workflow block so it is the freshest text. We track
-    # the latest payload across both and return it iff anything was injected (else None
-    # → the caller forwards the original verbatim).
+    # the latest payload across all three and return it iff anything was injected (else
+    # None → the caller forwards the original verbatim).
     current = payload
     outcome: InjectOutcome[dict[str, Any]] | None = None
 
@@ -263,16 +268,15 @@ async def _maybe_inject(
         before = current
 
         def _inject_anthropic(text: str) -> dict[str, Any] | None:
-            # Inject into the last user message and the system prompt
-            # (highest-compliance location) independently -- each leg has
-            # its own idempotency state, so one no-opping must not skip
-            # the other. EXCEPTION: if there is no user message at all,
-            # `inject_into_anthropic_messages` can never deliver the
-            # workflow block this turn or any later turn this phase/session
-            # (the announced marker would be burned on commit, permanently
-            # forfeiting that delivery). Preserve the original all-or-nothing
-            # behavior in that case rather than counting a system-only
-            # delivery as sufficient.
+            # User-message leg only. The workflow prose that used to ride along
+            # here now has its own system-prompt leg (step 3) on a per-turn
+            # cadence, so this carries just the turn-varying half: advisories,
+            # confirms, Tier 1 system fragments, Tier 2 domain, decision push.
+            #
+            # Still all-or-nothing on a missing user message: with nothing to
+            # inject into, this block can never be delivered this turn or any
+            # later turn this phase/session (the announced marker would be burned
+            # on commit, permanently forfeiting the delivery).
             raw_messages = before.get("messages")
             has_user_message = isinstance(raw_messages, list) and any(
                 isinstance(m, dict) and m.get("role") == "user" for m in raw_messages
@@ -280,21 +284,15 @@ async def _maybe_inject(
             if not has_user_message:
                 return None
             injected = inject_into_anthropic_messages(before, text, phase=phase)
-            user_changed = injected is not before
-            sys_injected = inject_into_anthropic_system_prompt(
-                injected if user_changed else before, text, phase=phase
-            )
-            if sys_injected is not None:
-                return sys_injected
-            if user_changed:
-                return injected
-            return None
+            return injected if injected is not before else None
 
         outcome = await apply_signal(
             signal=signal,
             orchestrator=orchestrator,
             inject=_inject_anthropic,
             delivered=lambda out: out is not before,
+            # Workflow prose is delivered by the system-prompt leg below, not here.
+            use_message_text=True,
         )
         if outcome.injected is not None:
             current = outcome.injected
@@ -309,6 +307,34 @@ async def _maybe_inject(
         )
         if bannered is not current:
             current = bannered
+
+    # 3. Workflow prose -> top-level `system`, on EVERY carrier turn.
+    #    The harness rebuilds each request from its own local history and never sees
+    #    our mutation, so a once-per-(phase, session) system block survives exactly one
+    #    request: the agent read the intake instructions on turn 1 and was guessing by
+    #    turn 3. Like the banner, this leg carries no cadence marker and takes no part
+    #    in `commit_outcome` — a marker here would recreate the same deliver-once bug.
+    #
+    #    COST: intended to be ~one cache write per phase change, NOT measured yet.
+    #    The prose is phase-pure (see `SignalResult.workflow_system_prose`) so its bytes
+    #    are stable across a phase, and `inject_into_anthropic_system_prompt` now makes
+    #    the appended block its own `cache_control` breakpoint so that stability is
+    #    actually redeemable — otherwise the block sits past the harness's last
+    #    breakpoint and is fresh input at 1.0x on every turn.
+    #
+    #    Two known holes, both of which degrade to "uncached", never to an error:
+    #      - a string-valued `system` cannot carry a breakpoint (see that branch),
+    #      - the harness may already have spent all 4 breakpoints, in which case we
+    #        yield and take the token hit.
+    #    Confirm with two same-phase turns on the live proxy: `usage.input_tokens`
+    #    should NOT exceed a no-block baseline by the block size, and
+    #    `cache_read_input_tokens` should grow to include it.
+    if signal.workflow_system_prose and signal.phase is not None:
+        sys_injected = inject_into_anthropic_system_prompt(
+            current, signal.workflow_system_prose, phase=signal.phase
+        )
+        if sys_injected is not None:
+            current = sys_injected
 
     injected_payload = current if current is not payload else None
 
