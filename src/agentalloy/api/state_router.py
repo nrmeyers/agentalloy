@@ -482,7 +482,14 @@ async def list_artifacts(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ArtifactListResponse:
     rows = await asyncio.to_thread(store.list_artifacts, phase, slug=slug, name_glob=name_glob)
-    return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in rows])
+    # Convert datetime.updated_at to ISO string for pydantic validation
+    cleaned = []
+    for row in rows:
+        ua = row.get("updated_at")
+        if hasattr(ua, "isoformat"):
+            row = {**row, "updated_at": ua.isoformat()}
+        cleaned.append(row)
+    return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in cleaned])
 
 
 @router.get(

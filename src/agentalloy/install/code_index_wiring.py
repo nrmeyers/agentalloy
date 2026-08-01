@@ -50,6 +50,15 @@ _CANDIDATE_TARGETS: tuple[str, ...] = (
     ".clinerules",
     "CLAUDE.md",
     "AGENTS.md",
+    # Windsurf — dedicated file (when .windsurf/ exists), shared fallback
+    ".windsurf/rules/agentalloy.md",
+    ".windsurfrules",
+    # GitHub Copilot
+    ".github/copilot-instructions.md",
+    # Aider
+    ".agentalloy-aider-instructions.md",
+    # OpenCode
+    ".opencode/system-prompt.md",
 )
 
 _DEDICATED_TARGETS = frozenset(
@@ -86,7 +95,20 @@ def detect_target(root: Path, harness: str | None = None) -> Path | None:
     """
     if (root / ".cursor").is_dir() or (root / ".cursorrules").exists():
         return root / ".cursor/rules/agentalloy-code-index.mdc"
-    for rel in ("GEMINI.md", ".clinerules", "CLAUDE.md", "AGENTS.md"):
+    # Windsurf — dedicated file takes priority over shared fallback
+    if (root / ".windsurf").is_dir():
+        return root / ".windsurf/rules/agentalloy.md"
+    # Shared targets (in detection priority order)
+    for rel in (
+        "GEMINI.md",
+        ".clinerules",
+        ".windsurfrules",
+        ".github/copilot-instructions.md",
+        ".agentalloy-aider-instructions.md",
+        ".opencode/system-prompt.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+    ):
         if (root / rel).exists():
             return root / rel
     # Only default to CLAUDE.md when the harness is claude-code (or unknown).
