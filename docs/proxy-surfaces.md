@@ -26,9 +26,43 @@ The proxy exposes inbound HTTP surfaces in `src/agentalloy/api/`. There are
 
 | Surface | Endpoint | Router | Signal layer | Injection point | Markers |
 |---|---|---|---|---|---|
-| **Passthrough** | `POST /proj/{token}/v1/messages` | `proxy_passthrough_router.py` | yes | trailing **user** message | yes (announce/cursor) |
-| **OpenAI** | `POST /v1/chat/completions` | `proxy_router.py` | yes | **system** message | yes (announce/cursor — parity achieved Phase 2; both surfaces share the `apply_signal` seam) |
-| **Responses** | `POST /proj/{token}/v1/responses` | `proxy_responses_router.py` | yes | last user **input item** (`instructions` untouched) | yes (same marker families) |
+| **Passthrough** | `POST /proj/{token}/v1/messages` | `proxy_passthrough_router.py` | yes | trailing **user** message + `system` | yes (announce/cursor) |
+| **OpenAI** | `POST /v1/chat/completions` | `proxy_router.py` | yes | last **user** message + **system** message | yes (announce/cursor — parity achieved Phase 2; both surfaces share the `apply_signal` seam) |
+| **Responses** | `POST /proj/{token}/v1/responses` | `proxy_responses_router.py` | yes | last user **input item** + top-level `instructions` | yes (same marker families) |
+
+### The three-leg model (shared across all three surfaces)
+
+Every surface delivers the same three independent legs, in this order:
+
+| leg | content | target | cadence marker | gate |
+|---|---|---|---|---|
+| 1 | retrieval-derived (advisories, confirm, Tier 1/2, decision push) | last user message | `commit_outcome` | `should_compose` |
+| 2 | per-turn banner | last user message | none | every carrier turn |
+| 3 | SDD workflow prose (`SignalResult.workflow_system_prose`) | system leg | none | every carrier turn |
+
+The "system leg" is the Anthropic `system` field, the Chat Completions `system`
+message, or the Responses top-level `instructions` — whichever the surface owns.
+
+Invariants that hold everywhere:
+
+- `composed` telemetry flips for **leg 1 only**. Legs 2 and 3 are recency and
+  compliance anchors, not compositions.
+- Leg 1's markers are committed only after a confirmed, non-empty injection, so
+  a degraded compose never burns the announce/cursor cadence.
+- **Legs 2 and 3 commit nothing at all.** A cadence marker on leg 3 would
+  recreate the bug #499 fixed: harnesses rebuild every request from their own
+  local history and never observe proxy mutations, so a "delivered once" record
+  would silently suppress a leg that must fire every turn. Invisible on turn 1 —
+  only a two-turn test catches it.
+- The system leg is byte-identical **within a phase**, changing only on a phase
+  transition, when leg 3 strips the stale phase-stamped block and writes the new
+  one.
+- Leg 3 runs last and is failure-isolated: it writes a different message/field
+  than the banner, so a fault there cannot cost legs 1 or 2.
+- **Cache breakpoints and ttl mirroring are Anthropic-only.** `cache_control`,
+  `_CACHE_BREAKPOINT_LIMIT`, and `_forward_ttl` exist solely on the passthrough
+  path; both OpenAI wires cache prefixes implicitly with no knob, and none of
+  those keys may appear in an OpenAI upstream payload.
 
 Claude Code wires to the passthrough (`ANTHROPIC_BASE_URL=…/proj/<token>`). OpenAI-format
 harnesses (aider, cline, continue, opencode, openclaw, copilot-cli, …) wire to
@@ -194,8 +228,8 @@ Phase-2 shared seam so they run on passthrough **and** OpenAI.
   /sdd-fast unlocked; `docs/**` + `.agentalloy/**` always allowed) + optional pack
   `write_gate:`/`banner:` overrides.
 - **Marker composition:** three independent families in the trailing user message (workflow / banner
-  / scold), each strip-replaced only within its own family; none touch the top-level `system` field
-  (prompt-cache invariant preserved).
+  / scold), each strip-replaced only within its own family. The system leg carries its own
+  phase-stamped workflow block (leg 3 above) and is byte-identical within a phase.
 - **Pack changes require a `pack.yaml` version bump + re-ingest** (`test_pack_version_bump_guard.py`);
   loaders fall back to `_DEFAULT_WRITE_GATES` + default banner so the features work pre-bump.
 

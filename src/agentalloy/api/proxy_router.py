@@ -515,13 +515,24 @@ async def proxy_chat_completions(
 
     # --- Step 4: Compose + inject (if signal matched) ---
     # Same `evaluate_signal → compose → inject → commit_markers` cycle as the
-    # Anthropic passthrough, via the shared `apply_signal` seam. Injection lands in
-    # the LAST user message (the system block stays byte-identical for prompt-cache
-    # safety); markers are committed only after a confirmed, non-empty injection, so
-    # a degraded compose never burns the announce/cursor cadence.
-    # `current` tracks the latest request across two independent injections (workflow
-    # block, then the per-turn banner). `composed` flips ONLY for the workflow block —
-    # the banner is a recency anchor and must not register as a composition in telemetry.
+    # Anthropic passthrough, via the shared `apply_signal` seam. Three independent
+    # legs, in the order they run; `current` threads the request through all three:
+    #
+    #   leg | content                          | target            | cadence          | gate
+    #   ----|----------------------------------|-------------------|------------------|--------------
+    #    1  | retrieval-derived compose output | last user message | commit_outcome   | should_compose
+    #    2  | per-turn banner                  | last user message | none             | every carrier turn
+    #    3  | SDD workflow prose               | system message    | none             | every carrier turn
+    #
+    # `composed` flips ONLY for leg 1 — legs 2 and 3 are recency/compliance anchors,
+    # not compositions, and must not register as one in telemetry. Leg 1's markers are
+    # committed only after a confirmed, non-empty injection, so a degraded compose never
+    # burns the announce/cursor cadence; legs 2 and 3 commit nothing at all (a cadence
+    # marker on leg 3 would recreate the bug #499 fixed — the harness rebuilds every
+    # request from its own local history and never observes proxy mutations, so a
+    # "delivered once" record would suppress a leg that must fire every turn).
+    # The system message is therefore byte-identical WITHIN a phase, changing only on a
+    # phase transition, when leg 3 strips the stale block and writes the new one.
     current = request
     modified_request = request
     compose_telemetry: ProxyComposeTelemetry | None = None
@@ -541,29 +552,19 @@ async def proxy_chat_completions(
             before = current
 
             def _inject_openai(text: str) -> ProxyRequest | None:
-                # Inject into the last user message and the system prompt
-                # (highest-compliance location) independently -- each leg has
-                # its own idempotency state, so one no-opping must not skip
-                # the other. Phase-stamped markers make both idempotent
-                # within a phase; stale blocks are replaced on phase
-                # transition. EXCEPTION: if there is no user message at
-                # all, the workflow leg can never deliver this turn or any
-                # later turn this phase/session (the announced marker would
-                # be burned on commit, permanently forfeiting that
-                # delivery). Preserve the original all-or-nothing behavior
-                # rather than counting a system-only delivery as sufficient.
+                # Leg 1 only: the retrieval-derived block goes to the last user
+                # message. The system message belongs to leg 3 below, which carries
+                # different content (the phase prose) and a different cadence.
+                # With no user message there is nowhere to deliver, and returning
+                # None keeps the announced marker unburned -- otherwise this turn's
+                # commit would permanently forfeit the delivery for the rest of the
+                # phase/session.
                 if not any(m.role == "user" for m in before.messages):
                     return None
                 new_msgs = inject_into_openai_messages(before.messages, text, phase=phase)
-                user_changed = new_msgs is not None
-                sys_msgs = inject_into_openai_system_prompt(
-                    new_msgs if user_changed else before.messages, text, phase=phase
-                )
-                system_changed = sys_msgs is not None
-                if not user_changed and not system_changed:
+                if new_msgs is None:
                     return None
-                result_msgs = sys_msgs if system_changed else new_msgs
-                return before.model_copy(update={"messages": result_msgs})
+                return before.model_copy(update={"messages": new_msgs})
 
             inject_outcome = await apply_signal(
                 signal=signal_result,
@@ -601,6 +602,29 @@ async def proxy_chat_completions(
                 current = current.model_copy(update={"messages": new_msgs})
         except Exception:
             logger.warning("Banner injection failed -- skipping banner", exc_info=True)
+
+    # Leg 3: SDD workflow prose onto the system message (highest-compliance
+    # location). Like the banner it runs on every carrier turn -- outside the
+    # compose guard, outside apply_signal -- and commits no cadence marker, so it
+    # survives the harness rebuilding its history from scratch each turn. Ordered
+    # last: it writes a different message than the banner, so a failure here cannot
+    # cost the banner. Must NOT flip `composed`. No system message in the request is
+    # a no-op (the helper deliberately does not create one -- the harness owns the
+    # message array); the prose is a compliance improvement, not a correctness
+    # dependency, and legs 1 and 2 still land on the user message.
+    if (
+        signal_result is not None
+        and signal_result.workflow_system_prose
+        and signal_result.phase is not None
+    ):
+        try:
+            sys_msgs = inject_into_openai_system_prompt(
+                current.messages, signal_result.workflow_system_prose, phase=signal_result.phase
+            )
+            if sys_msgs is not None:
+                current = current.model_copy(update={"messages": sys_msgs})
+        except Exception:
+            logger.warning("Workflow prose injection failed -- skipping", exc_info=True)
 
     modified_request = current
 

@@ -2,8 +2,9 @@
 
 Tests the user-message injectors for both proxy surfaces:
 ``inject_into_anthropic_messages`` (raw payload dict) and
-``inject_into_openai_messages`` (typed list[ProxyMessage]), plus the shared
-phase-stamped marker helpers.
+``inject_into_openai_messages`` (typed list[ProxyMessage]), plus the system-leg
+injectors that carry the SDD workflow prose (``inject_into_openai_system_prompt``,
+``inject_into_responses_instructions``) and the shared phase-stamped marker helpers.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from agentalloy.api.proxy_injection import (
     inject_into_anthropic_system_prompt,
     inject_into_openai_messages,
     inject_into_openai_system_prompt,
+    inject_into_responses_instructions,
 )
 from agentalloy.api.proxy_models import ProxyMessage
 
@@ -855,3 +857,97 @@ class TestAnthropicSystemPromptInjection:
         system = result["system"]
         assert isinstance(system, str)
         assert "Original system text" in system
+
+
+class TestResponsesInstructionsInjection:
+    """Tests for inject_into_responses_instructions (leg 3, Responses surface).
+
+    Mirrors TestOpenAISystemPromptInjection, but this helper follows its own
+    surface's identity-equals-delivered convention: a NEW dict on injection, the
+    SAME object on every no-op.
+    """
+
+    @staticmethod
+    def _payload(**over: Any) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "model": "gpt-5",
+            "instructions": "You are codex.",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Hello"}],
+                }
+            ],
+        }
+        base.update(over)
+        return base
+
+    def test_appends_to_existing_instructions(self) -> None:
+        payload = self._payload()
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
+
+        assert result is not payload
+        instructions = result["instructions"]
+        assert isinstance(instructions, str)
+        assert "You are codex." in instructions
+        assert ANTHRO_BLOCK in instructions
+        assert instructions.count(anthropic_marker_begin("design")) == 1
+        assert instructions.count(ANTHROPIC_MARKER_END) == 1
+        # Input is leg 1/2 territory and must not be disturbed.
+        assert result["input"] == payload["input"]
+        assert payload["instructions"] == "You are codex."
+
+    def test_idempotent_within_a_phase(self) -> None:
+        payload = self._payload()
+        once = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
+        twice = inject_into_responses_instructions(once, ANTHRO_BLOCK, phase="design")
+
+        assert twice is once  # same object -> no second delivery
+        assert once["instructions"].count(anthropic_marker_begin("design")) == 1
+
+    def test_stale_phase_block_replaced_on_transition(self) -> None:
+        spec_block = f"{anthropic_marker_begin('spec')}\nspec prose\n{ANTHROPIC_MARKER_END}"
+        payload = self._payload(instructions=f"You are codex.\n\n{spec_block}")
+
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
+
+        instructions = result["instructions"]
+        assert result is not payload
+        assert anthropic_marker_begin("spec") not in instructions
+        assert "spec prose" not in instructions
+        assert instructions.count(anthropic_marker_begin("design")) == 1
+        assert "You are codex." in instructions
+
+    def test_creates_instructions_when_absent(self) -> None:
+        payload = self._payload()
+        del payload["instructions"]
+
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="build")
+
+        assert result is not payload
+        assert result["instructions"] == (
+            f"{anthropic_marker_begin('build')}\n{ANTHRO_BLOCK}\n{ANTHROPIC_MARKER_END}"
+        )
+        assert "instructions" not in payload
+
+    def test_creates_instructions_when_none_or_empty(self) -> None:
+        for empty in (None, ""):
+            payload = self._payload(instructions=empty)
+            result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="build")
+            assert result is not payload
+            instructions = result["instructions"]
+            assert isinstance(instructions, str)
+            assert ANTHRO_BLOCK in instructions
+            assert instructions.count(anthropic_marker_begin("build")) == 1
+
+    def test_non_str_instructions_left_alone(self) -> None:
+        for odd in ([{"text": "x"}], 42, {"a": 1}, True):
+            payload = self._payload(instructions=odd)
+            result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="build")
+            assert result is payload  # same object -> not delivered, and no raise
+
+    def test_input_never_touched(self) -> None:
+        payload = self._payload()
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="qa")
+        assert result["input"] is payload["input"]

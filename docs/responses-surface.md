@@ -45,14 +45,37 @@ user turn is `{"type": "message", "role": "user", "content": [{"type":
 "input_text", "text": …}]}`. `inject_into_responses_input` mirrors
 `inject_into_anthropic_messages`:
 
-- inject into the LAST user message item (the top-level `instructions` field
-  is codex's cached system prompt — byte-identical, never touched),
+- inject into the LAST user message item,
 - same marker families (phase-stamped workflow block, once-per-session
   system block, strip-and-replace banner),
 - string `input` gets the block appended as text; item-list `input` gets an
   appended `input_text` block on the last user message item,
 - returns the SAME object on every no-op (identity = delivered, as on the
   Anthropic path).
+
+### The `instructions` leg
+
+`instructions` is codex's cached system prompt, and it is also where the SDD
+phase prose goes — the highest-compliance location on this wire.
+`inject_into_responses_instructions` is the sibling of
+`inject_into_openai_system_prompt`: same phase-stamped workflow markers, same
+idempotence, same strip-on-transition, but the target is an optional top-level
+`str` rather than a message in an array. Absent / `None` / `""` is a real
+injection (setting a scalar the harness left unset disturbs nothing, unlike
+synthesizing a message into an array the harness owns); a non-`str` value is a
+no-op. Identity-equals-delivered, as everywhere else on this surface.
+
+This leg fires on **every carrier turn** — outside the `should_compose` guard,
+outside `apply_signal` — and commits **no cadence marker**. A "delivered once"
+record here would recreate the bug #499 fixed: codex rebuilds each request from
+its own local history and never observes proxy mutations, so the prose would
+vanish from turn 2 on. That failure mode is invisible on turn 1; the two-turn
+tests in `tests/test_proxy_responses_native.py` are the ones that catch it.
+
+`instructions` is therefore byte-identical **within a phase**, changing only on
+a phase transition. There is no `cache_control`/ttl analog on this wire —
+OpenAI caches prefixes implicitly with no knob, so the Anthropic breakpoint and
+ttl-mirroring machinery has nothing to port.
 
 Signal-layer mapping (`_proxy_request_from_responses`): input message items →
 `ProxyMessage` list (`input_text` blocks → text), top-level `tools` array →
