@@ -27,6 +27,7 @@ from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
+from tests.harness_e2e.upstream_stub import start_upstream_stub
 from tests.support import read_announced_raw
 
 _SIGNAL = "agentalloy.api.proxy_passthrough_router.evaluate_signal"
@@ -726,3 +727,89 @@ def test_tc_compose_exception_still_forwards_no_row(tmp_path: Path) -> None:
         assert resp.status_code == 200
         assert json.loads(captured["body"]) == _anthropic_body()
         assert store.query_traces(limit=10) == []
+
+
+# --------------------------------------------------------------------------- #
+# #505/#504 — per-repo .agentalloy/upstream must actually be reached, not just
+# echoed by `add`. Uses a REAL listening upstream (the harness matrix's stub)
+# rather than a MockTransport, so these assert egress at the socket level:
+# the request either lands on the adopted upstream or it doesn't.
+# --------------------------------------------------------------------------- #
+
+
+def _write_upstream(root: Path, text: str) -> None:
+    (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
+    (root / ".agentalloy" / "upstream").write_text(text)
+
+
+def test_per_repo_upstream_wins_over_lifespan_default(tmp_path: Path) -> None:
+    """A .agentalloy/upstream captured by `agentalloy add` must be the upstream
+    this surface actually forwards to -- not the process-wide default the
+    lifespan-scoped client was built from. This is the Anthropic-native sibling
+    of #505 (the Responses surface), called out explicitly in the issue as a
+    second affected surface with the same defect shape."""
+    stub = start_upstream_stub()
+    try:
+        _write_upstream(tmp_path, f"url: {stub.base_url}/v1\nmodel: claude-local\n")
+        wrong_default = AnthropicPassthroughClient(
+            upstream_base_url="http://should-not-be-reached.invalid"
+        )
+        app = create_app(use_default_lifespan=False)
+        app.state.anthropic_passthrough_client = wrong_default
+        app.state.embed_client = MagicMock()
+        app.state.telemetry_store = MagicMock()
+        with (
+            patch(_SIGNAL, return_value=SignalResult(should_compose=False)),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                f"/proj/{_token(tmp_path)}/v1/messages",
+                json=_anthropic_body(),
+                headers={"authorization": "Bearer caller-key"},
+            )
+        assert resp.status_code == 200
+        assert len(stub.captured) == 1
+        assert stub.captured[0].path == "/v1/messages"
+        assert stub.captured[0].payload["messages"] == _anthropic_body()["messages"]
+    finally:
+        stub.stop()
+
+
+def test_no_credential_injected_when_key_env_present(tmp_path: Path) -> None:
+    """The passthrough surfaces are auth-transparent: a per-repo key_env must
+    change only the destination, never inject a credential. The caller sent no
+    authorization header here, and the adopted upstream must not receive one
+    (proving key_env plays no role on this surface)."""
+    stub = start_upstream_stub()
+    try:
+        _write_upstream(
+            tmp_path,
+            f"url: {stub.base_url}/v1\nmodel: claude-local\nkey_env: SOME_UNSET_UPSTREAM_KEY\n",
+        )
+        app = create_app(use_default_lifespan=False)
+        app.state.anthropic_passthrough_client = None
+        app.state.embed_client = MagicMock()
+        app.state.telemetry_store = MagicMock()
+        with (
+            patch(_SIGNAL, return_value=SignalResult(should_compose=False)),
+            TestClient(app) as client,
+        ):
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 200
+        assert len(stub.captured) == 1
+    finally:
+        stub.stop()
+
+
+def test_falls_back_to_default_when_no_per_repo_upstream(tmp_path: Path) -> None:
+    """No .agentalloy/upstream in this repo -> the lifespan-scoped default is
+    still used (the fix must not break the no-override path)."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    with (
+        patch(_SIGNAL, return_value=SignalResult(should_compose=False)),
+        TestClient(app) as client,
+    ):
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    assert json.loads(captured["body"]) == _anthropic_body()

@@ -23,6 +23,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import (
     InjectOutcome,
     ProxyComposeTelemetry,
@@ -190,6 +191,68 @@ def _resolve_upstream(
     if default_client is not None:
         return default_client, "/v1/chat/completions", default_model
     return None
+
+
+def _passthrough_base_url(url: str) -> str:
+    """Strip a trailing ``/v1`` from a captured upstream URL for the passthrough
+    surfaces.
+
+    ``.agentalloy/upstream`` is documented (and written by ``agentalloy add``)
+    with a ``/v1`` suffix — the chat-completions shape, e.g.
+    ``http://host:8080/v1``. The passthrough surfaces' ``_UPSTREAM_PATH``
+    already carries the versioned path (``/v1/messages`` or ``/v1/responses``),
+    so verbatim reuse of the captured URL as the passthrough base would double
+    it to ``/v1/v1/messages``. Only a trailing ``/v1`` is stripped — any other
+    shape is passed through unchanged.
+    """
+    return url.removesuffix("/v1")
+
+
+def resolve_passthrough_client(
+    app: Any,
+    cwd: Path,
+    default_client: AnthropicPassthroughClient | None,
+    cache_attr: str,
+) -> AnthropicPassthroughClient | None:
+    """Resolve the ``AnthropicPassthroughClient`` for this request (Anthropic
+    Messages and OpenAI Responses passthrough surfaces).
+
+    Mirrors ``_resolve_upstream``'s per-repo-wins precedence but returns a
+    cached client rather than an ``(httpx.AsyncClient, url, model)`` tuple —
+    the two client shapes differ materially (relative-URL posting with a
+    pre-baked bearer vs. verbatim path-forwarding with the caller's own
+    headers), so this is kept as its own small function rather than unified
+    with ``_resolve_upstream``.
+
+    A per-repo ``.agentalloy/upstream`` (captured by ``agentalloy add``) wins:
+    the proxy adopts the harness's own upstream as the passthrough base URL
+    (its ``/v1`` suffix stripped — see ``_passthrough_base_url``). Otherwise
+    falls back to ``default_client`` (the lifespan-scoped client built from
+    global settings). Returns ``None`` only when neither resolves.
+
+    ``Upstream.key_env`` plays NO role here: the passthrough surfaces are
+    auth-transparent by design, forwarding the caller's own ``authorization``/
+    ``x-api-key`` header verbatim. A per-repo override changes only the
+    destination and must never inject a credential of its own.
+
+    ``cache_attr`` is the ``app.state`` attribute name the per-base-url client
+    cache lives on (e.g. ``"anthropic_passthrough_client_cache"``) — kept
+    distinct per surface so the Anthropic and Responses passthroughs never
+    share a cache dict.
+    """
+    up = read_upstream(cwd)
+    if up is None:
+        return default_client
+    base_url = _passthrough_base_url(up.url)
+    cache: dict[str, AnthropicPassthroughClient] | None = getattr(app.state, cache_attr, None)
+    if cache is None:
+        cache = {}
+        setattr(app.state, cache_attr, cache)
+    client = cache.get(base_url)
+    if client is None:
+        client = AnthropicPassthroughClient(upstream_base_url=base_url)
+        cache[base_url] = client
+    return client
 
 
 # ---------------------------------------------------------------------------
