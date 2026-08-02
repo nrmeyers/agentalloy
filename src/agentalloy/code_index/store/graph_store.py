@@ -30,8 +30,12 @@ from agentalloy.storage.protocols import CallSite, CodeEdge, CodeSymbol, Decisio
 logger = logging.getLogger(__name__)
 
 # Idempotent CREATE IF NOT EXISTS; run once per writer open. The graph is
-# derived data (rebuilt from source, never migrated) so there is no ALTER
-# ladder — a schema change means "reindex".
+# mostly derived data (rebuilt from source on reindex), but ``edges`` carries
+# the GOVERNS overlay (#527 C provenance columns below) which is NOT purely
+# derived from a fresh parse — it is accumulated across incremental runs. A
+# column added to ``edges`` therefore needs a real ALTER TABLE against
+# existing databases, not just the CREATE TABLE IF NOT EXISTS above (which is
+# a no-op once the table exists). See _EDGE_COLUMN_MIGRATIONS below.
 _SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS symbols (
   qualified_name TEXT PRIMARY KEY,
@@ -61,7 +65,9 @@ CREATE TABLE IF NOT EXISTS edges (
   col_start BIGINT DEFAULT 0,
   resolved_via TEXT DEFAULT 'unknown',
   confidence DOUBLE DEFAULT 1.0,
-  new_target TEXT DEFAULT ''
+  new_target TEXT DEFAULT '',
+  span TEXT,
+  resolution_tier BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(kind, src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(kind, dst);
@@ -79,6 +85,15 @@ CREATE TABLE IF NOT EXISTS repo_meta (
 );
 """
 
+# Additive column migrations for ``edges`` tables created before these
+# columns existed in _SCHEMA_DDL (CREATE TABLE IF NOT EXISTS never alters an
+# existing table). DuckDB's ``ADD COLUMN IF NOT EXISTS`` is itself idempotent,
+# so this ladder is safe to re-run on every writer open.
+_EDGE_COLUMN_MIGRATIONS: tuple[str, ...] = (
+    "ALTER TABLE edges ADD COLUMN IF NOT EXISTS span TEXT",
+    "ALTER TABLE edges ADD COLUMN IF NOT EXISTS resolution_tier BIGINT",
+)
+
 _SYMBOL_COLS = (
     "qualified_name, kind, name, file_path, start_line, end_line, docstring, decorators, "
     "is_exported, is_async, is_generator, source_code, contextual_prefix, content_hash"
@@ -86,9 +101,10 @@ _SYMBOL_COLS = (
 _SYMBOL_PLACEHOLDERS = ", ".join("?" for _ in range(14))
 
 _EDGE_COLS = (
-    "src, dst, kind, file_path, line_start, col_start, resolved_via, confidence, new_target"
+    "src, dst, kind, file_path, line_start, col_start, resolved_via, confidence, new_target, "
+    "span, resolution_tier"
 )
-_EDGE_PLACEHOLDERS = ", ".join("?" for _ in range(9))
+_EDGE_PLACEHOLDERS = ", ".join("?" for _ in range(11))
 
 
 def _symbol_params(s: CodeSymbol) -> tuple[object, ...]:
@@ -121,6 +137,8 @@ def _edge_params(e: CodeEdge) -> tuple[object, ...]:
         e.resolved_via,
         e.confidence,
         e.new_target,
+        e.span,
+        e.resolution_tier,
     )
 
 
@@ -166,6 +184,8 @@ class DuckDBCodeGraphStore:
         if self._read_only:
             raise RuntimeError("cannot migrate a read-only CodeGraphStore")
         self.conn.execute(_SCHEMA_DDL)
+        for ddl in _EDGE_COLUMN_MIGRATIONS:
+            self.conn.execute(ddl)
         logger.debug("graph.duck schema ensured at %s", self._db_path)
 
     # -- writes ------------------------------------------------------------------
@@ -224,8 +244,18 @@ class DuckDBCodeGraphStore:
         return len(rows)
 
     def delete_for_files(self, file_paths: Sequence[str]) -> int:
-        """Drop all symbols AND edges recorded against the given files
-        (incremental-reindex support). Returns total rows removed."""
+        """Drop all symbols AND non-GOVERNS edges recorded against the given
+        files (incremental-reindex support). Returns total rows removed.
+
+        ``GOVERNS`` edges are excluded from the edge DELETE (#526/#527):
+        they are an overlay owned by the decision phase (``_index_decisions``
+        / :meth:`delete_govern_edges_for_doc`), keyed by decision-doc
+        ``file_path`` rather than the code file a CALLS/IMPORTS/... edge
+        belongs to. Without this exclusion, a decision doc landing in
+        ``file_paths`` (e.g. because it dropped out of the incremental diff)
+        had its GOVERNS edges wholesale-deleted here, before the decision
+        phase ever runs — the destructive path this method exists to close.
+        """
         paths = list(file_paths)
         if not paths:
             return 0
@@ -236,10 +266,15 @@ class DuckDBCodeGraphStore:
                 f"SELECT count(*) FROM symbols WHERE file_path IN ({placeholders})", paths
             )
             n_edge = self._scalar(
-                f"SELECT count(*) FROM edges WHERE file_path IN ({placeholders})", paths
+                f"SELECT count(*) FROM edges WHERE file_path IN ({placeholders}) "
+                "AND kind != 'GOVERNS'",
+                paths,
             )
             self.conn.execute(f"DELETE FROM symbols WHERE file_path IN ({placeholders})", paths)
-            self.conn.execute(f"DELETE FROM edges WHERE file_path IN ({placeholders})", paths)
+            self.conn.execute(
+                f"DELETE FROM edges WHERE file_path IN ({placeholders}) AND kind != 'GOVERNS'",
+                paths,
+            )
             self.conn.execute("COMMIT")
         except Exception:
             self.conn.execute("ROLLBACK")
@@ -440,6 +475,19 @@ class DuckDBCodeGraphStore:
         )
         self.conn.execute(
             "DELETE FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
+            [doc_path],
+        )
+        return int(n or 0)
+
+    def count_govern_edges_for_doc(self, doc_path: str) -> int:
+        """Non-destructive count of ``GOVERNS`` edges rooted at ``doc_path``.
+
+        Used by the derive-first/swap-second guard in ``_index_decisions``
+        (#527 A): the caller must know how many edges existed BEFORE deciding
+        whether a zero-edge re-derivation is an intentional prune or a
+        suspicious data loss — so this must not delete."""
+        n = self._scalar(
+            "SELECT count(*) FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
             [doc_path],
         )
         return int(n or 0)

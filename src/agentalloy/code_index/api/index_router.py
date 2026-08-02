@@ -43,7 +43,11 @@ async def start_index(
             detail=f"an index job for slug {slug!r} is already active: {active.job_id}",
         )
     job = state.start_job(
-        repo_path=repo_path, slug=slug, force=req.force, index_markdown=req.index_markdown
+        repo_path=repo_path,
+        slug=slug,
+        force=req.force,
+        index_markdown=req.index_markdown,
+        prune_decisions=req.prune_decisions,
     )
     return JobView.from_job(job)
 

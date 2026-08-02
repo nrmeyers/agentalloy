@@ -308,3 +308,83 @@ class TestResolveQn:
         assert store.symbol("no.such.symbol") is None
         assert store.governing_decisions("no.such.symbol") == []
         assert store.callers("no.such.symbol") == []
+
+
+# -- #527 C: real ALTER TABLE migration against a pre-existing 9-column edges --
+
+
+def test_migrate_adds_span_and_resolution_tier_to_old_edges_table(tmp_path: Path) -> None:
+    """``edges`` already exists in every user's index; CREATE TABLE IF NOT
+    EXISTS is a no-op against it. ``migrate()`` must ALTER the table so the
+    new write path (which now sends 11 placeholders) works against a
+    database that predates the ``span``/``resolution_tier`` columns."""
+    import duckdb
+
+    db_path = tmp_path / "graph.duck"
+    # Build the OLD 9-column edges table literally, bypassing _SCHEMA_DDL.
+    conn = duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE symbols (
+          qualified_name TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+          file_path TEXT, start_line BIGINT, end_line BIGINT, docstring TEXT,
+          decorators TEXT[], is_exported BOOLEAN, is_async BOOLEAN DEFAULT FALSE,
+          is_generator BOOLEAN DEFAULT FALSE, source_code TEXT,
+          contextual_prefix TEXT DEFAULT '', content_hash TEXT
+        );
+        CREATE TABLE edges (
+          src TEXT NOT NULL, dst TEXT NOT NULL, kind TEXT NOT NULL,
+          file_path TEXT DEFAULT '', line_start BIGINT DEFAULT 0,
+          col_start BIGINT DEFAULT 0, resolved_via TEXT DEFAULT 'unknown',
+          confidence DOUBLE DEFAULT 1.0, new_target TEXT DEFAULT ''
+        );
+        """
+    )
+    cols_before = {r[1] for r in conn.execute("PRAGMA table_info(edges)").fetchall()}
+    assert cols_before == {
+        "src",
+        "dst",
+        "kind",
+        "file_path",
+        "line_start",
+        "col_start",
+        "resolved_via",
+        "confidence",
+        "new_target",
+    }
+    conn.close()
+
+    store = DuckDBCodeGraphStore(db_path)
+    try:
+        store.migrate()  # must ALTER the pre-existing table, not skip it
+        cols_after = {r[1] for r in store.conn.execute("PRAGMA table_info(edges)").fetchall()}
+        assert "span" in cols_after
+        assert "resolution_tier" in cols_after
+
+        # The new write path (11-placeholder upsert_edges) must work against
+        # the migrated table.
+        n = store.upsert_edges(
+            [
+                CodeEdge(
+                    src="doc::a",
+                    dst="pkg.foo",
+                    kind="GOVERNS",
+                    file_path="doc",
+                    span="pkg.foo",
+                    resolution_tier=1,
+                )
+            ]
+        )
+        assert n == 1
+        assert store.count_govern_edges_for_doc("doc") == 1
+        # Value round-trip, not just column presence/count — a count can't
+        # catch a mapping error in _edge_params.
+        row = store.conn.execute(
+            "SELECT span, resolution_tier FROM edges WHERE kind = 'GOVERNS'"
+        ).fetchone()
+        assert row == ("pkg.foo", 1)
+
+        # migrate() is idempotent — re-running it must not error.
+        store.migrate()
+    finally:
+        store.close()

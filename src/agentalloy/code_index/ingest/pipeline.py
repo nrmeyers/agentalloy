@@ -27,7 +27,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from agentalloy.code_index.facade import ParsedEdge, ParsedSymbol, ParseResult, parse_repo
@@ -218,14 +218,32 @@ def _is_code_shaped(span: str) -> bool:
     return any(c.isupper() for c in span[1:])
 
 
-def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> set[str]:
+@dataclass(frozen=True)
+class GovernResolution:
+    """Provenance-carrying outcome of :func:`_extract_governed_symbols` (#527 C).
+
+    ``governed`` is ``(fqn, span, resolution_tier)`` triples — tier 1 is an
+    exact fqn match, tier 2 a unique short-name match. ``unresolved`` carries
+    code-shaped spans that matched MORE THAN ONE symbol: real data the old
+    bare-``set[str]`` return silently dropped, needed so an ambiguity can be
+    surfaced instead of quietly losing the edge."""
+
+    governed: list[tuple[str, str, int]]
+    unresolved: list[str]
+
+
+def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> GovernResolution:
     """Code fqns a decision body governs, via fenced-span resolution (DK2).
 
     Tier 1: a span equal to a non-``MarkdownDoc`` symbol fqn. Tier 2: a
-    code-shaped span matching exactly one code symbol's short name. Ambiguous,
-    non-code-shaped, or unresolved spans are dropped; the result is always code
-    fqns, never a markdown chunk."""
-    governed: set[str] = set()
+    code-shaped span matching exactly one code symbol's short name.
+    Non-code-shaped or wholly-unmatched spans are silently dropped (as
+    before); an AMBIGUOUS code-shaped span (matches >=2 symbols) is now
+    reported via ``unresolved`` rather than silently dropped, so a caller can
+    flag it instead of losing the link with no trace."""
+    governed: list[tuple[str, str, int]] = []
+    unresolved: list[str] = []
+    seen_fqns: set[str] = set()
     for raw in _INLINE_CODE_RE.findall(body):
         span = raw.strip()
         if not span:
@@ -236,14 +254,37 @@ def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> set[str]:
         # falls through to the tier-2 short-name path below.
         exact = graph.symbol(span)
         if exact is not None and exact.qualified_name == span:
-            if exact.kind != _MARKDOWN_KIND:
-                governed.add(span)
+            if exact.kind != _MARKDOWN_KIND and span not in seen_fqns:
+                governed.append((span, span, 1))
+                seen_fqns.add(span)
             continue
         if _is_code_shaped(span):
             matches = graph.symbols_by_name(span)
             if len(matches) == 1:
-                governed.add(matches[0][0])
-    return governed
+                fqn = matches[0][0]
+                if fqn not in seen_fqns:
+                    governed.append((fqn, span, 2))
+                    seen_fqns.add(fqn)
+            elif len(matches) > 1:
+                unresolved.append(span)
+    return GovernResolution(governed=governed, unresolved=unresolved)
+
+
+@dataclass(frozen=True)
+class DecisionIndexResult:
+    """Structured outcome of :func:`_index_decisions` (#527 B delta reporting).
+
+    ``written``/``dropped`` are ``GOVERNS`` edge counts across all affected
+    docs this run. ``unresolved_spans`` are ambiguous fenced spans (``doc::
+    span``) that matched >=2 symbols. ``suspicious_docs`` are docs whose
+    re-derivation yielded ZERO edges while the doc still has current chunks
+    and previously had edges — the derive-first/swap-second guard (#527 A)
+    kept their prior edges rather than delete-then-fail-to-write."""
+
+    written: int = 0
+    dropped: int = 0
+    unresolved_spans: list[str] = field(default_factory=list)
+    suspicious_docs: list[str] = field(default_factory=list)
 
 
 def _index_decisions(
@@ -252,21 +293,37 @@ def _index_decisions(
     changed: list[MarkdownChunk],
     removed: list[str],
     chunks: list[MarkdownChunk],
-) -> int:
+    prune_decisions: bool = False,
+) -> DecisionIndexResult:
     """Overlay ``GOVERNS`` edges from decision chunks to the code they govern.
 
-    Doc-granular (DK6): every decision-source doc with >=1 chunk in ``changed`` or
-    ``removed`` has all its ``GOVERNS`` edges dropped and re-derived over its
-    *current* chunks — so an unchanged sibling's links survive a neighbour's
-    edit/removal (AC 3). A chunk becomes a decision iff it yields >=1 governed
-    symbol. Returns the number of ``GOVERNS`` edges written."""
+    Doc-granular (DK6): every decision-source doc with >=1 chunk in ``changed``
+    (or a wholesale-removed doc when ``prune_decisions`` is set — see below)
+    has its ``GOVERNS`` edges re-derived over its *current* chunks — so an
+    unchanged sibling's links survive a neighbour's edit/removal (AC 3).
+
+    ``prune_decisions`` (#527 escape hatch, default False everywhere): a doc
+    that has vanished ENTIRELY (no chunk for it anywhere in ``chunks`` — not
+    merely one heading among several) is left untouched unless this is set.
+    Without it, a decision doc's GOVERNS edges outlive its disappearance from
+    disk (or content-hash tracking); only an explicit ``--prune-decisions``
+    reindex removes them. A doc that still has SOME current chunks (a sibling
+    heading removed, not the whole doc) is always re-derived — that case is
+    protected instead by the derive-first/swap-second guard below (#527 A):
+    zero derived edges for a doc that still has chunks (and had edges before)
+    is reported suspicious and the prior edges are kept, never dropped.
+    """
+    doc_has_chunks = {c.file_path for c in chunks}
     affected: set[str] = {c.file_path for c in changed if _is_decision_source(c.file_path)}
     for qn in removed:
         doc = qn.rsplit("::", 1)[0]
-        if _is_decision_source(doc):
-            affected.add(doc)
+        if not _is_decision_source(doc):
+            continue
+        if doc not in doc_has_chunks and not prune_decisions:
+            continue  # doc wholesale gone; escape hatch not engaged -> leave edges alone
+        affected.add(doc)
     if not affected:
-        return 0
+        return DecisionIndexResult()
 
     by_doc: dict[str, list[MarkdownChunk]] = {}
     for c in chunks:
@@ -274,17 +331,48 @@ def _index_decisions(
             by_doc.setdefault(c.file_path, []).append(c)
 
     written = 0
+    dropped = 0
+    unresolved_spans: list[str] = []
+    suspicious_docs: list[str] = []
     for doc in sorted(affected):
-        graph.delete_govern_edges_for_doc(doc)
-        edges = [
-            CodeEdge(src=c.qualified_name, dst=fqn, kind="GOVERNS", file_path=doc)
-            for c in by_doc.get(doc, [])
-            for fqn in sorted(_extract_governed_symbols(c.body, graph))
-        ]
-        if edges:
-            graph.upsert_edges(edges)
-            written += len(edges)
-    return written
+        doc_chunks = by_doc.get(doc, [])
+        new_edges: list[CodeEdge] = []
+        for c in doc_chunks:
+            res = _extract_governed_symbols(c.body, graph)
+            unresolved_spans.extend(f"{doc}::{span}" for span in sorted(res.unresolved))
+            for fqn, span, tier in sorted(res.governed):
+                new_edges.append(
+                    CodeEdge(
+                        src=c.qualified_name,
+                        dst=fqn,
+                        kind="GOVERNS",
+                        file_path=doc,
+                        span=span,
+                        resolution_tier=tier,
+                    )
+                )
+
+        prior_count = graph.count_govern_edges_for_doc(doc)
+        doc_is_gone = doc not in doc_has_chunks
+        if not new_edges and prior_count > 0 and not doc_is_gone:
+            # Derive-first/swap-second (#527 A): re-derivation collapsed to
+            # zero while the doc is still present. That's indistinguishable
+            # here from an extraction regression, so keep the prior edges
+            # rather than silently losing them, and report it.
+            suspicious_docs.append(doc)
+            continue
+
+        removed_n = graph.delete_govern_edges_for_doc(doc)
+        if new_edges:
+            graph.upsert_edges(new_edges)
+            written += len(new_edges)
+        dropped += max(removed_n - len(new_edges), 0)
+    return DecisionIndexResult(
+        written=written,
+        dropped=dropped,
+        unresolved_spans=unresolved_spans,
+        suspicious_docs=suspicious_docs,
+    )
 
 
 def _parse_full(repo_path: Path, cache_dir: Path) -> ParseResult:
@@ -374,6 +462,8 @@ async def run_index_job(
     index_markdown: bool = True,
     job_id: str | None = None,
     progress_cb: ProgressCallback | None = None,
+    prune_decisions: bool = False,
+    decision_source_exists: Callable[[str], bool] | None = None,
 ) -> IndexResult:
     """Run one full index job for ``repo_path`` under ``slug``.
 
@@ -382,6 +472,14 @@ async def run_index_job(
     one snapshot) and pass its id in. Exceptions are recorded on the job and
     NOT re-raised — the returned :class:`IndexResult` carries the outcome.
     Cancellation (``jobs.request_cancel``) is honored between phases.
+
+    ``prune_decisions`` (default False, the #527 escape hatch): forwarded to
+    ``_index_decisions`` — a wholesale-vanished decision doc's GOVERNS edges
+    are only actually dropped when this is set. ``decision_source_exists``
+    (default None): forwarded to ``_index_markdown`` — the store-presence
+    check that keeps a doc's symbols/vectors (and, via the ``removed`` list it
+    filters, its GOVERNS edges) intact when the doc is gone from disk but
+    still live in the SDD state store.
     """
     started = time.monotonic()
     if job_id is None:
@@ -523,16 +621,25 @@ async def run_index_job(
                 handles=handles,
                 prior=prior,
                 full_rebuild=full_rebuild,
+                decision_source_exists=decision_source_exists,
             )
             markdown_embedded = md.embedded
             # decision phase: overlay GOVERNS edges from the just-indexed
             # decision chunks to the code they govern (doc-granular, DK6).
-            await asyncio.to_thread(
+            governs = await asyncio.to_thread(
                 _index_decisions,
                 graph,
                 changed=md.changed,
                 removed=md.removed,
                 chunks=md.chunks,
+                prune_decisions=prune_decisions,
+            )
+            jobs.update_governs_result(
+                job_id,
+                written=governs.written,
+                dropped=governs.dropped,
+                unresolved_spans=governs.unresolved_spans,
+                suspicious_docs=governs.suspicious_docs,
             )
 
         # --- fts phase ------------------------------------------------------------
@@ -602,9 +709,19 @@ async def _index_markdown(
     handles: CodeIndexHandles,
     prior: dict[str, str],
     full_rebuild: bool,
+    decision_source_exists: Callable[[str], bool] | None = None,
 ) -> _MarkdownResult:
     """Embed + store changed markdown chunks; prune removed ones. Returns the
-    embedded count and the change sets (for the decision phase)."""
+    embedded count and the change sets (for the decision phase).
+
+    ``decision_source_exists`` (#526/#527, store-presence filter): a decision
+    doc missing on disk but still present via ``decision_source_exists`` is
+    dropped from ``removed`` entirely, BEFORE that list drives symbol/vector
+    pruning below or is handed to the decision phase — otherwise a doc the
+    store still considers live gets its symbols and vectors pruned here even
+    though GOVERNS-edge deletion is separately guarded. Default None (no
+    store bound, e.g. a bare CLI reindex) preserves prior behavior exactly.
+    """
     graph, vectors = handles.graph, handles.vectors
     chunks = await asyncio.to_thread(collect_markdown_chunks, repo_path)
     chunks += await asyncio.to_thread(_collect_store_design_chunks, repo_path)
@@ -614,6 +731,14 @@ async def _index_markdown(
     prior_md = {} if full_rebuild else {qn: h for qn, h in prior.items() if "::" in qn}
     changed = [c for c in chunks if prior_md.get(c.qualified_name) != hashes[c.qualified_name]]
     removed = sorted(set(prior_md) - set(hashes))
+    if decision_source_exists is not None:
+        _exists = decision_source_exists
+
+        def _still_present(qn: str) -> bool:
+            doc = qn.rsplit("::", 1)[0]
+            return _is_decision_source(doc) and _exists(doc)
+
+        removed = [qn for qn in removed if not _still_present(qn)]
 
     embeddings = await _embed_batches(
         embed_client,

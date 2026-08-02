@@ -19,6 +19,13 @@ class IndexRequest(BaseModel):
     repo_path: str = Field(description="Absolute path to the repository to index.")
     force: bool = Field(default=False, description="Full rebuild: ignore stored content hashes.")
     index_markdown: bool = Field(default=True, description="Also chunk + embed markdown docs.")
+    prune_decisions: bool = Field(
+        default=False,
+        description=(
+            "Escape hatch (#527): actually drop GOVERNS edges for a decision doc "
+            "that has vanished entirely. Default False keeps them across reindexes."
+        ),
+    )
 
 
 class JobView(BaseModel):
@@ -36,6 +43,10 @@ class JobView(BaseModel):
     started_at: float
     updated_at: float
     finished_at: float | None
+    governs_written: int = 0
+    governs_dropped: int = 0
+    governs_unresolved_spans: list[str] = Field(default_factory=list)
+    governs_suspicious_docs: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_job(cls, job: CodeIndexJob) -> JobView:
@@ -52,6 +63,10 @@ class JobView(BaseModel):
             started_at=job.started_at,
             updated_at=job.updated_at,
             finished_at=job.finished_at,
+            governs_written=job.governs_written,
+            governs_dropped=job.governs_dropped,
+            governs_unresolved_spans=list(job.governs_unresolved_spans),
+            governs_suspicious_docs=list(job.governs_suspicious_docs),
         )
 
 

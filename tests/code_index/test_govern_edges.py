@@ -110,6 +110,61 @@ def test_symbols_by_name_returns_code_symbols_only(store: DuckDBCodeGraphStore) 
 # -- DK6: doc-granular prune ---------------------------------------------------
 
 
+def test_count_govern_edges_for_doc_is_non_destructive(store: DuckDBCodeGraphStore) -> None:
+    store.upsert_symbols([sym("pkg.foo", file_path="pkg/foo.py")])
+    store.upsert_edges(
+        [
+            governs("docs/a.md::d1", "pkg.foo", doc="docs/a.md"),
+            governs("docs/a.md::d2", "pkg.foo", doc="docs/a.md"),
+        ]
+    )
+    assert store.count_govern_edges_for_doc("docs/a.md") == 2
+    # Non-destructive: a second read sees the same count, edges untouched.
+    assert store.count_govern_edges_for_doc("docs/a.md") == 2
+    assert store.count_govern_edges_for_doc("docs/missing.md") == 0
+
+
+# -- #526: delete_for_files must not touch GOVERNS edges -----------------------
+
+
+def test_delete_for_files_preserves_govern_edges(store: DuckDBCodeGraphStore) -> None:
+    """The real deletion path (#526/#527 mechanism correction): GOVERNS edges
+    carry ``file_path`` = the decision doc path, so a file-granular
+    ``delete_for_files`` call that includes a decision doc must not delete
+    them — that overlay belongs to the decision phase, not the markdown/code
+    incremental-reindex path."""
+    store.upsert_symbols(
+        [
+            sym("pkg.foo", file_path="pkg/foo.py"),
+            sym(
+                "docs/design/x/approach.md::why-foo",
+                kind="MarkdownDoc",
+                name="Why foo",
+                file_path="docs/design/x/approach.md",
+            ),
+        ]
+    )
+    store.upsert_edges(
+        [
+            governs(
+                "docs/design/x/approach.md::why-foo", "pkg.foo", doc="docs/design/x/approach.md"
+            ),
+            CodeEdge(src="pkg.a", dst="pkg.b", kind="CALLS", file_path="docs/design/x/approach.md"),
+        ]
+    )
+
+    removed = store.delete_for_files(["docs/design/x/approach.md"])
+
+    # The MarkdownDoc symbol and the non-GOVERNS edge are gone (2 rows); the
+    # GOVERNS edge survives and is NOT counted as removed.
+    assert removed == 2
+    assert {d.qualified_name for d in store.governing_decisions("pkg.foo")} == {
+        "docs/design/x/approach.md::why-foo"
+    }
+    assert store.symbol("docs/design/x/approach.md::why-foo") is None
+    assert ("pkg.a", "pkg.b") not in store.calls_edges()
+
+
 def test_delete_govern_edges_for_doc_is_scoped(store: DuckDBCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo", file_path="pkg/foo.py")])
     store.upsert_edges(
