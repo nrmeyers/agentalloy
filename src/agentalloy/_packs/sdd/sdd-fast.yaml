@@ -19,9 +19,11 @@ prose_invariants:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: docs/fast/*.md
+        phase: sdd-fast
+        name: "*.md"
     - artifact_contains:
-        path: docs/fast/*.md
+        phase: sdd-fast
+        name: "*.md"
         sections:
           - Acceptance Criteria
           - Approach

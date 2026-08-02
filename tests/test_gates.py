@@ -199,10 +199,11 @@ def test_decide_transition_no_advisory_at_terminal_phase(tmp_path: Path):
 # the build's code and tests.
 _SDD_FAST_GATE = {
     "all_of": [
-        {"artifact_exists": {"path": "docs/fast/*.md"}},
+        {"artifact_exists": {"phase": "sdd-fast", "name": "*.md"}},
         {
             "artifact_contains": {
-                "path": "docs/fast/*.md",
+                "phase": "sdd-fast",
+                "name": "*.md",
                 "sections": ["Acceptance Criteria", "Approach", "Test Cases"],
             }
         },
@@ -223,6 +224,24 @@ def _seed_fast_artifacts(tmp_path: Path, *, sections: list[str]) -> None:
     tests_dir.mkdir()
     (tests_dir / "test_impl.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
 
+    # Store: create if needed and insert the sdd-fast artifact
+    # (post-migration: artifact_exists/artifact_contains read the store, not disk).
+    db = tmp_path / "test_state.db"
+    if not db.exists():
+        store = DuckDBStateStore(db)
+        store.open()
+        store.migrate()
+        store.close()
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'sdd-fast-01-task', '01-task', '[]', NULL, 'sdd-fast', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.set_artifact("sdd-fast", "01-task", "task.md", body)
+    store.close()
+
 
 def test_phase_graph_sdd_fast_routes_to_qa():
     """The fast lane merges into the standard qa → ship, not straight to ship."""
@@ -238,8 +257,8 @@ def test_phase_graph_add_skill_routes_to_intake():
 
 def test_decide_transition_sdd_fast_to_qa(tmp_path: Path):
     """Fast brief (all three sections) + code + tests advances sdd-fast → qa."""
-    ctx = _ctx(tmp_path, phase="sdd-fast")
     _seed_fast_artifacts(tmp_path, sections=["Acceptance Criteria", "Approach", "Test Cases"])
+    ctx = _ctx(tmp_path, phase="sdd-fast", store=_get_store(tmp_path))
     decision = decide_transition("sdd-fast", _SDD_FAST_GATE, ctx)
     assert decision.should_transition is True
     assert decision.to_phase == "qa"
@@ -247,8 +266,8 @@ def test_decide_transition_sdd_fast_to_qa(tmp_path: Path):
 
 def test_decide_transition_sdd_fast_missing_section_blocks(tmp_path: Path):
     """A fast brief missing the Approach section does not advance to qa."""
-    ctx = _ctx(tmp_path, phase="sdd-fast")
     _seed_fast_artifacts(tmp_path, sections=["Acceptance Criteria", "Test Cases"])
+    ctx = _ctx(tmp_path, phase="sdd-fast", store=_get_store(tmp_path))
     decision = decide_transition("sdd-fast", _SDD_FAST_GATE, ctx)
     assert decision.should_transition is False
     assert decision.to_phase is None

@@ -106,8 +106,17 @@ def _extract_artifact_contains_specs(gate_spec: Any) -> list[tuple[str, list[str
     required headings instead of checking every section against the first path only (the
     bug this fixes). Order follows declaration; an ``artifact_contains`` lacking a string
     ``path`` or a non-empty list of string ``sections`` is skipped.
+
+    Handles both filesystem ``path`` globs and store-backed ``phase``+``name``
+    queries. For store-backed gates the ``phase``+``name`` pair is synthesized
+    into a ``docs/<phase>/*.md`` glob so the scaffolding / banner machinery can
+    still operate.
     """
     specs: list[tuple[str, list[str]]] = []
+    # Only synthesize a ``path`` from ``phase``+``name`` for phases that
+    # originally used disk-glob scaffolding (qa / ship / fast).  Spec and
+    # design are fully store-backed — no scaffolding.
+    _SYNTHESIZE_PHASES = frozenset({"qa", "ship", "sdd-fast"})
     if isinstance(gate_spec, dict):
         gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
         contains = gate_d.get("artifact_contains")
@@ -115,10 +124,18 @@ def _extract_artifact_contains_specs(gate_spec: Any) -> list[tuple[str, list[str
             c = cast(dict[str, Any], contains)
             path = c.get("path")
             raw_sections = c.get("sections")
-            if isinstance(path, str) and isinstance(raw_sections, list):
+            if isinstance(raw_sections, list):
                 sections = [s for s in cast(list[Any], raw_sections) if isinstance(s, str)]
                 if sections:
-                    specs.append((path, sections))
+                    if isinstance(path, str):
+                        specs.append((path, sections))
+                    elif "phase" in c and "name" in c:
+                        phase = str(c["phase"])
+                        if phase in _SYNTHESIZE_PHASES:
+                            # Store-backed form: synthesize a path glob for
+                            # scaffolding / banner machinery.
+                            name = str(c["name"])
+                            specs.append((f"docs/{phase}/{name}", sections))
         for k, v in gate_d.items():
             if k != "artifact_contains":
                 specs.extend(_extract_artifact_contains_specs(v))

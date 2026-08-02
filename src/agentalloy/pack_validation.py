@@ -24,6 +24,7 @@ can call them with tmp-path fixtures without a live corpus.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,10 @@ def validate_pack_skills(
             continue
 
         errs = _validate(record)
+        # Gate 1.5: reject artifact_exists/artifact_contains leaves using ``path:``
+        # with a glob targeting a store-backed docs/ phase.
+        gate_errs = _validate_gate_path_stores(record)
+        errs = [*errs, *gate_errs]
         if strict:
             errs = [*errs, *_lint(record, yaml_path)]
         if errs:
@@ -118,6 +123,81 @@ def validate_pack_skills(
             )
 
     return PackValidationResult(ok=len(skill_errors) == 0, errors=skill_errors)
+
+
+def _validate_gate_path_stores(record: Any) -> list[str]:
+    """Gate 1.5: reject ``artifact_exists`` / ``artifact_contains`` leaves using
+    ``path:`` with a glob targeting a store-backed docs/ phase.
+
+    Store-backed phases (where SDD artifacts live in the contract store, not
+    on disk): spec, design, qa, ship, fast.  Any ``path:`` glob matching
+    ``docs/{spec,design,qa,ship,fast}/**`` is a bug — it forces the user into
+    a filesystem-only workflow or ``--force`` to bypass.
+
+    Walks the ``exit_gates`` tree (``all_of`` / ``any_of`` / ``not`` composites
+    + leaf predicates).  For each ``artifact_exists`` or ``artifact_contains``
+    leaf that carries ``path:`` (not ``phase:``), checks the glob value against
+    the forbidden prefixes via ``fnmatch.fnmatch``.
+
+    Returns a list of error strings (empty = valid).
+    """
+    errors: list[str] = []
+    exit_gates = getattr(record, "exit_gates", None)
+    if not isinstance(exit_gates, dict):
+        return errors
+    _walk_gate_paths(exit_gates, errors)
+    return errors
+
+
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "qa", "ship", "fast"})
+
+
+def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
+    """Recursively walk an exit_gates tree, checking leaf predicates."""
+    if not isinstance(spec, dict):
+        return
+    spec_d = spec
+    composites = [k for k in ("all_of", "any_of", "not") if k in spec_d]
+    leaves = [k for k in spec_d if k not in ("all_of", "any_of", "not")]
+
+    if composites and leaves:
+        return  # malformed; upstream _validate_gate_spec catches this
+    if len(composites) > 1:
+        return
+
+    if "all_of" in spec_d:
+        for child in spec_d["all_of"]:
+            _walk_gate_paths(child, errors)
+        return
+    if "any_of" in spec_d:
+        for child in spec_d["any_of"]:
+            _walk_gate_paths(child, errors)
+        return
+    if "not" in spec_d:
+        _walk_gate_paths(spec_d["not"], errors)
+        return
+
+    # Leaf predicate: exactly one {predicate_name: args}.
+    if len(leaves) != 1:
+        return
+    name = leaves[0]
+    if name not in ("artifact_exists", "artifact_contains"):
+        return
+    args = spec_d[name]
+    if not isinstance(args, dict):
+        return
+    # Only flag when ``path:`` is used without ``phase:``.
+    # If ``phase`` is present, it takes precedence at evaluation time.
+    if "path" not in args or "phase" in args:
+        return
+    glob_val = str(args["path"])
+    for phase in _STORE_BACKED_PHASES:
+        if fnmatch.fnmatch(glob_val, f"docs/{phase}/**"):
+            errors.append(
+                f"exit_gates: '{glob_val}' targets a store-backed docs/{phase}/ phase; "
+                f"use phase: {phase}, name: <pattern> instead"
+            )
+            return  # one error per leaf is enough
 
 
 # ---------------------------------------------------------------------------

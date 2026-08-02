@@ -27,9 +27,11 @@ prose_invariants:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: docs/qa/*.md
+        phase: qa
+        name: "*.md"
     - artifact_contains:
-        path: docs/qa/*.md
+        phase: qa
+        name: "*.md"
         sections:
           - Checks
           - Review

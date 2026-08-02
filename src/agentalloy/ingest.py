@@ -19,6 +19,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import logging
 import re
 import sys
@@ -795,12 +796,18 @@ def _known_gate_predicates() -> set[str]:
     return set(PREDICATES) | set(SEMANTIC_PREDICATES)
 
 
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "qa", "ship", "fast"})
+
+
 def _validate_gate_spec(spec: Any, *, path: str = "exit_gates") -> list[str]:
     """Statically validate an exit_gates spec: composite structure + known predicates.
 
     Mirrors the runtime walk in ``signals.gates.evaluate_node`` so an authoring
     error (typo'd predicate, malformed composite) fails at ingest rather than at
-    a live phase transition.
+    a live phase transition.  Also rejects ``artifact_exists`` /
+    ``artifact_contains`` leaves using ``path:`` with a glob targeting a
+    store-backed docs/ phase (``docs/{spec,design,qa,ship,fast}/**``) — these
+    must use ``phase:`` + ``name:`` instead.
     """
     if not isinstance(spec, dict):
         return [f"{path} must be a mapping, got {type(spec).__name__}"]
@@ -832,6 +839,20 @@ def _validate_gate_spec(spec: Any, *, path: str = "exit_gates") -> list[str]:
     known = _known_gate_predicates()
     if name not in known:
         return [f"{path}: unknown predicate '{name}' (available: {sorted(known)})"]
+
+    # Gate path-store check: reject ``path:`` globs targeting store-backed docs/
+    # phases — they silently fail in store-only workflows and force ``--force``.
+    if name in ("artifact_exists", "artifact_contains"):
+        args = spec_d[name]
+        if isinstance(args, dict) and "path" in args and "phase" not in args:
+            glob_val = str(args["path"])
+            for phase in _STORE_BACKED_PHASES:
+                if fnmatch.fnmatch(glob_val, f"docs/{phase}/**"):
+                    return [
+                        f"{path}: '{glob_val}' targets a store-backed docs/{phase}/ phase; "
+                        f"use phase: {phase}, name: <pattern> instead"
+                    ]
+
     return []
 
 
