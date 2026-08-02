@@ -124,6 +124,8 @@ async def _maybe_inject(
     embed_client: EmbedClient | None,
     orchestrator: ComposeOrchestrator | None,
     session_id: str | None = None,
+    *,
+    vector_store: TelemetryStore | None = None,
 ) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None, SignalResult]:
     """Run signal → compose → inject for this repo (Responses payload shape).
 
@@ -132,7 +134,8 @@ async def _maybe_inject(
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
-        _proxy_request_from_responses(payload), project_dir, embed_client, session_id
+        _proxy_request_from_responses(payload), project_dir, embed_client, session_id,
+        vector_store=vector_store
     )
 
     current = payload
@@ -217,7 +220,8 @@ async def passthrough_openai_responses(
         try:
             session_id = extract_session_header(inbound_headers)
             injected, outcome, signal = await _maybe_inject(
-                payload, token, embed_client, orchestrator, session_id
+                payload, token, embed_client, orchestrator, session_id,
+                vector_store=vector_store,
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")

@@ -391,6 +391,7 @@ async def _write_flow_telemetry(
     session_key: str | None = None,
     session_source: str | None = None,
     category: str | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """Write one consolidated telemetry trace for the full proxy request flow.
 
@@ -403,6 +404,28 @@ async def _write_flow_telemetry(
     """
     if vector_store is None:
         return
+    # Phase-level telemetry: complete or error, using the request's trace_id.
+    try:
+        from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
+
+        pw = PhaseTelemetryWriter(vector_store)
+        if error_code:
+            pw.phase_error(
+                trace_id or "",
+                phase or "unknown",
+                error_message=error_code,
+                success=False,
+            )
+        else:
+            pw.phase_complete(
+                trace_id or "",
+                phase or "unknown",
+                latency_ms=latency_ms,
+                success=True,
+            )
+    except Exception:  # noqa: BLE001 — soft-fail
+        logger.debug("phase_complete/phase_error write failed", exc_info=True)
+
     status = "proxy_composed" if composed else "proxy_passthrough"
     task_prompt = _extract_task_prompt(request)
     scores_json = (
@@ -509,7 +532,7 @@ async def proxy_chat_completions(
     signal_result = None
     composed = False
     try:
-        signal_result = await evaluate_signal(request, cwd, embed_client, session_id)
+        signal_result = await evaluate_signal(request, cwd, embed_client, session_id, vector_store=vector_store)
     except Exception:
         logger.warning("Signal evaluation failed -- passing through", exc_info=True)
 
@@ -679,6 +702,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _stream_upstream_response(upstream_client, chat_url, payload, on_status=_commit)
 
@@ -706,6 +730,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.TimeoutException as e:
@@ -729,6 +754,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.RequestError as e:
@@ -752,6 +778,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.HTTPError as e:
@@ -775,6 +802,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _upstream_unavailable_error(str(e))
 
@@ -799,6 +827,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         return _upstream_unavailable_error(f"HTTP {resp.status_code}")
 
@@ -823,6 +852,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
+            trace_id=signal_result.trace_id if signal_result else None,
         )
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
