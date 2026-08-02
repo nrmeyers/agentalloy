@@ -31,6 +31,7 @@ from agentalloy.api.proxy_apply import (
     commit_outcome,
 )
 from agentalloy.api.proxy_context import (
+    UpstreamFile,
     decode_proj_token,
     read_phase,
     read_upstream,
@@ -173,21 +174,25 @@ def _resolve_upstream(
     cwd: Path,
     default_client: httpx.AsyncClient | None,
     default_model: str,
-) -> tuple[httpx.AsyncClient, str, str] | None:
+) -> tuple[httpx.AsyncClient, str, str] | UpstreamFile | None:
     """Resolve ``(client, chat_completions_url, model)`` for a request.
 
     A per-repo ``.agentalloy/upstream`` (captured by ``agentalloy add``) wins:
     the proxy adopts the harness's own upstream, forwarding to
     ``<url>/chat/completions`` with the API key read from the named env var at
     request time. Otherwise falls back to the global lifespan-scoped client
-    (``default_client``, posting the relative ``/v1/chat/completions``). Returns
-    ``None`` only when neither resolves — the caller then 503s.
+    (``default_client``, posting the relative ``/v1/chat/completions``).
+    Returns ``UpstreamFile(kind="error")`` when the per-repo file is
+    malformed, ``None`` when neither resolves — the caller then 503s.
     """
-    up = read_upstream(cwd)
-    if up is not None:
-        api_key = os.environ.get(up.key_env) if up.key_env else None
-        client = _get_or_create_upstream_client(app, up.url, api_key)
-        return client, f"{up.url}/chat/completions", up.model
+    result = read_upstream(cwd)
+    if result.kind == "valid" and result.upstream is not None:
+        api_key = os.environ.get(result.upstream.key_env) if result.upstream.key_env else None
+        client = _get_or_create_upstream_client(app, result.upstream.url, api_key)
+        return client, f"{result.upstream.url}/chat/completions", result.upstream.model
+    if result.kind == "error":
+        return result
+    # "absent" or "valid" without upstream — fall through to global
     if default_client is not None:
         return default_client, "/v1/chat/completions", default_model
     return None
@@ -267,6 +272,18 @@ def _upstream_not_configured_error() -> JSONResponse:
             "error": {
                 "code": "upstream_not_configured",
                 "message": "Upstream LLM is not configured. Set UPSTREAM_URL and UPSTREAM_MODEL.",
+            }
+        },
+    )
+
+
+def _upstream_parse_error(detail: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "code": "upstream_parse_error",
+                "message": f"Per-repo upstream is malformed: {detail}",
             }
         },
     )
@@ -831,8 +848,16 @@ async def proxy_chat_completions(
     resolved_upstream = _resolve_upstream(
         fastapi_request.app, cwd, upstream, settings.upstream_model
     )
+    if isinstance(resolved_upstream, UpstreamFile) and resolved_upstream.kind == "error":
+        detail = resolved_upstream.detail
+        assert detail is not None
+        return _upstream_parse_error(detail)
     if resolved_upstream is None:
         return _upstream_not_configured_error()
+    # At this point resolved_upstream is a tuple (client, url, model).
+    # Pyright can't narrow tuple | UpstreamFile | None past the two
+    # guards above, so assert it's not UpstreamFile.
+    assert not isinstance(resolved_upstream, UpstreamFile)
     upstream_client, chat_url, upstream_model = resolved_upstream
 
     # Per-session orientation key: explicit harness header (e.g. Claude Code's
