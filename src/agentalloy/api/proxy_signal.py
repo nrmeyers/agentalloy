@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,8 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _write_state_atomic,
     exit_gates_for_phase,
 )
+from agentalloy.storage.protocols import TelemetryStore
+from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,7 @@ class SignalResult:
     should_compose: bool
     phase: str | None = None
     task: str | None = None
+    trace_id: str | None = None
     domain_tags: list[str] | None = field(default_factory=lambda: list[str]())
 
     # Tier 1 (phase-entry announce). True when this request is the first one in
@@ -550,6 +554,8 @@ async def evaluate_signal(
     session_id: str | None = None,
     *,
     mutate: bool = True,
+    vector_store: TelemetryStore | None = None,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
 ) -> SignalResult:
     """Evaluate the signal layer for an incoming proxy request.
 
@@ -573,10 +579,22 @@ async def evaluate_signal(
         request: the incoming proxy request
         cwd: resolved working directory (project root)
         embed_client: optional client for semantic gate predicates
+        vector_store: telemetry store; used to build a fallback phase-event
+            writer when ``phase_telemetry`` is not supplied.
+        phase_telemetry: the app-state-scoped ``PhaseTelemetryWriter`` (task
+            04). Reused instead of constructing a fresh writer per call so the
+            schema DDL doesn't re-run on every write. Falls back to a
+            per-call writer over ``vector_store`` when not supplied (e.g.
+            callers without app.state, such as tests and the web playground).
 
     Returns:
         SignalResult with composition decision and metadata
     """
+    # Trace ID — single source of truth for correlating all telemetry events
+    # (phase_start, llm_sent, llm_received, composition_traces) for this request.
+    # Generated at the very start so all early-return paths have it.
+    trace_id = str(uuid.uuid4())
+
     # 0. Per-repo lifecycle mode. Only `full` runs the phase lifecycle on the
     # proxy. `assist`/`off` defer entirely: the proxy has no phase-independent
     # injection path (all domain + system skills flow through this one compose),
@@ -588,7 +606,7 @@ async def evaluate_signal(
     mode = _read_lifecycle_mode(cwd)
     if mode != "full":
         logger.debug("composition deferred for %s: lifecycle_mode=%s", cwd, mode)
-        return SignalResult(should_compose=False)
+        return SignalResult(should_compose=False, trace_id=trace_id)
 
     # 1. Read phase from the store (sync, instant). `transitioned_by` is read in
     # the same breath — the session key (if any) that caused *this* phase value,
@@ -619,7 +637,7 @@ async def evaluate_signal(
                     "path (see AGENTALLOY_PROJECTS_ROOT). Composition skipped for this repo.",
                     agentalloy_dir,
                 )
-            return SignalResult(should_compose=False)
+            return SignalResult(should_compose=False, trace_id=trace_id)
 
         # Wired, but phase-less: `wire` writes no state at all (AC-9), so the
         # entry phase is seeded lazily, here, on the first real request. Before
@@ -712,6 +730,7 @@ async def evaluate_signal(
             should_compose=False,
             phase=phase,
             task=task,
+            trace_id=trace_id,
             banner=_banner_for_turn(emit_banner, phase, fallback_gates, cwd, slug=contract_slug),
             repo=repo,
             session_key=session_key,
@@ -720,6 +739,28 @@ async def evaluate_signal(
 
     signal_keywords: list[str] = skill.get("signal_keywords") or []
     exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
+
+    # Phase telemetry: record phase_start now that we know the skill loaded.
+    # Prefer the app-state-scoped writer (task 04); fall back to a fresh
+    # per-call writer over vector_store when the caller has none (tests, the
+    # web signal playground).
+    _phase_telemetry = (
+        phase_telemetry
+        if phase_telemetry is not None
+        else (PhaseTelemetryWriter(vector_store) if vector_store is not None else None)
+    )
+    if _phase_telemetry is not None:
+        try:
+            _phase_telemetry.phase_start(
+                trace_id,
+                phase,
+                model=skill.get("model"),
+                workflow_skill_id=skill.get("skill_id"),
+                success=True,
+                repo=repo,
+            )
+        except Exception:  # noqa: BLE001 — soft-fail by design
+            logger.debug("phase_start telemetry write failed", exc_info=True)
 
     # System-prompt leg of the workflow prose. Threaded onto EVERY carrier return below
     # (quiet passthrough included) — unlike `workflow_prose`, which is announce-gated.
@@ -868,6 +909,7 @@ async def evaluate_signal(
             should_compose=False,
             phase=phase,
             task=task,
+            trace_id=trace_id,
             banner=banner,
             # Quiet for composition, NOT quiet for the system leg: this is the return
             # taken on every turn after the first of a phase, and it is precisely where
@@ -910,6 +952,7 @@ async def evaluate_signal(
         workflow_skill_id=(skill.get("skill_id") or None) if announce else None,
         current_contract=contract_id if announce_cursor else None,
         announce_cursor=announce_cursor,
+        trace_id=trace_id,
         phase=phase,
         task=task,
         banner=banner,

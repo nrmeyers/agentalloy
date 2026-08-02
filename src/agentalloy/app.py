@@ -55,6 +55,7 @@ from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
 from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
 from agentalloy.storage.state_store import bind_process_store, open_state_store
 from agentalloy.telemetry import DuckDBTelemetryWriter
+from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 from agentalloy.web.config_api import router as web_config_router
 from agentalloy.web.ops_api import router as web_ops_router
 from agentalloy.web.skills_api import router as web_skills_router
@@ -129,6 +130,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     telemetry_store = open_telemetry(settings, read_only=False)
     embed_client: EmbedClient = get_embed_client(settings)
     telemetry = DuckDBTelemetryWriter(telemetry_store)
+    # Phase-event writer over the SAME telemetry.duck store (decision: no
+    # second DuckDB handle). Lifespan-scoped so its schema DDL runs once per
+    # process instead of on every proxy request — see proxy_router.py /
+    # proxy_signal.py, which prefer this instance over constructing their own.
+    phase_telemetry = PhaseTelemetryWriter(telemetry_store)
 
     # SDD state store — single-writer DuckDB, opened once for the process
     # lifetime.  Path sits alongside the corpus DuckDB file.
@@ -230,6 +236,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # telemetry querier record/read composition traces here (decoupled from the
     # skill graph + Lance index so the reembed writer never contends — D4).
     app.state.telemetry_store = telemetry_store
+    # Phase-event writer (task 04) — the proxy router / signal layer read this
+    # to avoid constructing a fresh writer (and re-running its schema DDL) on
+    # every single request. No separate close(): it holds no resource of its
+    # own beyond telemetry_store, which is already closed below.
+    app.state.phase_telemetry = phase_telemetry
     # Expose the live read-only SkillStore so diagnostics (e.g. corpus skill
     # counts) can reuse the open handle instead of opening another one.
     app.state.store = store

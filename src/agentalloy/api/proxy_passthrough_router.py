@@ -42,6 +42,7 @@ from agentalloy.api.proxy_injection import (
 )
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import (
+    _get_phase_telemetry_writer,  # pyright: ignore[reportPrivateUsage]
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
     from agentalloy.orchestration.compose import ComposeOrchestrator
     from agentalloy.storage.protocols import TelemetryStore
+    from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +219,9 @@ async def _maybe_inject(
     embed_client: EmbedClient | None,
     orchestrator: ComposeOrchestrator | None,
     session_id: str | None = None,
+    *,
+    vector_store: TelemetryStore | None = None,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
 ) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None, SignalResult]:
     """Run signal → compose → inject for this repo.
 
@@ -227,11 +232,19 @@ async def _maybe_inject(
     consolidated telemetry row on the 2xx seam). Raising is fine — the caller treats
     any exception as "forward the original unchanged". ``session_id`` is the harness
     session-id header (Claude Code's ``x-claude-code-session-id``), used to key
-    per-session orientation.
+    per-session orientation. ``phase_telemetry`` is the app-state-scoped
+    ``PhaseTelemetryWriter`` (task 04) threaded through to ``evaluate_signal`` so
+    this surface reuses it instead of constructing (and re-migrating the schema
+    of) a fresh one per request.
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
-        _proxy_request_from_anthropic(payload), project_dir, embed_client, session_id
+        _proxy_request_from_anthropic(payload),
+        project_dir,
+        embed_client,
+        session_id,
+        vector_store=vector_store,
+        phase_telemetry=phase_telemetry,
     )
 
     # Three independent injections:
@@ -418,8 +431,15 @@ async def passthrough_anthropic_messages(
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
+            phase_telemetry = _get_phase_telemetry_writer(request.app, vector_store)
             injected, outcome, signal = await _maybe_inject(
-                payload, token, embed_client, orchestrator, session_id
+                payload,
+                token,
+                embed_client,
+                orchestrator,
+                session_id,
+                vector_store=vector_store,
+                phase_telemetry=phase_telemetry,
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
