@@ -245,19 +245,19 @@ def resolve_passthrough_client(
     distinct per surface so the Anthropic and Responses passthroughs never
     share a cache dict.
     """
-    up = read_upstream(cwd)
-    if up is None:
-        return default_client
-    base_url = _passthrough_base_url(up.url)
-    cache: dict[str, AnthropicPassthroughClient] | None = getattr(app.state, cache_attr, None)
-    if cache is None:
-        cache = {}
-        setattr(app.state, cache_attr, cache)
-    client = cache.get(base_url)
-    if client is None:
-        client = AnthropicPassthroughClient(upstream_base_url=base_url)
-        cache[base_url] = client
-    return client
+    result = read_upstream(cwd)
+    if result.kind == "valid" and result.upstream is not None:
+        base_url = _passthrough_base_url(result.upstream.url)
+        cache: dict[str, AnthropicPassthroughClient] | None = getattr(app.state, cache_attr, None)
+        if cache is None:
+            cache = {}
+            setattr(app.state, cache_attr, cache)
+        client = cache.get(base_url)
+        if client is None:
+            client = AnthropicPassthroughClient(upstream_base_url=base_url)
+            cache[base_url] = client
+        return client
+    return default_client
 
 
 # ---------------------------------------------------------------------------
