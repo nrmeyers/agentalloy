@@ -419,3 +419,52 @@ class TestShipResetAutoArchive:
 
         # A normal forward transition leaves live contracts in place.
         assert (repo_root / ".agentalloy" / "contracts" / "active" / "build" / "01.md").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Issue #503 — phase set --force silently no-ops
+# ---------------------------------------------------------------------------
+
+
+class TestIssue503OverrideForwarding:
+    """Regression tests for gh#503.
+
+    Defect 1: `--force` wasn't forwarded through the HTTP client to the server,
+    so the server re-evaluated the gate without override and blocked the write.
+    The CLI's local gate evaluation passed (because it got force=True), so the
+    CLI never checked the server's gate verdict.
+
+    Defect 2: The CLI returned `phase` from the argument instead of
+    `state.phase` from the read-back, masking the server-side block.
+    """
+
+    def test_force_bypasses_qa_gate(self, repo_root: Path) -> None:
+        """qa→ship normally requires docs/qa/*.md; --force bypasses that."""
+        run_phase_set("qa", root=repo_root)
+        # Without --force: gate blocks because no qa docs exist.
+        result = run_phase_set("ship", root=repo_root)
+        assert result["blocked"] is True
+        assert result["phase"] == "qa"  # Defect 2 check: returns stored, not requested
+
+        # With --force: gate is bypassed, write succeeds.
+        result = run_phase_set("ship", root=repo_root, force=True)
+        assert result["blocked"] is False
+        assert result["phase"] == "ship"
+        assert run_phase_get(root=repo_root)["phase"] == "ship"
+
+    def test_blocked_write_returns_stored_phase(self, repo_root: Path) -> None:
+        """Defect 2: when a forward gate blocks, the returned phase is the stored one."""
+        run_phase_set("spec", root=repo_root)
+        # No spec artifact recorded → gate blocks on forward to design.
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is True
+        assert result["phase"] == "spec"  # stored phase, not "design"
+        assert run_phase_get(root=repo_root)["phase"] == "spec"
+
+    def test_force_qa_to_ship_persists(self, repo_root: Path) -> None:
+        """qa→ship --force actually persists — the core regression from #503."""
+        run_phase_set("qa", root=repo_root)
+        result = run_phase_set("ship", root=repo_root, force=True)
+        assert result["blocked"] is False
+        # The read-back must match: the write actually persisted.
+        assert run_phase_get(root=repo_root)["phase"] == "ship"

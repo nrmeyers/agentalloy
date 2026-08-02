@@ -238,7 +238,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         # `mode`/`free_since` are deliberately not passed: omitting them carries
         # the stored pair forward, so a phase set never drops the repo out of
         # free-flow. Only `agentalloy flow` sets them.
-        access.write(phase, actor=cli_session_key() or None)
+        access.write(phase, actor=cli_session_key() or None, override=force)
         state = access.read()
     except StateClientError as exc:
         fail_on_state_error(exc)
