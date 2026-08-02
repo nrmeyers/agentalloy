@@ -83,8 +83,12 @@ class TestWorktreeRun:
         assert (wt / ".git").is_file()
 
         # Upstream adopted into the WORKTREE's .agentalloy/upstream.
-        up = read_upstream(wt)
-        assert up is not None and up.url == "http://10.0.0.9:60000/v1"
+        result = read_upstream(wt)
+        assert (
+            result.kind == "valid"
+            and result.upstream is not None
+            and result.upstream.url == "http://10.0.0.9:60000/v1"
+        )
 
         # Interception wired with the worktree's own /proj token — distinct from
         # the main checkout's, which is what keeps the two sessions isolated.

@@ -11,7 +11,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import yaml
 
@@ -112,7 +112,26 @@ class Upstream:
     key_env: str | None = None
 
 
-def read_upstream(cwd: Path) -> Upstream | None:
+@dataclass(frozen=True)
+class UpstreamFile:
+    """Result of reading a per-repo ``.agentalloy/upstream`` file.
+
+    The ``kind`` discriminant distinguishes three states:
+
+    * ``"absent"`` — no per-repo upstream configured (caller may fall back to
+      the global upstream).
+    * ``"valid"`` — the file parsed successfully; :attr:`upstream` holds the
+      parsed :class:`Upstream`.
+    * ``"error"`` — the file exists but could not be used; :attr:`detail`
+      describes the specific failure (useful for error responses and logs).
+    """
+
+    kind: Literal["absent", "valid", "error"]
+    upstream: Upstream | None = None
+    detail: str | None = None
+
+
+def read_upstream(cwd: Path) -> UpstreamFile:
     """Read the captured upstream from *cwd*/.agentalloy/upstream.
 
     The file is YAML written by ``agentalloy add <harness>``::
@@ -121,36 +140,44 @@ def read_upstream(cwd: Path) -> Upstream | None:
         model: some-model
         key_env: OPENAI_API_KEY   # optional; env-var name, not the secret
 
-    Returns ``None`` when the file is absent, empty, malformed, or missing the
-    required ``url``/``model`` keys — callers then fall back to the global
-    upstream. Never raises on a bad file; a per-repo override must never take
-    down the proxy.
+    Returns an :class:`UpstreamFile` indicating one of three states:
+
+    * ``kind == "absent"`` — no per-repo upstream configured.
+    * ``kind == "valid"`` — file parsed successfully with :attr:`upstream` set.
+    * ``kind == "error"`` — file exists but is malformed or missing required
+      keys; :attr:`detail` contains a human-readable reason.
+
+    Never raises on a bad file — a per-repo override must never take down the
+    proxy.
     """
     path = cwd / UPSTREAM_FILE
     try:
         raw = path.read_text(encoding="utf-8")
     except (FileNotFoundError, NotADirectoryError):
-        return None
+        return UpstreamFile(kind="absent")
     except OSError as e:
         logger.warning("could not read %s: %s", path, e)
-        return None
+        return UpstreamFile(kind="error", detail=f"could not read {path}: {e}")
 
     try:
         parsed = yaml.safe_load(raw)
     except yaml.YAMLError as e:
         logger.warning("malformed %s: %s", path, e)
-        return None
+        return UpstreamFile(kind="error", detail=f"malformed {path}: {e}")
     if not isinstance(parsed, dict):
-        return None
+        logger.warning("%s is not a YAML mapping", path)
+        return UpstreamFile(kind="error", detail=f"{path} is not a YAML mapping")
     data = cast("dict[str, object]", parsed)
 
     url = data.get("url")
     model = data.get("model")
     if not isinstance(url, str) or not url or not isinstance(model, str) or not model:
         logger.warning("%s missing required url/model", path)
-        return None
+        return UpstreamFile(kind="error", detail=f"{path} missing required url/model")
 
     key_env_raw = data.get("key_env")
     key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
 
-    return Upstream(url=url.rstrip("/"), model=model, key_env=key_env)
+    return UpstreamFile(
+        kind="valid", upstream=Upstream(url=url.rstrip("/"), model=model, key_env=key_env)
+    )

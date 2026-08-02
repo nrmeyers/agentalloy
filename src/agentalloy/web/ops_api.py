@@ -44,6 +44,7 @@ class RepoInfo(BaseModel):
     profile: str | None
     upstream_url: str | None
     upstream_model: str | None
+    upstream_error: str | None = None
     cursor: str | None
     contracts_by_phase: dict[str, int]
     approval_required: bool
@@ -152,7 +153,16 @@ def _repo_info(
             approval_pending=False,
         )
     phase = _repo_phase(root_str)
-    upstream = read_upstream(root)
+    result = read_upstream(root)
+
+    upstream_url = None
+    upstream_model = None
+    upstream_error = None
+    if result.kind == "valid" and result.upstream is not None:
+        upstream_url = result.upstream.url
+        upstream_model = result.upstream.model
+    elif result.kind == "error":
+        upstream_error = result.detail
 
     # Count contracts by phase from the store (not the filesystem).
     contracts: dict[str, int] = {}
@@ -173,8 +183,9 @@ def _repo_info(
         phase=phase,
         lifecycle_mode=_read_lifecycle_mode(root),
         profile=profile,
-        upstream_url=upstream.url if upstream else None,
-        upstream_model=upstream.model if upstream else None,
+        upstream_url=upstream_url,
+        upstream_model=upstream_model,
+        upstream_error=upstream_error,
         cursor=_read_cursor(root),
         contracts_by_phase=contracts,
         approval_required=required,

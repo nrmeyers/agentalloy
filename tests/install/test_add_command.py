@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agentalloy.api.proxy_context import decode_proj_token, read_upstream
+from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token, read_upstream
 from agentalloy.install.subcommands import add
 
 
@@ -32,7 +32,7 @@ class TestCaptureUpstream:
         assert up.url == "http://10.0.0.9:60000/v1"
         assert up.model == "qwen3.6"
         # And it was recorded for the proxy to read.
-        assert read_upstream(tmp_path) == up
+        assert read_upstream(tmp_path) == UpstreamFile(kind="valid", upstream=up)
 
     def test_cli_overrides_win(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         home = tmp_path / "home"
@@ -49,7 +49,7 @@ class TestCaptureUpstream:
     def test_no_extractor_no_override_is_none(self, tmp_path: Path) -> None:
         # claude-code adopts nothing (auth-transparent passthrough).
         assert add.capture_upstream("claude-code", tmp_path) is None
-        assert read_upstream(tmp_path) is None
+        assert read_upstream(tmp_path).kind == "absent"
 
 
 class TestAddRun:
@@ -74,8 +74,12 @@ class TestAddRun:
         assert rc == 0
 
         # Upstream adopted from the global hermes config.
-        up = read_upstream(repo)
-        assert up is not None and up.url == "http://10.0.0.9:60000/v1"
+        result = read_upstream(repo)
+        assert (
+            result.kind == "valid"
+            and result.upstream is not None
+            and result.upstream.url == "http://10.0.0.9:60000/v1"
+        )
 
         # Interception wired at the proxy with this repo's /proj token.
         cfg = yaml.safe_load((repo / ".hermes" / "config.yaml").read_text())
