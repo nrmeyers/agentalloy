@@ -834,13 +834,18 @@ async def evaluate_signal(
                 try:
                     _write_phase_atomic(cwd, decision.to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
-                    # Rewrite enforcement posture for wired Tier A harnesses (D1–D9)
+                    # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
+                    # mode="workflow" is not a guess: this whole branch is only
+                    # reached past the free-flow guard above (1b), which returns
+                    # early on `mode: free` — an auto-advance never fires while
+                    # the repo is in free-flow, so the mode here is always
+                    # "workflow".
                     try:
                         from agentalloy.install.subcommands.wire_harness import (
                             rewrite_enforcement_posture,
                         )
 
-                        rewrite_enforcement_posture(cwd, decision.to_phase)
+                        rewrite_enforcement_posture(cwd, decision.to_phase, mode="workflow")
                     except Exception:
                         logger.debug(
                             "posture rewrite failed after transition to %s",

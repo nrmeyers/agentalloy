@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -57,6 +58,8 @@ from typing import Any, cast
 from agentalloy.install import state as install_state
 from agentalloy.install.sentinel_utils import replace_marked_block
 from agentalloy.providers import REGISTRY
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "wire-harness"
@@ -2168,18 +2171,62 @@ def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> 
         return False
 
 
-def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
+class _UnsetType:
+    """Sentinel distinguishing "no mode passed" from an explicit ``None``.
+
+    ``rewrite_enforcement_posture``'s ``mode`` parameter needs three distinct
+    inputs: a known mode string, an explicit "no free-flow" (``None``/``""``),
+    and "the caller doesn't know — derive it yourself". Only the sentinel can
+    stand for the third without colliding with the second.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return "<unset>"
+
+
+_UNSET = _UnsetType()
+
+
+def rewrite_enforcement_posture(
+    root: Path,
+    phase: str,
+    *,
+    mode: str | None | _UnsetType = _UNSET,
+) -> list[str]:
     """Rewrite the enforcement posture files for all wired Tier A harnesses.
 
-    Called after a phase transition to update deny rules.  Only touches repos
-    that have a ``WireRecord`` — an unwired repo is never modified.
+    Called after a phase transition *or* a free-flow mode change to update
+    deny rules — posture is a pure function of ``(phase, mode)``
+    (``build_claude_code_permissions`` / ``build_codex_workspace_write``), and
+    every transition that changes either input must recompute and persist it.
+    Only touches repos that have a ``WireRecord`` — an unwired repo is never
+    modified.
 
-    When the repo is in free-flow mode, deny rules are skipped entirely so
+    When the resolved mode is free-flow, deny rules are skipped entirely so
     the LLM retains full write access regardless of phase.
 
     Args:
         root: The repository root.
         phase: The new phase value.
+        mode: The already-known flow mode (``"free"``, or ``"workflow"``/
+            ``None``/``""`` for anything else), when the caller just wrote it
+            and knows it authoritatively — pass this whenever possible.
+            ``run_flow_free``/``run_flow_resume`` always do, since they just
+            wrote the mode themselves; the CLI process cannot reach the
+            in-process store to re-derive it after the fact (see
+            ``read_flow_state``'s docstring — store-only, no HTTP fallback).
+
+            When omitted, the mode is derived from the phase row directly.
+            That derivation is safe only in-process — the phase-advance and
+            proxy auto-advance call sites, which always run inside the
+            service and never change ``mode`` themselves. If the store turns
+            out to be unreachable from *this* process while ``mode`` is
+            omitted, that is the exact condition this function must not paper
+            over: silently writing a "workflow" posture because the store
+            couldn't be read would fail closed on write access while the
+            caller believes the rewrite succeeded. Rather than guess, this
+            logs a warning and skips the rewrite entirely, leaving whatever
+            posture is currently on disk untouched.
 
     Returns:
         List of harness names whose posture was successfully rewritten.
@@ -2188,13 +2235,34 @@ def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
     if not _has_any_wire_record(root):
         return []
 
-    # Read flow state from the phase row — free-flow disables write gating.
-    from agentalloy.signals.skill_loader import (
-        read_flow_state,  # pyright: ignore[reportPrivateUsage]
-    )
+    if isinstance(mode, _UnsetType):
+        # In-process derivation only. Distinguish "the store says workflow"
+        # from "the store is unreachable from here" — the latter must never
+        # silently coerce to workflow.
+        from agentalloy.signals.skill_loader import (
+            _phase_view,  # pyright: ignore[reportPrivateUsage]
+        )
 
-    flow_mode, _ = read_flow_state(root)
-    free_mode = flow_mode == "free"
+        view = _phase_view(root)
+        if view is None:
+            logger.warning(
+                "posture rewrite for %s: state store unreachable from this process and no "
+                "mode was passed explicitly — skipping rewrite rather than guessing 'workflow'",
+                root,
+            )
+            return []
+        try:
+            state = view.read_phase()
+        except Exception:
+            logger.warning(
+                "posture rewrite for %s: phase read failed — skipping rewrite", root, exc_info=True
+            )
+            return []
+        flow_mode = (state.mode or "workflow") if state else "workflow"
+    else:
+        flow_mode = mode or "workflow"
+
+    free_mode = (flow_mode or "").lower() == "free"
 
     rewritten: list[str] = []
 
@@ -2209,6 +2277,63 @@ def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
         rewritten.append("codex")
 
     return rewritten
+
+
+def verify_enforcement_posture(root: Path, phase: str, mode: str | None) -> list[str]:
+    """Confirm the on-disk posture for wired Tier A harnesses matches ``(phase, mode)``.
+
+    Returns the wired harnesses whose file does **not** match what
+    ``build_claude_code_permissions`` / ``build_codex_workspace_write`` would
+    produce for this exact pair — an empty list means every wired harness is
+    verified correct. An unwired repo always verifies clean (empty list),
+    never a warning — that mirrors ``rewrite_enforcement_posture``'s own
+    unwired guard.
+
+    ``rewrite_enforcement_posture``'s return value only reports *write*
+    success (the file existed and was written); it says nothing about whether
+    the content it wrote was actually the posture the caller intended. This
+    is the read-back that closes that gap, used by ``flow free``/``flow
+    resume`` so the CLI can warn loudly instead of trusting a rewrite that
+    silently computed the wrong ``free_mode``.
+    """
+    from agentalloy.providers.base import (
+        build_claude_code_permissions,
+        build_codex_workspace_write,
+    )
+
+    free_mode = (mode or "").lower() == "free"
+    mismatched: list[str] = []
+
+    if _has_wire_record_for_harness(root, "claude-code"):
+        settings_path = root / ".claude" / "settings.local.json"
+        expected = build_claude_code_permissions(phase, free_mode=free_mode)
+        actual: Any = None
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                actual = data.get("permissions")
+        except (OSError, json.JSONDecodeError):
+            actual = None
+        if actual != expected:
+            mismatched.append("claude-code")
+
+    if _has_wire_record_for_harness(root, "codex"):
+        config_path = root / ".codex" / "config.toml"
+        expected_ww = build_codex_workspace_write(phase, free_mode=free_mode)
+        actual_ww: Any = None
+        try:
+            import tomllib as _tomllib
+
+            data = _tomllib.loads(config_path.read_text())
+            if isinstance(data, dict):
+                actual_ww = data.get("workspace-write")
+        except Exception:  # noqa: BLE001 - matches _apply_codex_posture's parse guard
+            actual_ww = None
+        # An empty expected block means "no workspace-write key at all".
+        if (actual_ww or {}) != (expected_ww or {}):
+            mismatched.append("codex")
+
+    return mismatched
 
 
 def should_show_banner(root: Path) -> bool:

@@ -20,6 +20,8 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +29,68 @@ from agentalloy.api.state_client import StateClientError
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
 from agentalloy.install.subcommands.phase import _now_iso  # pyright: ignore[reportPrivateUsage]
 
+logger = logging.getLogger(__name__)
+
 # A repo that was never wired has no phase row; free-flow still works there —
 # the row is created at the entry phase so resume lands where a fresh wire
 # would (intake runs on the first post-resume request).
 _DEFAULT_PHASE = "intake"
+
+
+def _rewrite_and_verify_posture(root: Path, phase: str, mode: str) -> None:
+    """Rewrite the Tier A enforcement posture for ``(phase, mode)`` and confirm it stuck.
+
+    Called from the CLI process, where ``mode`` is already known (the caller
+    just wrote it) — passed explicitly rather than re-derived, since the CLI
+    cannot reach the in-process store to re-read it reliably (that is exactly
+    the bug this function exists to not repeat).
+
+    Non-fatal by design: a posture failure must not block ``flow free``/``flow
+    resume`` from completing the mode write, which already succeeded by the
+    time this runs. But it must not be silent either — a warning to stderr
+    (and the log) replaces the old bare ``except Exception: pass``, which
+    turned total failure of the command's purpose into nothing happening.
+    """
+    from agentalloy.install.subcommands.wire_harness import (
+        rewrite_enforcement_posture,
+        verify_enforcement_posture,
+    )
+
+    try:
+        rewrite_enforcement_posture(root, phase, mode=mode)
+    except Exception:
+        logger.warning(
+            "posture rewrite failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+        )
+        print(
+            f"Warning: could not update enforcement posture for phase '{phase}' "
+            f"(mode '{mode}') — write gates may be stale. Run `agentalloy flow status` "
+            "and check `.claude/settings.local.json` / `.codex/config.toml` by hand.",
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        mismatched = verify_enforcement_posture(root, phase, mode)
+    except Exception:
+        logger.warning(
+            "posture verification failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+        )
+        return
+
+    if mismatched:
+        logger.warning(
+            "posture mismatch after rewrite for %s phase=%s mode=%s: %s",
+            root,
+            phase,
+            mode,
+            mismatched,
+        )
+        print(
+            f"Warning: enforcement posture for {', '.join(mismatched)} did not update to "
+            f"match phase '{phase}' (mode '{mode}') — write gates may be stale.",
+            file=sys.stderr,
+        )
 
 
 def run_flow_free(root: Path | None = None) -> dict[str, Any]:
@@ -62,15 +122,10 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
         since = _now_iso()
         access.write(phase, mode="free", free_since=since)
         # Immediately update Tier A harness configs so free-flow writes take effect.
-        # The posture rewrite reads the flow state to determine if deny rules should be active.
-        try:
-            from agentalloy.install.subcommands.wire_harness import (
-                rewrite_enforcement_posture,
-            )
-
-            rewrite_enforcement_posture(root, phase)
-        except Exception:
-            pass  # soft: a posture failure must not block free-flow
+        # Mode is passed explicitly (known here, just written) rather than
+        # re-derived — the CLI process cannot reach the in-process store to
+        # re-read it reliably. See `_rewrite_and_verify_posture`.
+        _rewrite_and_verify_posture(root, phase, "free")
     except StateClientError as exc:
         fail_on_state_error(exc)
         raise  # unreachable
@@ -86,6 +141,11 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     free, it holds the free sentinel, which mismatches every real phase — so
     the next proxy request re-orients (intake included) as a first request.
     Affects every session in the repo.
+
+    Re-engages the enforcement posture for the restored phase — this is the
+    dangerous polarity: if the rewrite were inert here the way it used to be
+    on the ``free`` side, gates would fail to RE-ENGAGE on resume, silently
+    leaving writes open after the escape hatch closes.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
     from agentalloy.signals.skill_loader import _clear_state  # pyright: ignore[reportPrivateUsage]
@@ -99,6 +159,7 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
             return {"phase": phase, "mode": "workflow", "changed": False}
         # Empty strings *clear* the pair; None would carry it forward.
         access.write(phase, mode="", free_since="")
+        _rewrite_and_verify_posture(root, phase, "workflow")
     except StateClientError as exc:
         fail_on_state_error(exc)
         raise  # unreachable

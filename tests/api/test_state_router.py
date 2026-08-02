@@ -922,7 +922,10 @@ class TestPostureRewrite:
                 json={"value": "build"},
             )
             assert resp.status_code == 200
-            mock_rewrite.assert_called_once_with(tmp_path, "build")
+            # mode is None: a fresh repo has no prior row, so the written mode
+            # resolves to nothing (workflow) — read back off the same store
+            # handle that did the write, not re-derived through a second seam.
+            mock_rewrite.assert_called_once_with(tmp_path, "build", None)
 
     def test_posture_rewrite_called_with_contract(
         self, full_client: TestClient, tmp_path: Path
@@ -944,7 +947,7 @@ class TestPostureRewrite:
                 json=payload,
             )
             assert resp.status_code == 200
-            mock_rewrite.assert_called_once_with(tmp_path, "spec")
+            mock_rewrite.assert_called_once_with(tmp_path, "spec", None)
 
     def test_no_posture_rewrite_without_repo_root(self, state_client: TestClient) -> None:
         """Omitting repo_root skips posture rewrite."""
@@ -1021,5 +1024,5 @@ class TestPostureRewriteSoftFail:
             "rewrite_enforcement_posture",
             side_effect=ImportError("no module"),
         ):
-            result = _rewrite_posture(tmp_path, "build")
+            result = _rewrite_posture(tmp_path, "build", None)
             assert result == []
