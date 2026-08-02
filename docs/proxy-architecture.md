@@ -186,7 +186,9 @@ Confirmed from live traffic: an account-authenticated Claude Code (OAuth, `anthr
 
 ### Configurable upstream
 
-The upstream target is `ANTHROPIC_UPSTREAM_URL` (default `https://api.anthropic.com`). Because it is configurable, the proxy can be chained — e.g. Claude Code → AgentAlloy → another proxy → Anthropic — so a user who already occupies `ANTHROPIC_BASE_URL` with another passthrough proxy can keep both.
+The global default upstream target is `ANTHROPIC_UPSTREAM_URL` (default `https://api.anthropic.com`), built once at lifespan startup. Because it is configurable, the proxy can be chained — e.g. Claude Code → AgentAlloy → another proxy → Anthropic — so a user who already occupies `ANTHROPIC_BASE_URL` with another passthrough proxy can keep both.
+
+A per-repo `.agentalloy/upstream` (captured by `agentalloy add --upstream-url`) wins over that default, resolved per request by `resolve_passthrough_client` (`proxy_router.py`, shared with the Responses passthrough — see [responses-surface.md](responses-surface.md#upstream)) and cached per adopted base URL on `app.state.anthropic_passthrough_client_cache`. `key_env` plays no role here: this surface stays auth-transparent regardless of which upstream is in effect.
 
 ### Streaming
 

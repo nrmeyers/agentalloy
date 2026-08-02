@@ -5,8 +5,14 @@ from __future__ import annotations
 import types
 from pathlib import Path
 
+from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_context import Upstream, read_upstream
-from agentalloy.api.proxy_router import _get_or_create_upstream_client, _resolve_upstream
+from agentalloy.api.proxy_router import (
+    _get_or_create_upstream_client,
+    _passthrough_base_url,
+    _resolve_upstream,
+    resolve_passthrough_client,
+)
 
 
 def _write_upstream(root: Path, text: str) -> None:
@@ -73,3 +79,59 @@ class TestClientCache:
         c3 = _get_or_create_upstream_client(app, "http://other:1", None)
         assert c1 is c2
         assert c3 is not c1
+
+
+class TestPassthroughBaseUrl:
+    def test_strips_trailing_v1(self) -> None:
+        # `.agentalloy/upstream` is documented (and written by `agentalloy add`)
+        # with a /v1 suffix -- the chat-completions shape. The passthrough
+        # surfaces' _UPSTREAM_PATH already carries /v1/messages or
+        # /v1/responses, so verbatim reuse would double it (#505 note).
+        assert _passthrough_base_url("http://h:9000/v1") == "http://h:9000"
+
+    def test_leaves_bare_host_unchanged(self) -> None:
+        assert _passthrough_base_url("http://h:9000") == "http://h:9000"
+
+    def test_only_strips_trailing_occurrence(self) -> None:
+        assert _passthrough_base_url("http://h:9000/v1/proxy") == "http://h:9000/v1/proxy"
+
+
+class TestResolvePassthroughClient:
+    def test_per_repo_wins_and_strips_v1(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\n")
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        assert resolved is not None
+        assert resolved is not default
+        assert resolved.upstream_base_url == "http://h:9000"
+        assert "http://h:9000" in app.state.test_client_cache
+
+    def test_falls_back_to_default_client(self, tmp_path: Path) -> None:
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        assert resolved is default
+
+    def test_none_when_neither_resolves(self, tmp_path: Path) -> None:
+        app = _fake_app()
+        assert resolve_passthrough_client(app, tmp_path, None, "test_client_cache") is None
+
+    def test_reuses_cached_client_for_same_base_url(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\n")
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        c1 = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        c2 = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        assert c1 is c2
+
+    def test_key_env_never_used_to_build_a_credential(self, tmp_path: Path) -> None:
+        # Auth-transparent by design: a per-repo key_env must play no role on
+        # the passthrough surfaces -- they forward the caller's own header
+        # verbatim. Resolving must not raise or attempt to read the env var,
+        # and the resulting client carries no bearer of its own.
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\nkey_env: SOME_UNSET_VAR\n")
+        app = _fake_app()
+        resolved = resolve_passthrough_client(app, tmp_path, None, "test_client_cache")
+        assert resolved is not None
+        assert resolved.upstream_base_url == "http://h:9000"

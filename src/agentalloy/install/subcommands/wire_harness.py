@@ -1522,11 +1522,23 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
     else:
         settings_data["modelProviders"] = {"openai": [proxy_provider_entry]}
 
-    # Update top-level model.baseUrl
+    # Update top-level model.baseUrl AND model.name. Qwen resolves the active
+    # provider by matching `model.name` against a provider `id` in
+    # `modelProviders.openai[]` — leaving `model.name` as the inherited upstream
+    # model name (e.g. "qwen3.6-35B-XL") can collide with a real provider entry
+    # the user already has for that same model id. When it collides, qwen wins
+    # on the id match and silently discards `model.baseUrl` (the proxy URL),
+    # routing every request straight to the colliding provider instead (#504).
+    # Setting `model.name` to the proxy's own provider id ("agentalloy-proxy")
+    # means the id qwen resolves IS the proxy entry, so it can never collide
+    # with a provider the user configured under the real model name. The
+    # upstream model name itself is not lost — it lives in `.agentalloy/upstream`
+    # and is applied proxy-side (`_resolve_upstream` in proxy_router.py).
     if "model" in settings_data and isinstance(settings_data["model"], dict):
         settings_data["model"]["baseUrl"] = proxy_base
+        settings_data["model"]["name"] = "agentalloy-proxy"
     else:
-        settings_data["model"] = {"baseUrl": proxy_base}
+        settings_data["model"] = {"baseUrl": proxy_base, "name": "agentalloy-proxy"}
 
     # Point defaultModel at the proxy entry — otherwise Qwen Code keeps using
     # the old default and never routes through the proxy.
