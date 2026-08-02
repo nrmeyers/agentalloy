@@ -1,0 +1,77 @@
+"""Unit coverage for the stub's request-inspection helpers.
+
+Deliberately NOT marked ``harness_e2e``: these need no binaries and no
+sockets, so they run in the default suite. The matrix's assertions are only
+as good as these extractors — a ``system_texts`` that silently returned ``[]``
+for a surface would turn the leg-3 check into a no-op.
+"""
+
+from __future__ import annotations
+
+from tests.harness_e2e.upstream_stub import CapturedRequest, system_texts, user_texts
+
+BLOCK = "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->prose<!-- END AGENTALLOY-CONTEXT -->"
+
+
+def test_system_texts_reads_responses_instructions() -> None:
+    req = CapturedRequest(path="/v1/responses", payload={"instructions": BLOCK, "input": "hi"})
+    assert system_texts([req]) == [BLOCK]
+
+
+def test_system_texts_reads_chat_completions_system_messages() -> None:
+    req = CapturedRequest(
+        path="/v1/chat/completions",
+        payload={
+            "messages": [
+                {"role": "system", "content": BLOCK},
+                {"role": "user", "content": "hi"},
+            ]
+        },
+    )
+    assert system_texts([req]) == [BLOCK]
+
+
+def test_system_texts_joins_multiple_system_messages_in_order() -> None:
+    req = CapturedRequest(
+        path="/v1/chat/completions",
+        payload={
+            "messages": [
+                {"role": "system", "content": "first"},
+                {"role": "developer", "content": "second"},
+                {"role": "user", "content": "hi"},
+            ]
+        },
+    )
+    assert system_texts([req]) == ["first\nsecond"]
+
+
+def test_system_texts_reads_anthropic_system_field_both_forms() -> None:
+    as_string = CapturedRequest(path="/v1/messages", payload={"system": BLOCK})
+    as_blocks = CapturedRequest(
+        path="/v1/messages", payload={"system": [{"type": "text", "text": BLOCK}]}
+    )
+    assert system_texts([as_string, as_blocks]) == [BLOCK, BLOCK]
+
+
+def test_system_texts_is_one_entry_per_request_even_when_bare() -> None:
+    """Per-request alignment is the point: the matrix asserts on every turn."""
+    reqs = [
+        CapturedRequest(path="/v1/chat/completions", payload={"messages": [{"role": "user"}]}),
+        CapturedRequest(path="/v1/responses", payload={"instructions": BLOCK}),
+        CapturedRequest(path="/v1/chat/completions", payload={}),
+    ]
+    assert system_texts(reqs) == ["", BLOCK, ""]
+
+
+def test_user_texts_still_reads_the_user_leg_not_the_system_leg() -> None:
+    req = CapturedRequest(
+        path="/v1/chat/completions",
+        payload={
+            "messages": [
+                {"role": "system", "content": BLOCK},
+                {"role": "user", "content": "hi"},
+            ]
+        },
+    )
+    assert user_texts([req]) == ["hi"]
+    assert system_texts([req]) == [BLOCK]
