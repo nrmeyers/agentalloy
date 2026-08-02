@@ -296,10 +296,12 @@ CASES: tuple[HarnessCase, ...] = (
         name="qwen-code",
         binary="qwen",
         env=_qwen_env,
-        # -m is not optional. Without it qwen resolves its own default provider
-        # and bypasses the proxy entirely — `add qwen-code` writes a model.name
-        # that collides with a real provider id (issue #504). Same shape as the
-        # opencode entry's -m pin, for the same class of reason.
+        # -m pins the provider explicitly. `add qwen-code` now writes model.name
+        # as the proxy's own provider id ("agentalloy-proxy", fixed for #504 —
+        # it used to be the upstream model name, which could collide with a
+        # real provider id and silently discard the proxy baseUrl), so this is
+        # no longer load-bearing for correctness, but it stays as an explicit,
+        # unambiguous pin — same shape as the opencode entry's -m pin.
         argv=lambda root: ["qwen", "-m", "agentalloy-proxy", "-p", PROMPT],
         wire=_wire_qwen,
         scrub_env=("OPENAI_BASE_URL", "OPENAI_API_BASE"),

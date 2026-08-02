@@ -372,6 +372,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await anthropic_passthrough_client.aclose()
         with suppress(Exception):
             await responses_passthrough_client.aclose()
+        # Per-repo passthrough clients (resolve_passthrough_client), cached on
+        # app.state keyed by base_url when a request adopted a .agentalloy/upstream
+        # override — same leak-guard pattern as cached_upstreams above.
+        cached_passthrough = [
+            *getattr(app.state, "anthropic_passthrough_client_cache", {}).values(),
+            *getattr(app.state, "responses_passthrough_client_cache", {}).values(),
+        ]
+        for pclient in cached_passthrough:
+            with suppress(Exception):
+                await pclient.aclose()
         for closeable in (
             telemetry,
             embed_client,

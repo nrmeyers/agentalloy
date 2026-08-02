@@ -48,6 +48,7 @@ from agentalloy.api.proxy_router import (
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,
+    resolve_passthrough_client,
 )
 from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
@@ -63,6 +64,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _UPSTREAM_PATH = "/v1/responses"
+
+# app.state attribute name for this surface's per-repo passthrough client cache
+# (see resolve_passthrough_client) — distinct from the Anthropic passthrough's
+# so the two surfaces never share a cache dict.
+_CLIENT_CACHE_ATTR = "responses_passthrough_client_cache"
 
 
 def get_responses_client(request: Request) -> AnthropicPassthroughClient | None:
@@ -196,6 +202,17 @@ async def passthrough_openai_responses(
     raw_body = await request.body()
     query_string = request.url.query
     inbound_headers = request.headers
+
+    # Per-repo .agentalloy/upstream (captured by `agentalloy add`) wins over the
+    # lifespan-scoped default client -- the root cause of #505: `add codex
+    # --upstream-url` wrote this file and reported it as in effect, but this
+    # route forwarded to the process-wide RESPONSES_UPSTREAM_URL regardless.
+    try:
+        project_dir = decode_proj_token(token)
+    except ValueError:
+        project_dir = None
+    if project_dir is not None:
+        client = resolve_passthrough_client(request.app, project_dir, client, _CLIENT_CACHE_ATTR)
 
     if client is None:
         return Response(
