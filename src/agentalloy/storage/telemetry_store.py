@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 import duckdb
@@ -215,6 +216,10 @@ class DuckDBTelemetryStore:
         traces = self.count_traces()
         self._c().execute("DELETE FROM composition_traces")
         return {"traces_deleted": traces}
+
+    def execute(self, sql: str, params: Sequence[object] | None = None) -> None:
+        """Execute arbitrary SQL (used by the phase-event writer for DDL + inserts)."""
+        self._c().execute(sql, params or ())
 
     # -- reads ---------------------------------------------------------------
 
