@@ -18,12 +18,13 @@ that made the original robust:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +52,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   worker_token TEXT,
   started_at REAL NOT NULL,
   updated_at REAL NOT NULL,
-  finished_at REAL
+  finished_at REAL,
+  governs_written INTEGER NOT NULL DEFAULT 0,
+  governs_dropped INTEGER NOT NULL DEFAULT 0,
+  governs_unresolved_spans TEXT,
+  governs_suspicious_docs TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
@@ -99,6 +104,29 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
         "indexed_repos",
         "missing_since",
         "ALTER TABLE indexed_repos ADD COLUMN missing_since INTEGER",
+    ),
+    # #527 B: GOVERNS-edge delta reporting from the decision phase, surfaced
+    # on the job row rather than new plumbing (see jobs_store.py:551-576's
+    # existing job_events/JobView pattern).
+    (
+        "jobs",
+        "governs_written",
+        "ALTER TABLE jobs ADD COLUMN governs_written INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "governs_dropped",
+        "ALTER TABLE jobs ADD COLUMN governs_dropped INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "governs_unresolved_spans",
+        "ALTER TABLE jobs ADD COLUMN governs_unresolved_spans TEXT",
+    ),
+    (
+        "jobs",
+        "governs_suspicious_docs",
+        "ALTER TABLE jobs ADD COLUMN governs_suspicious_docs TEXT",
     ),
 )
 
@@ -215,6 +243,10 @@ class CodeIndexJob:
     started_at: float
     updated_at: float
     finished_at: float | None
+    governs_written: int = 0
+    governs_dropped: int = 0
+    governs_unresolved_spans: list[str] = field(default_factory=list)
+    governs_suspicious_docs: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -245,6 +277,17 @@ def repo_path_key(repo_path: str) -> str:
     return hashlib.sha256(repo_path.encode()).hexdigest()[:8]
 
 
+def _json_list(raw: object) -> list[str]:
+    """Decode a ``governs_*`` JSON-text column; tolerant of NULL/garbage."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return []
+    return [str(x) for x in data] if isinstance(data, list) else []
+
+
 def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
     return CodeIndexJob(
         job_id=str(row["job_id"]),
@@ -267,6 +310,10 @@ def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
         started_at=float(row["started_at"]),
         updated_at=float(row["updated_at"]),
         finished_at=None if row["finished_at"] is None else float(row["finished_at"]),
+        governs_written=int(row["governs_written"] or 0),
+        governs_dropped=int(row["governs_dropped"] or 0),
+        governs_unresolved_spans=_json_list(row["governs_unresolved_spans"]),
+        governs_suspicious_docs=_json_list(row["governs_suspicious_docs"]),
     )
 
 
@@ -545,6 +592,45 @@ class CodeIndexJobsStore:
                 (now, now, worker_token),
             )
             return int(cur.rowcount)
+
+    def update_governs_result(
+        self,
+        job_id: str,
+        *,
+        written: int,
+        dropped: int,
+        unresolved_spans: list[str],
+        suspicious_docs: list[str],
+    ) -> None:
+        """Record the decision phase's GOVERNS-edge delta (#527 B) on the job
+        row. Also appends a warn-level event when the result looks bad
+        (dropped > written, or anything reported suspicious) so
+        ``list_job_events``/CLI surfaces it without a separate poll."""
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  governs_written = ?, governs_dropped = ?,
+                  governs_unresolved_spans = ?, governs_suspicious_docs = ?,
+                  updated_at = ?
+                WHERE job_id = ?
+                """,
+                (
+                    int(written),
+                    int(dropped),
+                    json.dumps(unresolved_spans),
+                    json.dumps(suspicious_docs),
+                    time.time(),
+                    job_id,
+                ),
+            )
+        if dropped > written or suspicious_docs:
+            self._record_event_quiet(
+                job_id,
+                "warn",
+                f"GOVERNS delta looks suspicious: written={written} dropped={dropped} "
+                f"suspicious_docs={suspicious_docs} unresolved_spans={unresolved_spans}",
+            )
 
     # -- job events --------------------------------------------------------------
 

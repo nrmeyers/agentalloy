@@ -196,6 +196,11 @@ class CodeEdge:
     resolved_via: str = "unknown"
     confidence: float = 1.0
     new_target: str = ""
+    # Provenance for GOVERNS edges (#527 C): the fenced span that resolved to
+    # ``dst`` and the resolution tier (1 = exact fqn, 2 = unique short-name).
+    # None for non-GOVERNS edges (CALLS/IMPORTS/... never populate these).
+    span: str | None = None
+    resolution_tier: int | None = None
 
 
 @dataclass(frozen=True)
@@ -370,6 +375,7 @@ class CodeGraphStore(Protocol):
     def governing_decisions(self, fqn: str) -> list[DecisionRow]: ...
     def decisions_for_files(self, file_paths: Sequence[str]) -> list[DecisionRow]: ...
     def delete_govern_edges_for_doc(self, doc_path: str) -> int: ...
+    def count_govern_edges_for_doc(self, doc_path: str) -> int: ...
     def counts_by_kind(self) -> dict[str, int]: ...
     def list_files(
         self, *, prefix: str | None = None, limit: int = 100, offset: int = 0

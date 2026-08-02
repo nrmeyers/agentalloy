@@ -103,6 +103,42 @@ def test_index_rejects_missing_dir(fast_client: tuple[TestClient, CodeIndexState
     assert resp.status_code == 400
 
 
+def test_prune_decisions_threads_through_the_full_chain(
+    fast_client: tuple[TestClient, CodeIndexState], repo: Path
+) -> None:
+    """#527 escape hatch, end-to-end: CLI-shaped POST body -> IndexRequest ->
+    start_job -> run_index_job -> _index_decisions. Each of those layers
+    defaults ``prune_decisions`` to False independently, so this locks the
+    whole chain against a typo silently disabling the flag anywhere in it."""
+    client, state = fast_client
+    design_dir = repo / "docs" / "design" / "x"
+    design_dir.mkdir(parents=True)
+    (design_dir / "approach.md").write_text(
+        "# Approach\n\nWe route through `demo.pkg.util.helper`.\n"
+    )
+
+    job = client.post("/code/index", json={"repo_path": str(repo)}).json()
+    poll_done(client, str(job["id"]))
+
+    from agentalloy.code_index.store import open_code_index
+
+    handles = open_code_index(state.settings, "demo", role="reader", repo_path=str(repo))
+    try:
+        assert handles.graph.governing_decisions("demo.pkg.util.helper") != []
+    finally:
+        handles.close()
+
+    (design_dir / "approach.md").unlink()
+    job2 = client.post("/code/index", json={"repo_path": str(repo), "prune_decisions": True}).json()
+    poll_done(client, str(job2["id"]))
+
+    handles = open_code_index(state.settings, "demo", role="reader", repo_path=str(repo))
+    try:
+        assert handles.graph.governing_decisions("demo.pkg.util.helper") == []
+    finally:
+        handles.close()
+
+
 def test_duplicate_active_job_409(
     gated: tuple[TestClient, CodeIndexState, GatedEmbedClient], repo: Path
 ) -> None:

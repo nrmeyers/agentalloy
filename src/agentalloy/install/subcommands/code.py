@@ -2,7 +2,8 @@
 
 Thin HTTP clients against the local agentalloy service:
 
-    agentalloy code index [path] [--force] [--wait]     Start (and follow) an index job
+    agentalloy code index [path] [--force] [--wait] [--prune-decisions]
+                                                          Start (and follow) an index job
     agentalloy code status                              Indexed repos + active jobs
     agentalloy code search <query> [--repo] [--lexical] [-k N]
     agentalloy code symbol <fqn> [--repo]
@@ -206,7 +207,14 @@ def _run_index(args: argparse.Namespace) -> int:
             rc = _guard_module(client)
             if rc is not None:
                 return rc
-            resp = client.post("/code/index", json={"repo_path": str(root), "force": args.force})
+            resp = client.post(
+                "/code/index",
+                json={
+                    "repo_path": str(root),
+                    "force": args.force,
+                    "prune_decisions": args.prune_decisions,
+                },
+            )
             resp.raise_for_status()
             job: dict[str, Any] = resp.json()
             if not args.wait:
@@ -221,6 +229,29 @@ def _run_index(args: argparse.Namespace) -> int:
         return _http_error(exc)
     except httpx.HTTPError as exc:
         return _service_down_error(port, exc)
+
+
+def _warn_governs(job: dict[str, Any]) -> None:
+    """LOUD stderr warning (#527 B) when a job's GOVERNS-edge delta looks bad:
+    more edges dropped than written, or any doc flagged suspicious. Silent
+    otherwise — most jobs never touch a decision doc."""
+    written = int(job.get("governs_written") or 0)
+    dropped = int(job.get("governs_dropped") or 0)
+    suspicious = job.get("governs_suspicious_docs") or []
+    unresolved = job.get("governs_unresolved_spans") or []
+    if dropped <= written and not suspicious:
+        return
+    print("WARNING: GOVERNS-edge derivation looks suspicious.", file=sys.stderr)
+    print(f"  written={written} dropped={dropped}", file=sys.stderr)
+    if suspicious:
+        print(f"  suspicious docs (edges kept, not re-derived): {suspicious}", file=sys.stderr)
+    if unresolved:
+        print(f"  ambiguous/unresolved spans: {unresolved}", file=sys.stderr)
+    print(
+        "  Re-run `agentalloy code index --prune-decisions` once you've confirmed "
+        "this is intentional.",
+        file=sys.stderr,
+    )
 
 
 def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
@@ -249,6 +280,7 @@ def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
                 f"Indexed {job.get('slug')}: {job.get('symbol_count')} symbols, "
                 f"{job.get('edge_count')} edges, {job.get('embedding_count')} embeddings."
             )
+        _warn_governs(job)
         return 0
     if not as_json:
         print(f"ERROR: Index job ended in state {state!r}.", file=sys.stderr)
@@ -856,6 +888,14 @@ def add_parser(
         "--force", action="store_true", help="Full rebuild, ignore content hashes."
     )
     index_p.add_argument("--wait", action="store_true", help="Poll the job to completion.")
+    index_p.add_argument(
+        "--prune-decisions",
+        action="store_true",
+        help=(
+            "Escape hatch (#527): actually drop GOVERNS edges for a decision doc "
+            "that has vanished entirely. Default off keeps them across reindexes."
+        ),
+    )
     _add_common(index_p)
     index_p.set_defaults(func=_run_index)
 
