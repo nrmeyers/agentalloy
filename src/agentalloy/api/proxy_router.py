@@ -9,11 +9,13 @@ Composition failures soft-fail: request passes through unchanged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import time
 from collections.abc import AsyncGenerator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +45,7 @@ from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
 from agentalloy.api.upstream.error_sse import error_sse_plain
 from agentalloy.providers.base import filter_tools_for_phase
+from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 
 if TYPE_CHECKING:
     from agentalloy.config import Settings as AppSettings
@@ -108,6 +111,27 @@ def get_settings_for_proxy(request: Request) -> AppSettings:
     from agentalloy.config import Settings as AppSettings
 
     return AppSettings()
+
+
+def _get_phase_telemetry_writer(
+    app: Any, vector_store: TelemetryStore | None
+) -> PhaseTelemetryWriter | None:
+    """Prefer the lifespan-scoped writer on ``app.state.phase_telemetry`` (task
+    04) so the schema DDL is not re-run on every single write. Falls back to a
+    fresh per-request writer when app.state has none wired (e.g. tests that
+    build the app without the default lifespan) — same soft-fail posture as
+    every other telemetry seam in this module.
+    """
+    # Not an isinstance check: tests wire a MagicMock/duck-typed stand-in onto
+    # app.state.phase_telemetry to assert on llm_sent/llm_received/llm_error
+    # without a real DuckDB — any truthy value with the writer's method names
+    # is accepted, same as every other app.state dependency in this module.
+    existing = getattr(app.state, "phase_telemetry", None)
+    if existing is not None:
+        return existing
+    if vector_store is None:
+        return None
+    return PhaseTelemetryWriter(vector_store)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +222,171 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# LLM forwarding telemetry (llm_sent / llm_received / llm_error)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _StreamTelemetry:
+    """Bundle threaded into the SSE generator so it can emit the terminal
+    llm_received/llm_error event itself (the handler has already returned by
+    the time the stream finishes)."""
+
+    writer: PhaseTelemetryWriter
+    trace_id: str | None
+    phase: str | None
+    model: str | None
+
+
+def _extract_system_prompt(request: ProxyRequest) -> str | None:
+    """Flatten the first system message to plain text for the sha256 fingerprint."""
+    for msg in request.messages:
+        if msg.role != "system" or not msg.content:
+            continue
+        if isinstance(msg.content, str):
+            return msg.content
+        parts = [
+            block.get("text", "") for block in msg.content if block.get("type") == "text"
+        ]
+        joined = "".join(parts)
+        if joined:
+            return joined
+    return None
+
+
+def _system_prompt_sha(request: ProxyRequest) -> str | None:
+    text = _extract_system_prompt(request)
+    if not text:
+        return None
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _extract_tokens_out(body: dict[str, Any]) -> int | None:
+    """Pull ``usage.completion_tokens`` from a non-streaming chat-completions body."""
+    usage = body.get("usage")
+    if isinstance(usage, dict):
+        val = usage.get("completion_tokens")
+        if isinstance(val, int):
+            return val
+    return None
+
+
+class _SseUsageScanner:
+    """Scan SSE text chunks for a terminal ``usage.completion_tokens`` field.
+
+    Only present on OpenAI chat-completions streams when the caller set
+    ``stream_options.include_usage`` — absent otherwise, in which case
+    ``latest`` stays None rather than inventing a token count.
+
+    ``resp.aiter_text()`` yields byte-boundary chunks, not line-aligned ones —
+    a ``data: {...}`` line carrying the usage block can straddle two chunks, so
+    a per-chunk ``json.loads`` (no cross-chunk buffer) silently misses it on a
+    fragmented stream. This carries the trailing partial line across ``feed()``
+    calls so a split line is only parsed once it's whole.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.latest: int | None = None
+
+    def feed(self, chunk: str) -> None:
+        self._buffer += chunk
+        # Keep whatever comes after the last newline — it may be a partial
+        # line that the next chunk completes.
+        *complete_lines, self._buffer = self._buffer.split("\n")
+        for raw_line in complete_lines:
+            self._scan_line(raw_line.strip())
+
+    def _scan_line(self, line: str) -> None:
+        if not line.startswith("data:"):
+            return
+        data = line[len("data:") :].strip()
+        if not data or data == "[DONE]":
+            return
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            return
+        usage = obj.get("usage") if isinstance(obj, dict) else None
+        if isinstance(usage, dict):
+            val = usage.get("completion_tokens")
+            if isinstance(val, int):
+                self.latest = val
+
+
+def _emit_llm_sent(
+    writer: PhaseTelemetryWriter | None,
+    trace_id: str | None,
+    phase: str | None,
+    model: str | None,
+    *,
+    workflow_skill_id: str | None,
+    system_prompt_sha: str | None,
+) -> None:
+    if writer is None:
+        return
+    try:
+        writer.llm_sent(
+            trace_id or "",
+            phase or "unknown",
+            model=model,
+            direction="forward",
+            workflow_skill_id=workflow_skill_id,
+            system_prompt_sha=system_prompt_sha,
+        )
+    except Exception:  # noqa: BLE001 — soft-fail by design
+        logger.debug("llm_sent telemetry write failed", exc_info=True)
+
+
+def _emit_llm_received(
+    writer: PhaseTelemetryWriter | None,
+    trace_id: str | None,
+    phase: str | None,
+    model: str | None,
+    *,
+    tokens_out: int | None,
+    latency_ms: int,
+) -> None:
+    if writer is None:
+        return
+    try:
+        writer.llm_received(
+            trace_id or "",
+            phase or "unknown",
+            model=model,
+            tokens_out=tokens_out,
+            latency_ms=latency_ms,
+            success=True,
+        )
+    except Exception:  # noqa: BLE001 — soft-fail by design
+        logger.debug("llm_received telemetry write failed", exc_info=True)
+
+
+def _emit_llm_error(
+    writer: PhaseTelemetryWriter | None,
+    trace_id: str | None,
+    phase: str | None,
+    model: str | None,
+    *,
+    error_message: str,
+    latency_ms: int,
+) -> None:
+    if writer is None:
+        return
+    try:
+        writer.llm_error(
+            trace_id or "",
+            phase or "unknown",
+            model=model,
+            error_message=error_message,
+            latency_ms=latency_ms,
+            success=False,
+        )
+    except Exception:  # noqa: BLE001 — soft-fail by design
+        logger.debug("llm_error telemetry write failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Streaming helper
 # ---------------------------------------------------------------------------
 
@@ -207,6 +396,7 @@ def _stream_upstream_response(
     chat_url: str,
     payload: dict[str, Any],
     on_status: Callable[[int], None] = lambda _status: None,
+    telemetry: _StreamTelemetry | None = None,
 ) -> StreamingResponse:
     """Forward a streaming (SSE) response from the upstream LLM.
 
@@ -217,9 +407,48 @@ def _stream_upstream_response(
     ``on_status`` is invoked once with the upstream status as soon as the stream
     opens (before any chunk relays), so the caller can commit cadence markers
     2xx-gated — a 5xx open never burns the cadence.
+
+    ``telemetry``, when set, drives exactly one terminal ``llm_received`` (normal
+    completion) or ``llm_error`` (any failure, including mid-stream after bytes
+    were already relayed) emission from inside the generator — the handler has
+    already returned a ``StreamingResponse`` by the time the stream finishes, so
+    this is the only place that can observe the terminal outcome. ``llm_sent``
+    is emitted by the caller before this function is invoked.
     """
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        dispatch_start = time.monotonic()
+        usage_scanner = _SseUsageScanner()
+        emitted = False
+
+        def _finish_received() -> None:
+            nonlocal emitted
+            if emitted or telemetry is None:
+                return
+            emitted = True
+            _emit_llm_received(
+                telemetry.writer,
+                telemetry.trace_id,
+                telemetry.phase,
+                telemetry.model,
+                tokens_out=usage_scanner.latest,
+                latency_ms=int((time.monotonic() - dispatch_start) * 1000),
+            )
+
+        def _finish_error(message: str) -> None:
+            nonlocal emitted
+            if emitted or telemetry is None:
+                return
+            emitted = True
+            _emit_llm_error(
+                telemetry.writer,
+                telemetry.trace_id,
+                telemetry.phase,
+                telemetry.model,
+                error_message=message,
+                latency_ms=int((time.monotonic() - dispatch_start) * 1000),
+            )
+
         try:
             async with upstream.stream("POST", chat_url, json=payload) as resp:
                 on_status(resp.status_code)
@@ -228,27 +457,36 @@ def _stream_upstream_response(
                     yield error_sse_plain(
                         f"Upstream returned HTTP {resp.status_code}", resp.status_code
                     )
+                    _finish_error(f"Upstream returned HTTP {resp.status_code}")
                     return
                 async for chunk in resp.aiter_text():
+                    usage_scanner.feed(chunk)
                     yield chunk
+            _finish_received()
         except httpx.HTTPStatusError as exc:
             logger.warning("Upstream streaming HTTP status error: %s", exc)
             yield error_sse_plain(f"Upstream HTTP error: {exc}", exc.response.status_code)
+            _finish_error(f"Upstream HTTP error: {exc}")
         except httpx.ConnectError as exc:
             logger.warning("Upstream streaming connection failed: %s", exc)
             yield error_sse_plain(f"Upstream connection failed: {exc}")
+            _finish_error(f"Upstream connection failed: {exc}")
         except httpx.TimeoutException as exc:
             logger.warning("Upstream streaming timed out: %s", exc)
             yield error_sse_plain(f"Upstream timeout: {exc}")
+            _finish_error(f"Upstream timeout: {exc}")
         except httpx.RequestError as exc:
             logger.warning("Upstream streaming request error: %s", exc)
             yield error_sse_plain(f"Upstream request error: {exc}")
+            _finish_error(f"Upstream request error: {exc}")
         except httpx.HTTPError as exc:
             logger.warning("Upstream streaming HTTP error: %s", exc)
             yield error_sse_plain(f"Upstream HTTP error: {exc}")
+            _finish_error(f"Upstream HTTP error: {exc}")
         except Exception as exc:
             logger.warning("Upstream streaming unexpected error: %s", exc, exc_info=True)
             yield error_sse_plain(f"Upstream error: {exc}")
+            _finish_error(f"Upstream error: {exc}")
 
     return StreamingResponse(
         content=event_generator(),
@@ -392,6 +630,7 @@ async def _write_flow_telemetry(
     session_source: str | None = None,
     category: str | None = None,
     trace_id: str | None = None,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
 ) -> None:
     """Write one consolidated telemetry trace for the full proxy request flow.
 
@@ -400,15 +639,17 @@ async def _write_flow_telemetry(
     ``record_trace=False``); ``None`` on passthrough/error paths leaves the skill
     fields empty. ``repo`` and ``session_*`` are the values the handler already
     resolved (the handler may have used a /proj/<token> override, so they're passed
-    in rather than recomputed here).
+    in rather than recomputed here). ``phase_telemetry``, when supplied, is the
+    app-state-scoped writer (task 04) — reused instead of constructing a fresh
+    one so the schema DDL doesn't re-run on every write; falls back to a
+    per-call writer over ``vector_store`` when not supplied (e.g. call sites
+    that don't have app.state, such as tests).
     """
     if vector_store is None:
         return
     # Phase-level telemetry: complete or error, using the request's trace_id.
     try:
-        from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
-
-        pw = PhaseTelemetryWriter(vector_store)
+        pw = phase_telemetry if phase_telemetry is not None else PhaseTelemetryWriter(vector_store)
         if error_code:
             pw.phase_error(
                 trace_id or "",
@@ -528,11 +769,24 @@ async def proxy_chat_completions(
     session_id = extract_session_header(fastapi_request.headers)
     session_key, session_source = resolve_session_key(request, session_id)
 
+    # Phase-event writer for this request: prefers the lifespan-scoped instance
+    # (task 04) so the schema DDL doesn't re-run every write; reused below for
+    # both the signal-layer phase_start (via evaluate_signal) and the llm_*
+    # forwarding events.
+    phase_telemetry_writer = _get_phase_telemetry_writer(fastapi_request.app, vector_store)
+
     # --- Step 3: Signal layer ---
     signal_result = None
     composed = False
     try:
-        signal_result = await evaluate_signal(request, cwd, embed_client, session_id, vector_store=vector_store)
+        signal_result = await evaluate_signal(
+            request,
+            cwd,
+            embed_client,
+            session_id,
+            vector_store=vector_store,
+            phase_telemetry=phase_telemetry_writer,
+        )
     except Exception:
         logger.warning("Signal evaluation failed -- passing through", exc_info=True)
 
@@ -684,6 +938,18 @@ async def proxy_chat_completions(
         )
     error_code: str | None = None
 
+    # llm_sent: emitted ONCE right before dispatch, on both the streaming and
+    # non-streaming paths, never blocking the forward.
+    trace_id = signal_result.trace_id if signal_result else None
+    _emit_llm_sent(
+        phase_telemetry_writer,
+        trace_id,
+        phase,
+        upstream_model,
+        workflow_skill_id=signal_result.workflow_skill_id if signal_result else None,
+        system_prompt_sha=_system_prompt_sha(modified_request),
+    )
+
     if modified_request.stream:
         # Write telemetry after streaming starts (latency tracked separately)
         await _write_flow_telemetry(
@@ -702,9 +968,17 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
             category=trace_category,
-            trace_id=signal_result.trace_id if signal_result else None,
+            trace_id=trace_id,
+            phase_telemetry=phase_telemetry_writer,
         )
-        return _stream_upstream_response(upstream_client, chat_url, payload, on_status=_commit)
+        stream_telemetry = (
+            _StreamTelemetry(phase_telemetry_writer, trace_id, phase, upstream_model)
+            if phase_telemetry_writer is not None
+            else None
+        )
+        return _stream_upstream_response(
+            upstream_client, chat_url, payload, on_status=_commit, telemetry=stream_telemetry
+        )
 
     # Non-streaming: forward and return JSON
     try:
@@ -713,6 +987,10 @@ async def proxy_chat_completions(
         logger.warning("Upstream connection failed: %s", e)
         error_code = "upstream_connect_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
+        _emit_llm_error(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            error_message=str(e), latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -731,12 +1009,17 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.TimeoutException as e:
         logger.warning("Upstream timeout: %s", e)
         error_code = "upstream_timeout"
         latency_ms = int((time.monotonic() - start_time) * 1000)
+        _emit_llm_error(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            error_message=str(e), latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -755,12 +1038,17 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.RequestError as e:
         logger.warning("Upstream request error: %s", e)
         error_code = "upstream_request_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
+        _emit_llm_error(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            error_message=str(e), latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -779,12 +1067,17 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.HTTPError as e:
         logger.warning("Upstream HTTP error: %s", e)
         error_code = "upstream_http_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
+        _emit_llm_error(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            error_message=str(e), latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -803,6 +1096,7 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         return _upstream_unavailable_error(str(e))
 
@@ -810,6 +1104,10 @@ async def proxy_chat_completions(
         logger.warning("Upstream returned HTTP %d: %s", resp.status_code, resp.text[:200])
         error_code = f"upstream_http_{resp.status_code}"
         latency_ms = int((time.monotonic() - start_time) * 1000)
+        _emit_llm_error(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            error_message=f"Upstream returned HTTP {resp.status_code}", latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -828,6 +1126,7 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         return _upstream_unavailable_error(f"HTTP {resp.status_code}")
 
@@ -836,6 +1135,12 @@ async def proxy_chat_completions(
     try:
         body: dict[str, Any] = resp.json()
     except ValueError:
+        # Upstream returned 2xx but a non-JSON body — the LLM call itself
+        # succeeded (we can't extract tokens_out from a body we can't parse).
+        _emit_llm_received(
+            phase_telemetry_writer, trace_id, phase, upstream_model,
+            tokens_out=None, latency_ms=latency_ms,
+        )
         await _write_flow_telemetry(
             vector_store,
             modified_request,
@@ -853,6 +1158,7 @@ async def proxy_chat_completions(
             session_source=session_source,
             category=trace_category,
             trace_id=signal_result.trace_id if signal_result else None,
+            phase_telemetry=phase_telemetry_writer,
         )
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
@@ -864,6 +1170,10 @@ async def proxy_chat_completions(
             media_type=resp.headers.get("content-type", "text/plain"),
         )
 
+    _emit_llm_received(
+        phase_telemetry_writer, trace_id, phase, upstream_model,
+        tokens_out=_extract_tokens_out(body), latency_ms=latency_ms,
+    )
     await _write_flow_telemetry(
         vector_store,
         modified_request,
@@ -880,6 +1190,8 @@ async def proxy_chat_completions(
         session_key=session_key,
         session_source=session_source,
         category=trace_category,
+        trace_id=trace_id,
+        phase_telemetry=phase_telemetry_writer,
     )
 
     _commit(resp.status_code)

@@ -44,6 +44,7 @@ from agentalloy.api.proxy_passthrough_router import (
     _noop_status,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.api.proxy_router import (
+    _get_phase_telemetry_writer,  # pyright: ignore[reportPrivateUsage]
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
     from agentalloy.orchestration.compose import ComposeOrchestrator
     from agentalloy.storage.protocols import TelemetryStore
+    from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 
 logger = logging.getLogger(__name__)
 
@@ -126,16 +128,18 @@ async def _maybe_inject(
     session_id: str | None = None,
     *,
     vector_store: TelemetryStore | None = None,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
 ) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None, SignalResult]:
     """Run signal → compose → inject for this repo (Responses payload shape).
 
     Mirrors the Anthropic passthrough's ``_maybe_inject``; see that docstring
-    for the cadence-marker and identity-equals-delivered contracts.
+    for the cadence-marker and identity-equals-delivered contracts, and for why
+    ``phase_telemetry`` (task 04) is threaded through here too.
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
         _proxy_request_from_responses(payload), project_dir, embed_client, session_id,
-        vector_store=vector_store
+        vector_store=vector_store, phase_telemetry=phase_telemetry,
     )
 
     current = payload
@@ -219,9 +223,10 @@ async def passthrough_openai_responses(
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
+            phase_telemetry = _get_phase_telemetry_writer(request.app, vector_store)
             injected, outcome, signal = await _maybe_inject(
                 payload, token, embed_client, orchestrator, session_id,
-                vector_store=vector_store,
+                vector_store=vector_store, phase_telemetry=phase_telemetry,
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")

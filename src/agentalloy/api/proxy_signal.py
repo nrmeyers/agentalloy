@@ -555,6 +555,7 @@ async def evaluate_signal(
     *,
     mutate: bool = True,
     vector_store: TelemetryStore | None = None,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
 ) -> SignalResult:
     """Evaluate the signal layer for an incoming proxy request.
 
@@ -578,6 +579,13 @@ async def evaluate_signal(
         request: the incoming proxy request
         cwd: resolved working directory (project root)
         embed_client: optional client for semantic gate predicates
+        vector_store: telemetry store; used to build a fallback phase-event
+            writer when ``phase_telemetry`` is not supplied.
+        phase_telemetry: the app-state-scoped ``PhaseTelemetryWriter`` (task
+            04). Reused instead of constructing a fresh writer per call so the
+            schema DDL doesn't re-run on every write. Falls back to a
+            per-call writer over ``vector_store`` when not supplied (e.g.
+            callers without app.state, such as tests and the web playground).
 
     Returns:
         SignalResult with composition decision and metadata
@@ -733,9 +741,14 @@ async def evaluate_signal(
     exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
 
     # Phase telemetry: record phase_start now that we know the skill loaded.
-    if vector_store is not None:
+    # Prefer the app-state-scoped writer (task 04); fall back to a fresh
+    # per-call writer over vector_store when the caller has none (tests, the
+    # web signal playground).
+    _phase_telemetry = phase_telemetry if phase_telemetry is not None else (
+        PhaseTelemetryWriter(vector_store) if vector_store is not None else None
+    )
+    if _phase_telemetry is not None:
         try:
-            _phase_telemetry = PhaseTelemetryWriter(vector_store)
             _phase_telemetry.phase_start(
                 trace_id,
                 phase,

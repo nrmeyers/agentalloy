@@ -221,6 +221,15 @@ class DuckDBTelemetryStore:
         """Execute arbitrary SQL (used by the phase-event writer for DDL + inserts)."""
         self._c().execute(sql, params or ())
 
+    def query(self, sql: str, params: Sequence[object] | None = None) -> list[tuple[object, ...]]:
+        """Execute arbitrary SQL and fetch all rows (read counterpart to ``execute``).
+
+        Used by callers that need raw SQL over a table this store doesn't have a
+        dedicated typed read method for — e.g. the ``phase_events`` table, which
+        is the phase-writer's schema, not this store's.
+        """
+        return self._c().execute(sql, params or ()).fetchall()
+
     # -- reads ---------------------------------------------------------------
 
     def count_traces(self) -> int:

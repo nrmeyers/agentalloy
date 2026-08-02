@@ -110,6 +110,7 @@ def _make_app(
     upstream_status: int = 200,
     stream_chunks: list[str] | None = None,
     captured: dict[str, Any] | None = None,
+    mock_phase_telemetry: Any = None,
 ) -> Any:
     """Create a test app with all proxy dependencies wired."""
     app = create_app(use_default_lifespan=False)
@@ -152,6 +153,15 @@ def _make_app(
     if mock_telemetry_store is None:
         mock_telemetry_store = MagicMock()
     app.state.telemetry_store = mock_telemetry_store
+
+    # Phase-event writer (task 04) -- app-state-scoped, mirroring app.py's
+    # lifespan wiring (create_app(use_default_lifespan=False) skips lifespan,
+    # so tests must set this explicitly, same as the other app.state fields
+    # above). Defaults to a MagicMock so tests can assert phase/llm_* writes
+    # without a real DuckDB.
+    if mock_phase_telemetry is None:
+        mock_phase_telemetry = MagicMock()
+    app.state.phase_telemetry = mock_phase_telemetry
 
     # Orchestrator
     if mock_orchestrator is not None:
@@ -700,6 +710,47 @@ class TestUpstreamErrorHandling:
 # ---------------------------------------------------------------------------
 
 
+class TestSseUsageScanner:
+    """Unit tests for the streaming-usage scanner: `resp.aiter_text()` yields
+    byte-boundary chunks, not line-aligned ones, so a `data: {...}` line
+    carrying the terminal usage block can be split across two `feed()` calls."""
+
+    def _scanner(self) -> Any:
+        from agentalloy.api.proxy_router import (
+            _SseUsageScanner,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        return _SseUsageScanner()
+
+    def test_usage_within_a_single_chunk(self) -> None:
+        scanner = self._scanner()
+        scanner.feed('data: {"usage":{"completion_tokens":7}}\n\n')
+        assert scanner.latest == 7
+
+    def test_usage_line_split_across_two_chunks(self) -> None:
+        """The exact gap the per-chunk version missed: the data: line's bytes
+        arrive in two aiter_text() reads."""
+        scanner = self._scanner()
+        line = 'data: {"usage":{"completion_tokens":99}}\n\n'
+        midpoint = len(line) // 2
+        scanner.feed(line[:midpoint])
+        assert scanner.latest is None  # not yet a complete line
+        scanner.feed(line[midpoint:])
+        assert scanner.latest == 99
+
+    def test_later_usage_overwrites_earlier(self) -> None:
+        scanner = self._scanner()
+        scanner.feed('data: {"usage":{"completion_tokens":1}}\n\n')
+        scanner.feed('data: {"usage":{"completion_tokens":2}}\n\n')
+        assert scanner.latest == 2
+
+    def test_done_marker_and_malformed_json_are_ignored(self) -> None:
+        scanner = self._scanner()
+        scanner.feed('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')
+        scanner.feed("data: [DONE]\n\n")
+        assert scanner.latest is None
+
+
 class TestModelResolution:
     """Unit tests for _resolve_model() model-name resolution."""
 
@@ -720,3 +771,192 @@ class TestModelResolution:
 
         result = _resolve_model("claude-3-opus", "gpt-4o")
         assert result == "claude-3-opus"
+
+
+# ---------------------------------------------------------------------------
+# Phase telemetry wiring (Task 04) + llm_* forwarding telemetry (Task 03)
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseTelemetryWiring:
+    """T16 — app.state.phase_telemetry is wired and reused; llm_sent/llm_received
+    fire around the upstream forward on the non-streaming path."""
+
+    def test_phase_telemetry_writer_is_reachable_from_app_state(self, tmp_path: Path) -> None:
+        app = _make_app()
+        assert app.state.phase_telemetry is not None
+
+    def test_llm_sent_and_received_emitted_on_success(self, tmp_path: Path) -> None:
+        mock_phase_telemetry = MagicMock()
+        app = _make_app(mock_phase_telemetry=mock_phase_telemetry)
+
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False, trace_id="trace-xyz", phase="build"),
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_phase_telemetry.llm_sent.assert_called_once()
+        sent_args, sent_kwargs = mock_phase_telemetry.llm_sent.call_args
+        assert sent_args[0] == "trace-xyz"
+        assert sent_kwargs["direction"] == "forward"
+
+        mock_phase_telemetry.llm_received.assert_called_once()
+        recv_args, recv_kwargs = mock_phase_telemetry.llm_received.call_args
+        assert recv_args[0] == "trace-xyz"
+        assert recv_kwargs["success"] is True
+        assert recv_kwargs["tokens_out"] == 5  # from the mock upstream's usage block
+        mock_phase_telemetry.llm_error.assert_not_called()
+
+    def test_llm_error_emitted_on_connect_error(self, tmp_path: Path) -> None:
+        mock_phase_telemetry = MagicMock()
+        app = _make_app(
+            raise_upstream=httpx.ConnectError("boom"),
+            mock_phase_telemetry=mock_phase_telemetry,
+        )
+
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False, trace_id="trace-err", phase="build"),
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+
+        assert resp.status_code == 503
+        mock_phase_telemetry.llm_error.assert_called_once()
+        err_args, err_kwargs = mock_phase_telemetry.llm_error.call_args
+        assert err_args[0] == "trace-err"
+        assert err_kwargs["success"] is False
+        mock_phase_telemetry.llm_received.assert_not_called()
+
+    def test_llm_received_emitted_on_streaming_completion(self, tmp_path: Path) -> None:
+        """Streaming path: llm_received fires from inside the SSE generator once
+        the stream is drained to completion, with tokens_out from the terminal
+        usage chunk (OpenAI stream_options.include_usage shape)."""
+        mock_phase_telemetry = MagicMock()
+        stream_chunks = [
+            'data: {"id":"1","choices":[{"delta":{"content":"Hello"}}]}\n\n',
+            'data: {"id":"1","choices":[],"usage":{"completion_tokens":42}}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        app = _make_app(stream_chunks=stream_chunks, mock_phase_telemetry=mock_phase_telemetry)
+
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False, trace_id="trace-stream", phase="build"),
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+            # Force the StreamingResponse body to be fully consumed -- the
+            # terminal llm_received fires from the generator's tail, which only
+            # runs once Starlette has driven it to exhaustion.
+            _ = resp.text
+
+        assert resp.status_code == 200
+        mock_phase_telemetry.llm_sent.assert_called_once()
+        assert mock_phase_telemetry.llm_sent.call_args[0][0] == "trace-stream"
+
+        mock_phase_telemetry.llm_received.assert_called_once()
+        recv_args, recv_kwargs = mock_phase_telemetry.llm_received.call_args
+        assert recv_args[0] == "trace-stream"
+        assert recv_kwargs["tokens_out"] == 42
+        assert recv_kwargs["latency_ms"] is not None
+        assert recv_kwargs["success"] is True
+        mock_phase_telemetry.llm_error.assert_not_called()
+
+    def test_llm_error_emitted_on_streaming_open_failure(self, tmp_path: Path) -> None:
+        """A connection failure raised when opening the upstream stream (before
+        any chunk is relayed -- MockTransport raises from the request handler,
+        which fires at `upstream.stream()` open, not mid-body) emits llm_error,
+        not llm_received. The `emitted` guard in the generator makes the
+        after-bytes-relayed case correct by the same code path (an exception
+        raised inside the `async for` loop skips `_finish_received()` and falls
+        through to the same `except` handlers), but MockTransport can't
+        cheaply simulate a failure *after* a 200 opens, so that specific path
+        isn't separately exercised here."""
+        mock_phase_telemetry = MagicMock()
+        app = _make_app(
+            raise_upstream=httpx.ConnectError("boom"),
+            mock_phase_telemetry=mock_phase_telemetry,
+        )
+
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False, trace_id="trace-stream-err", phase="build"),
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+            _ = resp.text
+
+        assert resp.status_code == 200  # the SSE stream itself opens 200; the error rides in-band
+        mock_phase_telemetry.llm_sent.assert_called_once()
+        mock_phase_telemetry.llm_error.assert_called_once()
+        err_args, err_kwargs = mock_phase_telemetry.llm_error.call_args
+        assert err_args[0] == "trace-stream-err"
+        assert err_kwargs["success"] is False
+        mock_phase_telemetry.llm_received.assert_not_called()
+
+    def test_fresh_writer_fallback_when_app_state_unset(self, tmp_path: Path) -> None:
+        """Soft-fail fallback: an app without app.state.phase_telemetry (e.g. an
+        older test fixture) still works -- proxy_router falls back to a fresh
+        PhaseTelemetryWriter over vector_store instead of raising."""
+        app = _make_app()
+        del app.state.phase_telemetry
+
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False),
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
+
+        assert resp.status_code == 200
