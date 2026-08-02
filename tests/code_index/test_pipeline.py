@@ -281,6 +281,134 @@ async def test_embed_batches_halving_fallback() -> None:
     assert any(len(t[0]) == 750 for t in client.calls if len(t) == 1)
 
 
+def _write_decision_doc(repo: Path, *, symbol_ref: str = "demo.pkg.util.helper") -> Path:
+    design_dir = repo / "docs" / "design" / "x"
+    design_dir.mkdir(parents=True, exist_ok=True)
+    doc = design_dir / "approach.md"
+    doc.write_text(f"# Approach\n\nWe route through `{symbol_ref}`.\n")
+    return doc
+
+
+_DECISION_DOC_PATH = "docs/design/x/approach.md"
+
+
+async def test_decision_doc_present_in_store_survives_disk_removal(
+    settings: Settings, fixture_repo: Path
+) -> None:
+    """#526/#527 mechanism-corrected fix: a decision doc gone from disk but
+    present in the SDD state store must not lose its GOVERNS edges NOR its
+    symbols/vectors — both would be the same underlying data-loss bug."""
+    embed = FakeEmbedClient()
+    jobs = open_jobs(settings)
+    try:
+        doc = _write_decision_doc(fixture_repo)
+        await run(settings, embed, jobs, fixture_repo)
+
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
+        try:
+            assert handles.graph.governing_decisions("demo.pkg.util.helper") != []
+            symbol_count_before = handles.graph.counts_by_kind().get("MarkdownDoc", 0)
+            vector_count_before = handles.vectors.count()
+        finally:
+            handles.close()
+
+        doc.unlink()
+        result = await run_index_job(
+            settings,
+            embed,
+            jobs,
+            repo_path=fixture_repo,
+            slug=SLUG,
+            force=False,
+            decision_source_exists=lambda p: p == _DECISION_DOC_PATH,
+        )
+        assert result.status == "done"
+
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
+        try:
+            # GOVERNS edges survive.
+            assert handles.graph.governing_decisions("demo.pkg.util.helper") != []
+            # Symbols/vectors for the doc's chunk are NOT pruned either.
+            assert handles.graph.counts_by_kind().get("MarkdownDoc", 0) == symbol_count_before
+            assert handles.vectors.count() == vector_count_before
+        finally:
+            handles.close()
+    finally:
+        jobs.close()
+
+
+async def test_decision_doc_removed_not_in_store_retains_edges_without_flag(
+    settings: Settings, fixture_repo: Path
+) -> None:
+    embed = FakeEmbedClient()
+    jobs = open_jobs(settings)
+    try:
+        doc = _write_decision_doc(fixture_repo)
+        await run(settings, embed, jobs, fixture_repo)
+        doc.unlink()
+
+        result = await run_index_job(
+            settings, embed, jobs, repo_path=fixture_repo, slug=SLUG, force=False
+        )
+        assert result.status == "done"
+
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
+        try:
+            # No decision_source_exists bound and no --prune-decisions: the
+            # GOVERNS edge row is retained (the escape hatch defaults closed).
+            # NOTE: without decision_source_exists, the doc's MarkdownDoc
+            # symbol IS pruned by delete_for_files (only GOVERNS edges are
+            # exempted at the store layer) — so the retained edge is
+            # currently DANGLING: governing_decisions()'s LEFT JOIN to the
+            # now-missing symbol yields file_path=None/heading=""/snippet=
+            # None, not a hydrated decision. It self-heals the moment the doc
+            # reappears (doc-granular re-derive re-upserts the symbol and the
+            # edge already survived). This is the documented behavior for the
+            # "doc genuinely gone, no flag" case — #526 is guard-only, so the
+            # read path (governing_decisions/decisions_for_files) is
+            # deliberately NOT filtering dangling rows out here.
+            rows = handles.graph.governing_decisions("demo.pkg.util.helper")
+            assert len(rows) == 1
+            assert rows[0].qualified_name.startswith(_DECISION_DOC_PATH)
+            assert rows[0].file_path is None  # dangling: symbol was pruned
+            assert rows[0].heading == ""
+            assert rows[0].snippet is None
+        finally:
+            handles.close()
+    finally:
+        jobs.close()
+
+
+async def test_decision_doc_removed_not_in_store_dropped_with_prune_flag(
+    settings: Settings, fixture_repo: Path
+) -> None:
+    embed = FakeEmbedClient()
+    jobs = open_jobs(settings)
+    try:
+        doc = _write_decision_doc(fixture_repo)
+        await run(settings, embed, jobs, fixture_repo)
+        doc.unlink()
+
+        result = await run_index_job(
+            settings,
+            embed,
+            jobs,
+            repo_path=fixture_repo,
+            slug=SLUG,
+            force=False,
+            prune_decisions=True,
+        )
+        assert result.status == "done"
+
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
+        try:
+            assert handles.graph.governing_decisions("demo.pkg.util.helper") == []
+        finally:
+            handles.close()
+    finally:
+        jobs.close()
+
+
 async def test_embed_one_halving_gives_up_at_floor() -> None:
     from agentalloy.code_index.ingest.pipeline import _embed_one_with_halving
 

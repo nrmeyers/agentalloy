@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+import re
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -300,8 +301,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from agentalloy.code_index.store import open_jobs
 
         ci_jobs = open_jobs(settings)
+
+        # (#526/#527) Store-presence check for the markdown-phase pruning
+        # guard: a decision doc (``docs/design/<slug>/approach.md``) missing
+        # on disk but still present as an SDD artifact row survives the
+        # ingest pipeline's incremental prune. ``code_index/`` itself must
+        # not import the state store, so the closure is built here (app.py
+        # already has ``state_store`` in scope from its own construction
+        # above) and injected as a per-repo-path factory.
+        def _decision_source_exists_factory(
+            repo_path: Path,
+        ) -> Callable[[str], bool]:
+            repo_key = _repo_key_for(str(repo_path))
+
+            def _exists(doc_path: str) -> bool:
+                m = re.match(r"^docs/design/([^/]+)/approach\.md$", doc_path)
+                if m is None:
+                    return False
+                try:
+                    scoped = state_store.for_repo(repo_key)
+                    return scoped.get_artifact("design", m.group(1), "approach.md") is not None
+                except Exception:  # noqa: BLE001 — best-effort guard, never break ingest
+                    return False
+
+            return _exists
+
         code_index_state = CodeIndexState(
-            settings=settings, embed_client=embed_client, jobs=ci_jobs
+            settings=settings,
+            embed_client=embed_client,
+            jobs=ci_jobs,
+            decision_source_exists_factory=_decision_source_exists_factory,
         )
         # Wire the code-index state onto the orchestrator so the proxy
         # push path can reach it (settings is already wired).

@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,9 +41,21 @@ class CodeIndexState:
         default_factory=lambda: dict[str, asyncio.Task[None]]()
     )
     watch: WatchManager | None = None
+    # (#526/#527) Built in ``app.py`` from the process's SDD state store —
+    # ``code_index/`` must not import that store directly, so this is injected
+    # as a per-repo-path factory rather than constructed here. None (default)
+    # means no store is bound (e.g. a test or a standalone code-index run);
+    # ``_index_markdown`` treats that exactly like the pre-fix behavior.
+    decision_source_exists_factory: Callable[[Path], Callable[[str], bool]] | None = None
 
     def start_job(
-        self, *, repo_path: Path, slug: str, force: bool, index_markdown: bool = True
+        self,
+        *,
+        repo_path: Path,
+        slug: str,
+        force: bool,
+        index_markdown: bool = True,
+        prune_decisions: bool = False,
     ) -> CodeIndexJob:
         """Create the job row and schedule the pipeline as a background task.
 
@@ -62,6 +75,7 @@ class CodeIndexState:
                 slug=slug,
                 force=force,
                 index_markdown=index_markdown,
+                prune_decisions=prune_decisions,
             ),
             name=f"code-index:{slug}:{job.job_id}",
         )
@@ -70,8 +84,20 @@ class CodeIndexState:
         return job
 
     async def _run(
-        self, job_id: str, *, repo_path: Path, slug: str, force: bool, index_markdown: bool
+        self,
+        job_id: str,
+        *,
+        repo_path: Path,
+        slug: str,
+        force: bool,
+        index_markdown: bool,
+        prune_decisions: bool = False,
     ) -> None:
+        decision_source_exists = (
+            self.decision_source_exists_factory(repo_path)
+            if self.decision_source_exists_factory is not None
+            else None
+        )
         result = await run_index_job(
             self.settings,
             self.embed_client,
@@ -81,6 +107,8 @@ class CodeIndexState:
             force=force,
             index_markdown=index_markdown,
             job_id=job_id,
+            prune_decisions=prune_decisions,
+            decision_source_exists=decision_source_exists,
         )
         # Successful index of a watch-ENROLLED repo: begin watching it. A repo
         # that never opted in (`agentalloy code watch enable`) is left alone.
