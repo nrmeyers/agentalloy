@@ -68,6 +68,7 @@ def add_parser(
         help="Query phase_events: per-phase counts, llm_* latency, and a timeline.",
     )
     add_json_flag(phases_p)
+    _add_scope_flag(phases_p)
     phases_p.add_argument("--phase", default=None, help="Filter to one phase (e.g. design).")
     phases_p.add_argument(
         "--event-type",
@@ -373,7 +374,10 @@ def _phase_events_where(
     event_type: str | None,
     since: int | None,
     until: int | None,
+    repo: str | None = None,
 ) -> tuple[str, list[object]]:
+    from agentalloy.storage.telemetry_store import _repo_clause
+
     clauses: list[str] = []
     params: list[object] = []
     if phase is not None:
@@ -388,6 +392,10 @@ def _phase_events_where(
     if until is not None:
         clauses.append("request_ts <= ?")
         params.append(until)
+    repo_clause, repo_params = _repo_clause(repo)
+    if repo_clause:
+        clauses.append(repo_clause)
+        params.extend(repo_params)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -400,15 +408,19 @@ def _query_phase_events(
     since: int | None,
     until: int | None,
     limit: int,
+    repo: str | None = None,
 ) -> dict[str, Any]:
     """Run the three phase_events aggregations via ``DuckDBTelemetryStore.query``.
 
     ``phase_events`` is the phase-writer's schema, not this store's own typed
     read surface, so this goes through the generic ``query()`` raw-SQL escape
     hatch rather than a dedicated method. Returns a JSON-shaped result dict.
+
+    ``repo`` mirrors ``savings``'s scoping: ``None`` aggregates across every
+    repo, otherwise matches rows for that repo (and anything nested under it).
     """
     where, params = _phase_events_where(
-        phase=phase, event_type=event_type, since=since, until=until
+        phase=phase, event_type=event_type, since=since, until=until, repo=repo
     )
 
     counts_rows = store.query(
@@ -487,8 +499,25 @@ def _query_phase_events(
 
 
 def _phase_events_table_exists(store: Any) -> bool:
+    rows = store.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'phase_events'")
+    return bool(rows)
+
+
+def _phase_events_has_repo_column(store: Any) -> bool:
+    """True once the ``repo`` column (issue #522) exists on ``phase_events``.
+
+    ``PhaseTelemetryWriter._ensure_schema`` migrates the column lazily on the
+    next *write* — this CLI only ever reads (``open_telemetry(..., read_only=
+    True)``), so a pre-#522 14-column table on disk is never touched by that
+    migration here. Querying it with a ``repo`` scope clause would raise a
+    DuckDB BinderException. Given the column has zero historical rows to miss
+    (see issue #522's "why now"), an un-migrated table is necessarily empty
+    of anything a repo scope could match, so the caller treats "column
+    missing" the same as "table missing": an empty result.
+    """
     rows = store.query(
-        "SELECT 1 FROM information_schema.tables WHERE table_name = 'phase_events'"
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'phase_events' AND column_name = 'repo'"
     )
     return bool(rows)
 
@@ -520,6 +549,7 @@ def _run_phases(args: argparse.Namespace) -> int:
     since = getattr(args, "since", None)
     until = getattr(args, "until", None)
     limit = getattr(args, "limit", 20)
+    repo = _resolve_scope(args)
 
     port = _service_port()
     if server_proc.port_reachable(port):
@@ -545,6 +575,14 @@ def _run_phases(args: argparse.Namespace) -> int:
                 # write, not at DB-open time — an existing-but-untouched
                 # telemetry.duck has the composition_traces table only.
                 result = _empty_phases_result()
+            elif repo is not None and not _phase_events_has_repo_column(ts):
+                # A pre-#522 14-column phase_events table: the writer's
+                # migration only runs on the next write, and this CLI path
+                # only reads (read_only=True), so a repo-scoped query here
+                # would raise a DuckDB BinderException on the missing column.
+                # Zero historical rows on that table can match any repo
+                # scope, so empty is the correct (and safe) answer.
+                result = _empty_phases_result()
             else:
                 result = _query_phase_events(
                     ts,
@@ -553,21 +591,26 @@ def _run_phases(args: argparse.Namespace) -> int:
                     since=since,
                     until=until,
                     limit=limit,
+                    repo=repo,
                 )
         finally:
             ts.close()
 
-    write_result(result, args, human_fn=functools.partial(_render_phases, phase=phase))
+    result["repo"] = repo
+    write_result(result, args, human_fn=functools.partial(_render_phases, phase=phase, repo=repo))
     return 0
 
 
-def _render_phases(result: dict[str, Any], phase: str | None = None) -> None:
+def _render_phases(
+    result: dict[str, Any], phase: str | None = None, repo: str | None = None
+) -> None:
     """Render the phase_events query in human-readable format."""
     per_phase: list[dict[str, Any]] = list(result.get("per_phase") or [])
     latency: dict[str, Any] = result.get("llm_latency") or {}
     timeline: list[dict[str, Any]] = list(result.get("timeline") or [])
 
     print_rich("\n  [bold]Phase Events[/bold]")
+    print_rich(f"  [dim]{_scope_label(repo)}[/dim]")
     if phase is not None:
         print_rich(f"  [dim]phase = {phase}[/dim]")
     print_rich()

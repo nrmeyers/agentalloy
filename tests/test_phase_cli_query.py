@@ -25,6 +25,10 @@ def _args(**overrides: object) -> argparse.Namespace:
         limit=20,
         json=True,
         quiet=False,
+        # Existing tests below seed rows with no repo attribution; default to
+        # --all so they keep exercising the un-scoped query path. Scope-
+        # specific behavior is covered separately in TestPhasesScope.
+        all_repos=True,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -42,7 +46,9 @@ def _seed(db_path: Path) -> None:
         writer.phase_start("t2", "build", workflow_skill_id="sdd-build")
         writer.llm_sent("t2", "build", model="qwen3-235b")
         writer.llm_received("t2", "build", model="qwen3-235b", tokens_out=3000, latency_ms=2000)
-        writer.llm_error("t2", "build", model="qwen3-235b", error_message="timeout", latency_ms=4000)
+        writer.llm_error(
+            "t2", "build", model="qwen3-235b", error_message="timeout", latency_ms=4000
+        )
     finally:
         store.close()
 
@@ -82,6 +88,14 @@ class TestPhasesCliParsing:
         assert args.until == 200
         assert args.limit == 5
         assert args.json is True
+
+    def test_all_repos_flag_parses(self) -> None:
+        args = self._parser().parse_args(["telemetry", "phases", "--all"])
+        assert args.all_repos is True
+
+    def test_all_repos_defaults_false(self) -> None:
+        args = self._parser().parse_args(["telemetry", "phases"])
+        assert args.all_repos is False
 
 
 class TestPhasesCliLockGuard:
@@ -157,3 +171,105 @@ class TestPhasesQuery:
         assert result["per_phase"] == []
         assert result["timeline"] == []
         assert result["llm_latency"]["count"] == 0
+
+
+class TestPhasesScope:
+    """Repo scoping (issue #522): default scopes to the current repo, --all
+    aggregates across every repo. Mirrors ``savings``'s scoping tests."""
+
+    def _seed_two_repos(self, db_path: Path) -> None:
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start("t-this", "design", repo="/repo/this")
+            writer.phase_start("t-other", "build", repo="/repo/other")
+        finally:
+            store.close()
+
+    def _run(self, db_path: Path, **arg_overrides: object) -> dict:
+        settings = MagicMock(telemetry_db_path=str(db_path))
+        with (
+            patch("agentalloy.install.subcommands.telemetry._service_port", return_value=47950),
+            patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+            patch("agentalloy.config.get_settings", return_value=settings),
+            patch(
+                "agentalloy.install.subcommands.telemetry._current_repo_key",
+                return_value="/repo/this",
+            ),
+            patch("agentalloy.install.subcommands.telemetry.write_result") as mock_write,
+        ):
+            rc = telemetry._run_phases(_args(**arg_overrides))
+        assert rc == 0
+        return mock_write.call_args[0][0]
+
+    def test_default_scopes_to_current_repo(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "telemetry.duck"
+        self._seed_two_repos(db_path)
+        result = self._run(db_path, all_repos=False)
+        phases = {row["phase"] for row in result["per_phase"]}
+        assert phases == {"design"}
+        assert result["repo"] == "/repo/this"
+
+    def test_all_flag_does_not_filter(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "telemetry.duck"
+        self._seed_two_repos(db_path)
+        result = self._run(db_path, all_repos=True)
+        phases = {row["phase"] for row in result["per_phase"]}
+        assert phases == {"design", "build"}
+        assert result["repo"] is None
+
+    def _create_old_schema_db(self, db_path: Path) -> None:
+        """A pre-#522 14-column phase_events table (no repo column) — the
+        ``PhaseTelemetryWriter`` migration only runs on a write, and this
+        command only reads, so this shape is reachable on disk."""
+        import duckdb
+
+        con = duckdb.connect(str(db_path))
+        try:
+            con.execute(
+                """
+                CREATE TABLE phase_events (
+                    trace_id VARCHAR,
+                    correlation_id VARCHAR,
+                    request_ts BIGINT NOT NULL,
+                    phase VARCHAR NOT NULL,
+                    event_type VARCHAR NOT NULL,
+                    model VARCHAR,
+                    tokens_in INTEGER,
+                    tokens_out INTEGER,
+                    latency_ms INTEGER,
+                    success BOOLEAN,
+                    error_message VARCHAR,
+                    workflow_skill_id VARCHAR,
+                    system_prompt_sha VARCHAR,
+                    direction VARCHAR
+                )
+                """
+            )
+        finally:
+            con.close()
+
+    def test_default_scope_against_old_schema_db_returns_empty_not_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: a repo-scoped query against a pre-migration (14-column,
+        no repo) table must not raise a DuckDB BinderException on the missing
+        column -- it has zero rows to miss, so empty is correct."""
+        db_path = tmp_path / "telemetry.duck"
+        self._create_old_schema_db(db_path)
+        result = self._run(db_path, all_repos=False)
+        assert result["per_phase"] == []
+        assert result["timeline"] == []
+        assert result["repo"] == "/repo/this"
+
+    def test_all_flag_against_old_schema_db_also_returns_empty_not_error(
+        self, tmp_path: Path
+    ) -> None:
+        """--all never adds a repo clause, so it should already work against
+        an old-schema table -- covered here for symmetry with the default case."""
+        db_path = tmp_path / "telemetry.duck"
+        self._create_old_schema_db(db_path)
+        result = self._run(db_path, all_repos=True)
+        assert result["per_phase"] == []
+        assert result["timeline"] == []
+        assert result["repo"] is None

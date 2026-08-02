@@ -793,7 +793,9 @@ class TestPhaseTelemetryWiring:
         with (
             patch(
                 "agentalloy.api.proxy_router.evaluate_signal",
-                return_value=SignalResult(should_compose=False, trace_id="trace-xyz", phase="build"),
+                return_value=SignalResult(
+                    should_compose=False, trace_id="trace-xyz", phase="build"
+                ),
             ),
             TestClient(app) as client,
         ):
@@ -829,7 +831,9 @@ class TestPhaseTelemetryWiring:
         with (
             patch(
                 "agentalloy.api.proxy_router.evaluate_signal",
-                return_value=SignalResult(should_compose=False, trace_id="trace-err", phase="build"),
+                return_value=SignalResult(
+                    should_compose=False, trace_id="trace-err", phase="build"
+                ),
             ),
             TestClient(app) as client,
         ):
@@ -864,7 +868,9 @@ class TestPhaseTelemetryWiring:
         with (
             patch(
                 "agentalloy.api.proxy_router.evaluate_signal",
-                return_value=SignalResult(should_compose=False, trace_id="trace-stream", phase="build"),
+                return_value=SignalResult(
+                    should_compose=False, trace_id="trace-stream", phase="build"
+                ),
             ),
             TestClient(app) as client,
         ):
@@ -913,7 +919,9 @@ class TestPhaseTelemetryWiring:
         with (
             patch(
                 "agentalloy.api.proxy_router.evaluate_signal",
-                return_value=SignalResult(should_compose=False, trace_id="trace-stream-err", phase="build"),
+                return_value=SignalResult(
+                    should_compose=False, trace_id="trace-stream-err", phase="build"
+                ),
             ),
             TestClient(app) as client,
         ):

@@ -236,6 +236,7 @@ class _StreamTelemetry:
     trace_id: str | None
     phase: str | None
     model: str | None
+    repo: str | None = None
 
 
 def _extract_system_prompt(request: ProxyRequest) -> str | None:
@@ -245,9 +246,7 @@ def _extract_system_prompt(request: ProxyRequest) -> str | None:
             continue
         if isinstance(msg.content, str):
             return msg.content
-        parts = [
-            block.get("text", "") for block in msg.content if block.get("type") == "text"
-        ]
+        parts = [block.get("text", "") for block in msg.content if block.get("type") == "text"]
         joined = "".join(parts)
         if joined:
             return joined
@@ -322,6 +321,7 @@ def _emit_llm_sent(
     *,
     workflow_skill_id: str | None,
     system_prompt_sha: str | None,
+    repo: str | None = None,
 ) -> None:
     if writer is None:
         return
@@ -333,6 +333,7 @@ def _emit_llm_sent(
             direction="forward",
             workflow_skill_id=workflow_skill_id,
             system_prompt_sha=system_prompt_sha,
+            repo=repo,
         )
     except Exception:  # noqa: BLE001 — soft-fail by design
         logger.debug("llm_sent telemetry write failed", exc_info=True)
@@ -346,6 +347,7 @@ def _emit_llm_received(
     *,
     tokens_out: int | None,
     latency_ms: int,
+    repo: str | None = None,
 ) -> None:
     if writer is None:
         return
@@ -357,6 +359,7 @@ def _emit_llm_received(
             tokens_out=tokens_out,
             latency_ms=latency_ms,
             success=True,
+            repo=repo,
         )
     except Exception:  # noqa: BLE001 — soft-fail by design
         logger.debug("llm_received telemetry write failed", exc_info=True)
@@ -370,6 +373,7 @@ def _emit_llm_error(
     *,
     error_message: str,
     latency_ms: int,
+    repo: str | None = None,
 ) -> None:
     if writer is None:
         return
@@ -381,6 +385,7 @@ def _emit_llm_error(
             error_message=error_message,
             latency_ms=latency_ms,
             success=False,
+            repo=repo,
         )
     except Exception:  # noqa: BLE001 — soft-fail by design
         logger.debug("llm_error telemetry write failed", exc_info=True)
@@ -433,6 +438,7 @@ def _stream_upstream_response(
                 telemetry.model,
                 tokens_out=usage_scanner.latest,
                 latency_ms=int((time.monotonic() - dispatch_start) * 1000),
+                repo=telemetry.repo,
             )
 
         def _finish_error(message: str) -> None:
@@ -447,6 +453,7 @@ def _stream_upstream_response(
                 telemetry.model,
                 error_message=message,
                 latency_ms=int((time.monotonic() - dispatch_start) * 1000),
+                repo=telemetry.repo,
             )
 
         try:
@@ -656,6 +663,7 @@ async def _write_flow_telemetry(
                 phase or "unknown",
                 error_message=error_code,
                 success=False,
+                repo=repo,
             )
         else:
             pw.phase_complete(
@@ -663,6 +671,7 @@ async def _write_flow_telemetry(
                 phase or "unknown",
                 latency_ms=latency_ms,
                 success=True,
+                repo=repo,
             )
     except Exception:  # noqa: BLE001 — soft-fail
         logger.debug("phase_complete/phase_error write failed", exc_info=True)
@@ -948,6 +957,7 @@ async def proxy_chat_completions(
         upstream_model,
         workflow_skill_id=signal_result.workflow_skill_id if signal_result else None,
         system_prompt_sha=_system_prompt_sha(modified_request),
+        repo=repo,
     )
 
     if modified_request.stream:
@@ -972,7 +982,7 @@ async def proxy_chat_completions(
             phase_telemetry=phase_telemetry_writer,
         )
         stream_telemetry = (
-            _StreamTelemetry(phase_telemetry_writer, trace_id, phase, upstream_model)
+            _StreamTelemetry(phase_telemetry_writer, trace_id, phase, upstream_model, repo)
             if phase_telemetry_writer is not None
             else None
         )
@@ -988,8 +998,13 @@ async def proxy_chat_completions(
         error_code = "upstream_connect_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
         _emit_llm_error(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            error_message=str(e), latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            error_message=str(e),
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1017,8 +1032,13 @@ async def proxy_chat_completions(
         error_code = "upstream_timeout"
         latency_ms = int((time.monotonic() - start_time) * 1000)
         _emit_llm_error(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            error_message=str(e), latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            error_message=str(e),
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1046,8 +1066,13 @@ async def proxy_chat_completions(
         error_code = "upstream_request_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
         _emit_llm_error(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            error_message=str(e), latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            error_message=str(e),
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1075,8 +1100,13 @@ async def proxy_chat_completions(
         error_code = "upstream_http_error"
         latency_ms = int((time.monotonic() - start_time) * 1000)
         _emit_llm_error(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            error_message=str(e), latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            error_message=str(e),
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1105,8 +1135,13 @@ async def proxy_chat_completions(
         error_code = f"upstream_http_{resp.status_code}"
         latency_ms = int((time.monotonic() - start_time) * 1000)
         _emit_llm_error(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            error_message=f"Upstream returned HTTP {resp.status_code}", latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            error_message=f"Upstream returned HTTP {resp.status_code}",
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1138,8 +1173,13 @@ async def proxy_chat_completions(
         # Upstream returned 2xx but a non-JSON body — the LLM call itself
         # succeeded (we can't extract tokens_out from a body we can't parse).
         _emit_llm_received(
-            phase_telemetry_writer, trace_id, phase, upstream_model,
-            tokens_out=None, latency_ms=latency_ms,
+            phase_telemetry_writer,
+            trace_id,
+            phase,
+            upstream_model,
+            tokens_out=None,
+            latency_ms=latency_ms,
+            repo=repo,
         )
         await _write_flow_telemetry(
             vector_store,
@@ -1171,8 +1211,13 @@ async def proxy_chat_completions(
         )
 
     _emit_llm_received(
-        phase_telemetry_writer, trace_id, phase, upstream_model,
-        tokens_out=_extract_tokens_out(body), latency_ms=latency_ms,
+        phase_telemetry_writer,
+        trace_id,
+        phase,
+        upstream_model,
+        tokens_out=_extract_tokens_out(body),
+        latency_ms=latency_ms,
+        repo=repo,
     )
     await _write_flow_telemetry(
         vector_store,

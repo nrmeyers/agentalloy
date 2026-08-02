@@ -138,8 +138,12 @@ async def _maybe_inject(
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
-        _proxy_request_from_responses(payload), project_dir, embed_client, session_id,
-        vector_store=vector_store, phase_telemetry=phase_telemetry,
+        _proxy_request_from_responses(payload),
+        project_dir,
+        embed_client,
+        session_id,
+        vector_store=vector_store,
+        phase_telemetry=phase_telemetry,
     )
 
     current = payload
@@ -225,8 +229,13 @@ async def passthrough_openai_responses(
             session_id = extract_session_header(inbound_headers)
             phase_telemetry = _get_phase_telemetry_writer(request.app, vector_store)
             injected, outcome, signal = await _maybe_inject(
-                payload, token, embed_client, orchestrator, session_id,
-                vector_store=vector_store, phase_telemetry=phase_telemetry,
+                payload,
+                token,
+                embed_client,
+                orchestrator,
+                session_id,
+                vector_store=vector_store,
+                phase_telemetry=phase_telemetry,
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")

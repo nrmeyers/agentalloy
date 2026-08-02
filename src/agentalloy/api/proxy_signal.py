@@ -744,8 +744,10 @@ async def evaluate_signal(
     # Prefer the app-state-scoped writer (task 04); fall back to a fresh
     # per-call writer over vector_store when the caller has none (tests, the
     # web signal playground).
-    _phase_telemetry = phase_telemetry if phase_telemetry is not None else (
-        PhaseTelemetryWriter(vector_store) if vector_store is not None else None
+    _phase_telemetry = (
+        phase_telemetry
+        if phase_telemetry is not None
+        else (PhaseTelemetryWriter(vector_store) if vector_store is not None else None)
     )
     if _phase_telemetry is not None:
         try:
@@ -755,6 +757,7 @@ async def evaluate_signal(
                 model=skill.get("model"),
                 workflow_skill_id=skill.get("skill_id"),
                 success=True,
+                repo=repo,
             )
         except Exception:  # noqa: BLE001 — soft-fail by design
             logger.debug("phase_start telemetry write failed", exc_info=True)

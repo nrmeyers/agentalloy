@@ -43,8 +43,8 @@ class TestPhaseStart:
 
         writer.phase_start(trace_id, phase, model="gpt-4", tokens_in=100, tokens_out=50)
 
-        assert len(store.calls) == 2  # DDL + INSERT
-        sql, params = store.calls[1]
+        assert len(store.calls) == 4  # DDL + ADD COLUMN + CREATE INDEX + INSERT
+        sql, params = store.calls[-1]
         assert "INSERT INTO phase_events" in sql
         assert params[0] == trace_id  # trace_id
         assert params[3] == phase  # phase
@@ -59,14 +59,14 @@ class TestPhaseStart:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.phase_start("t1", "p1", success=True)
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[9] is True  # success column
 
     def test_correlation_id_is_passed_through(self) -> None:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.phase_start("t1", "p1", correlation_id="corr-1")
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[1] == "corr-1"  # correlation_id column
 
 
@@ -80,7 +80,7 @@ class TestPhaseComplete:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.phase_complete("t1", "compose", latency_ms=250, success=True)
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[4] == "phase_complete"
         assert params[8] == 250  # latency_ms
         assert params[9] is True  # success
@@ -89,7 +89,7 @@ class TestPhaseComplete:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.phase_complete("t1", "assemble", error_message="timeout")
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[10] == "timeout"
 
 
@@ -103,7 +103,7 @@ class TestLlmSent:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.llm_sent("t1", "llm", model="claude-sonnet-4-5-20250514", tokens_out=300)
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[4] == "llm_sent"
         assert params[5] == "claude-sonnet-4-5-20250514"
         assert params[7] == 300  # tokens_out
@@ -119,7 +119,7 @@ class TestLlmReceived:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.llm_received("t1", "llm", tokens_in=300, latency_ms=5000)
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[4] == "llm_received"
         assert params[6] == 300  # tokens_in
         assert params[8] == 5000  # latency_ms
@@ -135,7 +135,7 @@ class TestLlmError:
         store = _MockStore()
         writer = PhaseTelemetryWriter(store)
         writer.llm_error("t1", "llm", error_message="rate limit", success=False)
-        sql, params = store.calls[1]
+        sql, params = store.calls[-1]
         assert params[4] == "llm_error"
         assert params[10] == "rate limit"
         assert params[9] is False
@@ -164,8 +164,8 @@ class TestSoftFail:
         writer = PhaseTelemetryWriter(store)
 
         writer.phase_complete("t1", "p1")
-        # Called twice: DDL + INSERT, both fail silently
-        assert store.execute.call_count == 2
+        # Called 4x: DDL + ADD COLUMN + CREATE INDEX + INSERT, all fail silently
+        assert store.execute.call_count == 4
 
     def test_llm_error_soft_fails(self) -> None:
         writer = PhaseTelemetryWriter(MagicMock(side_effect=OSError("disk full")))
@@ -194,6 +194,7 @@ class TestPhaseEventDataclass:
         assert event.workflow_skill_id is None
         assert event.system_prompt_sha is None
         assert event.direction is None
+        assert event.repo is None
 
     def test_frozen(self) -> None:
         event = PhaseEvent(
@@ -220,6 +221,7 @@ class TestPhaseEventDataclass:
             workflow_skill_id="skill-abc",
             system_prompt_sha="sha256:abc123",
             direction="upstream",
+            repo="/home/nate/proj",
         )
         assert event.model == "gpt-4"
         assert event.tokens_in == 100
@@ -229,6 +231,7 @@ class TestPhaseEventDataclass:
         assert event.workflow_skill_id == "skill-abc"
         assert event.system_prompt_sha == "sha256:abc123"
         assert event.direction == "upstream"
+        assert event.repo == "/home/nate/proj"
 
 
 # ---------------------------------------------------------------------------
@@ -251,12 +254,18 @@ class TestSchema:
         assert "idx_phase_events_type" in _CREATE_DDL
         assert "idx_phase_events_trace" in _CREATE_DDL
 
-    def test_insert_sql_has_fourteen_placeholders(self) -> None:
-        """Regression: the table has 14 columns; the INSERT must match exactly
-        or every write raises (silently, under the soft-fail except block)."""
+    def test_create_ddl_contains_repo_column(self) -> None:
+        from agentalloy.telemetry.phase_writer import _CREATE_DDL
+
+        assert "repo VARCHAR" in _CREATE_DDL
+
+    def test_insert_sql_has_fifteen_placeholders(self) -> None:
+        """Regression: the table has 15 columns (14 + repo, issue #522); the
+        INSERT must match exactly or every write raises (silently, under the
+        soft-fail except block)."""
         from agentalloy.telemetry.phase_writer import _INSERT_SQL
 
-        assert _INSERT_SQL.count("?") == 14
+        assert _INSERT_SQL.count("?") == 15
 
     def test_insert_sql_names_columns_explicitly(self) -> None:
         """INSERT INTO phase_events (col, col, ...) VALUES (...) — not a bare
@@ -288,11 +297,15 @@ class TestRealDuckDBRoundTrip:
                 latency_ms=1500,
                 success=True,
             )
-            row = store._c().execute(  # noqa: SLF001 — direct read for the regression assertion
-                "SELECT trace_id, phase, event_type, model, tokens_out, latency_ms, success "
-                "FROM phase_events WHERE trace_id = ?",
-                ["trace-xyz"],
-            ).fetchone()
+            row = (
+                store._c()
+                .execute(  # noqa: SLF001 — direct read for the regression assertion
+                    "SELECT trace_id, phase, event_type, model, tokens_out, latency_ms, success "
+                    "FROM phase_events WHERE trace_id = ?",
+                    ["trace-xyz"],
+                )
+                .fetchone()
+            )
             assert row is not None
             assert row[0] == "trace-xyz"
             assert row[1] == "design"
@@ -301,6 +314,28 @@ class TestRealDuckDBRoundTrip:
             assert row[4] == 2048
             assert row[5] == 1500
             assert row[6] is True
+        finally:
+            store.close()
+
+    def test_repo_is_stored_and_read_back(self, tmp_path: Path) -> None:
+        """Round-trip on a fresh DB: repo is persisted and readable."""
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "telemetry_repo.duck"
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start("trace-repo", "design", repo="/home/nate/proj-a")
+            row = (
+                store._c()
+                .execute(  # noqa: SLF001 — direct read for the regression assertion
+                    "SELECT repo FROM phase_events WHERE trace_id = ?",
+                    ["trace-repo"],
+                )
+                .fetchone()
+            )
+            assert row is not None
+            assert row[0] == "/home/nate/proj-a"
         finally:
             store.close()
 
@@ -317,7 +352,9 @@ class TestRealDuckDBRoundTrip:
             names = {
                 r[0]
                 for r in store._c()  # noqa: SLF001
-                .execute("SELECT index_name FROM duckdb_indexes() WHERE table_name = 'phase_events'")
+                .execute(
+                    "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'phase_events'"
+                )
                 .fetchall()
             }
             assert names == {
@@ -325,6 +362,137 @@ class TestRealDuckDBRoundTrip:
                 "idx_phase_events_phase",
                 "idx_phase_events_type",
                 "idx_phase_events_trace",
+                "idx_phase_events_repo",
             }
+        finally:
+            store.close()
+
+    def test_repo_index_created_on_fresh_db(self, tmp_path: Path) -> None:
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "telemetry3.duck"
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start("t1", "spec")
+            names = {
+                r[0]
+                for r in store._c()  # noqa: SLF001
+                .execute(
+                    "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'phase_events'"
+                )
+                .fetchall()
+            }
+            assert "idx_phase_events_repo" in names
+        finally:
+            store.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration: a DB built between commit 9eb7eca and 74ac10b already has a
+# 14-column phase_events table (CREATE TABLE IF NOT EXISTS was a no-op on it).
+# _ensure_schema must self-heal by adding the repo column so writes on those
+# pre-existing databases succeed instead of reproducing the silent-arity-
+# failure bug that was just fixed.
+# ---------------------------------------------------------------------------
+
+
+class TestOldSchemaMigration:
+    def _create_old_schema(self, db_path: Path) -> None:
+        """Build a table matching the pre-#522 14-column schema exactly (no
+        repo column) — the shape any DB built from 9eb7eca onward already has
+        on disk."""
+        import duckdb
+
+        con = duckdb.connect(str(db_path))
+        try:
+            con.execute(
+                """
+                CREATE TABLE phase_events (
+                    trace_id VARCHAR,
+                    correlation_id VARCHAR,
+                    request_ts BIGINT NOT NULL,
+                    phase VARCHAR NOT NULL,
+                    event_type VARCHAR NOT NULL,
+                    model VARCHAR,
+                    tokens_in INTEGER,
+                    tokens_out INTEGER,
+                    latency_ms INTEGER,
+                    success BOOLEAN,
+                    error_message VARCHAR,
+                    workflow_skill_id VARCHAR,
+                    system_prompt_sha VARCHAR,
+                    direction VARCHAR
+                )
+                """
+            )
+            cols = [r[0] for r in con.execute("DESCRIBE phase_events").fetchall()]
+            assert len(cols) == 14, f"fixture drifted from the old schema: {cols}"
+            assert "repo" not in cols
+        finally:
+            con.close()
+
+    def test_write_succeeds_against_old_schema_and_repo_is_correct(self, tmp_path: Path) -> None:
+        """The mandatory regression: instantiate the writer against an
+        old-schema (14-column, no repo) database, write an event, and assert
+        both that the write succeeded and the repo value round-trips."""
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "old_schema.duck"
+        self._create_old_schema(db_path)
+
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start(
+                "trace-migrated", "design", model="gpt-4", repo="/home/nate/old-repo"
+            )
+
+            row = (
+                store._c()
+                .execute(  # noqa: SLF001 — direct read for the regression assertion
+                    "SELECT trace_id, phase, event_type, model, repo "
+                    "FROM phase_events WHERE trace_id = ?",
+                    ["trace-migrated"],
+                )
+                .fetchone()
+            )
+            assert row is not None, (
+                "write against the old 14-column schema was silently swallowed "
+                "by the soft-fail except block -- the exact bug #522 exists to prevent"
+            )
+            assert row[0] == "trace-migrated"
+            assert row[1] == "design"
+            assert row[2] == "phase_start"
+            assert row[3] == "gpt-4"
+            assert row[4] == "/home/nate/old-repo"
+
+            cols = [r[0] for r in store._c().execute("DESCRIBE phase_events").fetchall()]  # noqa: SLF001
+            assert "repo" in cols
+        finally:
+            store.close()
+
+    def test_repo_index_created_after_migration(self, tmp_path: Path) -> None:
+        """The repo index must be created AFTER the column migration runs —
+        creating it against the DDL string directly would fail on an old
+        table where the repo column doesn't exist yet."""
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "old_schema_idx.duck"
+        self._create_old_schema(db_path)
+
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start("t1", "design")
+            names = {
+                r[0]
+                for r in store._c()  # noqa: SLF001
+                .execute(
+                    "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'phase_events'"
+                )
+                .fetchall()
+            }
+            assert "idx_phase_events_repo" in names
         finally:
             store.close()

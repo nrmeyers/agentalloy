@@ -40,6 +40,7 @@ class PhaseEvent:
     workflow_skill_id: str | None = None
     system_prompt_sha: str | None = None
     direction: str | None = None
+    repo: str | None = None
 
 
 class TelemetryStore(Protocol):
@@ -52,8 +53,8 @@ _INSERT_SQL = """\
 INSERT INTO phase_events (
     trace_id, correlation_id, request_ts, phase, event_type,
     model, tokens_in, tokens_out, latency_ms, success,
-    error_message, workflow_skill_id, system_prompt_sha, direction
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    error_message, workflow_skill_id, system_prompt_sha, direction, repo
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _CREATE_DDL = """\
@@ -71,13 +72,17 @@ CREATE TABLE IF NOT EXISTS phase_events (
     error_message VARCHAR,
     workflow_skill_id VARCHAR,
     system_prompt_sha VARCHAR,
-    direction VARCHAR
+    direction VARCHAR,
+    repo VARCHAR
 );
 CREATE INDEX IF NOT EXISTS idx_phase_events_ts ON phase_events(request_ts);
 CREATE INDEX IF NOT EXISTS idx_phase_events_phase ON phase_events(phase);
 CREATE INDEX IF NOT EXISTS idx_phase_events_type ON phase_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_phase_events_trace ON phase_events(trace_id);
 """
+
+_ADD_REPO_COLUMN_SQL = "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS repo VARCHAR"
+_CREATE_REPO_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_phase_events_repo ON phase_events(repo)"
 
 
 class PhaseTelemetryWriter:
@@ -129,6 +134,7 @@ class PhaseTelemetryWriter:
         system_prompt_sha: str | None = None,
         direction: str | None = None,
         correlation_id: str | None = None,
+        repo: str | None = None,
     ) -> None:
         try:
             self._ensure_schema()
@@ -146,6 +152,7 @@ class PhaseTelemetryWriter:
                 workflow_skill_id=workflow_skill_id,
                 system_prompt_sha=system_prompt_sha,
                 direction=direction,
+                repo=repo,
             )
             params: tuple[Any, ...] = (
                 event.trace_id,
@@ -162,6 +169,7 @@ class PhaseTelemetryWriter:
                 event.workflow_skill_id,
                 event.system_prompt_sha,
                 event.direction,
+                event.repo,
             )
             self._store.execute(_INSERT_SQL, params)
         except Exception:  # noqa: BLE001 — soft-fail by design
@@ -173,5 +181,22 @@ class PhaseTelemetryWriter:
                 self._store.execute(_CREATE_DDL)
             except Exception:  # noqa: BLE001
                 logger.debug("phase_events schema creation failed", exc_info=True)
+            try:
+                # Self-healing migration: a DB built from a build between
+                # 9eb7eca and 74ac10b already has a 14-column phase_events
+                # table (CREATE TABLE IF NOT EXISTS was a no-op on it, even
+                # though every INSERT from that era failed on arity and was
+                # swallowed). ADD COLUMN IF NOT EXISTS is idempotent so this
+                # is safe to run on every schema-init, fresh DB or old.
+                self._store.execute(_ADD_REPO_COLUMN_SQL)
+            except Exception:  # noqa: BLE001
+                logger.debug("phase_events repo-column migration failed", exc_info=True)
+            try:
+                # Index creation must follow the column migration — on an old
+                # DB the column (and thus the index target) doesn't exist
+                # until the ALTER TABLE above runs.
+                self._store.execute(_CREATE_REPO_INDEX_SQL)
+            except Exception:  # noqa: BLE001
+                logger.debug("phase_events repo-index creation failed", exc_info=True)
             finally:
                 self._init_done = True
