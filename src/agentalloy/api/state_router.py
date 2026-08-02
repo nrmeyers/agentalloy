@@ -209,21 +209,29 @@ def _contract_row_to_response(row: dict[str, Any]) -> ContractResponse:
     )
 
 
-def _rewrite_posture(root: Path, phase: str) -> list[str]:
+def _rewrite_posture(root: Path, phase: str, mode: str | None) -> list[str]:
     """Rewrite enforcement posture files for wired Tier A harnesses.
 
     Thin wrapper around ``rewrite_enforcement_posture`` so the router can
     call it from ``asyncio.to_thread``.  Soft: any failure is logged and
     swallowed — a posture rewrite failure must not block the phase advance.
+
+    ``mode`` is passed explicitly by the caller (the just-committed
+    ``PhaseState.mode``, read off the same in-process store handle that did
+    the write) rather than re-derived here — one evaluation point for the
+    ``(phase, mode)`` pair, reachable identically from the service and the
+    CLI (see ``install.subcommands.flow``).
     """
     try:
         from agentalloy.install.subcommands.wire_harness import (
             rewrite_enforcement_posture as _rewrite,
         )
 
-        return _rewrite(root, phase)
+        return _rewrite(root, phase, mode=mode)
     except Exception:
-        logger.debug("posture rewrite failed for %s phase=%s", root, phase, exc_info=True)
+        logger.debug(
+            "posture rewrite failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+        )
         return []
 
 
@@ -629,9 +637,16 @@ async def write_phase(
                 status_code=409,
                 detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
             )
-        # Posture rewrite after successful phase advance
+        # Posture rewrite after successful phase advance. Read the row back
+        # off the same in-process store handle that just wrote it, rather
+        # than re-deriving mode from ``req.mode`` (usually ``None`` — a phase
+        # advance normally doesn't touch mode, which carries forward) or
+        # trusting a second read through a different seam.
         if repo_root is not None:
-            await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
+            written = await asyncio.to_thread(store.read_phase)
+            await asyncio.to_thread(
+                _rewrite_posture, Path(repo_root), phase_value, written.mode if written else None
+            )
         return PhaseAdvanceResponse(
             kind=result.kind,
             # ``result.value`` is the stored blob; callers want the bare name.
@@ -644,6 +659,7 @@ async def write_phase(
 
     # Transactional path: phase + contract in one BEGIN/COMMIT
     contract_id: str | None = None
+    written_mode: str | None = None
     try:
         with store.transaction() as tx:
             # Write the phase — blob semantics, reusing this transaction.
@@ -667,6 +683,11 @@ async def write_phase(
                     ).model_dump(mode="json"),
                 )
 
+            # Read the mode back inside the same transaction (read-your-own-write)
+            # so the posture rewrite below gets the resolved value, not a guess.
+            written_phase = tx.read_phase()
+            written_mode = written_phase.mode if written_phase else None
+
             # Write the contract
             contract = req.contract
             contract_id = tx.put_contract(
@@ -683,7 +704,7 @@ async def write_phase(
             )
         # Transaction committed — posture rewrite + in-process compose
         if repo_root is not None:
-            await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
+            await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value, written_mode)
         asyncio.create_task(_trigger_compose_in_process(store, contract_id, request))
     except HTTPException:
         raise
