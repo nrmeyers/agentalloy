@@ -104,6 +104,7 @@ class PhaseAccess(Protocol):
         actor: str | None = None,
         mode: str | None = None,
         free_since: str | None = None,
+        override: bool = False,
     ) -> None:
         """Write *phase*, carrying forward any field left as ``None``.
 
@@ -147,6 +148,7 @@ class _StoreAccess:
         actor: str | None = None,
         mode: str | None = None,
         free_since: str | None = None,
+        override: bool = False,
     ) -> None:
         self.store.write_phase(phase, actor=actor, mode=mode, free_since=free_since)
 
@@ -187,6 +189,7 @@ class _ServiceAccess:
         actor: str | None = None,
         mode: str | None = None,
         free_since: str | None = None,
+        override: bool = False,
     ) -> None:
         self.client.set_phase(
             phase,
@@ -194,6 +197,7 @@ class _ServiceAccess:
             actor=actor,
             mode=mode,
             free_since=free_since,
+            override=override,
         )
 
     def clear(self) -> None:
