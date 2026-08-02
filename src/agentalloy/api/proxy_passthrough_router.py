@@ -46,6 +46,7 @@ from agentalloy.api.proxy_router import (
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,
+    resolve_passthrough_client,
 )
 from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
@@ -68,6 +69,11 @@ __all__ = ["_ComposedBlock", "_compose_block", "router"]
 
 # Upstream path the discriminator maps to (the /proj/<token> prefix is ours).
 _UPSTREAM_PATH = "/v1/messages"
+
+# app.state attribute name for this surface's per-repo passthrough client cache
+# (see resolve_passthrough_client) — distinct from the Responses surface's so
+# the two never share a cache dict.
+_CLIENT_CACHE_ATTR = "anthropic_passthrough_client_cache"
 
 # Response headers we never relay back to the client.
 _RESPONSE_HOP = frozenset(
@@ -395,6 +401,18 @@ async def passthrough_anthropic_messages(
     raw_body = await request.body()
     query_string = request.url.query
     inbound_headers = request.headers
+
+    # Per-repo .agentalloy/upstream (captured by `agentalloy add`) wins over the
+    # lifespan-scoped default client -- same precedence as the chat-completions
+    # surface's _resolve_upstream, so `add`'s reported upstream is the one this
+    # surface actually forwards to (#505's fix, mirrored here for the Anthropic
+    # passthrough per the issue's "two surfaces, not one" finding).
+    try:
+        project_dir = decode_proj_token(token)
+    except ValueError:
+        project_dir = None
+    if project_dir is not None:
+        client = resolve_passthrough_client(request.app, project_dir, client, _CLIENT_CACHE_ATTR)
 
     if client is None:
         return Response(

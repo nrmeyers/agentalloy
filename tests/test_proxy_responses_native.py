@@ -23,6 +23,7 @@ from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.api.proxy_injection import inject_into_responses_input
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
+from tests.harness_e2e.upstream_stub import start_upstream_stub
 
 _SIGNAL = "agentalloy.api.proxy_responses_router.evaluate_signal"
 
@@ -408,3 +409,81 @@ def test_no_anthropic_cache_keys_on_the_responses_wire(tmp_path: Path) -> None:
     assert "cache_control" not in body
     assert '"ttl"' not in body
     assert "ephemeral" not in body
+
+
+# --------------------------------------------------------------------------- #
+# #505 — per-repo .agentalloy/upstream must actually be reached, not just
+# echoed by `add codex --upstream-url`. Uses a REAL listening upstream (the
+# harness matrix's stub) rather than a MockTransport, asserting egress at the
+# socket level: this is the reproduction from the issue (codex talking to
+# api.openai.com despite `add` reporting a local upstream), now against a
+# deterministic stub instead of the real OpenAI host.
+# --------------------------------------------------------------------------- #
+
+
+def _write_upstream(root: Path, text: str) -> None:
+    (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
+    (root / ".agentalloy" / "upstream").write_text(text)
+
+
+def test_per_repo_upstream_wins_over_lifespan_default(tmp_path: Path) -> None:
+    stub = start_upstream_stub()
+    try:
+        _write_upstream(tmp_path, f"url: {stub.base_url}/v1\nmodel: local-model\n")
+        wrong_default = AnthropicPassthroughClient(
+            upstream_base_url="http://should-not-be-reached.invalid"
+        )
+        app = create_app(use_default_lifespan=False)
+        app.state.responses_passthrough_client = wrong_default
+        app.state.embed_client = MagicMock()
+        app.state.telemetry_store = MagicMock()
+        with (
+            patch(_SIGNAL, return_value=_no_compose_signal()),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                f"/proj/{_token(tmp_path)}/v1/responses",
+                json=_responses_body(),
+                headers={"authorization": "Bearer caller-key"},
+            )
+        assert resp.status_code == 200
+        assert len(stub.captured) == 1
+        assert stub.captured[0].path == "/v1/responses"
+        assert stub.captured[0].payload["model"] == "gpt-test"
+    finally:
+        stub.stop()
+
+
+def test_no_credential_injected_when_key_env_present(tmp_path: Path) -> None:
+    """Auth-transparent: key_env must never inject a credential on this surface."""
+    stub = start_upstream_stub()
+    try:
+        _write_upstream(
+            tmp_path,
+            f"url: {stub.base_url}/v1\nmodel: local-model\nkey_env: SOME_UNSET_UPSTREAM_KEY\n",
+        )
+        app = create_app(use_default_lifespan=False)
+        app.state.responses_passthrough_client = None
+        app.state.embed_client = MagicMock()
+        app.state.telemetry_store = MagicMock()
+        with (
+            patch(_SIGNAL, return_value=_no_compose_signal()),
+            TestClient(app) as client,
+        ):
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/responses", json=_responses_body())
+        assert resp.status_code == 200
+        assert len(stub.captured) == 1
+    finally:
+        stub.stop()
+
+
+def test_falls_back_to_default_when_no_per_repo_upstream(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    with (
+        patch(_SIGNAL, return_value=_no_compose_signal()),
+        TestClient(app) as client,
+    ):
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/responses", json=_responses_body())
+    assert resp.status_code == 200
+    assert json.loads(captured["body"]) == _responses_body()

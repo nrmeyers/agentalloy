@@ -34,9 +34,21 @@ exists to solve.
 
 ## Upstream
 
-`RESPONSES_UPSTREAM_URL` (default `https://api.openai.com`). Reuses
-`AnthropicPassthroughClient` — the class is protocol-agnostic (it forwards
-paths, headers, and bytes); only its name is historical.
+Global default: `RESPONSES_UPSTREAM_URL` (default `https://api.openai.com`),
+built once at lifespan startup into a lifespan-scoped `AnthropicPassthroughClient`
+— the class is protocol-agnostic (it forwards paths, headers, and bytes); only
+its name is historical.
+
+A per-repo `.agentalloy/upstream` (captured by `agentalloy add --upstream-url`)
+wins over that default: `resolve_passthrough_client` (`proxy_router.py`) reads
+it, strips its documented `/v1` suffix (the file is written in the
+chat-completions shape; this surface's own `/v1/responses` suffix would
+otherwise double to `/v1/v1/responses`), and forwards there instead, caching
+one client per adopted base URL on `app.state.responses_passthrough_client_cache`.
+`key_env` plays no role on this surface — it stays auth-transparent, relaying
+the caller's own credential; a per-repo override changes only the destination
+(fixes #505 — `add codex --upstream-url` used to report an upstream this route
+never actually reached).
 
 ## Injection
 
