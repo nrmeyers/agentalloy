@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -250,7 +251,80 @@ class TestSchema:
         assert "idx_phase_events_type" in _CREATE_DDL
         assert "idx_phase_events_trace" in _CREATE_DDL
 
-    def test_insert_sql_has_thirteen_placeholders(self) -> None:
+    def test_insert_sql_has_fourteen_placeholders(self) -> None:
+        """Regression: the table has 14 columns; the INSERT must match exactly
+        or every write raises (silently, under the soft-fail except block)."""
         from agentalloy.telemetry.phase_writer import _INSERT_SQL
 
-        assert _INSERT_SQL.count("?") == 13
+        assert _INSERT_SQL.count("?") == 14
+
+    def test_insert_sql_names_columns_explicitly(self) -> None:
+        """INSERT INTO phase_events (col, col, ...) VALUES (...) — not a bare
+        VALUES(...) — so column order cannot silently drift from the DDL again."""
+        from agentalloy.telemetry.phase_writer import _INSERT_SQL
+
+        assert "INSERT INTO phase_events (" in _INSERT_SQL
+
+
+# ---------------------------------------------------------------------------
+# Regression: real DuckDB round-trip (P0 bug — every write raised and was
+# swallowed by the soft-fail except block; zero rows were ever persisted).
+# ---------------------------------------------------------------------------
+
+
+class TestRealDuckDBRoundTrip:
+    def test_written_event_is_read_back(self, tmp_path: Path) -> None:
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "telemetry.duck"
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.llm_received(
+                "trace-xyz",
+                "design",
+                model="qwen3-235b-a22b",
+                tokens_out=2048,
+                latency_ms=1500,
+                success=True,
+            )
+            row = store._c().execute(  # noqa: SLF001 — direct read for the regression assertion
+                "SELECT trace_id, phase, event_type, model, tokens_out, latency_ms, success "
+                "FROM phase_events WHERE trace_id = ?",
+                ["trace-xyz"],
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "trace-xyz"
+            assert row[1] == "design"
+            assert row[2] == "llm_received"
+            assert row[3] == "qwen3-235b-a22b"
+            assert row[4] == 2048
+            assert row[5] == 1500
+            assert row[6] is True
+        finally:
+            store.close()
+
+    def test_multi_statement_ddl_creates_indexes(self, tmp_path: Path) -> None:
+        """DuckDB's execute() runs every statement in the DDL string, not just
+        the first — this asserts the indexes actually exist, not just the table."""
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "telemetry2.duck"
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_start("t1", "spec")
+            names = {
+                r[0]
+                for r in store._c()  # noqa: SLF001
+                .execute("SELECT index_name FROM duckdb_indexes() WHERE table_name = 'phase_events'")
+                .fetchall()
+            }
+            assert names == {
+                "idx_phase_events_ts",
+                "idx_phase_events_phase",
+                "idx_phase_events_type",
+                "idx_phase_events_trace",
+            }
+        finally:
+            store.close()

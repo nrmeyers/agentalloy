@@ -48,8 +48,13 @@ class TelemetryStore(Protocol):
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None: ...
 
 
-# Column order must match the INSERT below (13 placeholders).
-_INSERT_SQL = "INSERT INTO phase_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+_INSERT_SQL = """\
+INSERT INTO phase_events (
+    trace_id, correlation_id, request_ts, phase, event_type,
+    model, tokens_in, tokens_out, latency_ms, success,
+    error_message, workflow_skill_id, system_prompt_sha, direction
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+"""
 
 _CREATE_DDL = """\
 CREATE TABLE IF NOT EXISTS phase_events (
@@ -160,7 +165,7 @@ class PhaseTelemetryWriter:
             )
             self._store.execute(_INSERT_SQL, params)
         except Exception:  # noqa: BLE001 — soft-fail by design
-            logger.debug("phase_event write failed: %s", exc_info=True)
+            logger.debug("phase_event write failed", exc_info=True)
 
     def _ensure_schema(self) -> None:
         if not self._init_done:
