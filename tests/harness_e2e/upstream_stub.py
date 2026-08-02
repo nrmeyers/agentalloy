@@ -1,10 +1,11 @@
 """A real listening stub upstream for the harness e2e matrix.
 
-Serves both proxy upstream surfaces on a real socket so actual harness
+Serves all three proxy upstream surfaces on a real socket so actual harness
 binaries (and the proxy's own httpx client) can talk to it:
 
 - ``POST /v1/chat/completions`` — OpenAI Chat Completions (JSON + SSE)
 - ``POST /v1/messages`` — Anthropic Messages (JSON + SSE)
+- ``POST /v1/responses`` — OpenAI Responses (JSON + SSE)
 
 Every request body is captured (with its path) for assertions. Responses are
 canned: a short assistant turn with no tool calls, so headless harness runs
@@ -83,6 +84,46 @@ def user_texts(requests: list[CapturedRequest]) -> list[str]:
         elif isinstance(content, list):
             # Anthropic content blocks: [{"type": "text", "text": ...}, ...]
             texts.append("\n".join(b.get("text", "") for b in content if isinstance(b, dict)))
+    return texts
+
+
+def system_texts(requests: list[CapturedRequest]) -> list[str]:
+    """System-leg text per captured request (all three API shapes).
+
+    The system leg is where leg 3 — the SDD workflow prose, which must re-send
+    on every carrier turn (#499, #506) — lands. It is a different field on each
+    surface: Responses puts it at top-level ``instructions``, Chat Completions
+    in the ``system``-role message(s), Anthropic in a top-level ``system``
+    field. One entry per request, ``""`` when the request has no system leg at
+    all, so callers can assert per-turn rather than "at least one turn".
+    """
+    texts: list[str] = []
+    for req in requests:
+        instructions = req.payload.get("instructions")
+        if isinstance(instructions, str):
+            # Responses API.
+            texts.append(instructions)
+            continue
+        system = req.payload.get("system")
+        if isinstance(system, str):
+            # Anthropic Messages, string form.
+            texts.append(system)
+            continue
+        if isinstance(system, list):
+            # Anthropic Messages, content-block form.
+            texts.append("\n".join(b.get("text", "") for b in system if isinstance(b, dict)))
+            continue
+        # Chat Completions: system-role messages, in order.
+        parts: list[str] = []
+        for msg in req.payload.get("messages", []):
+            if not isinstance(msg, dict) or msg.get("role") not in ("system", "developer"):
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                parts.append("\n".join(b.get("text", "") for b in content if isinstance(b, dict)))
+        texts.append("\n".join(parts))
     return texts
 
 

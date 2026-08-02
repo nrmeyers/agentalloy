@@ -1704,8 +1704,10 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
 
     OpenCode does not honor ``OPENAI_API_BASE`` (the old carrier), and its
     built-in openai provider speaks the Responses API (``/v1/responses``),
-    which the proxy does not serve. The working vector — verified against a
-    live binary by the harness e2e matrix — is a custom provider on the
+    which it drives through its own bundled provider package rather than a
+    configurable base. (The proxy itself does serve ``/v1/responses``
+    natively — codex rides it.) The working vector — verified against
+    a live binary by the harness e2e matrix — is a custom provider on the
     ``@ai-sdk/openai-compatible`` package (Chat Completions wire) pointed at
     the proxy's per-repo ``/proj/<token>/v1`` endpoint, selected as the
     default model. OpenCode merges the repo-local config over the user's

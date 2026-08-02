@@ -150,6 +150,34 @@ def _codex_env(port: int, root: Path) -> dict[str, str]:
     return {"CODEX_HOME": str(root / ".codex"), "OPENAI_API_KEY": "agentalloy-e2e"}
 
 
+def _wire_qwen(port: int, root: Path) -> object:
+    # Sandbox rule: _wire_proxy_qwen_code seeds the repo-local settings.json
+    # from ``Path.home()/.qwen/settings.json`` so the user's own tuning
+    # survives. Point HOME at the (empty) work repo for the duration so the
+    # matrix wires a hermetic config instead of inheriting the developer's
+    # providers, envKey, and context window. Writes all land under *root*.
+    import os
+
+    from agentalloy.install.subcommands.wire_harness import (
+        _wire_proxy_qwen_code,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    prev = os.environ.get("HOME")
+    os.environ["HOME"] = str(root)
+    try:
+        return _wire_proxy_qwen_code(port, root, scope="repo")
+    finally:
+        if prev is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = prev
+
+
+def _qwen_env(port: int, root: Path) -> dict[str, str]:
+    # Mirrors .qwen/.agentalloy-env; dummy key only ever reaches the stub.
+    return {"QWEN_HOME": str(root / ".qwen"), "OPENAI_API_KEY": "agentalloy-e2e"}
+
+
 def _wire_continue(port: int, root: Path) -> object:
     from agentalloy.install.subcommands.wire_harness import (
         _wire_proxy_continue,  # pyright: ignore[reportPrivateUsage]
@@ -262,6 +290,22 @@ CASES: tuple[HarnessCase, ...] = (
         notes=(
             "Repo-local CODEX_HOME (config.toml, wire_api=responses) → the "
             "proxy's native /proj/<token>/v1/responses passthrough."
+        ),
+    ),
+    HarnessCase(
+        name="qwen-code",
+        binary="qwen",
+        env=_qwen_env,
+        # -m is not optional. Without it qwen resolves its own default provider
+        # and bypasses the proxy entirely — `add qwen-code` writes a model.name
+        # that collides with a real provider id (issue #504). Same shape as the
+        # opencode entry's -m pin, for the same class of reason.
+        argv=lambda root: ["qwen", "-m", "agentalloy-proxy", "-p", PROMPT],
+        wire=_wire_qwen,
+        scrub_env=("OPENAI_BASE_URL", "OPENAI_API_BASE"),
+        notes=(
+            "Repo-local QWEN_HOME (settings.json model block → /proj/<token>/v1); "
+            "the chat-completions sibling of the codex entry's Responses wire."
         ),
     ),
     HarnessCase(
