@@ -23,24 +23,57 @@ def _write_upstream(root: Path, text: str) -> None:
 class TestReadUpstream:
     def test_parses_url_model_keyenv(self, tmp_path: Path) -> None:
         _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: m1\nkey_env: OPENAI_API_KEY\n")
-        up = read_upstream(tmp_path)
-        assert up == Upstream(url="http://h:9000/v1", model="m1", key_env="OPENAI_API_KEY")
+        result = read_upstream(tmp_path)
+        assert result.kind == "valid"
+        assert result.upstream == Upstream(
+            url="http://h:9000/v1", model="m1", key_env="OPENAI_API_KEY"
+        )
 
     def test_strips_trailing_slash_and_optional_keyenv(self, tmp_path: Path) -> None:
         _write_upstream(tmp_path, "url: http://h:9000/v1/\nmodel: m1\n")
-        up = read_upstream(tmp_path)
-        assert up == Upstream(url="http://h:9000/v1", model="m1", key_env=None)
+        result = read_upstream(tmp_path)
+        assert result.kind == "valid"
+        assert result.upstream == Upstream(url="http://h:9000/v1", model="m1", key_env=None)
 
     def test_absent_file_is_none(self, tmp_path: Path) -> None:
-        assert read_upstream(tmp_path) is None
+        result = read_upstream(tmp_path)
+        assert result.kind == "absent"
 
     def test_missing_required_keys_is_none(self, tmp_path: Path) -> None:
         _write_upstream(tmp_path, "url: http://h:9000/v1\n")  # no model
-        assert read_upstream(tmp_path) is None
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
 
     def test_malformed_yaml_is_none(self, tmp_path: Path) -> None:
         _write_upstream(tmp_path, "url: [unclosed\n")
-        assert read_upstream(tmp_path) is None
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
+
+    def test_empty_file_is_error(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "")
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
+
+    def test_non_dict_yaml_is_error(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "just a string\n")
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
+
+    def test_empty_url_and_model_is_error(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, 'url: ""\nmodel: ""\n')
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
+
+    def test_missing_url_only_is_error(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "model: m1\n")
+        result = read_upstream(tmp_path)
+        assert result.kind == "error"
+        assert result.detail is not None
 
 
 def _fake_app() -> types.SimpleNamespace:
