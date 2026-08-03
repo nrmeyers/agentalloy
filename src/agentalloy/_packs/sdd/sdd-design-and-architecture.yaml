@@ -1,0 +1,140 @@
+skill_id: sdd-design-and-architecture
+canonical_name: SDD — Design (sdd-design)
+description: "Turn the spec into a technical approach with decisions and rationale — recorded as approach.md via agentalloy contract artifact-set --phase design --slug <slug>. Task decomposition, test cases, and build contracts are plan's job."
+category: operational
+skill_class: workflow
+domain_tags:
+  - spec-driven-development
+  - design
+  - planning
+  - architecture
+requires: []
+always_apply: false
+applies_to_phases:
+  - design
+# Load-bearing command tokens not derivable from exit_gates: how the agent works
+# the build contracts and advances. A customization may reword the prose but must
+# keep these verbatim.
+prose_invariants:
+  - "agentalloy phase set plan"
+exit_gates:
+  all_of:
+    - artifact_exists:
+        phase: design
+        name: approach.md
+    - artifact_contains:
+        phase: design
+        name: approach.md
+        sections:
+          - Approach
+    # Human-in-the-loop checkpoint (#10): design→plan requires a recorded approval.
+    # `since_name_glob` covers the design artifact so editing it after approval
+    # invalidates the marker. --force never bypasses this.
+    - approval_recorded:
+        since_name_glob: "approach.md"
+signal_keywords:
+  - done with design
+  - ready to plan
+  - next phase
+contract_template: |
+  ---
+  phase: design
+  task_slug: {{task_slug}}
+  route: full
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## Scope in a sentence
+
+  <what this changes, and the boundary of "this">
+
+  ## Design
+
+  The approach is recorded as a design artifact
+  (approach.md) via
+  `agentalloy contract artifact-set --phase design --slug {{task_slug}}`.
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
+phase_scope: []
+category_scope: [process]
+author: agentalloy
+change_summary: "split from sdd-design-and-planning: design focuses on approach, decisions, and rationale only; task decomposition, test cases, and build contracts moved to sdd-plan-and-contracts"
+raw_prose: |
+  # SDD — Design
+
+  **Checkpoint first.** You MUST confirm the spec artifact exists by running:
+
+      agentalloy contract artifact-list --phase spec --slug <slug>
+
+  and verifying it carries **Acceptance Criteria**. If it does not, you skipped spec;
+  STOP and record it. You MUST NOT write any `src/` code in this phase: design
+  produces artifacts only, recorded via `agentalloy contract artifact-set
+  --phase design --slug <slug> --name approach.md`. There is no file to write —
+  if you are editing source, you are in the wrong phase.
+
+  Spec settled *what* and *done*. Design settles *how* — the approach, the
+  decisions you're committing to, and the rationale for each. Skipping straight
+  to code is the classic SDD failure: you thrash on architecture you should have
+  chosen on paper. Stay read-only here — design produces artifacts, not a diff.
+
+  ## 1. Start from the spec
+
+  Read the spec artifact (`agentalloy contract artifact-list --phase spec
+  --slug <slug>`) and your work-item contract
+  (`agentalloy contract show <slug>`, which spec authored — the proxy
+  already front-loaded its design skills on entry). Acceptance and non-goals are
+  fixed, you don't reopen them.
+
+  Then read the code you'll touch — existing patterns, conventions, the seams
+  you'll extend. Read to understand constraints and patterns, not to start
+  designing the implementation. You're learning what the codebase can do, not
+  what it should do.
+
+  If the spec's acceptance is impossible to achieve with this codebase, or if
+  two acceptance criteria contradict each other, STOP and surface the issue.
+  Don't design around it.
+
+  ## 2. Decide the approach — and say why
+
+  Write the *how*: the structure, the key choices, and the rationale for each.
+  The rationale is the point — "Postgres over SQLite because we need concurrent
+  writers" is a decision build can trust; "use Postgres" is an order it can't
+  evaluate. Name the alternatives you rejected when the call was close.
+
+  ## 3. Record it
+
+  The **design artifact** is the deliverable and the single source of truth
+  for approach — record it with:
+
+      agentalloy contract artifact-set --phase design --slug <slug> --name approach.md
+
+  The body MUST include `## Approach`. That completes design.
+
+  Then **PRESENT the design in full and STOP** — do not advance yourself. The
+  forward jump to plan is a human checkpoint: only once the user explicitly
+  approves do you run `agentalloy approve design` (it records the approval and
+  carries you into plan) — or, after approval, advance with
+  `agentalloy phase set plan`. Phase advance ends this session; the next phase
+  begins in a fresh one, and `agentalloy resume` rebuilds context. If anything's
+  still unresolved — an approach you haven't committed to, an alternative you
+  can't evaluate — **stop and surface it** instead of presenting it as done.
+  The phase guard refuses the jump until `approach.md` exists with its required
+  section AND a human approval is recorded, so a premature `phase set` just
+  names what's missing.
+
+  ## Not this
+
+  Don't write code — design is read-only; the moment you're editing `src/`
+  you've skipped to build. Don't re-litigate the spec's scope or acceptance; if
+  design reveals the spec was wrong, fix it there (`agentalloy phase set spec`),
+  don't quietly redefine it. Don't gold-plate the plan with sizing tables and
+  risk matrices the work doesn't need — the approach and the decisions are the
+  whole deliverable.

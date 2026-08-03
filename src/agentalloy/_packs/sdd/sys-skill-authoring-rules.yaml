@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — meta pack, derived from fixtures/skill-authoring-guidelines.md
   (verified 2026-05-04). Captures R1–R8 quality contract for new skill source authoring.
   2026-07-14: converted from _packs/meta/sys-skill-authoring-rules.md to a phase-scoped

@@ -1,6 +1,6 @@
 skill_id: sdd-verify-and-review
 canonical_name: SDD — Verify and Review (sdd-verify)
-description: "The wide net before ship: run the full suite (integration included), lint, and typecheck; verify the change meets every spec acceptance and respects non-goals; review for correctness/security/readability/architecture/performance — recorded to docs/qa/<slug>.md."
+description: "The wide net before ship: run the full suite (integration included), lint, and typecheck; verify the change meets every spec acceptance and respects non-goals; review for correctness/security/readability/architecture/performance — recorded to the qa artifact."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -14,16 +14,16 @@ always_apply: false
 applies_to_phases:
   - qa
 # Load-bearing tokens not derivable from a gate path. (1) The forward advance to
-# ship. (2) docs/solutions/ — the codify target: the lessons_recorded gate below
-# resolves the slug internally and carries no `path` arg (so it emits no spurious
-# advisory), which means the token is NOT auto-derived; asserting it here keeps
-# prose and gate in lock-step, so a prose override that drops the "write the
-# lesson" instruction is rejected at runtime (shipped prose served, warning
-# logged) until its author re-adds the token. A customization may reword the
-# prose but must keep both verbatim.
+# ship. (2) the solutions artifact — the codify target: the lessons_recorded gate
+# below resolves the slug internally and carries no `path` arg (so it emits no
+# spurious advisory), which means the token is NOT auto-derived; asserting it
+# here keeps prose and gate in lock-step, so a prose override that drops the
+# "write the lesson" instruction is rejected at runtime (shipped prose served,
+# warning logged) until its author re-adds the token. A customization may reword
+# the prose but must keep both verbatim.
 prose_invariants:
   - "agentalloy phase set ship"
-  - "docs/solutions/"
+  - "the solutions artifact"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -36,10 +36,10 @@ exit_gates:
           - Checks
           - Review
     # Compound-engineering codify gate: blocks qa->ship until THIS task's lesson
-    # is recorded at docs/solutions/<slug>.md. Slug-scoped (eval_lessons_recorded
-    # resolves the active work-item), so a stale docs/solutions/ file from a prior
-    # task cannot satisfy it; deterministic, so it blocks under the CLI's
-    # lm_client=None forward gate. `phase: qa` pins the work-item to resolve.
+    # is recorded in the solutions artifact. Slug-scoped (eval_lessons_recorded
+    # resolves the active work-item), so a stale prior-task lesson can't satisfy
+    # it; deterministic, so it blocks under the CLI's lm_client=None forward gate.
+    # `phase: qa` pins the work-item to resolve.
     - lessons_recorded:
         phase: qa
 signal_keywords:
@@ -69,20 +69,20 @@ contract_template: |
 
   ## Report
 
-  Checks + review verdict live in docs/qa/{{task_slug}}.md.
+  Checks + review verdict live in the qa artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
-author: navistone
-change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (docs/qa/<slug>.md) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until docs/solutions/<slug>.md records this task's lesson (a stale prior-task lesson can't satisfy it), with docs/solutions/ asserted as a prose invariant. MIGRATION: a pre-existing enabled profile override for this skill that lacks the docs/solutions/ token is dropped at runtime (shipped prose served, warning logged) until its author re-adds the token."
+author: agentalloy
+change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (qa artifact) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until the solutions artifact records this task's lesson (a stale prior-task lesson can't satisfy it), with the solutions artifact asserted as a prose invariant. MIGRATION: a pre-existing enabled profile override for this skill that lacks the solutions artifact token is dropped at runtime (shipped prose served, warning logged) until its author re-adds the token."
 raw_prose: |
   # SDD — QA (Verify and Review)
 
   **Checkpoint first.** You MUST confirm the implementation (`src/`) and its tests (`tests/`) exist
   before reviewing — if they do not, you skipped build; STOP and go back. You MUST record the gate
-  results in `docs/qa/<slug>.md` (**Checks** + **Review**), and you MUST codify what this task
-  taught you to `docs/solutions/<slug>.md` before advancing to ship. You MUST NOT add features or
+  results in the qa artifact (**Checks** + **Review**), and you MUST codify what this task
+  taught you to the solutions artifact before advancing to ship. You MUST NOT add features or
   new scope here — QA verifies, it does not build.
 
   Build proved each task green against its designed cases. QA is the wider net:
@@ -107,7 +107,7 @@ raw_prose: |
 
   ## 2. Check it against spec and design
 
-  Open `docs/spec/<slug>.md` and `docs/design/<slug>/`. Verify:
+  Open the spec artifact and the design artifact. Verify:
 
   - **every acceptance criterion is met** — each AC-N has a test proving it, and
     the behavior is real, not faked to satisfy a test.
@@ -140,9 +140,9 @@ raw_prose: |
   Then sweep for dead code the change orphaned — list it, and ask before
   deleting anything you didn't add.
 
-  ## 4. Record it, then route
+  ## 4. Record the verdict
 
-  Write the verdict to **`docs/qa/<slug>.md`** with `## Checks` (the suite, lint,
+  Write the verdict to the **qa artifact** with `## Checks` (the suite, lint,
   and type results) and `## Review` (the findings + the spec/non-goals verdict).
   A clean report — green bar, every AC met, no open Critical or required finding
   — clears the way to ship.
@@ -156,20 +156,25 @@ raw_prose: |
   and how to make it reversible. That body is ship's retrieval prompt, so
   delivery opens already primed.
 
-  **Codify what you learned.** Before you advance, write `docs/solutions/<slug>.md`
-  — the compounding step, and the last thing this task does: the problem you
-  solved, the approach that worked, what you tried that *didn't*, and any decision
-  worth keeping. Keep it concrete and short — a real lesson, not a restatement of
-  the diff — so the next task starts smarter instead of from zero. Once a lesson
-  proves it recurs, promote it into the corpus with `agentalloy lessons promote
-  <slug>` so the signal layer front-loads it automatically next time.
+  ## 5. Codify what you learned
+
+  **This is mandatory, not optional.** The phase guard blocks `ship` until this
+  step completes. Write the solutions artifact — the compounding step: the problem
+  you solved, the approach that worked, what you tried that *didn't*, and any
+  decision worth keeping. Keep it concrete and short — a real lesson, not a
+  restatement of the diff — so the next task starts smarter instead of from zero.
+  Once a lesson proves it recurs, promote it into the corpus with
+  `agentalloy lessons promote <slug>` so the signal layer front-loads it
+  automatically next time.
+
+  ## 6. Advance to ship
 
   Advance yourself: `agentalloy phase set ship`, and go straight into delivery.
   Phase advance ends this session; the next phase begins in a fresh one, and
   `agentalloy resume` rebuilds context. Don't wait to be told; a clean report
   *is* the signal. The phase guard refuses
-  the jump until `docs/qa/<slug>.md` exists with its `## Checks` and `## Review`
-  sections **and** `docs/solutions/<slug>.md` records this task's lesson, so a
+  the jump until the qa artifact exists with its `## Checks` and `## Review`
+  sections **and** the solutions artifact records this task's lesson, so a
   premature `phase set` just names what's missing.
 
   Anything open routes by *cause*, and you don't fix code here: the report is

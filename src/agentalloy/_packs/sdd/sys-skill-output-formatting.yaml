@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — conventions pack, codifies markdown
   structure, code-fence rules, table conventions, and citation format used across
   skill source markdown. 2026-07-14: converted from _packs/conventions/sys-skill-output-formatting.md

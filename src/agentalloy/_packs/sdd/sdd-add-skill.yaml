@@ -68,7 +68,7 @@ contract_template: |
   <the skill is validated, human-approved, and installed into the local corpus>
 phase_scope: []
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: "add-skill lane workflow — guided custom-skill authoring (class choice → draft → R1-R9 self-critique → scaffold + validate → unconditional human approval → install), third intake route alongside full and fast. 2026-07-14: step 3 now emits the review.yaml verdict per sys-skill-review-verdict, feeding install-pack's semantic Gate 1.5 when AGENTALLOY_INSTALL_REQUIRE_REVIEW is on. 2026-07-14: steps 2-3 now name sys-r1-tiered-sourcing, sys-skill-tagging-rules, sys-fragment-types-and-sizing, sys-skill-naming, sys-skill-output-formatting, sys-skill-writing-voice at their point of use — all 6 converted from unreachable meta/conventions markdown to phase-scoped system skills (requires: added for provenance) delivered alongside this workflow at add-skill phase entry."
 raw_prose: |
   # SDD — Add a Custom Skill (add-skill)

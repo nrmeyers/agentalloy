@@ -1,6 +1,6 @@
 skill_id: sdd-build
 canonical_name: SDD — Build (sdd-build)
-description: "Execute the design's plan as code TDD-style: work the ordered tasks in docs/design/<slug>/tasks.md one at a time, turning each task's designed test cases (test-plan.md) red → green → refactor until the suite proves the spec's acceptance."
+description: "Execute the design's plan as code TDD-style: work the ordered tasks from the plan artifact one at a time, turning each task's designed test cases from the test-plan artifact red → green → refactor until the suite proves the spec's acceptance."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -63,37 +63,47 @@ contract_template: |
 
   ## Plan
 
-  Approach + task order live in docs/design/{{task_slug}}/ (approach.md, tasks.md).
+  Approach and task order live in the design artifact (approach.md) and plan artifacts
+  (tasks.md, test-plan.md). Per-task build contracts live in the contract store and
+  are advanced with `agentalloy task next`.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: "two-tier injection: build no longer authors contracts (design emits one per task); walk the per-task build contracts with `agentalloy task next`, which front-loads each task's domain skills + the task itself before coding — no skill-selection reasoning; contract body is now the retrieval prompt (a real task description, not a tasks.md pointer); strict TDD against test-plan.md unchanged"
 raw_prose: |
   # SDD — Build
 
-  **Checkpoint first.** You MUST confirm `docs/design/<slug>/{approach,tasks,test-plan}.md` exist
-  before writing any code — if they do not, you skipped design; STOP and go back. You MUST work the
-  design's task slices as written and prove each with a test. You MUST NOT invent new architecture
-  or acceptance here — if you are making those decisions, you are in the wrong phase.
+  **Checkpoint first.** You MUST confirm the design artifact (approach.md) and the
+  plan artifacts (tasks.md, test-plan.md) exist before writing any code — if they
+  do not, you skipped plan; STOP and go back. You MUST work the plan's
+  task slices as written and prove each with a test. You MUST NOT invent new
+  architecture or acceptance here — if you are making those decisions, you are
+  in the wrong phase. Confirm by running:
 
-  Spec said *what*, design said *how* and *in what order*. Build is execution:
-  work the design's task slices, one at a time, each proven by a test before you
-  move on. No new decisions here — if you're inventing architecture or
-  acceptance, you're in the wrong phase.
+      agentalloy contract artifact-list --phase design --slug <slug>   # check approach.md
+      agentalloy contract artifact-list --phase plan --slug <slug>     # check tasks.md, test-plan.md
+
+  (Replace `<slug>` with the active contract slug — run `agentalloy contracts list`
+  if you're not sure.)
+
+  Spec said *what*, design said *how* and plan said *in what order*. Build is
+  execution: work the plan's task slices, one at a time, each proven by a test
+  before you move on. No new decisions here — if you're inventing architecture
+  or acceptance, you're in the wrong phase.
 
   ## 1. Load the plan
 
-  Read `docs/design/<slug>/tasks.md` (your worklist), `test-plan.md` (the unit
-  cases each task must pass), and `approach.md` (the how + decisions you're
-  implementing against), plus `docs/spec/<slug>.md` (the acceptance behind it
-  all). Design already wrote one build contract per task — `agentalloy task status`
+  Read the plan artifacts — `tasks.md` (your worklist) and `test-plan.md` (the unit
+  cases each task must pass), the design artifact (approach.md, the how + decisions you're
+  implementing against), plus the spec artifact (the acceptance behind it
+  all). Plan already wrote one build contract per task — `agentalloy task status`
   lists them in order.
 
   ## 2. Pull the next task's skills, then work it
 
-  Don't author contracts here — design did. For each task, top to bottom:
+  Don't author contracts here — plan did. For each task, top to bottom:
 
       agentalloy task next
 
@@ -106,11 +116,12 @@ raw_prose: |
 
   ## 3. TDD: red → green → refactor, one case at a time
 
-  Design already decided what proves each task — work its test cases from
+  Plan already decided what proves each task — work its test cases from
   `test-plan.md`, don't re-derive them. For the task you're on, take each case:
 
   1. **Red** — write it as a test and run it (the **CI** system skill names the
-     runner); watch it fail for the right reason.
+     runner — `pytest`, `npm test`, etc. — and how to invoke it); watch it fail
+     for the right reason.
   2. **Green** — write the minimum code to pass. No more than the case asks for.
   3. **Refactor** — clean it up with the test holding you safe.
 
@@ -128,7 +139,7 @@ raw_prose: |
 
   ## 4. Stay inside the scope you declared
 
-  Work within the contract's `scope.touches`. Spreading wider than you planned is
+  Work within the current task contract's `scope.touches`. Spreading wider than you planned is
   the signal to stop and check: is this scope creep (cut it), or did design miss
   something (fix it there — `agentalloy phase set design`)? Don't quietly grow
   the blast radius.
@@ -136,8 +147,8 @@ raw_prose: |
   ## 5. Done when
 
   Every case in `test-plan.md` is a passing test (plus the edges you added), the
-  full suite is green with no regressions, and the work lives under `src/` with
-  tests under `tests/`. Done also means **wired**: trace the feature from the
+  full suite is green with no regressions, the source artifact exists, and the
+  test artifact exists. Done also means **wired**: trace the feature from the
   app's real entry point and confirm data flows end to end — green unit tests
   prove the unit works, not that the running app uses it.
 

@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-07-14 — meta pack. Turns the R1–R9 authoring-rule
   evaluation into the machine-checkable `review.yaml` verdict artifact that install-pack''s
   Gate 1.5 enforces (docs/spec-contracts/install-pack-semantic-gate.spec.md). Producer

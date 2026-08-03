@@ -72,13 +72,13 @@ contract_template: |
   <the obvious acceptance — and the tests that prove it>
 phase_scope: []
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: fast-lane workflow — compressed spec+design+build for a single task (no build loop), merging into the standard qa → ship; bail-to-spec escape hatch
 raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
   **Checkpoint first.** The fast lane compresses spec + design + build into one pass, but you MUST
-  still write `docs/fast/<slug>.md` (**Acceptance Criteria**, **Approach**, **Test Cases**) before
+  still write the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) before
   coding, and you MUST prove the work with tests under `tests/` before ship. You MUST NOT skip the
   acceptance and test cases just because the lane is fast — fast is not unspecified.
 
@@ -89,7 +89,7 @@ raw_prose: |
 
   ## One pass
 
-  Capture the compressed spec + design in a single brief at `docs/fast/<slug>.md`
+  Capture the compressed spec + design in the sdd-fast artifact
   with three headings — `## Acceptance Criteria`, `## Approach`, `## Test Cases` —
   the same load-bearing sections the full lane spreads across spec and design,
   just collapsed. Then build against it.
@@ -102,7 +102,7 @@ raw_prose: |
      `scope.touches`. No build loop — if it fragments into multiple tasks or
      spreads wider than scoped, bail.
   4. **Test Cases.** Write the tests that prove the acceptance, and run them green.
-  5. **Hand to QA.** Once `docs/fast/<slug>.md` carries the three sections, code
+  5. **Hand to QA.** Once the sdd-fast artifact carries the three sections, code
      exists under `src/`, and a test under `tests/`, advance yourself —
      `agentalloy phase set qa` — into the **standard** verification + ship. Don't
      wait to be told. The phase guard refuses the jump until those exist, so a

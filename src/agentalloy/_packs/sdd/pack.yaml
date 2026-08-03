@@ -1,9 +1,9 @@
 name: sdd
-version: 2.4.1
+version: 2.5.0
 tier: workflow
 description: |
-  Spec-Driven Development pipeline phase patterns — sdd-spec (scoping a fuzzy ask into a precise spec), sdd-design + sdd-plan (technical design and ordered task breakdown), sdd-build (implementation with TDD), sdd-verify (test/lint/typecheck/review gate before delivery), and sdd-deliver (PR composition, changelogs, rollouts). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology skills per R1 tier-3 internal procedure.
-author: navistone
+  Spec-Driven Development pipeline phase patterns — sdd-spec (scoping a fuzzy ask into a precise spec), sdd-design (technical approach and decisions), sdd-plan (task breakdown, test cases, build contracts), sdd-build (implementation with TDD), sdd-verify (test/lint/typecheck/review gate before delivery), and sdd-deliver (PR composition, changelogs, rollouts). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology skills per R1 tier-3 internal procedure.
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT
@@ -16,8 +16,11 @@ skills:
 - skill_id: sdd-deliver-and-ship
   file: sdd-deliver-and-ship.yaml
   fragment_count: 0
-- skill_id: sdd-design-and-planning
-  file: sdd-design-and-planning.yaml
+- skill_id: sdd-design-and-architecture
+  file: sdd-design-and-architecture.yaml
+  fragment_count: 0
+- skill_id: sdd-plan-and-contracts
+  file: sdd-plan-and-contracts.yaml
   fragment_count: 0
 - skill_id: sdd-spec-and-scoping
   file: sdd-spec-and-scoping.yaml
