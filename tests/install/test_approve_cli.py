@@ -128,3 +128,56 @@ def test_approve_marker_present_but_forward_completeness_blocks(repo_root: Path)
     # The forward write was refused on artifact-completeness, so still in design.
     assert result["advanced"]["blocked"] is True
     assert run_phase_get(root=repo_root)["phase"] == "design"
+
+
+# --- approve/gate digest agreement -------------------------------------------
+
+
+def test_approval_globs_match_packs() -> None:
+    """`_APPROVAL_STORE_NAME_GLOB[phase]` MUST equal that phase's pack
+    `approval_recorded: since_name_glob`.
+
+    They are two sources of truth for one set: `run_approve` digests through the
+    map, the gate re-digests through the pack arg. Any drift records a digest the
+    gate cannot reproduce, so `approve <phase>` reports success while the phase
+    stays blocked — silently and forever.
+
+    This caught design: the split narrowed the pack to approach.md while the map
+    still said "*.md", so any repo holding a pre-split tasks.md under
+    phase=design would have been permanently unapprovable.
+    """
+    from agentalloy.signals.gates import (
+        _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
+    )
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    for phase, mapped in _APPROVAL_STORE_NAME_GLOB.items():
+        gate = exit_gates_for_phase(phase)
+        assert gate is not None, f"{phase}: no exit gate"
+        found = [
+            leaf["approval_recorded"].get("since_name_glob")
+            for leaf in gate.get("all_of", [])
+            if isinstance(leaf, dict) and "approval_recorded" in leaf
+        ]
+        assert found, f"{phase}: pack declares no approval_recorded leaf"
+        assert found[0] == mapped, (
+            f"{phase}: pack since_name_glob {found[0]!r} != "
+            f"_APPROVAL_STORE_NAME_GLOB {mapped!r} — approve and the gate would "
+            f"digest different sets"
+        )
+
+
+def test_plan_is_approvable(repo_root: Path) -> None:
+    """`agentalloy approve plan` is a shipped prose invariant of the plan pack, so
+    the phase must actually be approvable."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    run_phase_set("plan", root=repo_root, force=True)
+    handle = phase_access(repo_root).contracts_handle()
+    handle.set_artifact("plan", "x", "tasks.md", "# x\n\n## Tasks\n\n- t1\n")
+    handle.set_artifact("plan", "x", "test-plan.md", "# x\n\n## Test Cases\n\n- AC-1\n")
+
+    result = run_approve("plan", root=repo_root, approver="alice")
+
+    assert result["ok"] is True
+    assert phase_access(repo_root).contracts_handle().get_approval("plan") is not None
