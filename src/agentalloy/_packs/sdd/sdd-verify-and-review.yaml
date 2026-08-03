@@ -36,10 +36,11 @@ exit_gates:
           - Checks
           - Review
     # Compound-engineering codify gate: blocks qa->ship until THIS task's lesson
-    # is recorded in the solutions artifact. Slug-scoped (eval_lessons_recorded
-    # resolves the active work-item), so a stale prior-task lesson can't satisfy
-    # it; deterministic, so it blocks under the CLI's lm_client=None forward gate.
-    # `phase: qa` pins the work-item to resolve.
+    # is recorded in the solutions artifact (store: phase=qa, name=solution;
+    # a pre-migration docs/solutions/<slug>.md file still satisfies it).
+    # Slug-scoped (eval_lessons_recorded resolves the active work-item), so a
+    # stale prior-task lesson can't satisfy it; deterministic, so it blocks under
+    # the CLI's lm_client=None forward gate. `phase: qa` pins the work-item.
     - lessons_recorded:
         phase: qa
 signal_keywords:
@@ -75,7 +76,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (qa artifact) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until the solutions artifact records this task's lesson (a stale prior-task lesson can't satisfy it), with the solutions artifact asserted as a prose invariant. MIGRATION: a pre-existing enabled profile override for this skill that lacks the solutions artifact token is dropped at runtime (shipped prose served, warning logged) until its author re-adds the token."
+change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (qa artifact) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until the solutions artifact records this task's lesson (a stale prior-task lesson can't satisfy it), with the solutions artifact asserted as a prose invariant. MIGRATION: the lesson moved off disk — it is now the store artifact (phase=qa, name=solution, written via `agentalloy contract artifact-set`) rather than docs/solutions/<slug>.md; the gate reads the store first and still accepts a pre-migration docs/solutions/ file, so existing repos are not stranded. The prose invariant token likewise changed from docs/solutions/ to the solutions artifact: a pre-existing enabled profile override for this skill that lacks the new token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
 raw_prose: |
   # SDD — QA (Verify and Review)
 
@@ -163,6 +164,16 @@ raw_prose: |
   you solved, the approach that worked, what you tried that *didn't*, and any
   decision worth keeping. Keep it concrete and short — a real lesson, not a
   restatement of the diff — so the next task starts smarter instead of from zero.
+
+  Store it, don't write a file:
+
+  ```
+  agentalloy contract artifact-set --phase qa --slug <slug> --name solution --body-file -
+  ```
+
+  The name is `solution` with no `.md` — the qa artifact gate globs `*.md` and
+  would otherwise demand `## Checks`/`## Review` of your lesson too.
+
   Once a lesson proves it recurs, promote it into the corpus with
   `agentalloy lessons promote <slug>` so the signal layer front-loads it
   automatically next time.

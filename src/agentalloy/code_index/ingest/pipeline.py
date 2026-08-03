@@ -53,6 +53,7 @@ from agentalloy.code_index.store import (
 )
 from agentalloy.config import Settings
 from agentalloy.embed_provider import EmbedClient
+from agentalloy.lessons_artifact import LESSON_NAME, LESSON_PHASE, lesson_doc_path
 from agentalloy.storage.protocols import (
     CodeEdge,
     CodeGraphStore,
@@ -152,8 +153,9 @@ def _markdown_symbol(chunk: MarkdownChunk, digest: str) -> CodeSymbol:
 # `_collect_store_design_chunks` builds from the artifact store — the on-disk
 # file and the store row use the same repo-relative path shape on purpose, so
 # this glob (and the GOVERNS-edge logic below) needed no changes for the
-# migration off disk (specs/final_migration.md). docs/solutions/*.md stays
-# disk-only: hand-written retrospectives, not an SDD phase artifact.
+# migration off disk (specs/final_migration.md). "docs/solutions/*.md" is the
+# same story: `_collect_store_lesson_chunks` synthesizes lessons out of the
+# store under that same path, and a pre-migration on-disk lesson still matches.
 _DECISION_SOURCE_GLOBS: tuple[str, ...] = (
     "docs/solutions/*.md",
     "docs/design/*/approach.md",
@@ -195,6 +197,49 @@ def _collect_store_design_chunks(repo_root: Path) -> list[MarkdownChunk]:
         if not content or not slug:
             continue
         chunks.extend(chunk_markdown(f"docs/design/{slug}/approach.md", content))
+    return chunks
+
+
+def _collect_store_lesson_chunks(repo_root: Path, seen_paths: set[str]) -> list[MarkdownChunk]:
+    """Compound-engineering lessons held as store artifacts (``phase='qa'``,
+    ``name='solution'``) — the store-backed successor to ``docs/solutions/<slug>.md``.
+
+    Synthesized chunks reuse the on-disk path shape (:func:`lesson_doc_path`) so
+    the ``docs/solutions/*.md`` decision-source glob, the GOVERNS-edge logic, and
+    ``knowledge_push._solutions_slug`` need no changes — the same trick
+    :func:`_collect_store_design_chunks` uses for ``approach.md``.
+
+    ``seen_paths`` holds the doc paths :func:`collect_markdown_chunks` already
+    produced from disk; a slug present in both places is emitted once (disk
+    wins) so a repo mid-migration does not double-index its lesson.
+
+    Best-effort: no bound store, an unreachable one, or a repo with no lessons
+    all fall through to ``[]`` rather than failing ingest.
+    """
+    try:
+        from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+        from agentalloy.storage.state_store import process_store  # noqa: PLC0415
+    except Exception:
+        return []
+
+    store = process_store()
+    if store is None:
+        return []
+    try:
+        scoped = store.for_repo(_repo_key_for(str(repo_root)))
+        rows = scoped.list_artifacts(LESSON_PHASE, name_glob=LESSON_NAME)
+    except Exception:
+        return []
+
+    chunks: list[MarkdownChunk] = []
+    for row in rows:
+        content, slug = row.get("content"), row.get("slug")
+        if not content or not slug:
+            continue
+        doc_path = lesson_doc_path(str(slug))
+        if doc_path in seen_paths:
+            continue
+        chunks.extend(chunk_markdown(doc_path, content))
     return chunks
 
 
@@ -725,6 +770,9 @@ async def _index_markdown(
     graph, vectors = handles.graph, handles.vectors
     chunks = await asyncio.to_thread(collect_markdown_chunks, repo_path)
     chunks += await asyncio.to_thread(_collect_store_design_chunks, repo_path)
+    # Lessons last: they dedupe against the disk paths already collected above.
+    seen_doc_paths = {c.file_path for c in chunks}
+    chunks += await asyncio.to_thread(_collect_store_lesson_chunks, repo_path, seen_doc_paths)
     texts = {c.qualified_name: finalize_embed_text(compose_markdown_embed_text(c)) for c in chunks}
     hashes = {qn: text_hash(t) for qn, t in texts.items()}
 

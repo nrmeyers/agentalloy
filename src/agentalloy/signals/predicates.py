@@ -16,6 +16,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from agentalloy.lessons_artifact import LESSON_NAME, LESSON_PHASE
+
 if TYPE_CHECKING:
     pass
 
@@ -152,7 +154,7 @@ def _query_store_contracts(
 
 
 def _list_store_artifacts(
-    ctx: PredicateContext, *, phase: str, name_glob: str | None = None
+    ctx: PredicateContext, *, phase: str, name_glob: str | None = None, slug: str | None = None
 ) -> list[dict[str, Any]] | None:
     """Query the store for artifacts. ``None`` means "can't tell" — no store
     bound, or the bound store errored — callers must fail closed (UNKNOWN),
@@ -160,11 +162,14 @@ def _list_store_artifacts(
     whose predicates own the fail-open rule, not the caller; see
     ``test_no_store_handle_fails_open``). Only a store that is present AND
     answers (even with an empty list) yields a real result.
+
+    ``slug`` narrows to a single work-item (the codify gate needs per-task
+    scoping); the phase-wide gates leave it None.
     """
     if ctx.store is None:
         return None
     try:
-        return ctx.store.list_artifacts(phase, name_glob=name_glob)
+        return ctx.store.list_artifacts(phase, slug=slug, name_glob=name_glob)
     except Exception:
         return None
 
@@ -524,12 +529,22 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     Slug-scoped on purpose. A bare ``artifact_exists: docs/solutions/*.md`` would
     be MET forever by the first lesson ever written (the stale-file no-op), so it
     could not force *this* task to codify. Tying the check to the active work-item
-    slug makes it order-independent and per-task. Deterministic and DB-free;
-    returns UNKNOWN (fail-open, never blocks) when no single work-item resolves.
-    The cursor is seeded to the phase's first work-item on entry and advanced by
-    ``task next``, so the gate normally resolves a concrete slug; only a genuinely
-    uncursored fan-out (≥2 contracts, no cursor — rare) fails open, by design, so
-    the gate never blocks against a *guessed* task.
+    slug makes it order-independent and per-task. Returns UNKNOWN (fail-open,
+    never blocks) when no single work-item resolves. The cursor is seeded to the
+    phase's first work-item on entry and advanced by ``task next``, so the gate
+    normally resolves a concrete slug; only a genuinely uncursored fan-out (≥2
+    contracts, no cursor — rare) fails open, by design, so the gate never blocks
+    against a *guessed* task.
+
+    Store-first, disk-fallback. The lesson is a store artifact
+    (``phase='qa', name='solution'``, written by ``agentalloy contract
+    artifact-set``); a repo predating the migration still satisfies the gate with
+    ``docs/solutions/<slug>.md`` on disk, so no repo is stranded and the gate is
+    never unsatisfiable just because no store is bound. The artifact is named
+    ``solution`` WITHOUT a ``.md`` suffix on purpose: the qa exit gate globs
+    ``name: "*.md"`` and ``artifact_contains`` requires EVERY matching row to
+    carry ``## Checks``/``## Review``, so a ``.md``-suffixed lesson would make
+    writing the lesson break the very gate it sits beside.
     """
     from agentalloy.contracts import (
         resolve_current_contract,  # lazy: keep signals free of import cost
@@ -542,6 +557,9 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     if contract_path is None:
         return PredicateResult.UNKNOWN
     slug = contract_path.stem
+    rows = _list_store_artifacts(ctx, phase=LESSON_PHASE, name_glob=LESSON_NAME, slug=slug)
+    if rows:
+        return PredicateResult.MET
     lesson = ctx.project_root / "docs" / "solutions" / f"{slug}.md"
     return PredicateResult.MET if lesson.is_file() else PredicateResult.NOT_MET
 
