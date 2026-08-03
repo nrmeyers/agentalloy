@@ -83,18 +83,27 @@ for h in $harnesses; do
   hrepo="$WORK/wire-$h"
   mkdir -p "$hrepo"
   git -C "$hrepo" init -q
-  out="$(cd "$hrepo" && agentalloy wire --harness "$h" 2>/dev/null)"
+  # stderr goes to a file rather than /dev/null: it is the ONLY diagnostic this
+  # loop produces, and discarding it makes an intermittent failure here
+  # undebuggable from the CI log alone (aider flaked once on main at 0120870
+  # and passed on a bare re-run, with no evidence left behind). stdout is still
+  # captured separately — the raw-JSON assertion below applies to stdout only.
+  werr="$WORK/wire-$h.err"
+  out="$(cd "$hrepo" && agentalloy wire --harness "$h" 2>"$werr")"
   wrc=$?
+  uerr="$WORK/unwire-$h.err"
   urc=0
-  (cd "$hrepo" && agentalloy unwire >/dev/null 2>&1) || urc=$?
+  (cd "$hrepo" && agentalloy unwire >/dev/null 2>"$uerr") || urc=$?
   if [ "$wrc" -ne 0 ]; then
     echo "FAIL [$h]: wire exit $wrc"
+    sed 's/^/       wire stderr| /' "$werr"
     fail=1
   elif printf '%s' "$out" | _is_json; then
     echo "FAIL [$h]: wire dumped raw JSON"
     fail=1
   elif [ "$urc" -ne 0 ]; then
     echo "FAIL [$h]: unwire exit $urc"
+    sed 's/^/       unwire stderr| /' "$uerr"
     fail=1
   else
     echo "ok   [$h]: wire + unwire"
