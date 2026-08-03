@@ -87,10 +87,23 @@ _REAL_HOME_SENTINELS = (
     Path.home() / ".local" / "share" / "agentalloy" / "code_index" / "repos",
 )
 
+# Fifth incident class, and the first NOT under $HOME: a test that runs a real
+# cwd-derived code path from the repo checkout itself. `uninstall()` resolves
+# the repo to unwire via `Path.cwd()` and unlinks
+# `.agentalloy/{phase,upstream,README.md}` (uninstall.py:904) plus the repo's
+# store rows. test_port_guard patched only the process-killing seam, so the
+# filesystem side ran for real against this dogfooded checkout and silently
+# deleted the developer's own `upstream`. Tests that exercise cwd-derived
+# install/uninstall paths must `monkeypatch.chdir(tmp_path)` first.
+_REPO_STATE_SENTINELS = tuple(
+    Path(__file__).resolve().parent.parent / ".agentalloy" / name
+    for name in ("upstream", "config", "phase", "claude-code-env.sh")
+)
+
 
 def _home_fingerprint() -> tuple[tuple[str, float, int], ...]:
     out: list[tuple[str, float, int]] = []
-    for path in _REAL_HOME_SENTINELS:
+    for path in (*_REAL_HOME_SENTINELS, *_REPO_STATE_SENTINELS):
         try:
             st = path.stat()
             out.append((str(path), st.st_mtime, st.st_size))
@@ -106,9 +119,12 @@ def _guard_real_home_wiring() -> Iterator[None]:
     yield
     after = _home_fingerprint()
     assert after == before, (
-        "Test modified REAL home wiring state (~/.claude/settings.json or "
-        f"~/.agentalloy): {before} -> {after}. Patch Path.home() (see "
-        "tests/install/test_claude_code_hook_wiring.py fake_home fixture)."
+        "Test modified REAL wiring state — either home (~/.claude/settings.json, "
+        "~/.agentalloy) or this checkout's own .agentalloy/ state: "
+        f"{before} -> {after}. For home, patch Path.home() (see "
+        "tests/install/test_claude_code_hook_wiring.py fake_home fixture). For "
+        "the checkout, the test is running a cwd-derived install/uninstall path "
+        "for real — monkeypatch.chdir(tmp_path) first."
     )
 
 

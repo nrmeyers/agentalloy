@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -105,13 +106,26 @@ def test_guarded_stop_kills_session_leaked_process() -> None:
     assert _run_guarded_stop_with(root_conftest._SESSION_START_EPOCH + 60) == [4242]
 
 
-def test_uninstall_does_not_kill_preexisting_server() -> None:
+def test_uninstall_does_not_kill_preexisting_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """End-to-end: uninstall(stop_services=True) must not SIGTERM a server
     that predates the session — the exact path test_adversarial.py reached
     unmocked, which motivated the guard.
+
+    ``uninstall`` derives the repo to unwire from ``Path.cwd()``, and only the
+    process-killing seam is patched below — the filesystem and store side runs
+    for real. Run from a tmp cwd: without this, on a dogfooded checkout the real
+    ``.agentalloy/{phase,upstream,README.md}`` are unlinked
+    (``uninstall.py:904``) and the repo's store rows dropped, silently
+    disconnecting the developer's own wiring. Same incident class the
+    ``_REAL_HOME_SENTINELS`` tripwire covers for ``$HOME``; the repo checkout
+    was the gap.
     """
     from agentalloy.install import server_proc
     from agentalloy.install.subcommands import uninstall as uninstall_mod
+
+    monkeypatch.chdir(tmp_path)
 
     killed: list[int] = []
     with (
