@@ -10,6 +10,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from pathlib import Path
 
+from agentalloy.api.state_router import _repo_key_for
 from agentalloy.install.subcommands.phase import _forward_gate_blocks
 from agentalloy.lessons_artifact import LESSON_NAME, LESSON_PHASE
 from agentalloy.signals.invariants import check_prose, derive_invariants, load_shipped_skill
@@ -18,17 +19,23 @@ from agentalloy.signals.predicates import (
     PredicateResult,
     eval_lessons_recorded,
 )
+from agentalloy.storage.state_store import process_store
 
 SLUG = "feat-x"
+
+
+def _qa_contract(root: Path) -> None:
+    """Just the work-item the codify gate resolves its slug from."""
+    (root / ".agentalloy" / "contracts" / "active" / "qa").mkdir(parents=True, exist_ok=True)
+    (root / ".agentalloy" / "contracts" / "active" / "qa" / f"{SLUG}.md").write_text(
+        "---\nphase: qa\n---\n", encoding="utf-8"
+    )
 
 
 def _qa_ready(root: Path) -> None:
     """A repo whose qa exit artifact + work-item are in place — everything the
     qa->ship gate needs EXCEPT the codify lesson."""
-    (root / ".agentalloy" / "contracts" / "active" / "qa").mkdir(parents=True, exist_ok=True)
-    (root / ".agentalloy" / "contracts" / "active" / "qa" / f"{SLUG}.md").write_text(
-        "---\nphase: qa\n---\n", encoding="utf-8"
-    )
+    _qa_contract(root)
     (root / "docs" / "qa").mkdir(parents=True, exist_ok=True)
     (root / "docs" / "qa" / f"{SLUG}.md").write_text(
         "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n", encoding="utf-8"
@@ -151,3 +158,64 @@ def test_lesson_name_is_not_swept_up_by_the_qa_md_glob(tmp_path: Path):
     named solution.md, writing it would break the gate beside it — so the name
     carries no .md suffix and the glob must miss it."""
     assert not fnmatch(LESSON_NAME, "*.md")
+
+
+def _store_for(root: Path):
+    store = process_store()
+    assert store is not None
+    return store.for_repo(_repo_key_for(str(root)))
+
+
+def test_store_lesson_coexists_with_the_qa_report_artifact(tmp_path: Path):
+    """End-to-end, through the real forward gate and a real store — the claim
+    the whole migration rests on.
+
+    The qa exit gate globs `name: "*.md"` and ``artifact_contains`` demands
+    ## Checks/## Review of EVERY row that glob matches. Writing the lesson
+    alongside the qa report must therefore clear the gate, not break it. A
+    lesson named ``solution.md`` would fail here; ``solution`` does not.
+    """
+    _qa_contract(tmp_path)
+    scoped = _store_for(tmp_path)
+    scoped.set_artifact(
+        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+    )
+    scoped.set_artifact(LESSON_PHASE, SLUG, LESSON_NAME, "# lesson\n\nwhat worked\n")
+
+    blocked, advisories = _forward_gate_blocks("qa", "ship", tmp_path, scoped)
+
+    assert blocked is False, f"store-backed qa+lesson should clear the gate; got {advisories}"
+
+
+def test_md_suffixed_lesson_would_break_the_qa_gate(tmp_path: Path):
+    """Proves the name choice is load-bearing rather than cosmetic.
+
+    Identical to the test above except the lesson is stored as ``solution.md``.
+    The qa gate's ``*.md`` glob then sweeps it up and ``artifact_contains``
+    demands ## Checks/## Review of it, so the gate blocks — recording the lesson
+    would have broken the edge it is supposed to open. This test failing means
+    someone gave LESSON_NAME an .md suffix.
+    """
+    _qa_contract(tmp_path)
+    scoped = _store_for(tmp_path)
+    scoped.set_artifact(
+        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+    )
+    scoped.set_artifact("qa", SLUG, "solution.md", "# lesson\n\nwhat worked\n")
+
+    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, scoped)
+
+    assert blocked is True
+
+
+def test_store_qa_report_without_lesson_still_blocks(tmp_path: Path):
+    """The companion: the codify gate is what's holding the edge, not the report."""
+    _qa_contract(tmp_path)
+    scoped = _store_for(tmp_path)
+    scoped.set_artifact(
+        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+    )
+
+    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, scoped)
+
+    assert blocked is True
