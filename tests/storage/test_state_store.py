@@ -352,6 +352,141 @@ class TestStoreSchema:
 
 
 # ---------------------------------------------------------------------------
+# Artifact methods with status filtering
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactStatus:
+    """Tests for TC3–TC6: artifact methods filter by status."""
+
+    def _make_store_with_artifacts(self, tmp_path: Path) -> DuckDBStateStore:
+        """Helper that creates a store with two active and one archived artifact."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.set_artifact("design", "my-feature", "approach.md", "draft spec")
+            store.set_artifact("design", "my-feature", "tasks.md", "spec body")
+            # Archive the first artifact directly via SQL
+            store.conn.execute("UPDATE sdd_artifact SET status='archived' WHERE name='approach.md'")
+        return DuckDBStateStore(db)
+
+    def test_list_artifacts_returns_only_active_by_default(self, tmp_path: Path) -> None:
+        """TC3 — list_artifacts returns only active by default."""
+        store = self._make_store_with_artifacts(tmp_path)
+        with store:
+            rows = store.list_artifacts("design", slug="my-feature")
+            assert len(rows) == 1
+            assert rows[0]["name"] == "tasks.md"
+            assert rows[0]["status"] == "active"
+
+    def test_list_artifacts_returns_all_with_status_all(self, tmp_path: Path) -> None:
+        """TC4 — list_artifacts returns all with status='all'."""
+        store = self._make_store_with_artifacts(tmp_path)
+        with store:
+            rows = store.list_artifacts("design", slug="my-feature", status="all")
+            assert len(rows) == 2
+            names = {r["name"] for r in rows}
+            assert names == {"approach.md", "tasks.md"}
+            statuses = {r["status"] for r in rows}
+            assert statuses == {"active", "archived"}
+
+    def test_get_artifact_returns_only_active_by_default(self, tmp_path: Path) -> None:
+        """TC5 — get_artifact returns only active by default."""
+        store = self._make_store_with_artifacts(tmp_path)
+        with store:
+            active = store.get_artifact("design", "my-feature", "tasks.md")
+            assert active is not None
+            assert active["status"] == "active"
+            archived = store.get_artifact("design", "my-feature", "approach.md")
+            assert archived is None  # archived → hidden by default
+
+    def test_get_artifact_returns_archived_with_status_all(self, tmp_path: Path) -> None:
+        """TC5b — get_artifact returns archived row with status='all'."""
+        store = self._make_store_with_artifacts(tmp_path)
+        with store:
+            archived = store.get_artifact("design", "my-feature", "approach.md", status="all")
+            assert archived is not None
+            assert archived["status"] == "archived"
+
+    def test_set_artifact_sets_status_active_on_insert(self, tmp_path: Path) -> None:
+        """TC6a — set_artifact sets status='active' on INSERT."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            result = store.set_artifact("design", "my-feature", "test-plan.md", "new")
+            assert result["status"] == "active"
+            row = store.get_artifact("design", "my-feature", "test-plan.md")
+            assert row is not None
+            assert row["status"] == "active"
+
+    def test_set_artifact_preserves_status_on_update(self, tmp_path: Path) -> None:
+        """TC6b — set_artifact preserves status on UPDATE."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # Insert and then archive
+            store.set_artifact("design", "my-feature", "test-plan.md", "v1")
+            store.conn.execute(
+                "UPDATE sdd_artifact SET status='archived' WHERE name='test-plan.md'"
+            )
+            # Update content — should keep archived
+            result = store.set_artifact("design", "my-feature", "test-plan.md", "v2")
+            assert result["status"] == "archived"
+            # Should not be visible without status='all'
+            visible = store.get_artifact("design", "my-feature", "test-plan.md")
+            assert visible is None
+
+    def test_archive_artifact_flips_status(self, tmp_path: Path) -> None:
+        """TC7 — archive_artifact flips status from active to archived."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.set_artifact("design", "my-feature", "approach.md", "draft")
+            # Should be visible
+            assert store.get_artifact("design", "my-feature", "approach.md") is not None
+            # Archive it
+            result = store.archive_artifact("design", "my-feature", "approach.md")
+            assert result is True
+            # Should no longer be visible
+            assert store.get_artifact("design", "my-feature", "approach.md") is None
+
+    def test_archive_artifact_is_idempotent(self, tmp_path: Path) -> None:
+        """TC8 — archive_artifact is idempotent (returns False on second call)."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.set_artifact("design", "my-feature", "approach.md", "draft")
+            # First archive succeeds
+            assert store.archive_artifact("design", "my-feature", "approach.md") is True
+            # Second archive returns False
+            assert store.archive_artifact("design", "my-feature", "approach.md") is False
+
+    def test_archive_all_archives_everything(self, tmp_path: Path) -> None:
+        """TC9 — archive_all archives all contracts and artifacts in one transaction."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # Create 3 contracts
+            store.put_contract("c1", phase="design", slug="feat-a")
+            store.put_contract("c2", phase="build", slug="feat-b")
+            store.put_contract("c3", phase="design", slug="feat-a")
+            # Create 5 artifacts
+            store.set_artifact("design", "feat-a", "approach.md", "a1")
+            store.set_artifact("design", "feat-a", "tasks.md", "a2")
+            store.set_artifact("build", "feat-b", "test-plan.md", "a3")
+            store.set_artifact("design", "feat-a", "spec.md", "a4")
+            store.set_artifact("build", "feat-b", "approach.md", "a5")
+            # Archive everything
+            result = store.archive_all()
+            assert result["contracts_archived"] == 3
+            assert result["artifacts_archived"] == 5
+            # Nothing active anymore
+            assert store.list_contracts(status="active") == []
+            assert store.list_artifacts("design") == []
+            assert store.list_artifacts("build") == []
+
+
+# ---------------------------------------------------------------------------
 # Read / Write
 # ---------------------------------------------------------------------------
 

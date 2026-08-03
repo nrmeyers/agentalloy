@@ -1211,14 +1211,26 @@ class DuckDBStateStore:
     # has one — a single `body` column (as sdd_contract has, for the contract
     # itself) can't hold that shape.
 
-    def set_artifact(self, phase: str, slug: str, name: str, content: str) -> dict[str, Any]:
-        """Upsert an artifact body. Returns the stored row as a dict."""
+    def set_artifact(
+        self,
+        phase: str,
+        slug: str,
+        name: str,
+        content: str,
+        *,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        """Upsert an artifact body. Returns the stored row as a dict.
+
+        New inserts default to ``status='active'``; updates preserve the
+        existing status so an archived artifact stays archived when rewritten.
+        """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
         repo = self._repo()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         existing = self.conn.execute(
-            "SELECT 1 FROM sdd_artifact WHERE repo=? AND phase=? AND slug=? AND name=?",
+            "SELECT status FROM sdd_artifact WHERE repo=? AND phase=? AND slug=? AND name=?",
             (repo, phase, slug, name),
         ).fetchone()
         if existing:
@@ -1227,25 +1239,46 @@ class DuckDBStateStore:
                 "WHERE repo=? AND phase=? AND slug=? AND name=?",
                 (content, ts, repo, phase, slug, name),
             )
+            existing_status = existing[0]
         else:
             self.conn.execute(
-                "INSERT INTO sdd_artifact (repo, phase, slug, name, content, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (repo, phase, slug, name, content, ts),
+                "INSERT INTO sdd_artifact "
+                "(repo, phase, slug, name, content, updated_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (repo, phase, slug, name, content, ts, status),
             )
+            existing_status = status
         return {
             "phase": phase,
             "slug": slug,
             "name": name,
             "content": content,
             "updated_at": ts,
+            "status": existing_status,
         }
 
-    def get_artifact(self, phase: str, slug: str, name: str) -> dict[str, Any] | None:
+    def get_artifact(
+        self,
+        phase: str,
+        slug: str,
+        name: str,
+        *,
+        status: str = "active",
+    ) -> dict[str, Any] | None:
+        conditions = [
+            "repo=?",
+            "phase=?",
+            "slug=?",
+            "name=?",
+        ]
+        params: list[Any] = [self._repo(), phase, slug, name]
+        if status != "all":
+            conditions.append("status=?")
+            params.append(status)
         row = self.conn.execute(
-            "SELECT phase, slug, name, content, updated_at FROM sdd_artifact "
-            "WHERE repo=? AND phase=? AND slug=? AND name=?",
-            (self._repo(), phase, slug, name),
+            "SELECT phase, slug, name, content, updated_at, status FROM sdd_artifact "
+            "WHERE " + " AND ".join(conditions),
+            params,
         ).fetchone()
         if row is None:
             return None
@@ -1255,6 +1288,7 @@ class DuckDBStateStore:
             "name": row[2],
             "content": row[3],
             "updated_at": row[4],
+            "status": row[5],
         }
 
     def list_artifacts(
@@ -1263,29 +1297,96 @@ class DuckDBStateStore:
         *,
         slug: str | None = None,
         name_glob: str | None = None,
+        status: str = "active",
     ) -> list[dict[str, Any]]:
         """List artifacts for a phase, optionally filtered by slug and a
         ``fnmatch``-style ``name_glob`` (the store-side equivalent of globbing
         ``docs/<phase>/**/<name_glob>`` on disk).
+
+        By default returns only active artifacts; pass ``status='all'`` to
+        include archived rows.
         """
         conditions = ["repo=?", "phase=?"]
         params: list[Any] = [self._repo(), phase]
         if slug is not None:
             conditions.append("slug=?")
             params.append(slug)
+        if status != "all":
+            conditions.append("status=?")
+            params.append(status)
         where = " AND ".join(conditions)
         rows = self.conn.execute(
-            "SELECT phase, slug, name, content, updated_at FROM sdd_artifact "
+            "SELECT phase, slug, name, content, updated_at, status FROM sdd_artifact "
             f"WHERE {where} ORDER BY updated_at DESC",
             params,
         ).fetchall()
         results = [
-            {"phase": r[0], "slug": r[1], "name": r[2], "content": r[3], "updated_at": r[4]}
+            {
+                "phase": r[0],
+                "slug": r[1],
+                "name": r[2],
+                "content": r[3],
+                "updated_at": r[4],
+                "status": r[5],
+            }
             for r in rows
         ]
         if name_glob is not None:
             results = [r for r in results if fnmatch.fnmatch(r["name"], name_glob)]
         return results
+
+    def archive_artifact(self, phase: str, slug: str, name: str) -> bool:
+        """Archive a single artifact by flipping status to 'archived'.
+
+        Returns True if a row was updated, False if not found or already archived.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        result = self.conn.execute(
+            "UPDATE sdd_artifact SET status='archived', updated_at=? "
+            "WHERE repo=? AND phase=? AND slug=? AND name=? AND status != 'archived'",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), repo, phase, slug, name),
+        )
+        count = result.fetchall()
+        return count and count[0][0] > 0
+
+    def archive_all(self) -> dict[str, int]:
+        """Archive all active contracts and artifacts in one transaction.
+
+        Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.conn
+
+        conn.execute("BEGIN")
+        try:
+            contracts_result = conn.execute(
+                "UPDATE sdd_contract SET status='archived', updated_at=? "
+                "WHERE status != 'archived'",
+                (ts,),
+            )
+            contracts_count = contracts_result.fetchall()
+            contracts_count = contracts_count[0][0] if contracts_count else 0
+
+            artifacts_result = conn.execute(
+                "UPDATE sdd_artifact SET status='archived', updated_at=? "
+                "WHERE status != 'archived'",
+                (ts,),
+            )
+            artifacts_count = artifacts_result.fetchall()
+            artifacts_count = artifacts_count[0][0] if artifacts_count else 0
+
+            conn.execute("COMMIT")
+            return {
+                "contracts_archived": contracts_count,
+                "artifacts_archived": artifacts_count,
+            }
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     # -- approval marker -------------------------------------------------------
     # Thin wrappers over the generic sdd_state read/write, using the already
