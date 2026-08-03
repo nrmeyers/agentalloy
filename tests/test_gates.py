@@ -372,6 +372,34 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
     store.close()
 
 
+def _seed_plan_artifacts(tmp_path: Path) -> None:
+    """plan's work-item + deliverables + approval.
+
+    The design/plan split moved the density and tag-focus gates onto plan→build,
+    so the gates that used to be asserted against design are now asserted here.
+    Call after :func:`_seed_design_artifacts` (it creates the store).
+    """
+    pc = tmp_path / ".agentalloy" / "contracts" / "active" / "plan"
+    pc.mkdir(parents=True, exist_ok=True)
+    (pc / "01-task.md").write_text("---\nphase: plan\ntask_slug: 01-task\n---\n\n# 01-task\n")
+
+    from agentalloy.signals.predicates import (
+        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'plan-01-task', '01-task', '[]', NULL, 'plan', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.set_artifact("plan", "01-task", "tasks.md", "# x\n\n## Tasks\n\n- t1\n")
+    store.set_artifact("plan", "01-task", "test-plan.md", "# x\n\n## Test Cases\n\n- AC-1\n")
+    store.set_approval("plan", _artifact_digest(store.list_artifacts("plan", name_glob="*.md")))
+    store.close()
+
+
 def _write_build_contract_to_store(
     tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "01-task"
 ) -> None:
@@ -467,18 +495,22 @@ def test_design_gate_blocks_without_approval(tmp_path: Path):
     assert result == NOT_MET
 
 
-def test_design_gate_blocks_on_over_tagged_contract(tmp_path: Path):
-    """A 3-tag build contract trips the tag-focus gate even with approval recorded."""
+def test_plan_gate_blocks_on_over_tagged_contract(tmp_path: Path):
+    """A 3-tag build contract trips the tag-focus gate even with approval recorded.
+
+    Asserted on plan→build: the design/plan split moved `build_contract_tag_focus`
+    off design, which now gates only approach.md + its approval.
+    """
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)
+    _seed_plan_artifacts(tmp_path)
     _write_build_contract_to_store(
         tmp_path, name="01-task.md", tags=["react", "typescript", "vite"]
     )
-    _approve_design(tmp_path)
-    gate = exit_gates_for_phase("design")
+    gate = exit_gates_for_phase("plan")
     assert gate is not None
-    ctx = _ctx(tmp_path, phase="design", store=_get_store(tmp_path))
+    ctx = _ctx(tmp_path, phase="plan", store=_get_store(tmp_path))
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == NOT_MET
 

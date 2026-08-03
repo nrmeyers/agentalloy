@@ -64,7 +64,11 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
 
     rows = [
         f"('{repo}', 'design/{SLUG}', '{SLUG}', '[\"state\"]', NULL, "
-        f"'design', 'active', CURRENT_TIMESTAMP)"
+        f"'design', 'active', CURRENT_TIMESTAMP)",
+        # The contract-coverage gates moved to plan→build with the design/plan
+        # split, so the work-item they resolve `{slug}` from must live in plan.
+        f"('{repo}', 'plan/{SLUG}', '{SLUG}', '[\"state\"]', NULL, "
+        f"'plan', 'active', CURRENT_TIMESTAMP)",
     ]
     for i in range(n_build):
         rows.append(
@@ -87,6 +91,13 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
     # — and this class exists to test coverage, not to be masked by approval.
     artifact_rows = store.list_artifacts("design", name_glob="approach.md")
     store.set_approval("design", _artifact_digest(artifact_rows))
+
+    # plan's own deliverables + approval — the plan→build gate reads these.
+    store.set_artifact(
+        "plan", SLUG, "tasks.md", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
+    )
+    store.set_artifact("plan", SLUG, "test-plan.md", "# x\n\n## Test Cases\n\n- a test\n")
+    store.set_approval("plan", _artifact_digest(store.list_artifacts("plan", name_glob="*.md")))
     return store
 
 
@@ -130,12 +141,17 @@ class TestQueryStoreContractsErrorPosture:
 
 
 class TestForwardGateSeesContracts:
-    """The load-bearing pair: coverage must actually decide the design→build gate."""
+    """The load-bearing pair: coverage must actually decide the plan→build gate.
+
+    The design/plan split moved `build_contracts_cover_tasks` /
+    `build_contract_tag_focus` onto plan→build, so that is the edge asserted
+    here. Design→plan no longer carries contract coverage at all.
+    """
 
     def test_full_coverage_passes(self, design_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         store = _store_with(design_repo, n_build=3)
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo, store
+            "plan", "build", design_repo, store
         )
         assert blocked is False
 
@@ -149,7 +165,7 @@ class TestForwardGateSeesContracts:
         """
         store = _store_with(design_repo, n_build=2)
         blocked, advisories = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo, store
+            "plan", "build", design_repo, store
         )
         assert blocked is True
         assert advisories
@@ -165,13 +181,13 @@ class TestForwardGateSeesContracts:
         store = _store_with(design_repo, n_build=3, build_tags='["state","api","signals"]')
         # Direct predicate assertion: the gate-level block alone can't distinguish
         # NOT_MET-from-tag-focus from NOT_MET-for-any-other-reason.
-        ctx = PredicateContext(project_root=design_repo, current_phase="design", store=store)
+        ctx = PredicateContext(project_root=design_repo, current_phase="plan", store=store)
         assert (
-            eval_build_contract_tag_focus({"phase": "design", "slug": SLUG}, ctx)
+            eval_build_contract_tag_focus({"phase": "plan", "slug": SLUG}, ctx)
             == PredicateResult.NOT_MET
         )
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo, store
+            "plan", "build", design_repo, store
         )
         assert blocked is True
 
@@ -185,6 +201,6 @@ class TestForwardGateSeesContracts:
         future caller that legitimately has no handle must not start blocking.
         """
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo, None
+            "plan", "build", design_repo, None
         )
         assert blocked is False

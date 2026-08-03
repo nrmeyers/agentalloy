@@ -22,8 +22,8 @@ from typing import Any
 
 from agentalloy.api.state_client import StateClientError
 
-_APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
-_STORE_BACKED_PHASES = frozenset({"spec", "design"})
+_APPROVABLE = ("spec", "design", "plan", "sdd-fast", "add-skill")
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan"})
 # sdd-fast (docs/fast/*.md) and add-skill (a custom-skill YAML, not a phase
 # deliverable body at all) keep their packs' disk-glob exit gates for now —
 # only spec/design packs were moved to the artifact store by this migration

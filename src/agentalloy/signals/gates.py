@@ -30,7 +30,10 @@ _PHASE_GRAPH: dict[str, str] = {
     "intake": "spec",  # entry phase: default (full) route. The fast route
     #                    overrides this with a next_phase_hint of "sdd-fast".
     "spec": "design",
-    "design": "build",
+    "design": "plan",  # design settles approach/decisions/rationale only; plan
+    #                    decomposes it into tasks, test cases, and one build
+    #                    contract per task (the density floor lives on plan→build)
+    "plan": "build",
     "build": "qa",
     "qa": "ship",
     "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
@@ -466,6 +469,10 @@ _APPROVAL_SINCE: dict[str, str] = {
 _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
     "spec": "*.md",
     "design": "*.md",
+    # plan produces tasks.md + test-plan.md, so "*.md" covers both — editing
+    # either after approval invalidates the marker, which matches the plan pack's
+    # `approval_recorded: since_name_glob: "*.md"`.
+    "plan": "*.md",
 }
 
 

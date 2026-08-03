@@ -254,6 +254,7 @@ _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
     "intake": "phase instructions: system prompt",
     "spec": "phase instructions: system prompt",
     "design": "phase instructions: system prompt",
+    "plan": "phase instructions: system prompt",
     "build": "phase instructions: system prompt",
     "qa": "phase instructions: system prompt",
     "ship": "phase instructions: system prompt",

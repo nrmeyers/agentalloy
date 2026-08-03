@@ -29,7 +29,17 @@ logger = logging.getLogger(__name__)
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
-VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
+VALID_PHASES = (
+    "intake",
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+)
 
 SCHEMA_VERSION = 1
 
@@ -48,6 +58,7 @@ _APPROVAL_SINCE = {
 _APPROVAL_STORE_NAME_GLOB = {
     "spec": "*.md",
     "design": "*.md",
+    "plan": "*.md",  # tasks.md + test-plan.md
 }
 
 

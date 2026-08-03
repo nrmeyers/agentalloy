@@ -419,7 +419,7 @@ def eval_artifact_newer_than(args: dict[str, Any], ctx: PredicateContext) -> Pre
 # Forward routes that always require a recorded human approval marker.
 # add-skill is unconditional by design: installing a skill into the corpus
 # changes what gets injected into every future session — never auto-approved.
-_ALWAYS_APPROVAL_PHASES = ("spec", "design", "add-skill")
+_ALWAYS_APPROVAL_PHASES = ("spec", "design", "plan", "add-skill")
 
 
 def approval_required(phase: str | None) -> bool:
