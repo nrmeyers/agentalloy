@@ -215,8 +215,9 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
         # cycle, so sweep the just-completed cycle's live contracts into
         # archive/<phase>/ before the next cycle starts writing into active/.
         # Mirrors the CLI path in install/subcommands/phase.py (same guards,
-        # same try/except for graceful degradation). Uses the store directly
-        # (in-process path — uses store directly).
+        # same try/except for graceful degradation). This is an in-process path,
+        # so it goes through the store handle rather than the HTTP client —
+        # `test_signals_module_no_state_client_import` enforces that.
         if phase == "intake" and prev is not None and prev != "intake":
             from agentalloy.contracts import apply_contracts_migration, plan_archive
 
