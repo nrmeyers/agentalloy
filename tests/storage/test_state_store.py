@@ -485,6 +485,38 @@ class TestArtifactStatus:
             assert store.list_artifacts("design") == []
             assert store.list_artifacts("build") == []
 
+    def test_archive_all_is_repo_scoped(self, tmp_path: Path) -> None:
+        """TC10 — archive_all on repo A does not archive repo B's active contracts (GH#541)."""
+        db = tmp_path / "test.duck"
+        # Single shared DB, two repo-scoped stores
+        store_a = DuckDBStateStore(db, repo="repo-a").open()
+        store_b = DuckDBStateStore(db, repo="repo-b").open()
+        store_a.migrate()
+
+        # Put contracts + artifacts in both repos
+        store_a.put_contract("ca1", phase="design", slug="feat-a")
+        store_a.set_artifact("design", "feat-a", "approach.md", "a1")
+
+        store_b.put_contract("cb1", phase="spec", slug="feat-b")
+        store_b.put_contract("cb2", phase="design", slug="feat-c")
+        store_b.set_artifact("spec", "feat-b", "tasks.md", "b1")
+
+        # Archive repo-a's active items
+        result = store_a.archive_all()
+        assert result["contracts_archived"] == 1
+        assert result["artifacts_archived"] == 1
+
+        # Repo-a is now empty of active items
+        assert store_a.list_contracts(status="active") == []
+        assert store_a.list_artifacts("design") == []
+
+        # Repo-b must still have its items alive
+        assert len(store_b.list_contracts(status="active")) == 2
+        assert store_b.get_artifact("spec", "feat-b", "tasks.md") is not None
+
+        store_a.close()
+        store_b.close()
+
 
 # ---------------------------------------------------------------------------
 # Read / Write

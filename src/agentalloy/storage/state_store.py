@@ -1359,22 +1359,23 @@ class DuckDBStateStore:
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        repo = self._repo_key
         conn = self.conn
 
         conn.execute("BEGIN")
         try:
             contracts_result = conn.execute(
                 "UPDATE sdd_contract SET status='archived', updated_at=? "
-                "WHERE status != 'archived'",
-                (ts,),
+                "WHERE repo=? AND status != 'archived'",
+                (ts, repo),
             )
             contracts_count = contracts_result.fetchall()
             contracts_count = contracts_count[0][0] if contracts_count else 0
 
             artifacts_result = conn.execute(
                 "UPDATE sdd_artifact SET status='archived', updated_at=? "
-                "WHERE status != 'archived'",
-                (ts,),
+                "WHERE repo=? AND status != 'archived'",
+                (ts, repo),
             )
             artifacts_count = artifacts_result.fetchall()
             artifacts_count = artifacts_count[0][0] if artifacts_count else 0
