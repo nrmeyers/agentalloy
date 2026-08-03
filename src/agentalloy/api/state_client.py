@@ -360,9 +360,11 @@ class StateClient:
     def get_artifact(self, phase: str, slug: str, name: str) -> dict[str, Any] | None:
         """Fetch a single artifact by (phase, slug, name), or None if absent."""
         path = f"/state/artifact/{urllib.parse.quote(phase, safe='')}/{urllib.parse.quote(slug, safe='')}/{urllib.parse.quote(name, safe='')}"
-        req = urllib.request.Request(f"{self.base}{path}", headers={"Accept": "application/json"})
+        req = urllib.request.Request(
+            f"{self.base_url}{path}", headers={"Accept": "application/json"}
+        )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
