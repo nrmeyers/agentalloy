@@ -500,6 +500,35 @@ async def list_artifacts(
     return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in cleaned])
 
 
+@router.get(
+    "/artifact/{phase}/{slug}/{name}",
+    response_model=ArtifactResponse,
+    responses={404: {"description": "Artifact not found"}},
+    summary="Get a single artifact by (phase, slug, name)",
+)
+async def get_artifact(
+    phase: str,
+    slug: str,
+    name: str,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> ArtifactResponse:
+    """Fetch a single artifact by (phase, slug, name).
+
+    Returns 404 when the artifact does not exist.  Filters to
+    ``status='active'`` by default so the route is lifecycle-ready
+    from issue #520 without a follow-up change.
+    """
+    row = await asyncio.to_thread(store.get_artifact, phase, slug, name, status="active")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    # Convert datetime.updated_at to ISO string for pydantic validation
+    if hasattr(row.get("updated_at"), "isoformat"):
+        row = {**row, "updated_at": row["updated_at"].isoformat()}
+    # Strip 'status' — it's returned by the store but not in ArtifactResponse
+    cleaned = {k: v for k, v in row.items() if k in ArtifactResponse.model_fields}
+    return ArtifactResponse(**cleaned)
+
+
 @router.post(
     "/archive-all",
     summary="Archive all active contracts and artifacts",

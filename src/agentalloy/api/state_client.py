@@ -359,11 +359,17 @@ class StateClient:
 
     def get_artifact(self, phase: str, slug: str, name: str) -> dict[str, Any] | None:
         """Fetch a single artifact by (phase, slug, name), or None if absent."""
-        rows = self.list_artifacts(phase, slug=slug, name_glob=name)
-        for row in rows:
-            if row.get("name") == name:
-                return row
-        return None
+        path = f"/state/artifact/{urllib.parse.quote(phase, safe='')}/{urllib.parse.quote(slug, safe='')}/{urllib.parse.quote(name, safe='')}"
+        req = urllib.request.Request(f"{self.base}{path}", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise StateClientError(exc.read().decode()) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
     def set_approval(
         self, phase: str, artifact_digest: str, *, approver: str | None = None

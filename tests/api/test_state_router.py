@@ -1103,3 +1103,55 @@ class TestArchiveAll:
         # Second call returns 409
         resp2 = state_client.post("/state/archive-all")
         assert resp2.status_code == 409
+
+    # ------------------------------------------------------------------
+    # GET /state/artifact/{phase}/{slug}/{name} — single artifact route
+    # ------------------------------------------------------------------
+
+    def test_get_artifact_success(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC1 — GET /state/artifact/{phase}/{slug}/{name} returns content."""
+        state_store.set_artifact("spec", "my-task", "spec.md", "# The spec")
+
+        resp = state_client.get("/state/artifact/spec/my-task/spec.md")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["phase"] == "spec"
+        assert body["slug"] == "my-task"
+        assert body["name"] == "spec.md"
+        assert body["content"] == "# The spec"
+
+    def test_get_artifact_not_found(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC2 — GET /state/artifact/{phase}/{slug}/{name} returns 404."""
+        resp = state_client.get("/state/artifact/spec/missing/art.md")
+        assert resp.status_code == 404
+
+    def test_get_artifact_uses_active_filter(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC3 — get_artifact filters to status='active' by default."""
+        # Store an active artifact
+        state_store.set_artifact("design", "feat", "plan.md", "active content")
+        # Mark it archived (status='archived')
+        state_store.conn.execute(
+            "UPDATE sdd_artifact SET status='archived' WHERE slug='feat' AND name='plan.md'"
+        )
+
+        resp = state_client.get("/state/artifact/design/feat/plan.md")
+        assert resp.status_code == 404  # active filter excludes archived
+
+    def test_get_artifact_route_before_catchall(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC4 — the specific /artifact/… route takes priority over /{kind}."""
+        state_store.set_artifact("build", "c", "x.md", "x")
+        # If the catch-all /{kind} matched first, this would return 200
+        # with kind='artifact' — but the specific route should handle it.
+        resp = state_client.get("/state/artifact/build/c/x.md")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["phase"] == "build"
+        assert body["content"] == "x"

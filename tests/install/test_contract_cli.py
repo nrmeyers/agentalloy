@@ -21,6 +21,7 @@ import pytest
 
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.install.subcommands.contract import (
+    _artifact_show,
     _edit,
     _init,
     _show,
@@ -50,6 +51,10 @@ def _make_args(**kwargs) -> argparse.Namespace:
         "route": "full",
         "new_id": None,
         "contract_id": None,
+        "triple": None,
+        "name": None,
+        "body_file": None,
+        "name_glob": None,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -66,6 +71,7 @@ def _mock_client(
     patch_contract: object = _UNSET,
     supersede_contract: object = _UNSET,
     get_state: object = _UNSET,
+    get_artifact: object = _UNSET,
 ) -> MagicMock:
     """Build a mock StateClient instance for use with _get_client patching.
 
@@ -87,6 +93,11 @@ def _mock_client(
         client.supersede_contract = supersede_contract
     if get_state is not _UNSET:
         client.get_state = get_state
+    if get_artifact is not _UNSET:
+        # Accept a dict/None (wrap in lambda) or a callable directly
+        client.get_artifact = (
+            get_artifact if callable(get_artifact) else lambda phase, slug, name: get_artifact
+        )
     return client
 
 
@@ -416,3 +427,102 @@ class TestSupersedeSuccess:
             with patch.object(sys, "stderr", stderr):
                 rc = _supersede(args)
             assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# _artifact_show — contract artifact-show CLI command
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactShowSuccess:
+    """artifact-show: prints raw content by default, JSON with --json."""
+
+    def test_show_by_triple(self) -> None:
+        args = _make_args(triple="spec/my-task/spec.md")
+        captured: list[tuple] = []
+
+        def fake_get_artifact(phase: str, slug: str, name: str) -> dict | None:
+            captured.append((phase, slug, name))
+            return {"phase": phase, "slug": slug, "name": name, "content": "# The spec"}
+
+        mock_client = _mock_client(is_running=True, get_artifact=fake_get_artifact)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            rc = _artifact_show(args)
+        assert rc == 0
+        assert captured[0] == ("spec", "my-task", "spec.md")
+
+    def test_show_by_flags(self) -> None:
+        args = _make_args(phase="design", slug="feat", name="plan.md")
+        captured: list[tuple] = []
+
+        def fake_get_artifact(phase: str, slug: str, name: str) -> dict | None:
+            captured.append((phase, slug, name))
+            return {"phase": phase, "slug": slug, "name": name, "content": "plan body"}
+
+        mock_client = _mock_client(is_running=True, get_artifact=fake_get_artifact)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            rc = _artifact_show(args)
+        assert rc == 0
+        assert captured[0] == ("design", "feat", "plan.md")
+
+    def test_show_json_output(self) -> None:
+        args = _make_args(triple="spec/my-task/spec.md", json=True, quiet=False)
+
+        def fake_get_artifact(phase: str, slug: str, name: str) -> dict | None:
+            return {"phase": phase, "slug": slug, "name": name, "content": "# spec"}
+
+        mock_client = _mock_client(is_running=True, get_artifact=fake_get_artifact)
+        stdout = StringIO()
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            with patch("sys.stdout", stdout):
+                rc = _artifact_show(args)
+        assert rc == 0
+        output = stdout.getvalue()
+        assert '"content"' in output
+        assert '"phase"' in output
+
+    def test_show_service_down(self) -> None:
+        args = _make_args(triple="spec/missing/art.md")
+        mock_client = _mock_client(is_running=False)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            stderr = StringIO()
+            with patch.object(sys, "stderr", stderr):
+                with pytest.raises(SystemExit) as exc_info:
+                    _artifact_show(args)
+            assert exc_info.value.code == 1
+        assert "service" in stderr.getvalue().lower()
+
+    def test_show_not_found(self) -> None:
+        args = _make_args(triple="spec/missing/art.md")
+
+        def fake_get_artifact(phase: str, slug: str, name: str) -> dict | None:
+            return None  # artifact doesn't exist
+
+        mock_client = _mock_client(is_running=True, get_artifact=fake_get_artifact)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            stderr = StringIO()
+            with patch.object(sys, "stderr", stderr):
+                rc = _artifact_show(args)
+            assert rc == 1
+        assert "not found" in stderr.getvalue().lower()
+
+    def test_show_invalid_triple_format(self) -> None:
+        args = _make_args(triple="spec/only-two-parts")
+        mock_client = _mock_client(is_running=True)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            stderr = StringIO()
+            with patch.object(sys, "stderr", stderr):
+                rc = _artifact_show(args)
+            assert rc == 1
+        assert "triple must be" in stderr.getvalue().lower()
+
+    def test_show_missing_args(self) -> None:
+        # Neither triple nor all three flags provided
+        args = _make_args(triple=None, phase=None, slug=None, name=None)
+        mock_client = _mock_client(is_running=True)
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            stderr = StringIO()
+            with patch.object(sys, "stderr", stderr):
+                rc = _artifact_show(args)
+            assert rc == 1
+        assert "provide either" in stderr.getvalue().lower()
