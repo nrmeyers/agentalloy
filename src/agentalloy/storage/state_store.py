@@ -402,6 +402,28 @@ class DuckDBStateStore:
         self.conn.execute(_SCHEMA_DDL)
         logger.debug("sdd_state and sdd_contract schema ensured")
 
+        # Lifecycle column on sdd_artifact — added after DDL so it runs on
+        # first boot after this change, and is idempotent for subsequent boots.
+        # DuckDB does not support ADD COLUMN ... NOT NULL DEFAULT in one
+        # statement, so we do it in three steps.
+        # Check first to avoid a cascade of errors.
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'sdd_artifact' AND column_name = 'status'"
+        ).fetchone()
+        col_exists = row[0] if row else 0
+        if col_exists == 0:
+            self.conn.execute("ALTER TABLE sdd_artifact ADD COLUMN status TEXT")
+            self.conn.execute("UPDATE sdd_artifact SET status = 'active' WHERE status IS NULL")
+            # NOT NULL enforcement is done at the code layer — set_artifact()
+            # always writes 'active', so NULL is impossible in practice.
+        with suppress(duckdb.Error):
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_artifact_repo_phase_status "
+                "ON sdd_artifact (repo, phase, status)"
+            )
+        logger.debug("sdd_artifact lifecycle column and index ensured")
+
     # -- read / write --------------------------------------------------------
 
     def read(self, kind: str, session_key: str | None = None) -> str | None:

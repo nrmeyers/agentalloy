@@ -331,6 +331,25 @@ class TestStoreSchema:
         with pytest.raises(RuntimeError, match="not open"):
             _ = store.conn
 
+    def test_migrate_adds_status_column(self, tmp_path: Path) -> None:
+        """TC1 — ALTER TABLE adds status column to sdd_artifact."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # Verify the column exists by querying it.
+            row = store.scalar("SELECT COUNT(*) FROM sdd_artifact WHERE status = 'active'")
+            assert row == 0  # table exists, no rows yet
+
+    def test_migrate_status_column_idempotent(self, tmp_path: Path) -> None:
+        """TC2 — ALTER TABLE is idempotent (no error on second migrate)."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.migrate()  # Should not raise
+            # Column should still work.
+            row = store.scalar("SELECT COUNT(*) FROM sdd_artifact WHERE status = 'active'")
+            assert row == 0
+
 
 # ---------------------------------------------------------------------------
 # Read / Write
