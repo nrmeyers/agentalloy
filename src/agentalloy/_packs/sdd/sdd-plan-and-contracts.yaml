@@ -234,6 +234,20 @@ raw_prose: |
   tags each AND a human approval is recorded, so a premature `phase set` just
   names what's missing.
 
+  **Before you hand off, ask the user whether they want this work on a new
+  branch, and wait for their answer.** Build is the first phase that writes
+  `src/`, so this is the last moment the question is free. Don't branch on your
+  own initiative and don't assume the current branch is right — ask, then do what
+  they say. Asking here rather than earlier is deliberate: phase advance ends the
+  session, so an answer given in spec or design would have to survive two session
+  boundaries before anything could act on it.
+
+  Switching branches in place is safe — the artifact store is keyed by repo path,
+  not by branch, so `approach.md`, `tasks.md`, `test-plan.md`, and the build
+  contracts all follow you. A new **worktree** is a different path and therefore a
+  different store key: the artifacts do NOT follow, and build would start empty.
+  If the user wants a worktree, say so before they create it.
+
   ## Not this
 
   Don't write code — plan is read-only; the moment you're editing `src/`
