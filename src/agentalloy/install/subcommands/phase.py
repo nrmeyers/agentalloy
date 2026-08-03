@@ -14,6 +14,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,8 @@ from typing import Any
 from agentalloy.api.state_client import StateClientError
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
 from agentalloy.signals.gates import evaluate_phase_gate as _evaluate_phase_gate
+
+logger = logging.getLogger(__name__)
 
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
@@ -265,8 +268,14 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     # cycle, so sweep the just-completed cycle's live contracts into
     # archive/<phase>/ before the next cycle starts writing into active/.
     if current == "ship" and phase == "intake":
+        from agentalloy.api.state_client import StateClient
         from agentalloy.contracts import apply_contracts_migration, plan_archive
 
+        try:
+            client = StateClient()
+            client.archive_all()
+        except Exception:
+            logger.warning("archive_all failed — store archiving skipped")
         apply_contracts_migration(plan_archive(root))
 
     if current != phase:
