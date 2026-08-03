@@ -431,7 +431,11 @@ def _approve_design(tmp_path: Path) -> None:
     db = tmp_path / "test_state.db"
     store = DuckDBStateStore(db)
     store.open()
-    rows = store.list_artifacts("design", name_glob="*.md")
+    # Must match the design gate's `since_name_glob`, which the design/plan split
+    # tightened from "*.md" to "approach.md" (design now produces one artifact;
+    # tasks.md/test-plan.md became plan's). Digesting a wider set than the gate
+    # re-digests is a permanent mismatch — approval would never read as recorded.
+    rows = store.list_artifacts("design", name_glob="approach.md")
     store.set_approval("design", _artifact_digest(rows))
     store.close()
 

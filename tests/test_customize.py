@@ -148,8 +148,14 @@ def test_validate_clean_prose_only_edit_passes():
     from agentalloy.signals.invariants import derive_invariants
 
     data = _load_shipped(_WF_SKILL)
-    # Reword the prose but keep every load-bearing token.
-    data["raw_prose"] = "Reworded design guidance. Retains: " + " ".join(derive_invariants(data))
+    # Reword the prose but keep every load-bearing token. The lead sentence is
+    # padded only to clear the 80-char raw_prose floor: post-split, design's
+    # invariants are few and short enough that the tokens alone fall under it,
+    # and this test is about token retention, not the anti-stub minimum.
+    data["raw_prose"] = (
+        "Reworded design guidance for this phase, kept deliberately wordy so the "
+        "anti-stub length floor is not what is under test here. Retains: "
+    ) + " ".join(derive_invariants(data))
     errors = _validate_skill_data(data, _WF_SKILL)
     assert errors == []
 

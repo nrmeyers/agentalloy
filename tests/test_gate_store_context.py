@@ -81,7 +81,11 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
     store.set_artifact(
         "design", SLUG, "tasks.md", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
     )
-    artifact_rows = store.list_artifacts("design", name_glob="*.md")
+    # Matches the design gate's `since_name_glob`, tightened to "approach.md" by
+    # the design/plan split. A wider digest never equals the one the gate
+    # recomputes, so approval_recorded would block regardless of contract coverage
+    # — and this class exists to test coverage, not to be masked by approval.
+    artifact_rows = store.list_artifacts("design", name_glob="approach.md")
     store.set_approval("design", _artifact_digest(artifact_rows))
     return store
 

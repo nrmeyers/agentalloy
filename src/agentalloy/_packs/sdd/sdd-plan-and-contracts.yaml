@@ -16,9 +16,19 @@ applies_to_phases:
 # Load-bearing command tokens not derivable from exit_gates: how the agent writes
 # artifacts, creates build contracts, and advances. A customization may reword
 # the prose but must keep these verbatim.
+#
+# `agentalloy task next` is load-bearing beyond this phase: it advances the
+# work-item cursor, and every later phase resolves "which task am I on" from it
+# (qa's codify gate resolves its slug cursor-first — the literal predicate name
+# is deliberately not written here: test_codify_guards greps pack text for it).
+# Plan is
+# where the work items are created, so plan is where the cursor command has to be
+# taught — dropping it from a customization leaves the cursor mechanism
+# undocumented at the only phase that introduces it.
 prose_invariants:
   - "agentalloy phase set build"
   - "agentalloy approve plan"
+  - "agentalloy task next"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -87,7 +97,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "split from sdd-design-and-planning: plan handles task decomposition, test cases, and build contracts; design handles approach, decisions, and rationale only"
+change_summary: "split from sdd-design-and-planning: plan handles task decomposition, test cases, and build contracts; design handles approach, decisions, and rationale only. MIGRATION: `agentalloy task next` is now asserted as a prose invariant (it advances the work-item cursor every later phase resolves its task from, including qa's codify gate), and §5 names DEFAULT_K_BY_PHASE where it explains the k≈4 density floor. A pre-existing enabled profile override for this skill that lacks the `agentalloy task next` token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
 raw_prose: |
   # SDD — Plan
 
@@ -177,8 +187,9 @@ raw_prose: |
   dominant surface plus at most one adjacent**, so **MUST: ≤2 `domain_tags` per
   contract** (`[react]`, `[fastapi, async]`, `[typescript, pure-functions]`),
   **not** a union of every surface in the feature and **not** process words
-  (`build`, `coding`). Narrow tags are the whole point: with the fixed
-  per-contract k≈4 and the token budget, same-surface candidates let the reranker
+  (`build`, `coding`). Narrow tags are the whole point: retrieval pulls a fixed
+  number of fragments per contract — `DEFAULT_K_BY_PHASE` puts build at k≈4 —
+  so with that cap and the token budget, same-surface candidates let the reranker
   separate cleanly and the right fragments reach the agent; pile on 5–7 surfaces
   and the important fragments truncate and the scores muddy.
 
@@ -214,9 +225,11 @@ raw_prose: |
   checkpoint: only once the user explicitly approves do you run
   `agentalloy approve plan` (it records the approval and carries you into
   build) — or, after approval, advance with `agentalloy phase set build` and
-  work the contracts top to bottom with `agentalloy task next`. Phase advance
-  ends this session; the next phase begins in a fresh one, and `agentalloy
-  resume` rebuilds context. The phase guard refuses the jump until
+  work the contracts top to bottom with `agentalloy task next` — that command
+  advances the work-item cursor, which is how every later phase knows which
+  task it is on (qa's codify gate resolves its slug from it).
+  Phase advance ends this session; the next phase begins in a fresh one,
+  and `agentalloy resume` rebuilds context. The phase guard refuses the jump until
   `tasks.md`, `test-plan.md`, and one build contract per task exist with ≤2
   tags each AND a human approval is recorded, so a premature `phase set` just
   names what's missing.

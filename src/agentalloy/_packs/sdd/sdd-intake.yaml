@@ -122,8 +122,13 @@ raw_prose: |
   completes intake.
 
   Then **PRESENT the contract in full and STOP** — do not advance yourself. The
-  forward jump is a human checkpoint: once the user explicitly approves do you
-  run `agentalloy phase set spec` (or `sdd-fast` / `add-skill`) to advance.
+  forward jump is a human checkpoint: only once the user explicitly approves do
+  you advance, with the command matching the lane you picked in §2:
+
+      agentalloy phase set spec        # full lane
+      agentalloy phase set sdd-fast    # fast lane
+      agentalloy phase set add-skill   # custom-skill authoring
+
   Phase advance ends this session; the next phase begins in a fresh one, and
   `agentalloy resume` rebuilds context. Stop here only if the route itself is
   genuinely unclear — surface that and let the user make the call.
