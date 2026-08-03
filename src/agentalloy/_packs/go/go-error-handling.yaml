@@ -7,7 +7,7 @@ domain_tags: [error-wrapping, sentinel-values, typed-errors, panic-recover, erro
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — errors package https://pkg.go.dev/errors (verified 2026-05-05 against fixtures/upstream/curated/go.yaml topic `error_handling_and_exceptions`); Go 1.13 errors blog https://go.dev/blog/go1.13-errors; Error handling and Go https://go.dev/blog/error-handling-and-go; Go spec on panic recovery https://go.dev/ref/spec#Handling_panics. Skill scope: how to return, wrap, and inspect errors idiomatically; when to use sentinel errors vs typed errors vs `fmt.Errorf` with `%w`; the limits of `panic`/`recover`; not error reporting/observability (covered separately), not language-comparison error semantics (covered in foundation tier).
 

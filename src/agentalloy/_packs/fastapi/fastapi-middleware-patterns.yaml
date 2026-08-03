@@ -21,7 +21,7 @@ phase_scope:
 - build
 category_scope:
 - framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-01 for the skill-tax pilot (experiments/skill-tax/skills/). FastAPI 0.115+ flavored, covering the two complementary request-wrapping mechanisms: ASGI middleware (per-app, via `Middleware()` and `@app.middleware("http")`) and dependency injection (per-route, via `Depends()`). Includes the security-baseline middleware stack (CORS, TrustedHost, HTTPS), exception-handler routing, lifespan context, and the `APIRoute` raw-body capture pattern that pairs with `webhook-patterns`. See experiments/skill-tax/skills/AUTHORING_LOG.md for primary sources and pilot context.
   merged 2026-06-03: absorbed unique content from fastapi-middleware (superseded_by: fastapi-middleware) — added short-circuiting pattern (feature flags, maintenance mode) and security-headers response-mutation example.

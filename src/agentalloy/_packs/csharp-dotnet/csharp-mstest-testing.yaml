@@ -17,7 +17,7 @@ phase_scope:
 - build
 - qa
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — Microsoft Learn, Unit testing C# with MSTest https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-with-mstest (verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `testing_idioms`); Microsoft Learn, Testing in .NET https://learn.microsoft.com/en-us/dotnet/core/testing/ (verified 2026-05-05). Skill scope: Microsoft-canonical MSTest v3.x for .NET 9 / C# 13 — `[TestClass]`, `[TestMethod]`, lifecycle attributes (`[TestInitialize]`/`[ClassInitialize]`/`[AssemblyInitialize]`), `[DataRow]` and `[DynamicData]` parameterized tests, async tests with `TestContext.CancellationTokenSource`, exception assertions with `Assert.ThrowsException<T>` / `Assert.ThrowsExceptionAsync<T>`, filtering with `[TestCategory]` / `dotnet test --filter`. xUnit, NUnit, and FluentAssertions are popular community alternatives but are NOT Microsoft-canonical (R6 honesty); this skill follows the curated yaml's MSTest v3 choice. MSTest v3.0 GA May 2024 introduced the `MSTest.Sdk` project SDK style (verified 2026-05-05).
 raw_prose: |

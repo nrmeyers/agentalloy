@@ -7,7 +7,7 @@ domain_tags: [type-alias, interface, declaration-merging, structural-typing, rea
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — TypeScript handbook "Everyday Types" https://www.typescriptlang.org/docs/handbook/2/everyday-types.html (verified 2026-05-04 against fixtures/upstream/curated/typescript.yaml topic `typing_and_generics`); "Types vs Interfaces" guidance https://www.typescriptlang.org/docs/handbook/2/objects.html#differences-between-type-aliases-and-interfaces. Skill scope: when to use `type` aliases vs `interface`, structural typing semantics, declaration merging; not advanced type-system features (covered in ts-generics-and-conditional-types).
 

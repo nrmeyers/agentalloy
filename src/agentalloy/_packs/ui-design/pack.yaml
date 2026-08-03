@@ -3,7 +3,7 @@ version: 1.0.7
 tier: domain
 description: |
   UI design + frontend craft — Tailwind v4 utility-first styling, theme + design tokens via @theme, responsive design + dark mode, state variants (hover/focus/group/peer/aria), and accessibility fundamentals (ARIA, WCAG, semantic HTML). Precision-favored domain tier; sourced from tailwindlabs/tailwindcss.com docs and MDN accessibility guides per R1 tier-3 procedure.
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT

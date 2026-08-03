@@ -7,7 +7,7 @@ domain_tags: [small-commits, working-tree-discipline, integration-frequency, sto
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — internal review history, git workflow conventions, observed correlations between commit-frequency and bug-discovery latency. Skill scope: the discipline of keeping the working tree green at every step; not the planning step that decided what to slice (covered in planning-and-task-breakdown).
 

@@ -7,7 +7,7 @@ domain_tags: [diminishing-returns, perfect-is-the-enemy, scope-creep, revert-as-
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Kent Beck's "make it work, make it right, make it fast" sequencing https://wiki.c2.com/?MakeItWorkMakeItRightMakeItFast (verified 2026-05-04 against fixtures/upstream/curated/c2-wiki.yaml topic `incremental_design`); internal review history on refactor PRs that grew unbounded and never merged. Skill scope: knowing when to stop a refactor and ship it; not knowing when to start (covered in refactoring-when-and-why), not specific moves (covered in common-refactoring-moves).
 

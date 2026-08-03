@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Diátaxis documentation framework https://diataxis.fr/ (verified 2026-05-04 against fixtures/upstream/curated/docs.yaml topic `diataxis`) for the reference/tutorial/howto/explanation distinction; OpenAPI spec https://spec.openapis.org/oas/v3.1.0 for HTTP API reference shape; Stripe and Twilio docs as widely-cited exemplars. Skill scope: writing reference documentation for an API — REST, library, SDK, CLI; not tutorials or onboarding (different artifact in the Diátaxis split), not READMEs (covered separately).
 

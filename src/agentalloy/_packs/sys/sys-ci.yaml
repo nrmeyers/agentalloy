@@ -13,7 +13,7 @@ phase_scope:
   - build
   - qa
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: "golden default: detect the repo's test/lint/typecheck commands; the green-gate for build and qa"
 raw_prose: |
   # CI and quality gates

@@ -7,7 +7,7 @@ domain_tags: [nullable-annotations, null-forgiving-operator, generic-constraints
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — learn.microsoft.com/en-us/dotnet/csharp/programming-guide/generics/, learn.microsoft.com/en-us/dotnet/csharp/nullable-references, and learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/patterns (verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic typing_and_generics). Targets .NET 9 / C# 13. Skill scope: nullable reference types (NRT), nullable-state attributes, generic type parameters and constraint clauses, and the pattern-matching family (type, property, relational, logical, list patterns) including switch expressions.
 

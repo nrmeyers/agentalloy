@@ -7,7 +7,7 @@ domain_tags: [parallel-agent-dispatch, fan-out-fan-in, subagent-context-isolatio
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Claude Code Agent tool documentation https://docs.anthropic.com/en/docs/claude-code/sub-agents (verified 2026-05-04); internal review history on misfired parallel dispatches (shared-file-write conflicts, redundant searches across siblings); Claude Agent SDK guidance on subagent boundaries. Skill scope: when to fan out work to multiple agents in one message vs. keep it sequential, and how to brief each agent so the parallel run produces useful, non-redundant output; not workflow orchestration (covered in workflow packs), not single-agent prompt engineering (covered in claude-code pack).
 

@@ -15,7 +15,7 @@ phase_scope:
 - build
 category_scope:
 - framework
-author: navistone
+author: agentalloy
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
   # Vue Composition API and Reactivity

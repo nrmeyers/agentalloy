@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — TypeScript handbook on generics https://www.typescriptlang.org/docs/handbook/2/generics.html (verified 2026-05-04 against fixtures/upstream/curated/typescript.yaml topic `typing_and_generics`); conditional types https://www.typescriptlang.org/docs/handbook/2/conditional-types.html; mapped types https://www.typescriptlang.org/docs/handbook/2/mapped-types.html; template literal types https://www.typescriptlang.org/docs/handbook/2/template-literal-types.html. Skill scope: writing generic functions, generic types, conditional types, mapped types, and using `infer` correctly; not basic syntax (covered in tsconfig and types-vs-interfaces).
 

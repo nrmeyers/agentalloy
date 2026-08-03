@@ -16,7 +16,7 @@ phase_scope:
 - build
 category_scope:
 - infrastructure
-author: navistone
+author: agentalloy
 change_summary: |
   initial authoring draft
   merged 2026-06-03: absorbed unique content from redis-lua-scripting (superseded_by: redis-lua-scripting)

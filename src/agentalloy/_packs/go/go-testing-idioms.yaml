@@ -7,7 +7,7 @@ domain_tags: [table-driven-tests, subtest-isolation, testing-helper, benchmark-l
 always_apply: false
 phase_scope: [build, qa]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — testing package https://pkg.go.dev/testing (verified 2026-05-05 against fixtures/upstream/curated/go.yaml topic `testing_idioms`); How to Write Go Code — Testing https://go.dev/doc/code#Testing; Go fuzzing tutorial https://go.dev/doc/fuzz/. Skill scope: how the `testing` package's idioms shape Go test code — table-driven cases, `t.Run` subtests, `t.Helper`, parallel tests, benchmarks, fuzz tests; not test-driven development methodology, not test doubles/mocking patterns (covered in foundation tier), not assertion libraries beyond a brief mention.
 

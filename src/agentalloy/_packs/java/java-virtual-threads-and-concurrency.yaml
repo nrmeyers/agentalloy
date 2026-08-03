@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — java.util.concurrent package summary https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html, java.lang.Thread API https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html, JEP 444 Virtual Threads https://openjdk.org/jeps/444, JEP 453 Structured Concurrency (Preview) https://openjdk.org/jeps/453 (all verified 2026-05-06 against fixtures/upstream/curated/java.yaml topic `concurrency_and_async`). Skill scope: virtual threads via `Thread.ofVirtual()`, `Thread.startVirtualThread`, and `Executors.newVirtualThreadPerTaskExecutor()`; carrier-thread pinning under `synchronized` and JNI and the `ReentrantLock` fix; `StructuredTaskScope.ShutdownOnFailure` / `ShutdownOnSuccess` (preview in Java 21, requires `--enable-preview`); `CompletableFuture` composition (`thenApply`, `thenCompose`, `thenCombine`, `allOf`, `anyOf`, `orTimeout`, `exceptionally`); `ExecutorService` as `AutoCloseable` (Java 19+, verified 2026-05-06) with try-with-resources; `InterruptedException` handling and interrupt-flag restoration. Known gap per R6: structured concurrency is preview-status in Java 21 — readers must compile and run with `--enable-preview` and the API is subject to change before finalization. Out of scope: `ForkJoinPool` work-stealing internals, `VarHandle`, `Phaser` deep usage, project Loom continuations API.
 raw_prose: |

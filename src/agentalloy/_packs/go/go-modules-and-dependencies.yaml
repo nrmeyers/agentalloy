@@ -7,7 +7,7 @@ domain_tags: [module-path, semantic-import-versioning, replace-directive, vendor
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — Go modules reference https://go.dev/ref/mod (verified 2026-05-05 against fixtures/upstream/curated/go.yaml topic `packaging_and_dependency_management`); go.mod file reference https://go.dev/doc/modules/gomod-ref; managing dependencies https://go.dev/doc/modules/managing-dependencies; publishing modules https://go.dev/doc/modules/publishing. Skill scope: the structure of `go.mod` and `go.sum`, how Go resolves module versions, semantic import versioning for v2+, when to use `replace`/`exclude`/vendor, and the role of GOPROXY/GOSUMDB; not project layout conventions, not workspace mode (`go.work`) beyond a brief mention.
 

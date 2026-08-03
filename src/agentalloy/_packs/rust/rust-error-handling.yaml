@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — std::result https://doc.rust-lang.org/std/result/index.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `error_handling_and_exceptions`); std::option https://doc.rust-lang.org/std/option/index.html; The Rust Programming Language ch09 https://doc.rust-lang.org/book/ch09-00-error-handling.html; Rust Reference question-mark operator https://doc.rust-lang.org/reference/expressions/operator-expr.html#the-question-mark-operator. Community crates `thiserror` 1.x and `anyhow` 1.x are referenced as the de facto standard for library and application error types respectively (verified 2026-05-05); they are not stdlib — flagged inline per R6 honesty rule. Skill scope: Result/Option idioms, the `?` operator and its `From::from` desugar, building typed errors with thiserror, opaque application errors with anyhow, and when panic/unwrap/expect are appropriate; not custom Error trait implementations by hand (thiserror covers it), not error reporting/observability.
 raw_prose: |

@@ -7,7 +7,7 @@ domain_tags: [readme-structure, quickstart, install-instructions, project-pitch,
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Standard Readme spec https://github.com/RichardLitt/standard-readme (verified 2026-05-04 against fixtures/upstream/curated/docs.yaml topic `readme_structure`); GitHub's README guidance https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes; internal review history on README-less OSS projects that lost adoption to better-documented competitors. Skill scope: writing the project README — the first page users encounter; not API reference docs (covered separately) or marketing landing pages.
 

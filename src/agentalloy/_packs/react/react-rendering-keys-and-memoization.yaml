@@ -7,7 +7,7 @@ domain_tags: [list-keys-stable-id, reconciliation-tree-diff, react-memo-props-eq
 always_apply: false
 phase_scope: [build]
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   merged 2026-06-03: removed useMemo/useCallback section (moved to react-hooks-rules-and-deps). Retains keys, reconciliation, React.memo, and React Compiler content.
   Initial authoring 2026-05-06. Sources — Render and Commit https://react.dev/learn/render-and-commit, Rendering Lists https://react.dev/learn/rendering-lists, Preserving and Resetting State https://react.dev/learn/preserving-and-resetting-state, memo https://react.dev/reference/react/memo, useMemo https://react.dev/reference/react/useMemo, useCallback https://react.dev/reference/react/useCallback (all verified 2026-05-06 via tier-2 llms_url procedure against the react.dev llms-index). Skill scope: the render/commit two-phase model, reconciliation rules (same type at same position preserves state; different type or different `key` remounts), keys for list rendering and the index-as-key trap, the deliberate `key`-as-state-reset pattern, `React.memo` shallow-prop equality, `useMemo` and `useCallback` as identity-stabilizers (not blanket optimizers), and the React Compiler (React 19+) which automatically inserts memoization at compile time. Out of scope: Suspense rendering, transitions/`useTransition`, server components rendering, and `useSyncExternalStore`. React Compiler is GA-stage at the time of authoring but adoption is uneven; this skill teaches code that is correct without the compiler so it remains correct with it.

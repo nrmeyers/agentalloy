@@ -3,7 +3,7 @@ version: 1.0.6
 tier: workflow
 description: |
   Design review workflow patterns — RFC + ADR document conventions, interface-contract review (Hyrum's Law, contract-first, deprecation planning), and non-functional-requirements review (security threat-model, performance targets, observability hooks, operational constraints). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology per R1 internal procedure.
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT

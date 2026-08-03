@@ -7,7 +7,7 @@ domain_tags: [characterization-tests, green-bar, golden-master, small-steps, bis
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Michael Feathers, *Working Effectively with Legacy Code*, ch. 13 ("I Need to Make a Change, but I Don't Know What Tests to Write") (verified 2026-05-04 against fixtures/upstream/curated/feathers.yaml topic `characterization_tests`); Martin Fowler, *Refactoring*, ch. 1 on the small-step discipline; internal review history on refactors that broke production because the test suite was thin where the refactor reached. Skill scope: the discipline of using tests as the safety net during a refactor — adding tests first when coverage is missing, taking small reversible steps, keeping the bar green; not test-writing fundamentals (covered in TDD), not refactoring decisions (covered in refactoring-when-and-why).
 

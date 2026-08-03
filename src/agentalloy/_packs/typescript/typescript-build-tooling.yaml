@@ -13,7 +13,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [language]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion (wave 2)
 raw_prose: |
   # TypeScript Build Tooling — tsc, esbuild, swc, tsx

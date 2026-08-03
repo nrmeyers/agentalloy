@@ -7,7 +7,7 @@ domain_tags: [incident-commander, mitigate-before-diagnose, severity-triage, sta
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Google SRE Book chapter 14 "Managing Incidents" https://sre.google/sre-book/managing-incidents/ (verified 2026-05-04 against fixtures/upstream/curated/sre.yaml topic `incident_management`); PagerDuty incident response guide https://response.pagerduty.com/; internal review history on diagnose-first incidents that extended outages by hours. Skill scope: live response while an incident is open — triage, role assignment, mitigation, communication, resolution declaration; not the post-incident postmortem (covered in postmortem).
 

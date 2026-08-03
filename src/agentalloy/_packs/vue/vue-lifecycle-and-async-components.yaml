@@ -16,7 +16,7 @@ phase_scope:
 - build
 category_scope:
 - framework
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # Vue Lifecycle Hooks and Async Components

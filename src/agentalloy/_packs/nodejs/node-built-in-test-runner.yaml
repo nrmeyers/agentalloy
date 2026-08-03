@@ -19,7 +19,7 @@ phase_scope:
 - build
 - qa
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Node.js 22 test docs https://nodejs.org/docs/latest-v22.x/api/test.html (verified 2026-05-04 against fixtures/upstream/curated/nodejs.yaml topic `testing_idioms`); assert docs https://nodejs.org/docs/latest-v22.x/api/assert.html. Skill scope: Node's built-in test runner (`node --test`) and assert module; not third-party runners (Jest, Vitest, Mocha — covered in tooling packs), not test philosophy (covered in core/test-driven-development). Merged 2026-06-03: absorbed deprecated `nodejs-native-test-runner` content (--test-rerun-failures, describe()/it() aliases, skip/t.skip(), todo/t.todo()).
 raw_prose: |

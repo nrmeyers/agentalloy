@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion (14B over-fragmented)
 raw_prose: |
   # React Optimistic Updates with useOptimistic

@@ -12,7 +12,7 @@ phase_scope:
 - build
 category_scope:
 - domain
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |-
   ## Seven-column CSS grid

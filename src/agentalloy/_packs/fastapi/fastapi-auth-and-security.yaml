@@ -20,7 +20,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06 — scaffolded from fastapi.tiangolo.com
   tutorial/security and advanced/security/oauth2-scopes (verified 2026-05-06

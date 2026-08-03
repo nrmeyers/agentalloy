@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Python 3.13 typing docs https://docs.python.org/3.13/library/typing.html (verified 2026-05-04 against fixtures/upstream/curated/python.yaml topic `typing_and_generics`); PEP 484 https://peps.python.org/pep-0484/ (gradual typing); PEP 544 https://peps.python.org/pep-0544/ (Protocols); PEP 695 https://peps.python.org/pep-0695/ (new generic syntax, Python 3.12+). Skill scope: Python's gradual typing system — annotations, generics, Protocols, common pitfalls; not external type checkers' configuration (mypy.ini, pyright config — out of scope), not runtime type validation (covered in framework-tier skills like Pydantic).
 

@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]
-author: navistone
+author: agentalloy
 deprecated: true
 superseded_by: react-server-components-and-suspense
 change_summary: |

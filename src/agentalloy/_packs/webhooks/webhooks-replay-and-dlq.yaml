@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: 'hand-authored Opus expansion; 2026-06-11 lead prose differentiated toward replay/DLQ/poison-message/redelivery vocabulary to resolve ranking-stranding against generic webhook siblings'
 raw_prose: |
   # Webhooks — Replay and Dead-Letter Queues

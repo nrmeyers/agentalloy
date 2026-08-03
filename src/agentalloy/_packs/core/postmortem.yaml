@@ -7,7 +7,7 @@ domain_tags: [blameless-postmortem, root-cause-analysis, contributing-factors, a
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Google SRE Book chapter 15 "Postmortem Culture" https://sre.google/sre-book/postmortem-culture/ (verified 2026-05-04 against fixtures/upstream/curated/sre.yaml topic `postmortem`); PagerDuty incident response postmortem guide https://response.pagerduty.com/after/post_mortem_process/; internal review history on stale action items and "the deploy script was bad" single-cause postmortems. Skill scope: writing the postmortem document and following through on action items after an incident is resolved; not the live incident response itself (covered in incident-response).
 

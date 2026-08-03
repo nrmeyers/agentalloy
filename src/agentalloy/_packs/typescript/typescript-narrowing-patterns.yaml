@@ -14,7 +14,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [language]
-author: navistone
+author: agentalloy
 change_summary: Merged deprecated typescript-narrowing-and-control-flow into this skill; absorbed typeof quirks, truthiness narrowing, boolean negations, and domain tags. Expanded with hand-authored content (wave 2).
 raw_prose: |
   # TypeScript Narrowing Patterns

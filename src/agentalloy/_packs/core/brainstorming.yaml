@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — internal review history on misaligned implementations that passed tests but solved the wrong problem; sdd-spec/sdd-design conventions in this repo; superpowers `brainstorming` skill heuristics observed in practice. Skill scope: the discipline of exploring what the user actually wants and what designs are possible before committing to one; not estimation, not planning task breakdown (covered in planning-and-task-breakdown), not feature-dev architecture sketching.
 

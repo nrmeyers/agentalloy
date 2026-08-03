@@ -16,7 +16,7 @@ phase_scope:
 - design
 category_scope:
 - process
-author: navistone
+author: agentalloy
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
   # Tailwind Responsive Design and Dark Mode

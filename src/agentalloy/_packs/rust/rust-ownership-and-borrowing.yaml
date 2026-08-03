@@ -7,7 +7,7 @@ domain_tags: [move-semantics, borrow-checker, lifetime-elision, interior-mutabil
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — The Rust Programming Language ch04 https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `memory_and_performance`); Rust Reference on lifetime elision https://doc.rust-lang.org/reference/lifetime-elision.html; std::cell https://doc.rust-lang.org/std/cell/index.html; std::rc and std::sync::Arc. Skill scope: how Rust's ownership model works, when to take a reference vs a value, what the borrow checker enforces, lifetime annotations and elision rules, and the escape hatches (Rc/Arc, Cell/RefCell); not unsafe Rust beyond a brief mention, not async lifetimes (covered in async pack).
 

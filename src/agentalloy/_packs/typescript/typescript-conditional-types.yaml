@@ -17,7 +17,7 @@ phase_scope:
 - build
 category_scope:
 - language
-author: navistone
+author: agentalloy
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
   # TypeScript Conditional Types

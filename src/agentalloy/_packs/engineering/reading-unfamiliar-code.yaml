@@ -7,7 +7,7 @@ domain_tags: [code-comprehension, entry-points, call-graph, runtime-tracing, bre
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Felienne Hermans, *The Programmer's Brain* https://www.manning.com/books/the-programmers-brain (verified 2026-05-04 against fixtures/upstream/curated/comprehension.yaml topic `code_reading`); Diomidis Spinellis, *Code Reading*; internal review history on edits made before the editor understood the code, leading to broken contracts. Skill scope: the discipline of reading and understanding unfamiliar code before changing it; not refactoring (covered separately), not learning a new language (covered in language packs).
 

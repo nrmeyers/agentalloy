@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |
   # Apache Iceberg and the Lakehouse Pattern

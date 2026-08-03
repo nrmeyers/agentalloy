@@ -9,7 +9,7 @@ deprecated: true
 superseded_by: design-review-rfc-and-adrs
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Michael Nygard's original ADR post https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions (verified 2026-05-04 against fixtures/upstream/curated/adr.yaml topic `adr_format`); ThoughtWorks Technology Radar entry on ADRs; adr-tools project https://github.com/npryce/adr-tools; internal review history on undocumented decisions surfacing as "why is this done this way?" months later. Skill scope: writing and maintaining ADRs as a lightweight decision log; not RFCs or design docs (covered in workflow/rfc), not detailed architecture diagrams.
   Deprecated 2026-06-03: superseded by design-review-rfc-and-adrs

@@ -7,7 +7,7 @@ domain_tags: [goroutine-leaks, channel-direction, select-default, sync-primitive
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — Go language spec https://go.dev/ref/spec#Go_statements (verified 2026-05-05 against fixtures/upstream/curated/go.yaml topic `concurrency_and_async`); sync package https://pkg.go.dev/sync; context package https://pkg.go.dev/context; Effective Go concurrency https://go.dev/doc/effective_go#concurrency; Go pipelines blog https://go.dev/blog/pipelines. Skill scope: how to spawn and synchronize goroutines, use channels and select correctly, prevent goroutine leaks, and propagate cancellation/deadlines via context.Context; not generic async patterns at the language-comparison level (covered in python/nodejs packs), not HTTP-server context plumbing specifics.
 

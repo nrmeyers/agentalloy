@@ -7,7 +7,7 @@ domain_tags: [explain-rationale, docstring-discipline, comment-as-code-smell, to
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Robert Martin, *Clean Code*, ch. 4 ("Comments") on the "comments compensate for failure to express ourselves" thesis (verified 2026-05-04 against fixtures/upstream/curated/clean-code.yaml topic `comments`); PEP 257 https://peps.python.org/pep-0257/ for docstring conventions; godoc conventions https://go.dev/blog/godoc; internal review history on comments that lied because the code changed and the comment did not. Skill scope: when to write inline comments and docstrings, when not to, what to put in them; not external API documentation (covered in writing-api-docs), not code naming (covered in engineering/naming-things).
 

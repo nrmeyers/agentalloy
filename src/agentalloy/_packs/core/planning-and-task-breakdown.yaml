@@ -7,7 +7,7 @@ domain_tags: [task-decomposition, dependency-mapping, plan-checkpoint, slice-by-
 always_apply: false
 phase_scope: [build, design, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — internal SDD pipeline conventions (sdd-spec, sdd-design, sdd-plan), accumulated review experience on plan-driven execution. Skill scope: the discipline of breaking multi-step work into reviewable, testable units; not project management or estimation.
 

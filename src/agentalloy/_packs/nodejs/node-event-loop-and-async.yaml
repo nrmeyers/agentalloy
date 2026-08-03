@@ -7,7 +7,7 @@ domain_tags: [event-loop-phases, microtask-queue, async-local-storage, worker-th
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Node.js 22 async_context docs https://nodejs.org/docs/latest-v22.x/api/async_context.html (verified 2026-05-04 against fixtures/upstream/curated/nodejs.yaml topic `concurrency_and_async`); worker_threads docs https://nodejs.org/docs/latest-v22.x/api/worker_threads.html; events docs https://nodejs.org/docs/latest-v22.x/api/events.html; libuv documentation for event-loop phase ordering. Skill scope: how Node's event loop works, where async work runs, AsyncLocalStorage for context propagation, worker_threads for CPU offload; not framework-level concurrency, not async patterns at the language level (covered in TS/python packs).
 

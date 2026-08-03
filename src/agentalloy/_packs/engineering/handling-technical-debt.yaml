@@ -7,7 +7,7 @@ domain_tags: [tech-debt, fowler-quadrant, debt-ledger, prudent-vs-reckless, repa
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Ward Cunningham's original debt-metaphor talk https://www.youtube.com/watch?v=pqeJFYwnkjE (verified 2026-05-04 via cached transcript); Martin Fowler's "TechnicalDebtQuadrant" https://martinfowler.com/bliki/TechnicalDebtQuadrant.html (verified 2026-05-04 against fixtures/upstream/curated/fowler.yaml topic `tech_debt`); internal review history on debt-tagged TODOs that aged for years untouched. Skill scope: how to record, triage, and pay down deliberate and accidental tech debt; not refactoring techniques (covered in refactoring pack), not initial design decisions (covered in ADRs).
 

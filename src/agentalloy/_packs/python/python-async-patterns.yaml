@@ -20,7 +20,7 @@ phase_scope:
 - build
 category_scope:
 - language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-01 for the skill-tax pilot (experiments/skill-tax/skills/). Python 3.11+ asyncio patterns: structured concurrency via `asyncio.TaskGroup`, cancellation handling, timeouts via `asyncio.timeout`, bridging blocking work via `asyncio.to_thread` / `run_in_executor`, and the `ExceptionGroup` / `except*` machinery introduced by PEP 654. Intended as a clean replacement candidate for the canonical `src/agentalloy/_packs/python/async-python-patterns.yaml` post-pilot if methodology validates — supersession contingent on pilot result, canonical untouched in the meantime. See experiments/skill-tax/skills/AUTHORING_LOG.md for primary sources, supersession intent, and pilot context.
 raw_prose: |

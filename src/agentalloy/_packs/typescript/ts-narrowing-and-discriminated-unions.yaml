@@ -7,7 +7,7 @@ domain_tags: [type-narrowing, discriminated-union, type-guard, exhaustiveness-ch
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — TypeScript handbook on narrowing https://www.typescriptlang.org/docs/handbook/2/narrowing.html (verified 2026-05-04 against fixtures/upstream/curated/typescript.yaml topic `error_handling_and_exceptions`); TypeScript 4.0 release notes https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-0.html for assertion functions. Skill scope: type narrowing, type guards, discriminated unions, exhaustiveness checks; not generic type-system mechanics (covered in ts-generics-and-conditional-types).
 

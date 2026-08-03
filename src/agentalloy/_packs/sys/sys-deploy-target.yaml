@@ -11,7 +11,7 @@ always_apply: false
 phase_scope:
   - ship
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: "golden default: merge-is-release + revert rollback; customize point for staged-rollout pipelines"
 raw_prose: |
   # Deploy target

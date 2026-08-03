@@ -14,7 +14,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # GitHub Actions — Deployment Environments

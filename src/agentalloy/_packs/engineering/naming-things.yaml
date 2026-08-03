@@ -7,7 +7,7 @@ domain_tags: [naming-conventions, domain-language, ubiquitous-language, rename-d
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Phil Karlton's "two hard things" attribution https://www.karlton.org/2017/12/naming-things-hard/ (verified 2026-05-04); Eric Evans, *Domain-Driven Design*, ch. 14 ("Maintaining Model Integrity") on ubiquitous language; Kent Beck, *Implementation Patterns*, ch. 4 ("Class") on intention-revealing names; internal review history on names that aged badly. Skill scope: choosing names for symbols, files, and concepts, and renaming them when they no longer fit; not file structure (covered in conventions pack), not API URL design (covered in protocol/rest).
 

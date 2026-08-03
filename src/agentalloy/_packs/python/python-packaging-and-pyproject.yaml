@@ -7,7 +7,7 @@ domain_tags: [pyproject-toml, build-backend, src-layout, lockfile, editable-inst
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 deprecated: true
 superseded_by: python-packaging-pyproject
 change_summary: |

@@ -7,7 +7,7 @@ domain_tags: [feature-branch, commit-hygiene, pr-gate, atomic-commits, never-for
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — git docs at https://git-scm.com/docs (verified 2026-05-04 against fixtures/upstream/curated/git.yaml topic `branch_pr_workflow`); GitHub Flow guide https://docs.github.com/en/get-started/quickstart/github-flow; internal review history on direct-to-main accidents and force-push regressions. Skill scope: the day-to-day workflow of moving a change from working tree to merged main; not git internals (covered in the tooling/git pack), not advanced rebase/history-rewriting (covered in tooling/git-rebase).
 

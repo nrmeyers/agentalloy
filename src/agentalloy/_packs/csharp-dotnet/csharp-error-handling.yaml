@@ -7,7 +7,7 @@ domain_tags: [exception-filters, aggregateexception-flatten, custom-exception-ty
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — C# fundamentals exceptions guide https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/exceptions/ (verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `error_handling_and_exceptions`); System.Exception API reference https://learn.microsoft.com/en-us/dotnet/api/system.exception?view=net-9.0; TPL exception handling https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/exception-handling-task-parallel-library. Known gap (per curated registry): learn.microsoft.com versioned subtrees can redirect to a different .NET version — verify `view=net-9.0` is preserved on each URL when re-fetching. Skill scope: System.Exception hierarchy and the common BCL exception types, `try`/`catch`/`finally` with the `when` filter clause, `throw;` vs `throw ex;` and `ExceptionDispatchInfo`, custom exception type design, `AggregateException.Flatten` from `Task.WhenAll`, `OperationCanceledException`/`TaskCanceledException` cooperative cancellation, throw helpers (`ArgumentNullException.ThrowIfNull` and friends), `using`/`await using` and disposal-time exceptions; not logging frameworks, not ASP.NET Core middleware error handling, not source-generated diagnostics.
 

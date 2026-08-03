@@ -16,7 +16,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — react.dev/reference/react/useEffect https://react.dev/reference/react/useEffect, react.dev/learn/synchronizing-with-effects https://react.dev/learn/synchronizing-with-effects, react.dev/learn/lifecycle-of-reactive-effects https://react.dev/learn/lifecycle-of-reactive-effects, react.dev/learn/you-might-not-need-an-effect https://react.dev/learn/you-might-not-need-an-effect, react.dev/reference/react/useRef https://react.dev/reference/react/useRef (all verified 2026-05-06 via tier-2 llms_url procedure). Skill scope: useEffect lifecycle (setup runs after commit, cleanup runs before next setup and on unmount), mandatory cleanup for subscriptions/timers/network/DOM listeners, race-condition handling in async effects via AbortController and the cancelled-flag pattern, why "fetch in useEffect" is now discouraged in favor of Suspense / framework data layers, Strict Mode double-invocation (React 18+, default in dev) as a feature surfacing missing cleanup, the "you might not need an effect" failure modes (deriving state, caching with useMemo, resetting state via key, event-handler logic, effect chains), useEffect vs useLayoutEffect, and the standard anti-patterns (empty deps with stale closures, conditional hooks, setState in cleanup of an unmounted tree). Out of scope: useSyncExternalStore in depth, server components data flow, custom hooks beyond a passing reference, React Native specifics.
 raw_prose: |

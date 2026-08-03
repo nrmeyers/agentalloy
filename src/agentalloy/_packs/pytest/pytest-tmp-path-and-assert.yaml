@@ -14,7 +14,7 @@ phase_scope:
 - qa
 category_scope:
 - tooling
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # Pytest tmp_path and Assertion Introspection
