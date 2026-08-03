@@ -215,15 +215,13 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
         # cycle, so sweep the just-completed cycle's live contracts into
         # archive/<phase>/ before the next cycle starts writing into active/.
         # Mirrors the CLI path in install/subcommands/phase.py (same guards,
-        # same try/except for graceful degradation).
+        # same try/except for graceful degradation). Uses the store directly
+        # (in-process path — no StateClient).
         if phase == "intake" and prev is not None and prev != "intake":
             from agentalloy.contracts import apply_contracts_migration, plan_archive
 
             try:
-                from agentalloy.api.state_client import StateClient
-
-                client = StateClient()
-                client.archive_all()
+                view.archive_all()
             except Exception:
                 logger.warning("archive_all failed — store archiving skipped in proxy path")
             apply_contracts_migration(plan_archive(project_root))
