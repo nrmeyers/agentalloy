@@ -420,6 +420,63 @@ class TestShipResetAutoArchive:
         # A normal forward transition leaves live contracts in place.
         assert (repo_root / ".agentalloy" / "contracts" / "active" / "build" / "01.md").is_file()
 
+    def test_build_to_intake_archives(self, repo_root: Path) -> None:
+        run_phase_set("build", root=repo_root, force=True)
+        self._active(repo_root, "build", "01.md")
+
+        run_phase_set("intake", root=repo_root)
+
+        c = repo_root / ".agentalloy" / "contracts"
+        assert (c / "archive" / "build" / "01.md").is_file()
+        assert not (c / "active" / "build" / "01.md").exists()
+
+    def test_qa_to_intake_archives(self, repo_root: Path) -> None:
+        run_phase_set("qa", root=repo_root, force=True)
+        self._active(repo_root, "qa", "01.md")
+
+        run_phase_set("intake", root=repo_root)
+
+        c = repo_root / ".agentalloy" / "contracts"
+        assert (c / "archive" / "qa" / "01.md").is_file()
+        assert not (c / "active" / "qa" / "01.md").exists()
+
+    def test_direct_intake_set_archives(self, repo_root: Path) -> None:
+        run_phase_set("design", root=repo_root, force=True)
+        self._active(repo_root, "design", "01.md")
+
+        run_phase_set("intake", root=repo_root)
+
+        c = repo_root / ".agentalloy" / "contracts"
+        assert (c / "archive" / "design" / "01.md").is_file()
+        assert not (c / "active" / "design" / "01.md").exists()
+
+    def test_intake_to_intake_does_not_rearchive(self, repo_root: Path) -> None:
+        run_phase_set("intake", root=repo_root, force=True)
+
+        # No error when setting intake while already in intake.
+        result = run_phase_set("intake", root=repo_root)
+        assert result.get("blocked") is not True
+
+    def test_spec_to_intake_archives(self, repo_root: Path) -> None:
+        run_phase_set("spec", root=repo_root, force=True)
+        self._active(repo_root, "spec", "01.md")
+
+        run_phase_set("intake", root=repo_root)
+
+        c = repo_root / ".agentalloy" / "contracts"
+        assert (c / "archive" / "spec" / "01.md").is_file()
+        assert not (c / "active" / "spec" / "01.md").exists()
+
+    def test_design_to_intake_archives(self, repo_root: Path) -> None:
+        run_phase_set("design", root=repo_root, force=True)
+        self._active(repo_root, "design", "01.md")
+
+        run_phase_set("intake", root=repo_root)
+
+        c = repo_root / ".agentalloy" / "contracts"
+        assert (c / "archive" / "design" / "01.md").is_file()
+        assert not (c / "active" / "design" / "01.md").exists()
+
 
 # ---------------------------------------------------------------------------
 # Issue #503 — phase set --force silently no-ops
