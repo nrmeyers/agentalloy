@@ -23,7 +23,7 @@ from agentalloy.install.subcommands.customize import (
 from agentalloy.signals.invariants import derive_invariants, load_shipped_skill
 
 # A real shipped workflow skill with derivable invariants.
-_BAD = "sdd-design-and-planning"
+_BAD = "sdd-design-and-architecture"
 _GOOD = "sdd-build"
 BAD_PROSE = "Reworded guidance dropping every load-bearing path and command. " * 3
 

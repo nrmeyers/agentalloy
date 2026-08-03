@@ -73,24 +73,26 @@ change_summary: "add-skill lane workflow — guided custom-skill authoring (clas
 raw_prose: |
   # SDD — Add a Custom Skill (add-skill)
 
-  **Approval first — burn this in.** You MUST NOT run `agentalloy approve add-skill` or
-  `agentalloy install-pack` until the human has explicitly said to proceed in this
-  conversation. Installing a skill changes what gets composed into every future session
-  in this repo; the exit gate blocks the phase until a human approval marker exists, and
-  it is not yours to write on their behalf.
-
   You're authoring a **skill for this repo's local corpus** — teaching AgentAlloy
   something it should know from now on. The deliverable is an installed corpus
   skill, not a code change. Work in one pass:
 
-  ## 1. Pick the skill class
+  ## 1. Approval
+
+  **You MUST NOT run `agentalloy approve add-skill` or `agentalloy install-pack`
+  until the human has explicitly said to proceed in this conversation.** Installing
+  a skill changes what gets composed into every future session in this repo; the exit
+  gate blocks the phase until a human approval marker exists, and it is not yours to
+  write on their behalf.
+
+  ## 2. Pick the skill class
 
   Default to **domain** — teaching a framework, an internal API, a team convention,
   a process the corpus keeps missing. Reach for `system` (an always-on operational
   rule) or `workflow` (a lifecycle-phase process) only when the user explicitly
   describes one — both are rare, advanced cases; say so before choosing them.
 
-  ## 2. Draft it
+  ## 3. Draft it
 
   Write the `raw_prose` first: concrete, imperative, self-contained, in the
   second-person directive voice per `sys-skill-writing-voice` (no hedging, no
@@ -104,7 +106,7 @@ raw_prose: |
   the skill and choose `domain_tags` per `sys-skill-naming` and
   `sys-skill-tagging-rules`.
 
-  ## 3. Self-critique against R1–R9, then emit the verdict
+  ## 4. Self-critique against R1–R9
 
   Check the draft against the authoring contract in the corpus's
   `sys-skill-authoring-rules` (the R1–R9 quality rules) — all nine, with an
@@ -115,15 +117,11 @@ raw_prose: |
   than ad-hoc web research); date-stamping is N/A for claims with no version
   dependency. A rule that isn't N/A must pass, or the draft goes another round.
 
-  Then turn that evaluation into the **verdict artifact `review.yaml`** per
-  `sys-skill-review-verdict` — a per-rule `checks` map plus a hash of the final
-  skill bytes, written into the pack dir beside `pack.yaml`. This makes the
-  critique machine-checkable instead of prose-only: when the operator has the
-  semantic gate on (`AGENTALLOY_INSTALL_REQUIRE_REVIEW=1`), install-pack's Gate 1.5
-  requires this verdict. Emit it **after** validate-pack passes (step 4), so the
-  hash binds to the final bytes.
+  **Prepare the evaluation but do NOT emit `review.yaml` yet.** The hash in
+  `review.yaml` must bind to the final skill bytes (after validation), so emit it
+  only after the validation loop passes.
 
-  ## 4. Scaffold and validate
+  ## 5. Scaffold and validate
 
   Scaffold into the conventional location — **this path is load-bearing**: the exit
   gate and the approval command both check it, and a pack elsewhere cannot pass the
@@ -140,11 +138,14 @@ raw_prose: |
   Don't reach for `--allow-lint-warnings` unless the user has explicitly accepted
   a specific warning.
 
-  Once validate reports zero errors, emit the **verdict `review.yaml`** (step 3,
-  per `sys-skill-review-verdict`) into the pack dir now — the draft bytes are
-  final, so the hash it binds to is stable.
+  **Once validate reports zero errors, emit the verdict `review.yaml`** per
+  `sys-skill-review-verdict` — a per-rule `checks` map plus a hash of the final
+  skill bytes, written into the pack dir beside `pack.yaml`. The draft bytes are
+  now stable, so the hash binds correctly. This makes the critique machine-checkable:
+  when the operator has the semantic gate on (`AGENTALLOY_INSTALL_REQUIRE_REVIEW=1`),
+  install-pack's Gate 1.5 requires this verdict.
 
-  ## 5. Stop for human approval
+  ## 6. Stop for human approval
 
   Present the final skill content — the actual prose and fragments, not a summary —
   plus one line on what install will do (strict lint already passed; the dedup gate
@@ -155,7 +156,7 @@ raw_prose: |
       agentalloy install-pack .agentalloy/custom-skills/<pack-name>
 
   When the operator has the semantic gate on (`AGENTALLOY_INSTALL_REQUIRE_REVIEW=1`),
-  install-pack blocks at Gate 1.5 without the `review.yaml` verdict from step 3;
+  install-pack blocks at Gate 1.5 without the `review.yaml` verdict from step 5;
   `--allow-unreviewed` is the loud, recorded bypass — use it only if the operator
   explicitly waives the review.
 

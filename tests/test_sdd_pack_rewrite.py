@@ -16,12 +16,13 @@ import yaml
 
 _PACKS = Path(__file__).parent.parent / "src" / "agentalloy" / "_packs" / "sdd"
 
-# The six SDD workflow skills that carry the rewrite (sys-* are system skills,
+# The eight SDD workflow skills that carry the rewrite (sys-* are system skills,
 # sdd-fast and sdd-add-skill never referenced the contracts path).
 _SDD_WORKFLOW_SKILLS = [
     "sdd-intake.yaml",
     "sdd-spec-and-scoping.yaml",
-    "sdd-design-and-planning.yaml",
+    "sdd-design-and-architecture.yaml",
+    "sdd-plan-and-contracts.yaml",
     "sdd-build.yaml",
     "sdd-verify-and-review.yaml",
     "sdd-deliver-and-ship.yaml",
@@ -32,7 +33,7 @@ _SDD_WORKFLOW_SKILLS = [
 _PRE_BUILD_PHASES = {
     "sdd-intake.yaml",
     "sdd-spec-and-scoping.yaml",
-    "sdd-design-and-planning.yaml",
+    "sdd-design-and-architecture.yaml",
 }
 
 # Patterns that would instruct a denied action in pre-build phases:
@@ -139,7 +140,8 @@ def test_tc2_session_boundary_on_phase_advance() -> None:
     advancing_skills = {
         "sdd-intake.yaml",
         "sdd-spec-and-scoping.yaml",
-        "sdd-design-and-planning.yaml",
+        "sdd-design-and-architecture.yaml",
+        "sdd-plan-and-contracts.yaml",
         "sdd-build.yaml",
         "sdd-verify-and-review.yaml",
     }

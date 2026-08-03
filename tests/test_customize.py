@@ -126,7 +126,7 @@ def test_validate_valid_workflow_skill():
 # Load-bearing protection (against a real shipped default)
 # ---------------------------------------------------------------------------
 
-_WF_SKILL = "sdd-design-and-planning"
+_WF_SKILL = "sdd-design-and-architecture"
 _SYS_SKILL = "sys-ci"
 
 
