@@ -319,6 +319,10 @@ class StateClient:
         """Archive a contract."""
         return self._post(f"/contracts/{contract_id}/archive", {})
 
+    def archive_all(self) -> dict[str, Any]:
+        """Archive all active contracts and artifacts."""
+        return self._post("/state/archive-all", {})
+
     def supersede_contract(self, contract_id: str, new_contract: dict[str, Any]) -> dict[str, Any]:
         """Supersede a contract with a new revision."""
         return self._post(f"/contracts/{contract_id}/supersede", new_contract)

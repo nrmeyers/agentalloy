@@ -1026,3 +1026,80 @@ class TestPostureRewriteSoftFail:
         ):
             result = _rewrite_posture(tmp_path, "build", None)
             assert result == []
+
+
+# ---------------------------------------------------------------------------
+# TC10 — POST /state/archive-all
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveAll:
+    """TC10: POST /state/archive-all archives all active contracts and artifacts."""
+
+    def test_archive_all_archives_everything(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Archiving when there is work: returns counts > 0."""
+        # Seed active contracts
+        state_store.put_contract("ctr-arch-1", phase="build", slug="a", body="v1")
+        state_store.put_contract("ctr-arch-2", phase="design", slug="b", body="v2")
+        # Seed active artifacts
+        state_store.set_artifact("build", "a", "design.md", "# design")
+        state_store.set_artifact("design", "b", "spec.md", "# spec")
+
+        resp = state_client.post("/state/archive-all")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["contracts_archived"] == 2
+        assert body["artifacts_archived"] == 2
+
+        # Verify they are now archived
+        all_contracts = state_store.list_contracts(status="active")
+        assert len(all_contracts) == 0
+
+    def test_archive_all_nothing_to_archive(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Already archived: returns 409 with detail."""
+        resp = state_client.post("/state/archive-all")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "Nothing to archive — already archived"
+
+    def test_archive_all_only_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """When only contracts exist (no artifacts), archives just contracts."""
+        state_store.put_contract("ctr-arch-c", phase="build", slug="c")
+
+        resp = state_client.post("/state/archive-all")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["contracts_archived"] == 1
+        assert body["artifacts_archived"] == 0
+
+    def test_archive_all_only_artifacts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """When only artifacts exist (no contracts), archives just artifacts."""
+        state_store.set_artifact("build", "c", "art.md", "# art")
+
+        resp = state_client.post("/state/archive-all")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["contracts_archived"] == 0
+        assert body["artifacts_archived"] == 1
+
+    def test_archive_all_is_idempotent(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """A second archive-all returns 409 — nothing to archive the second time."""
+        state_store.put_contract("ctr-arch-idem", phase="build", slug="idem")
+
+        # First call succeeds
+        resp1 = state_client.post("/state/archive-all")
+        assert resp1.status_code == 200
+
+        # Second call returns 409
+        resp2 = state_client.post("/state/archive-all")
+        assert resp2.status_code == 409

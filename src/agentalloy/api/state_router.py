@@ -500,6 +500,25 @@ async def list_artifacts(
     return ArtifactListResponse(artifacts=[ArtifactResponse(**row) for row in cleaned])
 
 
+@router.post(
+    "/archive-all",
+    summary="Archive all active contracts and artifacts",
+)
+async def archive_all(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, int]:
+    """Archive every active contract and artifact in one transaction.
+
+    Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
+    When nothing needs archiving (everything is already archived), returns
+    HTTP 409 so callers can distinguish "nothing to do" from success.
+    """
+    result = await asyncio.to_thread(store.archive_all)
+    if result["contracts_archived"] == 0 and result["artifacts_archived"] == 0:
+        raise HTTPException(status_code=409, detail="Nothing to archive — already archived")
+    return result
+
+
 @router.get(
     "/{kind}",
     response_model=StateReadResponse,
