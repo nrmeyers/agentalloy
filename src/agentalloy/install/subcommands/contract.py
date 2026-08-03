@@ -513,6 +513,56 @@ def _artifact_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _artifact_show(args: argparse.Namespace) -> int:
+    """Show the content of a stored deliverable artifact.
+
+    Prints raw artifact body to stdout by default (no framing) so agents
+    can consume it as context.  Use ``--json`` for structured output.
+
+    Accepts either a positional ``phase/slug/name`` triple or individual
+    ``--phase``, ``--slug``, ``--name`` flags.
+    """
+    client = _get_client()
+
+    # Resolve phase/slug/name from triple or flags
+    phase, slug, name = None, None, None
+    if args.triple is not None:
+        parts = args.triple.split("/")
+        if len(parts) != 3:
+            print(
+                f"Error: triple must be phase/slug/name (got '{args.triple}')",
+                file=sys.stderr,
+            )
+            return 1
+        phase, slug, name = parts
+    else:
+        phase, slug, name = args.phase, args.slug, args.name
+
+    if not all([phase, slug, name]):
+        print(
+            "Error: provide either 'phase/slug/name' or --phase + --slug + --name.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        result_data = client.get_artifact(phase, slug, name)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    if result_data is None:
+        print(f"Error: artifact {phase}/{slug}/{name} not found", file=sys.stderr)
+        return 1
+
+    if args.json:
+        write_result(result_data, args, human_fn=lambda r: print(r["content"] or ""))
+    else:
+        # Non-JSON: print raw body (no header, no framing) for agent consumption
+        print(result_data.get("content") or "", end="")
+    return 0
+
+
 def _supersede(args: argparse.Namespace) -> int:
     """Supersede a contract with a new revision via StateClient."""
     client = _get_client()
@@ -563,6 +613,7 @@ _HANDLERS = {
     "edit": _edit,
     "supersede": _supersede,
     "artifact-set": _artifact_set,
+    "artifact-show": _artifact_show,
     "artifact-list": _artifact_list,
 }
 
@@ -662,6 +713,21 @@ def add_parser(
     alist_p.add_argument("--slug", default=None, help="Filter by slug.")
     alist_p.add_argument("--name-glob", default=None, help="fnmatch pattern over name.")
     add_json_flag(alist_p)
+
+    # artifact-show
+    ashow_p = sub.add_parser(
+        "artifact-show", help="Show the content of a stored deliverable artifact."
+    )
+    ashow_p.add_argument(
+        "triple",
+        nargs="?",
+        default=None,
+        help="Phase/slug/name triple, e.g. 'spec/add-telemetry/spec.md'.",
+    )
+    ashow_p.add_argument("--phase", default=None, help="Phase (spec, design, ...).")
+    ashow_p.add_argument("--slug", default=None, help="Task slug.")
+    ashow_p.add_argument("--name", default=None, help="Artifact name, e.g. 'spec.md'.")
+    add_json_flag(ashow_p)
 
     p.set_defaults(func=_run)
 
