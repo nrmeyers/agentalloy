@@ -525,3 +525,291 @@ class TestIssue503OverrideForwarding:
         assert result["blocked"] is False
         # The read-back must match: the write actually persisted.
         assert run_phase_get(root=repo_root)["phase"] == "ship"
+
+
+# ---------------------------------------------------------------------------
+# Issue #556 — design → plan artifact migration
+# ---------------------------------------------------------------------------
+
+
+def _write_design_tasks(repo_root: Path, slug: str = "01-auth") -> None:
+    """Record design artifacts (tasks.md, test-plan.md) the way a pre-split repo would."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    handle = phase_access(repo_root).contracts_handle()
+    handle.set_artifact(
+        "design",
+        slug,
+        "tasks.md",
+        "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
+    )
+    handle.set_artifact(
+        "design",
+        slug,
+        "test-plan.md",
+        "# Test Cases\n\n- When user logs in, return auth token\n",
+    )
+
+
+def _design_artifacts_in_plan(repo_root: Path, slug: str = "01-auth") -> bool:
+    """Return True if tasks.md and test-plan.md exist under phase=plan for *slug*."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    handle = phase_access(repo_root).contracts_handle()
+    plan_rows = handle.list_artifacts("plan", slug=slug)
+    names = {r["name"] for r in plan_rows}
+    return "tasks.md" in names and "test-plan.md" in names
+
+
+def _design_approach_exists(repo_root: Path) -> bool:
+    """Return True if approach.md still exists under design."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    handle = phase_access(repo_root).contracts_handle()
+    rows = handle.list_artifacts("design", name_glob="approach.md")
+    return len(rows) > 0
+
+
+class TestDesignToPlanMigration:
+    """#556 — design→plan artifact migration.
+
+    Auto-migrate tasks.md / test-plan.md from design→plan on first entry to
+    plan.  Design rows are left untouched.
+    """
+
+    @staticmethod
+    def _purge_stale(repo_root: Path) -> None:
+        """Remove ALL design/plan artifacts so this test starts clean.
+
+        The shared process-wide store accumulates 200+ design artifacts from
+        other tests; they poison the approval digest and the migration function.
+        """
+        from agentalloy.install.subcommands._state import phase_access
+
+        handle = phase_access(repo_root).contracts_handle()
+        # Purge design and plan artifacts across all slugs via raw SQL.
+        # The handle is the DuckDBStateStore bound by _bound_state_store.
+        handle.conn.execute(
+            "DELETE FROM sdd_contract WHERE repo=? AND phase IN ('design','plan')",
+            (handle._repo,),
+        )
+        # Also clear phase rows for design/plan (approval markers live in sdd_state)
+        handle.conn.execute(
+            "DELETE FROM sdd_state WHERE repo=? AND phase IN ('design','plan')",
+            (handle._repo,),
+        )
+
+    def test_migration_copies_artifacts_on_enter_plan(self, repo_root: Path) -> None:
+        """A repo with design tasks.md / test-plan.md gets them copied into plan."""
+        self._purge_stale(repo_root)
+        run_phase_set("design", root=repo_root)
+        # Write ALL design artifacts first, then approve — the digest must
+        # match _APPROVAL_STORE_NAME_GLOB["design"] = "*.md" because
+        # evaluate_phase_gate pre-check recomputes the digest with that glob.
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.signals.predicates import (
+            _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        handle = phase_access(repo_root).contracts_handle()
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "approach.md",
+            "# Approach\n## Approach\nSome approach\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "tasks.md",
+            "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "test-plan.md",
+            "# Test Cases\n\n- When user logs in, return auth token\n",
+        )
+        # Approve the digest over ALL design .md files.
+        rows = handle.list_artifacts("design", name_glob="*.md")
+        handle.set_approval("design", _artifact_digest(rows))
+
+        result = run_phase_set("plan", root=repo_root)
+        assert result["blocked"] is False
+        assert result["phase"] == "plan"
+        assert _design_artifacts_in_plan(repo_root)
+
+    def test_migration_preserves_design_rows(self, repo_root: Path) -> None:
+        """Design rows are NOT deleted — approval digest must remain valid."""
+        run_phase_set("design", root=repo_root)
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.signals.predicates import _artifact_digest
+
+        handle = phase_access(repo_root).contracts_handle()
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "approach.md",
+            "# Approach\n## Approach\nSome approach\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "tasks.md",
+            "# Tasks\n\n1. Implement auth endpoint\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "test-plan.md",
+            "# Test Cases\n\n- When user logs in, return auth token\n",
+        )
+        # Design gate uses since_name_glob: "approach.md" — approve only that.
+        rows = handle.list_artifacts("design", name_glob="approach.md")
+        handle.set_approval("design", _artifact_digest(rows))
+
+        run_phase_set("plan", root=repo_root)
+        assert _design_approach_exists(repo_root)
+
+    def test_re_entering_plan_does_not_overwrite(self, repo_root: Path) -> None:
+        """Migration is idempotent: re-entering plan preserves the plan artifacts."""
+        run_phase_set("design", root=repo_root)
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.signals.predicates import _artifact_digest
+
+        handle = phase_access(repo_root).contracts_handle()
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "approach.md",
+            "# Approach\n## Approach\nSome approach\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "tasks.md",
+            "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "test-plan.md",
+            "# Test Cases\n\n- When user logs in, return auth token\n",
+        )
+        # Design gate uses since_name_glob: "approach.md" — approve only that.
+        rows = handle.list_artifacts("design", name_glob="approach.md")
+        handle.set_approval("design", _artifact_digest(rows))
+
+        run_phase_set("plan", root=repo_root)
+        assert _design_artifacts_in_plan(repo_root)
+
+        # Re-enter plan — migration should skip because plan already has
+        # artifacts for this slug.
+        run_phase_set("plan", root=repo_root)
+        assert _design_artifacts_in_plan(repo_root)
+
+        # The plan artifact must still be exactly what was migrated.
+        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.md")
+        assert plan_tasks is not None
+        assert plan_tasks["content"] is not None
+        # Content is what was in design — unchanged by re-entry.
+
+    def test_plan_already_has_slug_is_untouched(self, repo_root: Path) -> None:
+        """If plan already holds a slug, design artifacts for that slug are skipped."""
+        run_phase_set("design", root=repo_root)
+
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.signals.predicates import (
+            _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        handle = phase_access(repo_root).contracts_handle()
+
+        # Write design artifacts — the slug that will be migrated into plan.
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "approach.md",
+            "# Approach\n## Approach\nSome approach\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "tasks.md",
+            "# Design Tasks\n\n1. Design task\n",
+        )
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "test-plan.md",
+            "# Test Cases\n\n- Design test\n",
+        )
+        # Pre-populate plan for the SAME slug — user already produced plan artifacts.
+        handle.set_artifact(
+            "plan",
+            "01-auth",
+            "tasks.md",
+            "# Custom Tasks\n\n1. Custom task\n",
+        )
+        handle.set_artifact(
+            "plan",
+            "01-auth",
+            "test-plan.md",
+            "# Custom Test Cases\n\n- Custom test\n",
+        )
+        # Design gate uses since_name_glob: "approach.md" — approve only that.
+        rows = handle.list_artifacts("design", name_glob="approach.md")
+        handle.set_approval("design", _artifact_digest(rows))
+
+        run_phase_set("plan", root=repo_root)
+
+        # The plan artifact must NOT have been overwritten by migration.
+        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.md")
+        assert plan_tasks["content"] == "# Custom Tasks\n\n1. Custom task\n"
+        plan_tests = handle.get_artifact("plan", "01-auth", "test-plan.md")
+        assert plan_tests["content"] == "# Custom Test Cases\n\n- Custom test\n"
+
+    def test_migration_requires_design_artifacts(self, repo_root: Path) -> None:
+        """No design tasks.md / test-plan.md → nothing to migrate."""
+        run_phase_set("design", root=repo_root)
+        # Design exit gate requires approach.md with ## Approach section.
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.signals.predicates import _artifact_digest
+
+        handle = phase_access(repo_root).contracts_handle()
+        handle.set_artifact(
+            "design",
+            "01-auth",
+            "approach.md",
+            "# Approach\n## Approach\nSome approach\n",
+        )
+        # Design gate uses since_name_glob: "approach.md" — approve only that.
+        rows = handle.list_artifacts("design", name_glob="approach.md")
+        handle.set_approval("design", _artifact_digest(rows))
+
+        result = run_phase_set("plan", root=repo_root)
+        assert result["blocked"] is False
+        assert result["phase"] == "plan"
+        # No artifacts were copied because there were none to copy.
+        assert not _design_artifacts_in_plan(repo_root)
+
+    def test_backward_transition_skips_migration(self, repo_root: Path) -> None:
+        """A backward transition to plan (spec→plan) skips migration."""
+        # Set to spec (forward), then do a backward transition to plan.
+        run_phase_set("spec", root=repo_root)
+        _approve(repo_root, "spec", "docs/spec/*.md")
+        run_phase_set("design", root=repo_root)
+        _write_design_tasks(repo_root)
+
+        # Now set to spec (backward), then set to plan (forward from spec perspective,
+        # but current=="design", so this is actually design→plan forward).
+        # To test a non-design→plan transition, go spec→plan directly (backward).
+        run_phase_clear(root=repo_root)
+        run_phase_set("spec", root=repo_root)
+        _approve(repo_root, "spec", "docs/spec/*.md")
+
+        # spec→plan is backward — current is "spec", not "design" → no migration.
+        run_phase_set("plan", root=repo_root, force=True)
+        assert run_phase_get(root=repo_root)["phase"] == "plan"
+        # No migration happened because current != "design".
+        assert not _design_artifacts_in_plan(repo_root)

@@ -38,7 +38,16 @@ SERVER_VERSION = "0.1.0"
 # "intake" (the session front door — never a compose probe target; the tool
 # defaults to "build"). tests/test_config_consistency.py asserts this stays in
 # lockstep with api.compose_models.Phase.
-MCP_PHASES = ("spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
+MCP_PHASES = (
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+)
 
 # JSON-RPC error codes (a subset of the standard set)
 PARSE_ERROR = -32700

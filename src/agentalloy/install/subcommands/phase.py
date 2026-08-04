@@ -29,7 +29,17 @@ logger = logging.getLogger(__name__)
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
-VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
+VALID_PHASES = (
+    "intake",
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+)
 
 SCHEMA_VERSION = 1
 
@@ -48,6 +58,7 @@ _APPROVAL_SINCE = {
 _APPROVAL_STORE_NAME_GLOB = {
     "spec": "*.md",
     "design": "*.md",
+    "plan": "*.md",  # tasks.md + test-plan.md (split from sdd-design-and-planning)
 }
 
 
@@ -78,6 +89,65 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
         "last_updated": state.last_updated,
         "workflow": state.workflow,
     }
+
+
+def _migrate_design_to_plan(store: Any) -> None:
+    """Auto-migrate design artifacts → plan on first entry to plan.
+
+    When a repo sits in ``design`` with ``tasks.md`` / ``test-plan.md`` stored
+    under ``phase=design`` (the state left by pre-split ``sdd-design-and-planning``
+    packs), the plan gate will immediately block on ``phase set plan`` because
+    those artifacts are keyed ``(repo, design, slug, name)`` while the gate
+    expects ``(repo, plan, slug, name)``.
+
+    This function runs **once** (idempotent guard below), copying only the
+    slugs that need it.  It does **not** touch design rows — design's recorded
+    approval is a digest over ``phase=design`` rows and removing them would
+    invalidate the digest.
+
+    Constraints:
+
+    - **Idempotent.**  If plan already holds an artifact for a slug, it is
+      skipped — the user may have edited it since the migration.
+    - **Slug-scoped.**  Only the slugs that appear in design are considered;
+      this is not a phase-wide copy.
+    - **Scope:** only ``design → plan``.  Other transitions are ignored.
+
+    Called by :func:`run_phase_set` after the gate passes but before the phase
+    row is written, so the user lands in plan with the artifacts already where
+    the plan gate expects them.
+    """
+    # 1. Collect slugs that have tasks.md or test-plan.md in design.
+    design_artifacts = store.list_artifacts("design") if store else []
+    design_slugs: dict[str, set[str]] = {}  # slug -> set of artifact names
+    for row in design_artifacts:
+        if row["name"] in ("tasks.md", "test-plan.md"):
+            design_slugs.setdefault(row["slug"], set()).add(row["name"])
+
+    if not design_slugs:
+        return  # nothing in design → nothing to migrate
+
+    # 2. Collect slugs that already exist in plan (active artifacts).
+    plan_artifacts = store.list_artifacts("plan") if store else []
+    plan_slugs: set[str] = {row["slug"] for row in plan_artifacts}
+
+    if not plan_slugs:
+        # Plan is completely empty: copy all design tasks.md / test-plan.md
+        # rows into plan so the plan gate is satisfied.
+        for slug, names in design_slugs.items():
+            for name in names:
+                art = store.get_artifact("design", slug, name)
+                if art is not None and art["content"] is not None:
+                    store.set_artifact("plan", slug, name, art["content"])
+    else:
+        # Plan already has some slugs: only copy for slugs that plan lacks.
+        for slug, names in design_slugs.items():
+            if slug in plan_slugs:
+                continue  # plan already has this slug — leave it alone
+            for name in names:
+                art = store.get_artifact("design", slug, name)
+                if art is not None and art["content"] is not None:
+                    store.set_artifact("plan", slug, name, art["content"])
 
 
 def _forward_gate_blocks(
@@ -226,6 +296,15 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
             "advisories": verdict.get("advisories", []),
             "reason": verdict.get("result", "not_met"),
         }
+
+    # Design → plan migration: auto-copy design's tasks.md / test-plan.md into
+    # plan so the plan gate is satisfied on first entry.  Runs after the gate
+    # passes (so the user got past approval + completeness) but *before* the
+    # phase write, so the user lands in plan with the artifacts already where
+    # the plan gate expects them.  The migration is idempotent — if plan already
+    # holds artifacts for a slug, it is skipped.
+    if current == "design" and phase == "plan":
+        _migrate_design_to_plan(gate_store)
 
     # Record who caused a real transition, mirroring the proxy's
     # `skill_loader._write_phase_atomic` — lets a *different* session's next

@@ -26,11 +26,14 @@ from agentalloy.signals.predicates import (
 INTAKE_PHASE = "intake"
 
 # Linear SDD phase graph: phase → next phase
+# "plan" is the new phase between design and build (split from the former
+# sdd-design-and-planning skill in PR #555).
 _PHASE_GRAPH: dict[str, str] = {
     "intake": "spec",  # entry phase: default (full) route. The fast route
     #                    overrides this with a next_phase_hint of "sdd-fast".
     "spec": "design",
-    "design": "build",
+    "design": "plan",  # design produces approach.md; plan produces tasks.md + test-plan.md
+    "plan": "build",  # plan breaks the approach into tasks with build contracts
     "build": "qa",
     "qa": "ship",
     "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
@@ -466,6 +469,7 @@ _APPROVAL_SINCE: dict[str, str] = {
 _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
     "spec": "*.md",
     "design": "*.md",
+    "plan": "*.md",
 }
 
 

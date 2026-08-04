@@ -73,7 +73,7 @@ _VALID_FRAGMENT_TYPES = frozenset(
 # and whose "review" never matched runtime "qa". Reconciled in Stage 3b;
 # "sdd-fast" (the fast-lane phase) added so sys skills can scope to it.
 _VALID_PHASES = frozenset(
-    {"intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill"}
+    {"intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill"}
 )
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
@@ -796,7 +796,7 @@ def _known_gate_predicates() -> set[str]:
     return set(PREDICATES) | set(SEMANTIC_PREDICATES)
 
 
-_STORE_BACKED_PHASES = frozenset({"spec", "design", "qa", "ship", "fast"})
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan", "qa", "ship", "fast"})
 
 
 def _validate_gate_spec(spec: Any, *, path: str = "exit_gates") -> list[str]:

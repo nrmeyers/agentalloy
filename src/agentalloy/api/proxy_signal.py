@@ -831,6 +831,21 @@ async def evaluate_signal(
                 next_phase_hint=route_hint,
             )
             if mutate and decision.should_transition and decision.to_phase:
+                # Design → plan migration: auto-copy design's tasks.md /
+                # test-plan.md into plan so the plan gate is satisfied on first
+                # entry.  Mirrors the CLI path's migration in phase.run_phase_set.
+                if phase == "design" and decision.to_phase == "plan":
+                    try:
+                        from agentalloy.install.subcommands.phase import (
+                            _migrate_design_to_plan,
+                        )
+
+                        _migrate_design_to_plan(ctx.store)
+                    except Exception:
+                        logger.debug(
+                            "design→plan migration failed — artifacts may be missing",
+                            exc_info=True,
+                        )
                 try:
                     _write_phase_atomic(cwd, decision.to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
