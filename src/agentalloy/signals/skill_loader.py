@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import subprocess
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -161,6 +162,48 @@ def _read_transitioned_by(project_root: Path) -> str | None:
     return (state.transitioned_by or None) if state else None
 
 
+def _record_phase_start_ref(project_root: Path) -> None:
+    """Stamp the current HEAD SHA as the phase-entry ref in the phase blob.
+
+    Read by the build→qa ``scope_touched_in_diff`` predicate (via
+    :func:`PredicateContext`'s ``project_root``) to diff what changed *during*
+    the phase. Fail-soft: a git failure or an unreachable store leaves the
+    marker untouched — the predicate then returns UNKNOWN (fail-open), never
+    NOT_MET, so an infra hiccup can't masquerade as a real phase-start to
+    block a legitimate advance. Called on a *real* phase transition
+    (``prev != phase``) from both the CLI (``run_phase_set``) and the proxy
+    auto-advance (``_write_phase_atomic``).
+
+    The stamp lives in the phase blob (``phase_start_ref``) — it is *not*
+    written to a repo-local file, so stamping a phase never touches the
+    working tree (see ``test_creates_no_repo_directory``).
+
+    .. note:: the proxy also relies on :meth:`DuckDBStateStore.write_phase`'s
+       carry-forward: an idempotent same-phase rewrite preserves an existing
+       ``phase_start_ref`` rather than clearing it.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=project_root,
+        )
+    except Exception:  # noqa: BLE001 — fail-soft by design
+        return
+    if result.returncode != 0 or not result.stdout.strip():
+        return
+    ref = result.stdout.strip()
+    view = _phase_view(project_root)
+    if view is None:
+        return
+    try:
+        view.set_phase_start_ref(ref)
+    except Exception:  # noqa: BLE001 — fail-soft by design
+        return
+
+
 def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | None = None) -> None:
     """Write *phase* to the store for *project_root*, then re-seed the cursor.
 
@@ -201,6 +244,10 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
     # in-phase idempotent rewrite (prev == phase) leaves a deliberately-set cursor
     # untouched. See B2 in docs/feedback-bcal-run-fixes.md.
     if prev != phase:
+        # Stamp the phase-entry HEAD SHA so the build→qa ``scope_touched_in_diff``
+        # gate can diff what changed *during* the phase. Fail-soft: a git failure
+        # leaves the marker untouched and the predicate fails open (UNKNOWN).
+        _record_phase_start_ref(project_root)
         from agentalloy.contracts import first_workitem_id
 
         # Clear stale scoped cursors from the old phase, then seed the shared cursor

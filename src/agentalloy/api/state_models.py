@@ -136,6 +136,7 @@ class PhaseReadResponse(StateReadResponse):
     started_at: str | None = None
     last_updated: str | None = None
     workflow: str | None = None
+    phase_start_ref: str | None = None
 
 
 # ---------------------------------------------------------------------------

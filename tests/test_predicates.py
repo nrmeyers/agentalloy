@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 from agentalloy.signals.predicates import (
     PredicateContext,
     PredicateResult,
+    _glob_files,
     approval_marker_path,
     approval_required,
     eval_approval_recorded,
@@ -29,6 +31,7 @@ from agentalloy.signals.predicates import (
     eval_git_state,
     eval_phase_in,
     eval_phase_not_in,
+    eval_scope_touched_in_diff,
     eval_tests_present,
     eval_tool_use_about_to_fire,
     evaluate_predicate,
@@ -816,3 +819,160 @@ def test_new_predicates_registered(tmp_path: Path) -> None:
     ctx = _design_ctx(tmp_path)
     assert evaluate_predicate("build_contracts_cover_tasks", {}, ctx) == MET
     assert evaluate_predicate("build_contract_tag_focus", {}, ctx) == MET
+
+
+# ---------------------------------------------------------------------------
+# scope_touched_in_diff  (build → qa gate: #513)
+# ---------------------------------------------------------------------------
+
+
+def _write_phase_start_ref(store: DuckDBStateStore, sha: str, phase: str = "build") -> None:
+    """Stamp the phase-entry ref marker the way ``_record_phase_start_ref`` does.
+
+    The stamp lives in the store's ``phase_start_ref`` blob field, not on disk.
+    Requires an existing phase row — writes ``phase`` if none exists yet.
+    """
+    store.write_phase(phase)
+    repo = store.for_repo(store._repo())  # type: ignore[attr-defined]
+    repo.set_phase_start_ref(sha)
+
+
+class _GitResult:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _git_run_factory(diff_paths: list[str], status_paths: list[str]):
+    """A fake subprocess.run for predicates: returns staged `diff_paths` and dirty `status_paths`."""
+
+    def fake(args: Any, **kw: Any) -> Any:
+        argv = args if isinstance(args, list) else [args]
+        if "diff" in argv:
+            return _GitResult(0, "\n".join(diff_paths) + ("\n" if diff_paths else ""))
+        if "status" in argv:
+            return _GitResult(0, "".join(f" M {p}\n" for p in status_paths))
+        return _GitResult(0, "")
+
+    return fake
+
+
+def _seed_build_contract(
+    tmp_path: Path, *, slug: str = "task-foo", scope_touches: list[str] | None = None
+) -> DuckDBStateStore:
+    """Create a store with a build-phase contract. Returns the open store for further setup."""
+    store = _make_store(tmp_path)
+    repo = store._repo()  # type: ignore[attr-defined]
+    touches_json = json.dumps(scope_touches if scope_touches is not None else [])
+    store.execute(
+        f"""INSERT INTO sdd_contract
+            (repo, contract_id, slug, domain_tags, work_item, phase, status, scope_touches, scope_avoids, updated_at)
+            VALUES ('{repo}', 'c-001', '{slug}', '[]', NULL, 'build', 'active', '{touches_json}', '[]', CURRENT_TIMESTAMP)"""
+    )
+    return store
+
+
+def test_path_in_scope_matches_prefix_glob_and_exact() -> None:
+    from agentalloy.signals.predicates import _path_in_scope
+
+    assert _path_in_scope("src/api/handler.py", ["src/api/**"])
+    assert _path_in_scope("src/auth/user.py", ["src/auth"])  # directory prefix
+    assert _path_in_scope("src/auth/user.py", ["src/auth/"])  # trailing slash ok
+    assert _path_in_scope("src/router.py", ["src/router.py"])  # exact path
+    assert not _path_in_scope("tests/x.py", ["src/api/**"])
+    assert not _path_in_scope("src/api/handler.py", ["src/web/**"])
+
+
+def test_scope_touched_in_diff_unknown_when_no_phase_start_marker(tmp_path: Path) -> None:
+    _seed_build_contract(tmp_path)  # has a contract, but no phase-start marker
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
+
+
+def test_scope_touched_in_diff_met_when_scope_touched(tmp_path: Path) -> None:
+    store = _seed_build_contract(tmp_path, scope_touches=["src/api/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["src/api/handler.py"], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == MET
+
+
+def test_scope_touched_in_diff_not_met_when_changes_outside_scope(tmp_path: Path) -> None:
+    store = _seed_build_contract(tmp_path, scope_touches=["src/api/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["tests/test_handler.py"], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == NOT_MET
+
+
+def test_scope_touched_in_diff_not_met_when_no_changes(tmp_path: Path) -> None:
+    store = _seed_build_contract(tmp_path, scope_touches=["src/api/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory([], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == NOT_MET
+
+
+def test_scope_touched_in_diff_unknown_when_git_fails(tmp_path: Path) -> None:
+    store = _seed_build_contract(tmp_path, scope_touches=["src/api/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=OSError("no git"),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
+
+
+def test_scope_touched_in_diff_unknown_when_no_contract(tmp_path: Path) -> None:
+    # Store present but no active build contract → can't scope.
+    _make_store(tmp_path).close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
+
+
+def test_scope_touched_in_diff_unknown_when_scope_undeclared(tmp_path: Path) -> None:
+    store = _seed_build_contract(tmp_path, scope_touches=[])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
+
+
+def test_scope_touched_in_diff_unknown_when_no_phase(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, current_phase=None)
+    assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# _glob_files / artifact_exists directory regression (#513)
+# ---------------------------------------------------------------------------
+
+
+def test_glob_files_returns_only_files(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("x")
+    (tmp_path / "src" / "sub").mkdir()  # a subdirectory, no files under it
+    matched = _glob_files(tmp_path, "src/**/*")
+    # The ``src/sub`` directory is excluded; only the real file remains.
+    assert matched == [tmp_path / "src" / "main.py"]
+    assert all(f.is_file() for f in matched)
+
+
+def test_artifact_exists_excludes_empty_directory(tmp_path: Path) -> None:
+    """#513: a bare, empty ``src/`` dir must NOT satisfy artifact_exists{path: src/**}."""
+    (tmp_path / "src").mkdir()
+    assert eval_artifact_exists({"path": "src/**"}, _ctx(tmp_path)) == NOT_MET

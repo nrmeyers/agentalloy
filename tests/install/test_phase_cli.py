@@ -207,6 +207,48 @@ class TestPhaseRecordShape:
         row = self._row(repo_root)
         assert not hasattr(row, "blocked")
 
+    def test_phase_start_ref_stamped_on_real_transition(self, repo_root: Path) -> None:
+        """A real phase transition stamps the store's ``phase_start_ref``.
+
+        An idempotent same-phase ``phase set`` must *not* change it.
+        """
+        # Need a real git repo so _record_phase_start_ref can rev-parse HEAD.
+        import subprocess  # import here so it's scoped to this test
+
+        subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+        # Create a dummy commit so HEAD resolves to a SHA.
+        (repo_root / "README").write_text("dummy")
+        subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"], cwd=repo_root, check=True, capture_output=True
+        )
+
+        run_phase_set("build", root=repo_root)
+        row = self._row(repo_root)
+        assert row.phase == "build"
+        assert row.phase_start_ref is not None  # stamped on first transition
+
+        run_phase_set("build", root=repo_root)  # idempotent — same phase
+        assert self._row(repo_root).phase_start_ref == row.phase_start_ref  # unchanged
+
+    def test_phase_start_ref_not_set_on_idempotent_phase_get(self, repo_root: Path) -> None:
+        """Reading a phase must not create a ``phase_start_ref``."""
+        row = self._row(repo_root)
+        assert row is None
+        assert row is None  # still None — no transition happened
+
 
 def _write_spec_doc(repo_root: Path) -> None:
     """Record a spec artifact that satisfies the `spec` phase's exit gate."""

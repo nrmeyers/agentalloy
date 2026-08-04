@@ -1,8 +1,12 @@
 """CI guard: pack content edits must bump the pack's version field.
 
-This test is a no-op when PACK_GUARD_BASE_REF is unset (local runs without a
-base ref must not fail).  In CI it is driven by
-``PACK_GUARD_BASE_REF=${{ github.event.pull_request.base.sha }}``.
+The base ref is ``PACK_GUARD_BASE_REF`` if set; otherwise it defaults to
+``merge-base(HEAD, origin/main)`` so local runs, pre-commit, push, and CI all
+ask the same question ("which packs did this branch change relative to main?")
+and retargeting a PR cannot change the verdict.  CI no longer sets the env —
+both sides compute the merge-base.  Only when ``origin/main`` cannot be
+resolved (shallow clone with no network, fresh orphan worktree) does the guard
+skip, and loudly — never a silent pass.
 
 Propagation is version-gated BY DESIGN to preserve the SkillVersion rollback
 chain (see PR #99/#104).  Editing pack files without a version bump means the
@@ -138,18 +142,74 @@ def _git_show_version(ref: str, pack: str, repo_root: Path) -> str | None:
     return str(data["version"])
 
 
+def _git_merge_base(ref: str, repo_root: Path) -> str | None:
+    """Return ``merge-base(HEAD, ref)`` SHA, or None if ``ref`` is absent / git fails."""
+    result = subprocess.run(
+        ["git", "merge-base", "HEAD", ref],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    return out or None
+
+
+def _git_fetch(remote: str, branch: str, repo_root: Path) -> bool:
+    """Best-effort ``git fetch <remote> <branch>``; False on failure (offline, no remote)."""
+    result = subprocess.run(
+        ["git", "fetch", "--quiet", remote, branch],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=repo_root,
+    )
+    return result.returncode == 0
+
+
+def _resolve_base_ref(repo_root: Path) -> str | None:
+    """Resolve the pack-guard base ref, defaulting to ``merge-base(HEAD, origin/main)``.
+
+    Tries the local ``origin/main`` remote-tracking ref first; if absent (shallow
+    clone, fresh worktree without the ref), attempts a best-effort
+    ``git fetch origin main`` and retries.  Returns None only when ``origin/main``
+    cannot be resolved at all — the caller then skips *loudly*, never silently.
+    """
+    mb = _git_merge_base("origin/main", repo_root)
+    if mb:
+        return mb
+    if _git_fetch("origin", "main", repo_root):
+        return _git_merge_base("origin/main", repo_root)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # The guard test
 # ---------------------------------------------------------------------------
 
 
 def test_pack_version_bump_guard() -> None:
-    """Fail if any pack's content changed but its version was not bumped."""
+    """Fail if any pack's content changed but its version was not bumped.
+
+    The base ref is ``PACK_GUARD_BASE_REF`` if set, else
+    ``merge-base(HEAD, origin/main)``.  Never skips silently on an unset env —
+    that made the guard invisible locally and on push.  It skips only when
+    ``origin/main`` genuinely cannot be resolved, and then loudly.
+    """
+    repo_root = Path(__file__).parent.parent
+
     base_ref = os.environ.get("PACK_GUARD_BASE_REF", "").strip()
     if not base_ref:
-        pytest.skip("PACK_GUARD_BASE_REF not set — skipping pack version bump guard")
-
-    repo_root = Path(__file__).parent.parent
+        base_ref = _resolve_base_ref(repo_root) or ""
+    if not base_ref:
+        pytest.skip(
+            "Could not resolve a base ref for the pack version bump guard: "
+            "PACK_GUARD_BASE_REF is unset and merge-base(HEAD, origin/main) is "
+            "unavailable (no origin/main and fetch failed or was offline). "
+            "Set PACK_GUARD_BASE_REF explicitly or run with network access."
+        )
 
     changed_files = _git_diff_names(base_ref, repo_root)
     if not changed_files:
@@ -260,11 +320,35 @@ def test_unit_multiple_packs_only_some_bumped() -> None:
     assert failures[0].pack == "beta"
 
 
-def test_unit_skip_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When PACK_GUARD_BASE_REF is empty/unset the test must skip, not fail."""
+def test_unit_skip_loudly_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Env unset AND origin/main unresolvable → skip loudly, never a silent pass."""
     monkeypatch.delenv("PACK_GUARD_BASE_REF", raising=False)
+
+    def _no_merge_base(ref: str, root: Path) -> str | None:
+        return None
+
+    def _no_fetch(remote: str, branch: str, root: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(f"{__name__}._git_merge_base", _no_merge_base)
+    monkeypatch.setattr(f"{__name__}._git_fetch", _no_fetch)
     with pytest.raises(pytest.skip.Exception):  # type: ignore[attr-defined]
         test_pack_version_bump_guard()
+
+
+def test_unit_env_set_overrides_merge_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit PACK_GUARD_BASE_REF wins; the merge-base resolver is never called."""
+    monkeypatch.setenv("PACK_GUARD_BASE_REF", "deadbeef")
+
+    def _no_diff(base: str, root: Path) -> list[str]:
+        return []
+
+    def _boom_resolve(root: Path) -> str | None:
+        raise AssertionError("merge-base resolver must not run when env is set")
+
+    monkeypatch.setattr(f"{__name__}._git_diff_names", _no_diff)
+    monkeypatch.setattr(f"{__name__}._resolve_base_ref", _boom_resolve)
+    test_pack_version_bump_guard()  # returns early — no pack changes
 
 
 def test_unit_changed_files_capped_at_ten_in_message() -> None:

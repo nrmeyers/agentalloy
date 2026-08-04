@@ -50,9 +50,11 @@ jobs:
         run: uv run pytest -m "not integration and not container"
 
       - name: Pack version bump guard (pull_request only)
+        # No PACK_GUARD_BASE_REF env: the test defaults to
+        # merge-base(HEAD, origin/main), so CI asks the same question as local
+        # runs and retargeting a PR cannot change the verdict. origin/main is
+        # fetched on demand if the shallow checkout lacks it.
         if: github.event_name == 'pull_request'
-        env:
-          PACK_GUARD_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: uv run pytest tests/test_pack_version_bump_guard.py::test_pack_version_bump_guard -q
 
   # Split from `quality` so the image build runs in parallel with lint/type/

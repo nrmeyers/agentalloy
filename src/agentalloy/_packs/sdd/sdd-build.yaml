@@ -20,8 +20,11 @@ prose_invariants:
   - "agentalloy task next"
 exit_gates:
   all_of:
-    - artifact_exists:
-        path: "src/**"
+    # Prove the build touched the declared scope (``scope.touches`` of the
+    # active build contract) — diffs <phase-entry SHA>..HEAD since entering
+    # build. Replaces the vacuous ``artifact_exists{path:"src/**"}`` which
+    # matched any repo that merely *has* a ``src/`` dir, even empty (#513).
+    - scope_touched_in_diff: {}
     # Stack-aware: pytest, or JS/TS (Vitest/Jest) when package.json is present.
     # Packs may extend via `extra_globs`. Replaces the old hardcoded tests/**/*.py.
     - tests_present: {}
