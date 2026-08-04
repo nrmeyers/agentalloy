@@ -36,7 +36,9 @@ LLAMA_EMBED_PORT = 47951
 EMBED_HOST = "127.0.0.1"
 # llama-server batch size — keeps throughput high for pack ingest without
 # requiring a fat context window.
-LLAMA_UBATCH_SIZE = 2048
+LLAMA_UBATCH_SIZE = 4096
+# CPU feeds GPU during bulk embed; 4 avoids starving other work.
+LLAMA_EMBED_THREADS = 4
 # Seconds to wait for llama-server /health before giving up.
 LLAMA_START_TIMEOUT = 120
 
@@ -171,6 +173,10 @@ def _start_llama_server(
         "mean",
         "--port",
         str(LLAMA_EMBED_PORT),
+        "--threads",
+        str(LLAMA_EMBED_THREADS),
+        "--threads-embed",
+        str(LLAMA_EMBED_THREADS),
         "--ubatch-size",
         str(LLAMA_UBATCH_SIZE),
     ]
