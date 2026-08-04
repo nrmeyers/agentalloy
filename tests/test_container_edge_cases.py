@@ -355,7 +355,7 @@ class TestEntrypointLlamaServers:
 
         script = _build_entrypoint_script("")
         assert (
-            'llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"'
+            'llama-server --threads 4 --threads-embed 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"'
             in script
         )
         assert "EMBED_PID=$!" in script
