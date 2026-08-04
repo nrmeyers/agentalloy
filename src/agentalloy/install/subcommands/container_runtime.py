@@ -501,7 +501,7 @@ def _build_entrypoint_script(packs: str) -> str:
         "# them up. Start them before uvicorn so /readiness reflects a usable",
         "# service.",
         'echo ">> Starting embed llama-server on 47951..."',
-        'llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &',
+        'llama-server --threads 4 --threads-embed 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &',
         "EMBED_PID=$!",
         'echo ">> Starting reranker llama-server on 47952..."',
         "# CPU-optimal slot config (--parallel 1 -c 2048): the container llama build",
