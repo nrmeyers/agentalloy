@@ -591,12 +591,12 @@ class TestDesignToPlanMigration:
         # The handle is the DuckDBStateStore bound by _bound_state_store.
         handle.conn.execute(
             "DELETE FROM sdd_contract WHERE repo=? AND phase IN ('design','plan')",
-            (handle._repo,),
+            (handle._repo(),),
         )
         # Also clear phase rows for design/plan (approval markers live in sdd_state)
         handle.conn.execute(
             "DELETE FROM sdd_state WHERE repo=? AND phase IN ('design','plan')",
-            (handle._repo,),
+            (handle._repo(),),
         )
 
     def test_migration_copies_artifacts_on_enter_plan(self, repo_root: Path) -> None:
@@ -664,8 +664,9 @@ class TestDesignToPlanMigration:
             "test-plan.md",
             "# Test Cases\n\n- When user logs in, return auth token\n",
         )
-        # Design gate uses since_name_glob: "approach.md" — approve only that.
-        rows = handle.list_artifacts("design", name_glob="approach.md")
+        # Approve the digest over ALL design .md files to match
+        # _APPROVAL_STORE_NAME_GLOB["design"] = "*.md" used by pre-check.
+        rows = handle.list_artifacts("design", name_glob="*.md")
         handle.set_approval("design", _artifact_digest(rows))
 
         run_phase_set("plan", root=repo_root)
