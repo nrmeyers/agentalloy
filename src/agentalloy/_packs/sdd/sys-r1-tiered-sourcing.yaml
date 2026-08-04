@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — meta pack, defines registry-driven
   R1 source-fetch procedure replacing ad-hoc web research. References fixtures/upstream/registry.yaml
   + fixtures/upstream/curated/. 2026-07-14: converted from _packs/meta/sys-r1-tiered-sourcing.md

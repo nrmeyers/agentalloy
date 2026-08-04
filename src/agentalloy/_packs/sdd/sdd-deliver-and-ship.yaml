@@ -52,19 +52,19 @@ contract_template: |
 
   ## Delivery
 
-  Summary, PR link, and rollback plan live in docs/ship/{{task_slug}}.md.
+  Summary, PR link, and rollback plan live in the ship artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
-author: navistone
-change_summary: "two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
+author: agentalloy
+change_summary: "two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → ship artifact record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
 raw_prose: |
   # SDD — Ship (Deliver)
 
-  **Checkpoint first.** You MUST confirm QA signed off (`docs/qa/<slug>.md`, the bar green and the
+  **Checkpoint first.** You MUST confirm QA signed off (the qa artifact is green and the
   review clean) before shipping — if not, you skipped QA; STOP and go back. You MUST write
-  `docs/ship/<slug>.md` with its **Summary** and **Rollback**, and you MUST ship only what QA
+  the ship artifact with its **Summary** and **Rollback**, and you MUST ship only what QA
   approved — no last-minute changes that never went through the gate.
 
   QA signed off: the bar is green and the review is clean. Ship delivers that
@@ -76,7 +76,7 @@ raw_prose: |
 
   Read your work-item contract (`agentalloy contract show <slug>`, which qa
   authored — the proxy front-loaded the delivery skills for it on entry). Ship
-  rides on QA's report (`docs/qa/<slug>.md`) — don't re-run the review. Just
+  rides on QA's report (the qa artifact) — don't re-run the review. Just
   confirm the commit you're shipping *is* the reviewed one: the suite is green at
   HEAD and nothing landed after sign-off. If code changed since QA, it isn't
   verified — back to `qa`.
@@ -97,7 +97,7 @@ raw_prose: |
 
   ## 3. Record the delivery
 
-  Write `docs/ship/<slug>.md` with `## Summary` (what shipped, the PR link, the
+  Write the ship artifact with `## Summary` (what shipped, the PR link, the
   release-notes or changelog entry) and `## Rollback` (how to reverse this exact
   change — the revert commit, the flag to flip, any data migration to undo). The
   PR is external and ephemeral; this record persists in the repo. Update the

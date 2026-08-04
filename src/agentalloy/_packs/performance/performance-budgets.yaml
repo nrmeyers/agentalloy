@@ -7,7 +7,7 @@ domain_tags: [slo, error-budget, p99, drift-detection, when-to-stop-optimizing]
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Google SRE Workbook ch. 4 "Service Level Objectives" https://sre.google/workbook/implementing-slos/ (verified 2026-05-04 against fixtures/upstream/curated/sre.yaml topic `slo`); web.dev performance budgets https://web.dev/performance-budgets-101/; internal review history on optimizations that improved one metric while regressing another. Skill scope: setting performance targets and using them to decide when to optimize and when to stop; not measurement (covered in measure-before-optimizing), not bottleneck identification (covered in finding-the-bottleneck).
 

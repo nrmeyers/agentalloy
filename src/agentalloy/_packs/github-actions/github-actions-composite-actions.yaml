@@ -16,7 +16,7 @@ phase_scope:
 - build
 category_scope:
 - ops
-author: navistone
+author: agentalloy
 change_summary: |
   hand-authored Opus expansion
   Deprecated 2026-06-03: superseded by github-actions-reusable-workflows

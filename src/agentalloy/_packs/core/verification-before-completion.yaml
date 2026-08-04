@@ -7,7 +7,7 @@ domain_tags: [evidence-before-assertions, run-the-tests, ci-output, partial-pass
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — internal review history (docs/skill-review-history/2026-04-28-batch-2-stack-foundations.md) for the "claimed passing without running" failure modes; pytest exit-code semantics from https://docs.python.org/3.13/library/unittest.html and pytest official docs (curated/python.yaml `topics.testing_idioms`). Skill scope: the discipline of running verification commands and reading the output before declaring work complete; not test-writing (covered in test-driven-development).
 

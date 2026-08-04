@@ -14,7 +14,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |
   # GitHub Actions — Immutable Releases and Tag Strategy

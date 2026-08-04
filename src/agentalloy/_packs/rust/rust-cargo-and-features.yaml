@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — Cargo Book https://doc.rust-lang.org/cargo/index.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `packaging_and_dependency_management`); Manifest reference https://doc.rust-lang.org/cargo/reference/manifest.html; Features reference https://doc.rust-lang.org/cargo/reference/features.html; Workspaces reference https://doc.rust-lang.org/cargo/reference/workspaces.html; SemVer compatibility https://doc.rust-lang.org/cargo/reference/semver.html; Cargo team blog post on the lockfile question (2023). Skill scope: how `Cargo.toml` is structured, how features compose under cargo's unification rule, how workspaces share a lockfile and inherit metadata, what the modern lockfile-commit guidance is for binaries vs libraries, and how SemVer interacts with version-requirement operators on crates.io. Out of scope: the build-script (`build.rs`) protocol beyond a brief mention, custom registries, and `cargo` plugin authoring.
 raw_prose: |

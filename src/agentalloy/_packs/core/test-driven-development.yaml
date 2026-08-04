@@ -16,7 +16,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: 'Initial authoring 2026-05-04. Sources — Kent Beck''s *Test-Driven
   Development By Example* (2002) for the red/green/refactor cadence; pytest docs https://docs.python.org/3.13/library/unittest.html
   and curated/python.yaml `topics.testing_idioms` for Python framework conventions;

@@ -14,7 +14,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus source after 14B failed structural authoring
 raw_prose: |-
   # Webhooks — Documentation Patterns

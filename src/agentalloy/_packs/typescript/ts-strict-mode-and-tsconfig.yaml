@@ -7,7 +7,7 @@ domain_tags: [strict-mode, no-unchecked-indexed-access, target-es-version, modul
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — TypeScript handbook https://www.typescriptlang.org/docs/handbook/intro.html (verified 2026-05-04 against fixtures/upstream/curated/typescript.yaml, version_anchor 5.7); tsconfig reference https://www.typescriptlang.org/tsconfig/; TypeScript 5.7 release notes https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-7.html. Skill scope: configuring tsc strict mode, picking the right tsconfig flags, project references for monorepos; not bundler-specific config (tsup, vite, esbuild — covered in tooling), not framework-specific tsconfig (Next.js, Nuxt — covered in framework packs).
 

@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — System.Text.Json API reference https://learn.microsoft.com/en-us/dotnet/api/system.text.json?view=net-9.0 (verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `serialization_json_binary`); System.Text.Json overview https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/overview; source-generation https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/source-generation?view=net-9.0; polymorphism https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/polymorphism?view=net-9.0; converters https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/converters-how-to?view=net-9.0. Known gap (per curated csharp.yaml) — learn.microsoft.com versioned subtrees can redirect to a different .NET version; verify the `view=net-9.0` query parameter resolves to the .NET 9 page and not a redirect to net-8.0/net-7.0. Skill scope: System.Text.Json on .NET 9 / C# 13 — JsonSerializer entry points, JsonSerializerOptions caching, source-generated serializers, attribute model, polymorphic (de)serialization, custom JsonConverter, Utf8JsonWriter/Reader hot paths, anti-patterns. Out of scope: Newtonsoft.Json migration matrix (mentioned only at boundary), ASP.NET Core integration, XML/binary serializers.
 raw_prose: |

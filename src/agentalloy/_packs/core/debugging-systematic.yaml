@@ -7,7 +7,7 @@ domain_tags: [reproduce-the-bug, hypothesis-driven, git-bisect, log-analysis, ro
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — git-bisect docs (https://git-scm.com/docs/git-bisect), curated/python.yaml `topics.error_handling_and_exceptions` for stdlib traceback handling, internal review history for "fix the symptom not the cause" failure modes. Skill scope: the systematic loop of reproduce → hypothesize → test → narrow; not language-specific debugger UX.
 

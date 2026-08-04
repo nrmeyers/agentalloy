@@ -16,7 +16,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — std::thread https://doc.rust-lang.org/std/thread/index.html, std::sync https://doc.rust-lang.org/std/sync/index.html, await expression https://doc.rust-lang.org/reference/expressions/await-expr.html, std::future::Future https://doc.rust-lang.org/std/future/trait.Future.html, The Rust Programming Language ch16 https://doc.rust-lang.org/book/ch16-00-concurrency.html (all verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `concurrency_and_async`). Honest authorship note: per the curated yaml's known_gaps, Rust stdlib defines the `Future` trait and `async`/`await` syntax but ships no async runtime. tokio (https://docs.rs/tokio/1/tokio/, tokio 1.x line) is community-canonical for servers and is used here as the de facto runtime; smol and async-std exist but are not stdlib. tokio examples in this skill are scaffolded around stdlib semantics — original authoring, not a verbatim copy of upstream prose. Skill scope: `Send`/`Sync` auto-traits, `std::thread::spawn` with channel-based communication, the lazy `Future` poll model, tokio basics (`#[tokio::main]`, `tokio::spawn`, `tokio::sync::Mutex`, `tokio::sync::mpsc`, `tokio::select!`), cancellation safety, and the canonical "MutexGuard held across .await" deadlock. Out of scope: pinning internals beyond a brief note, lock-free programming, executor implementation.
 raw_prose: |

@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — TypeScript handbook on modules https://www.typescriptlang.org/docs/handbook/2/modules.html (verified 2026-05-04 against fixtures/upstream/curated/typescript.yaml topic `packaging_and_dependency_management`); declaration files https://www.typescriptlang.org/docs/handbook/declaration-files/introduction.html; module resolution https://www.typescriptlang.org/docs/handbook/module-resolution.html. Skill scope: ESM and CJS interop, .d.ts authoring, package.json `exports` field, dual-package hazard; not bundler-specific configuration (covered in tooling packs).
 

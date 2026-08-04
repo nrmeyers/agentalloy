@@ -7,7 +7,7 @@ domain_tags: [path-resolution, files-readstring-writestring, directorystream-wal
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — java.nio.file package summary https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/package-summary.html (verified 2026-05-06 against fixtures/upstream/curated/java.yaml topic `io_and_filesystem`); java.nio.file.Path https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Path.html (verified 2026-05-06); java.io package summary https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/package-summary.html (verified 2026-05-06). Skill scope: java.nio.file (NIO.2) on Java 21 LTS — `Path`, `Files`, directory streams, atomic move, `FileChannel`/`ByteBuffer`, `WatchService`, charsets, anti-patterns. Out of scope: networking (`java.net.http`), JSON/binary serialization (no stdlib canonical), build tooling.
 

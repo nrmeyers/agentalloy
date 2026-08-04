@@ -149,7 +149,7 @@ def _validate_gate_path_stores(record: Any) -> list[str]:
     return errors
 
 
-_STORE_BACKED_PHASES = frozenset({"spec", "design", "qa", "ship", "fast"})
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan", "qa", "ship", "fast"})
 
 
 def _walk_gate_paths(spec: Any, errors: list[str]) -> None:

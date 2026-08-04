@@ -9,7 +9,7 @@ domain_tags:
 always_apply: false
 phase_scope: [intake, spec, ship]
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: "golden default: forge-native issues with a customize point for dedicated trackers (Linear/Jira)"
 raw_prose: |
   # Issue tracking

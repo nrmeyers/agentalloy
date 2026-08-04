@@ -7,7 +7,7 @@ domain_tags: [keep-a-changelog, version-bump-mapping, breaking-changes, unreleas
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Keep a Changelog v1.1.0 https://keepachangelog.com/en/1.1.0/ (verified 2026-05-04 against fixtures/upstream/curated/changelog.yaml topic `keep_a_changelog`); semver spec https://semver.org/; conventional commits spec https://www.conventionalcommits.org/en/v1.0.0/ for the auto-generation pattern. Skill scope: writing and maintaining a changelog — what to record, how to group, how to align with semver; not commit message style (covered in core/git-workflow), not release notes for marketing (covered in workflow/release).
 

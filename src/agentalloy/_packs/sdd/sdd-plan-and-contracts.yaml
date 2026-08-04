@@ -1,0 +1,260 @@
+skill_id: sdd-plan-and-contracts
+canonical_name: SDD — Plan (sdd-plan)
+description: "Turn the design approach into an ordered task plan, unit test cases, and one build contract per task — recorded as tasks.md and test-plan.md via agentalloy contract artifact-set --phase plan --slug <slug>, with agentalloy contract init --phase build --slug <NN-slug> for each task."
+category: operational
+skill_class: workflow
+domain_tags:
+  - spec-driven-development
+  - planning
+  - task-breakdown
+  - test-cases
+  - build-contracts
+requires: []
+always_apply: false
+applies_to_phases:
+  - plan
+# Load-bearing command tokens not derivable from exit_gates: how the agent writes
+# artifacts, creates build contracts, and advances. A customization may reword
+# the prose but must keep these verbatim.
+#
+# `agentalloy task next` is load-bearing beyond this phase: it advances the
+# work-item cursor, and every later phase resolves "which task am I on" from it
+# (qa's codify gate resolves its slug cursor-first — the literal predicate name
+# is deliberately not written here: test_codify_guards greps pack text for it).
+# Plan is
+# where the work items are created, so plan is where the cursor command has to be
+# taught — dropping it from a customization leaves the cursor mechanism
+# undocumented at the only phase that introduces it.
+prose_invariants:
+  - "agentalloy phase set build"
+  - "agentalloy approve plan"
+  - "agentalloy task next"
+exit_gates:
+  all_of:
+    - artifact_exists:
+        phase: plan
+        name: tasks.md
+    - artifact_contains:
+        phase: plan
+        name: tasks.md
+        sections:
+          - Tasks
+    - artifact_exists:
+        phase: plan
+        name: test-plan.md
+    - artifact_contains:
+        phase: plan
+        name: test-plan.md
+        sections:
+          - Test Cases
+    # §6 density floor: ONE build contract PER TASK. Counts top-level items
+    # under ## Tasks in tasks.md and requires at least that many build contracts.
+    - build_contracts_cover_tasks:
+        tasks_from_store: true
+        phase: plan
+        slug: "{slug}"
+    # Tag-focus hard gate: each build contract must center ONE dominant tech
+    # surface — ≤2 domain_tags. NOT_MET names the offender + its tag count.
+    - build_contract_tag_focus:
+        phase: plan
+        slug: "{slug}"
+    # Human-in-the-loop checkpoint: plan→build requires a recorded approval.
+    # `since_name_glob` covers the plan artifacts so editing them after
+    # approval invalidates the marker. --force never bypasses this.
+    - approval_recorded:
+        since_name_glob: "*.md"
+signal_keywords:
+  - done with plan
+  - ready to build
+  - next phase
+contract_template: |
+  ---
+  phase: plan
+  task_slug: {{task_slug}}
+  route: full
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## Scope in a sentence
+
+  <what this changes, and the boundary of "this">
+
+  ## Plan
+
+  Tasks and test cases are recorded as plan artifacts
+  (tasks.md, test-plan.md) via
+  `agentalloy contract artifact-set --phase plan --slug {{task_slug}}`.
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
+phase_scope: []
+category_scope: [process]
+author: agentalloy
+change_summary: "split from sdd-design-and-planning: plan handles task decomposition, test cases, and build contracts; design handles approach, decisions, and rationale only. MIGRATION: `agentalloy task next` is now asserted as a prose invariant (it advances the work-item cursor every later phase resolves its task from, including qa's codify gate), and §5 names DEFAULT_K_BY_PHASE where it explains the k≈4 density floor. A pre-existing enabled profile override for this skill that lacks the `agentalloy task next` token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
+raw_prose: |
+  # SDD — Plan
+
+  **Checkpoint first.** You MUST confirm the design artifact exists by running:
+
+      agentalloy contract artifact-list --phase design --slug <slug>
+
+  and verifying it carries an **Approach**. If it does not, you skipped design;
+  STOP and record it. You MUST NOT write any `src/` code in this phase: plan
+  produces artifacts and contracts only, recorded via
+  `agentalloy contract artifact-set --phase plan --slug <slug>` and
+  `agentalloy contract init --phase build --slug <slug>`. There is no file
+  to write — if you are editing source, you are in the wrong phase.
+
+  Design settled the approach and decisions. Plan turns that into an ordered
+  task plan, unit test cases that prove each task correct, and one build
+  contract per task. Building from a plan is faster and less error-prone than
+  building from nothing — this is where you make that happen.
+
+  ## 1. Start from the spec and design
+
+  Read the spec artifact (`agentalloy contract artifact-list --phase spec
+  --slug <slug>`) and the design artifact (`agentalloy contract artifact-list
+  --phase design --slug <slug> --name approach.md`). The spec's acceptance and
+  non-goals are fixed; design's approach and decisions are fixed. Your job is
+  to decompose them into buildable tasks.
+
+  ## 2. Slice it vertically, in dependency order
+
+  Decompose into thin slices that each deliver a working, testable path —
+  schema + API + UI for one capability — not horizontal layers (all schema,
+  then all API). Order so foundations come first and every slice leaves the
+  system green. Each task names the spec acceptance it satisfies; don't invent
+  new acceptance here — that's spec's job.
+
+  A slice may span schema + API + UI, but each *task* inside it should resolve
+  to ONE dominant tech surface — don't basket many surfaces into a single task.
+  Keep tasks small: one focused session each. If you're writing "and" in a task
+  title, it's two tasks.
+
+  ## 3. Design the unit test cases
+
+  This is yours, not build's: with the whole design in front of you and no code
+  to bias you, decide what proves each task correct. Write the cases as
+  *behaviors* — input/condition, expected result, and the spec acceptance
+  (AC-N) each one closes — covering the happy path, the boundaries, and the
+  failure modes you can foresee. Build turns these into real tests and adds the
+  edges it uncovers; you specify the cases, not the test code.
+
+  Write: "When the user submits form X, the API returns HTTP 200 with the
+  created resource body." Don't write: `def test_submit_form(): assert
+  response.status_code == 200`. Behaviors, not code.
+
+  Designing the test is where you catch a design that can't actually be verified
+  — better here than mid-build. If a task has no clear test cases, the design
+  is incomplete; go back and surface it rather than proceeding.
+
+  ## 4. Record it
+
+  Plan fans out into named artifacts build reads from — two load-bearing ones,
+  with the exact section headers the gates check:
+
+      agentalloy contract artifact-set --phase plan --slug <task-slug> \
+        --name tasks.md      --body <text>   # the ordered worklist, under `## Tasks`
+      agentalloy contract artifact-set --phase plan --slug <task-slug> \
+        --name test-plan.md  --body <text>   # the unit cases, under `## Test Cases`
+
+  Then **verify tasks.md and test-plan.md exist with their required sections**.
+  That completes the artifact recording.
+
+  ## 5. Emit one build contract per task
+
+  **MUST: emit ONE build contract per task — never one whole-feature contract.**
+  Build retrieval is budgeted to a small ~4-skill cap per contract. A single
+  contract that carries every task's tags spreads that budget across all of
+  them, so most surfaces get zero skills. One contract per task, centered on
+  one surface, keeps the budget on target. Design is the cheap place to do it,
+  with the whole plan in front of you:
+
+      agentalloy contract init --phase build --slug <NN-task-slug>   # NN = 01, 02, … sets order
+
+  `init` stamps each build contract with `work_item:` (this plan item's slug,
+  from the active plan cursor) so the density and tag-focus gates judge *your*
+  item alone — sibling items still mid-plan never block yours, and vice versa.
+
+  In each, fill `domain_tags` with that task's *technology surface* — **one
+  dominant surface plus at most one adjacent**, so **MUST: ≤2 `domain_tags` per
+  contract** (`[react]`, `[fastapi, async]`, `[typescript, pure-functions]`),
+  **not** a union of every surface in the feature and **not** process words
+  (`build`, `coding`). Narrow tags are the whole point: retrieval pulls a fixed
+  number of fragments per contract — `DEFAULT_K_BY_PHASE` puts build at k≈4 —
+  so with that cap and the token budget, same-surface candidates let the reranker
+  separate cleanly and the right fragments reach the agent; pile on 5–7 surfaces
+  and the important fragments truncate and the scores muddy.
+
+  **MUST: tag the most *specific* surface the task implements, not the generic
+  framework it happens to use.** A task that builds a feature behavior with its
+  own domain (calendar navigation, date math, a charting axis) MUST carry that
+  feature tag (`[calendar]`), **not** the framework it's written in (`[react]`).
+  A framework tag retrieves framework boilerplate and starves the feature's
+  domain skill — a navigation task mistagged `[react]` is exactly why
+  month-navigation guidance never reached build even though the skill existed.
+  When unsure, name the surface the *acceptance criteria* are about, not the
+  language.
+
+  Then write the `## Task` body as a self-contained description of what to
+  implement. That body becomes build's retrieval prompt: the proxy composes
+  the skills matching it and front-loads them with the task, so build never has
+  to decide what it needs. Set `scope.touches/avoids` and name the `## Test
+  cases` (the test-plan.md cases by AC-N). The contracts sort by their `NN-`
+  prefix — that's build's worklist order.
+
+  Anti-pattern (a real calendar build that starved): one contract tagged
+  `[frontend, react, typescript, vite, calendar, css-grid, vitest]` — 7
+  surfaces, so at k≈4 the reranker never sees same-surface candidates and most
+  fragments truncate. Pattern: split it into per-surface tasks, each ≤2 tags —
+  the date layer `[calendar]`, the scaffold `[vite, react]`, the components
+  `[react, css-grid]`, the tests `[vitest]`. Four focused contracts, four clean
+  retrievals.
+
+  ## 6. Present and stop
+
+  Then **PRESENT the plan, test cases, and all build contracts in full and
+  STOP** — do not advance yourself. The forward jump to build is a human
+  checkpoint: only once the user explicitly approves do you run
+  `agentalloy approve plan` (it records the approval and carries you into
+  build) — or, after approval, advance with `agentalloy phase set build` and
+  work the contracts top to bottom with `agentalloy task next` — that command
+  advances the work-item cursor, which is how every later phase knows which
+  task it is on (qa's codify gate resolves its slug from it).
+  Phase advance ends this session; the next phase begins in a fresh one,
+  and `agentalloy resume` rebuilds context. The phase guard refuses the jump until
+  `tasks.md`, `test-plan.md`, and one build contract per task exist with ≤2
+  tags each AND a human approval is recorded, so a premature `phase set` just
+  names what's missing.
+
+  **Before you hand off, ask the user whether they want this work on a new
+  branch, and wait for their answer.** Build is the first phase that writes
+  `src/`, so this is the last moment the question is free. Don't branch on your
+  own initiative and don't assume the current branch is right — ask, then do what
+  they say. Asking here rather than earlier is deliberate: phase advance ends the
+  session, so an answer given in spec or design would have to survive two session
+  boundaries before anything could act on it.
+
+  Switching branches in place is safe — the artifact store is keyed by repo path,
+  not by branch, so `approach.md`, `tasks.md`, `test-plan.md`, and the build
+  contracts all follow you. A new **worktree** is a different path and therefore a
+  different store key: the artifacts do NOT follow, and build would start empty.
+  If the user wants a worktree, say so before they create it.
+
+  ## Not this
+
+  Don't write code — plan is read-only; the moment you're editing `src/`
+  you've skipped to build. Don't re-litigate the spec's scope or acceptance; if
+  plan reveals the spec was wrong, fix it there (`agentalloy phase set spec`),
+  don't quietly redefine it. Don't collapse the worklist into one all-tech
+  contract — a single `[react, typescript, fastapi, duckdb, …]` body for the
+  whole feature is the anti-pattern this phase exists to prevent: at k≈4 it
+  front-loads two surfaces and starves the rest. One single-surface contract
+  per task, ≤2 tags, always.

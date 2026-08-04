@@ -23,7 +23,8 @@ _PACKS = Path(__file__).parent.parent / "src" / "agentalloy" / "_packs" / "sdd"
 _FORWARD: dict[str, list[str]] = {
     "sdd-intake.yaml": ["phase set spec", "phase set sdd-fast", "phase set add-skill"],
     "sdd-spec-and-scoping.yaml": ["phase set design"],
-    "sdd-design-and-planning.yaml": ["phase set build"],
+    "sdd-design-and-architecture.yaml": ["phase set plan"],
+    "sdd-plan-and-contracts.yaml": ["phase set build"],
     "sdd-build.yaml": ["phase set qa"],
     "sdd-verify-and-review.yaml": ["phase set ship"],
     "sdd-fast.yaml": ["phase set qa"],  # fast merges into the standard qa → ship
@@ -98,7 +99,7 @@ def test_self_drive_language_present() -> None:
     # the phases that self-advance carry the "stop and surface it" escape hatch.
     for name in (
         "sdd-spec-and-scoping.yaml",
-        "sdd-design-and-planning.yaml",
+        "sdd-design-and-architecture.yaml",
         "sdd-build.yaml",
     ):
         prose = _prose(name).lower()

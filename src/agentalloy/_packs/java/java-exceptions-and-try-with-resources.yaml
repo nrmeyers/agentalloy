@@ -7,7 +7,7 @@ domain_tags: [checked-exception-policy, try-with-resources-closing, suppressed-e
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — java.lang.Throwable API https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Throwable.html, java.lang.Exception API https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Exception.html, JLS SE 21 §14.20 (the try statement, including try-with-resources) https://docs.oracle.com/javase/specs/jls/se21/html/jls-14.html#jls-14.20 (verified 2026-05-06 against fixtures/upstream/curated/java.yaml topic `error_handling_and_exceptions`). Skill scope: Throwable hierarchy and the checked-vs-unchecked split, `try`/`catch`/`finally` with multi-catch (Java 7), `try-with-resources` and `AutoCloseable.close()` ordering, suppressed exceptions via `Throwable.getSuppressed()`, the Java 9+ effectively-final resource form, custom exception type design and cause chaining, and `InterruptedException` cooperative-cancellation policy; not logging frameworks, not Spring/Jakarta exception translation, not JUnit assertion exceptions.
 

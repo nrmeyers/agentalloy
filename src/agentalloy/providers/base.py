@@ -383,6 +383,7 @@ def _next_phase_label(phase: str) -> str:
         "intake": "run intake to capture the request",
         "spec": "write the spec document",
         "design": "produce the design artifacts",
+        "plan": "decompose the design into tasks, test cases, and build contracts",
         "build": "work the design's tasks with tests",
         "qa": "record the QA review document",
         "ship": "write the ship summary and rollback plan",

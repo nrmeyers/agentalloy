@@ -7,7 +7,7 @@ domain_tags: [semver, lockfile, breaking-changes, transitive-deps, upgrade-one-a
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — semver spec https://semver.org/ (verified 2026-05-04 against fixtures/upstream/curated/semver.yaml topic `version_ranges`); pnpm lockfile docs https://pnpm.io/git#lockfiles; Renovate/Dependabot best-practices guides; internal review history on big-bang upgrades that flushed out 5 unrelated breakages at once. Skill scope: the discipline of moving a project from one version of a dependency to another without breaking it; not initial dependency selection (architectural), not security-vuln triage (covered in security pack).
 

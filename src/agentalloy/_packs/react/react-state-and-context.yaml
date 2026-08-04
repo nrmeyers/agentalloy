@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — React managing state https://react.dev/learn/managing-state, useReducer reference https://react.dev/reference/react/useReducer, useContext reference https://react.dev/reference/react/useContext, createContext reference https://react.dev/reference/react/createContext, extracting state logic into a reducer https://react.dev/learn/extracting-state-logic-into-a-reducer, scaling up with reducer and context https://react.dev/learn/scaling-up-with-reducer-and-context, useSyncExternalStore reference https://react.dev/reference/react/useSyncExternalStore (all verified 2026-05-06 via tier-2 llms_url procedure against react.dev/llms-index, react.dev/hooks-ref, react.dev/effect-pitfalls). Skill scope: `useState` patterns (scalar, object spread, functional update, lazy init), `useReducer` with discriminated-union action types, lifting state up as the default before context, `createContext` + `Provider` + `useContext`, the reducer-plus-context "scaling up" pattern, and the decision boundary to an external store via `useSyncExternalStore` (Zustand, Jotai, Redux, TanStack Query for server state). React 19+ era. Out of scope: class components, legacy `contextTypes`, React Native specifics, `useDeferredValue`/`useTransition` beyond a passing reference.
 raw_prose: |

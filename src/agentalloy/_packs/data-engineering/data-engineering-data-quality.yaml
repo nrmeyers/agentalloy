@@ -14,7 +14,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |
   # Data Quality with Great Expectations and dbt Tests

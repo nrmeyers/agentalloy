@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Google Engineering Practices Code Review guide (https://google.github.io/eng-practices/review/), internal review history (docs/skill-review-history/2026-04-28-batch-2-stack-foundations.md). Skill scope: discipline of giving and receiving review feedback; PR-shaping and pre-review verification (covered in verification-before-completion).
 

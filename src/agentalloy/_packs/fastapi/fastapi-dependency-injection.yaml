@@ -13,7 +13,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: "Initial authoring 2026-05-06 — scaffolded with citations against fastapi.tiangolo.com docs (tutorial/dependencies, sub-dependencies, dependencies-with-yield, global-dependencies, classes-as-dependencies). Not a verbatim copy of upstream prose."
 raw_prose: |
   # FastAPI Dependency Injection (Depends, Sub-deps, yield Cleanup, Class Deps, Caching)

@@ -22,12 +22,12 @@ from typing import Any
 
 from agentalloy.api.state_client import StateClientError
 
-_APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
-_STORE_BACKED_PHASES = frozenset({"spec", "design"})
+_APPROVABLE = ("spec", "design", "plan", "sdd-fast", "add-skill")
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan"})
 # sdd-fast (docs/fast/*.md) and add-skill (a custom-skill YAML, not a phase
 # deliverable body at all) keep their packs' disk-glob exit gates for now —
-# only spec/design packs were moved to the artifact store by this migration
-# (see specs/final_migration.md). Extending the rest is a follow-up.
+# spec/design (and plan, added with the design/plan split) are store-backed.
+# Extending the remaining two is a follow-up.
 _DISK_EXIT_ARTIFACT_GLOB = {
     "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
@@ -107,10 +107,19 @@ def run_approve(
     marker_desc: str
 
     if phase in _STORE_BACKED_PHASES:
+        from agentalloy.signals.gates import (  # noqa: PLC0415
+            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
+        )
         from agentalloy.signals.predicates import _artifact_digest  # noqa: PLC0415
 
         handle = access.contracts_handle()
-        rows = handle.list_artifacts(phase)
+        # MUST digest exactly the set the gate re-digests when it checks the
+        # marker. Approving over a wider set than the gate's `since_name_glob`
+        # records a digest that can never match, so the approval silently never
+        # counts. Live for design now that the split narrowed its glob to
+        # approach.md while a pre-split repo may still hold tasks.md and
+        # test-plan.md under phase=design.
+        rows = handle.list_artifacts(phase, name_glob=_APPROVAL_STORE_NAME_GLOB.get(phase))
         if not rows:
             return {
                 "ok": False,

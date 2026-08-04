@@ -36,7 +36,7 @@ ContractStatus = Literal["active", "archived", "superseded"]
 ContractRoute = Literal["full", "sdd-fast", "add-skill"]
 
 # SDD phases that a contract may belong to.
-ContractPhase = Literal["intake", "spec", "design", "build", "qa", "ship"]
+ContractPhase = Literal["intake", "spec", "design", "plan", "build", "qa", "ship"]
 
 
 # ---------------------------------------------------------------------------

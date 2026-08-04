@@ -47,24 +47,35 @@ class TestNormalizeGatePath:
 
 class TestDeriveInvariants:
     def test_real_sdd_skill_derives_path_tokens(self) -> None:
-        path = Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-design-and-planning.yaml"
-        data: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # Post-split: design produces approach.md; plan produces tasks.md,
+        # test-plan.md and build contracts via the store API.
+        design = (
+            Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-design-and-architecture.yaml"
+        )
+        data: dict[str, Any] = yaml.safe_load(design.read_text(encoding="utf-8"))
         inv = derive_invariants(data)
-        # The deterministic gate paths must surface as invariants.
         assert "approach.md" in inv
+
+        plan = Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-plan-and-contracts.yaml"
+        data: dict[str, Any] = yaml.safe_load(plan.read_text(encoding="utf-8"))
+        inv = derive_invariants(data)
         assert "tasks.md" in inv
         assert "test-plan.md" in inv
-        # After the contract-store rewrite, build contracts are no longer
-        # addressed by a filesystem path — the gate uses the store API instead.
         assert "agentalloy phase set build" in inv
         assert "agentalloy task next" in inv
 
     def test_shipped_prose_satisfies_its_own_invariants(self) -> None:
         # A shipped skill must never violate its own linter, or every
         # customization would be impossible.
-        path = Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-design-and-planning.yaml"
-        data: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert check_prose(data["raw_prose"], derive_invariants(data)) == []
+        design = (
+            Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-design-and-architecture.yaml"
+        )
+        plan = Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-plan-and-contracts.yaml"
+        for name in (design, plan):
+            data: dict[str, Any] = yaml.safe_load(name.read_text(encoding="utf-8"))
+            assert check_prose(data["raw_prose"], derive_invariants(data)) == [], (
+                f"{name.name} failed"
+            )
 
     def test_all_bundled_workflow_skills_satisfy_own_invariants(self) -> None:
         # CI guard: every bundled workflow skill's prose must contain all of its

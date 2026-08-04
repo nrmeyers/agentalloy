@@ -1,6 +1,6 @@
 skill_id: sdd-intake
 canonical_name: SDD — Intake (sdd-intake)
-description: "Open every session: check for work in progress (resume or new), then for new work run a short intent interview, decide full SDD vs the fast lane vs the add-skill lane (custom-skill authoring), and write a contract that hands off to the chosen route."
+description: "Open every session: check for work in progress, run a short intent interview, decide full SDD vs fast lane vs add-skill, and write a contract."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -12,14 +12,13 @@ requires: []
 always_apply: false
 applies_to_phases:
   - intake
-# Load-bearing command tokens not derivable from exit_gates: the forward routes
-# out of intake. A customization may reword the prose but must keep these
-# verbatim, or the phase machine has no documented way to advance.
+# Load-bearing advance commands — must be present for prose validation.
 prose_invariants:
   - "agentalloy phase set spec"
   - "agentalloy phase set sdd-fast"
   - "agentalloy phase set add-skill"
 exit_gates:
+  # §3: intake must produce a contract for the next phase.
   contract_exists:
     phase: spec
 signal_keywords:
@@ -45,25 +44,20 @@ contract_template: |
   # {{task_slug}}
 
   ## What the user actually wants
-
-  <one-paragraph restatement of the request in concrete, checkable terms>
+  <one-paragraph restatement>
 
   ## Intent signals
-
   - intent: <new-build | change-existing | investigate | review | other>
   - artifact_type: <feature | fix | refactor | doc | spike | ...>
   - scope: <small | medium | large> — <what it touches / avoids>
   - urgency: <now | soon | someday>
 
   ## Proposed route
+  <full SDD, sdd-fast, or add-skill, and why>
 
-  <full SDD, sdd-fast (the fast lane), or add-skill (custom-skill authoring), and why — default is full>
-# Workflow skills are selected by applies_to_phases (signal layer), not by
-# phase_scope, so this is left empty and scoped via category instead.
-phase_scope: []
 category_scope: [process]
-author: navistone
-change_summary: "third route out of intake: add-skill (custom-skill authoring for the local corpus) alongside full and fast — route on requests to add/create/teach a skill rather than change code; two-tier cascade and resume-aware front door unchanged"
+author: agentalloy
+change_summary: "decision tree for lane selection, present-and-stop hand-off, explicit phase validation via agentalloy phase get"
 raw_prose: |
   # SDD — Intake
 
@@ -76,8 +70,11 @@ raw_prose: |
 
   ## 1. Resume or new?
 
-  The injected session state (or the current phase from the store) tells you the current
-  phase. If it names a phase other than `intake`, there's work in flight — say
+  First, confirm the current phase by running:
+
+      agentalloy phase get
+
+  If the output names a phase other than `intake`, there's work in flight — say
   where the user left off (the phase + the active contract from `agentalloy contracts list`)
   and ask: **pick up there, or start something new?**
 
@@ -89,24 +86,22 @@ raw_prose: |
 
   ## 2. Frame it (briefly)
 
-  Ask only what you can't infer. You need just enough to answer one question —
-  **full SDD, the fast lane, or the add-skill lane?**
+  You need enough context to answer one question — **which route?** Apply the
+  decision tree below in order. The first match wins:
 
-  - **Full** (`spec → design → build → qa → ship`): new surface area, real design
-    choices, multiple components, risky or hard to reverse, or fuzzy acceptance.
-  - **Fast** (`sdd-fast` — one compressed spec-build-test-deliver): you could
-    confidently land it in a single PR with an obvious "done" — a small fix, a
-    localized change, a well-understood tweak.
-  - **Add-skill** (`add-skill` — custom-skill authoring): the user isn't asking
-    for a code change at all — they want to add, create, or teach you a skill for
-    this repo's AgentAlloy corpus ("remember how we do X", "add a skill for our
-    deploy process"). The deliverable is an installed corpus skill.
+  1. **Is the user asking you to add, create, or teach something?** (e.g.
+     "remember how we do X", "add a skill for our deploy process") → **add-skill**.
+     The deliverable is an installed corpus skill, not a code change.
+  2. **Is the task small, bounded, and obvious?** (e.g. "fix this typo", "add
+     a validation check", "tweak the button color") → **fast**.
+  3. **Otherwise** → **full** (`spec → design → build → qa → ship`).
+     New surface area, real design choices, multiple components, risky or
+     hard to reverse, or fuzzy acceptance. When in doubt, choose full.
 
-  When in doubt between full and fast, choose **full**. The fast lane is only for
-  work that's *clearly* bounded — and if `sdd-fast` turns out harder than it
-  looked, it bails back to `spec`, so under-calling it isn't a trap. The add-skill
-  lane isn't a judgment call about size — it's simply whether the ask is a corpus
-  skill rather than a code change.
+  You don't need a full interview for the fast or add-skill lanes — a sentence
+  is enough. For full SDD, ask only what you're missing: the *what*, the scope,
+  and any constraints (deadline, stack, non-goals). Don't propose solutions —
+  that's spec's job.
 
   ## 3. Hand off the next phase's work-item
 
@@ -124,17 +119,23 @@ raw_prose: |
   concrete restatement of what the user wants. That body becomes the next phase's
   retrieval prompt: on entry the proxy front-loads the skills matching it, so the
   next phase starts already primed. Set `scope.touches` too. Writing the contract
-  completes intake. Advance to the route you agreed: `agentalloy phase set spec`
-  for the full lane, `agentalloy phase set sdd-fast` for the fast lane, or
-  `agentalloy phase set add-skill` for custom-skill authoring. (The
-  contract write also advances on the next turn, so the new phase opens either
-  way; running it yourself just keeps you moving now.) Phase advance ends this
-  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
-  context. Stop here only if the route itself is genuinely unclear — surface that
-  and let the user make the call.
+  completes intake.
+
+  Then **PRESENT the contract in full and STOP** — do not advance yourself. The
+  forward jump is a human checkpoint: only once the user explicitly approves do
+  you advance, with the command matching the lane you picked in §2:
+
+      agentalloy phase set spec        # full lane
+      agentalloy phase set sdd-fast    # fast lane
+      agentalloy phase set add-skill   # custom-skill authoring
+
+  Phase advance ends this session; the next phase begins in a fresh one, and
+  `agentalloy resume` rebuilds context. Stop here only if the route itself is
+  genuinely unclear — surface that and let the user make the call.
 
   ## Not this
 
-  Intake is light, not a gate to fight. Don't write the spec, acceptance
-  criteria, or a design here — just enough to know *what* the work is and
-  *which lane* it takes. Once you hand off, normal phase composition resumes.
+  Intake is light — don't fight the process, but don't skip the gate either.
+  Don't write the spec, acceptance criteria, or a design here. The contract
+  *is* the gate: you can't advance without one. Just don't over-engineer what
+  goes into it.

@@ -72,96 +72,138 @@ contract_template: |
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
-author: navistone
-change_summary: "two-tier cascade: spec reads its incoming work-item from the contract store (intake authored) and hands off by seeding design's work-item in the store with the design-surface domain_tags + a body that becomes design's retrieval prompt; spec doc stays the single acceptance source (assumptions → checkable acceptance → non-goals, docs/spec/<slug>.md)"
+author: agentalloy
+change_summary: "outcomes-first spec: code-index + knowledge-graph reconnaissance informs outcome questions; always recommend when presenting options; code-index/knowledge-graph for reconnaissance only, not method decisions; prepare hand-off wording aligned with checkpoint model"
 raw_prose: |
   # SDD — Spec
 
-  **Checkpoint first.** You MUST confirm intake's contract exists
-  (`agentalloy contract show <slug>`) before scoping — if it does not, you skipped
-  intake; STOP and go back.
-  You MUST record the spec via `agentalloy contract artifact-set --phase spec
-  --slug <slug> --name spec.md --body <text>` (or `--body-file -` for stdin)
-  with its **Acceptance Criteria** and **Out of Scope** sections. There is no
-  file to write — this is a store write, not a docs/ document. You MUST NOT
-  design solutions or touch `src/` here — spec settles *what* and *done*,
-  never *how*.
+  **Checkpoint first.** You MUST confirm intake's contract exists by running:
 
-  Intake handed you a contract: the *what*, and a decision that this needs the
-  full lane. Your job is the highest-leverage step in the pipeline — turn that
-  fuzzy "what" into a spec precise enough that design and build can't drift:
-  scope, checkable acceptance, explicit non-goals. Bad specs cascade downstream
-  into bad designs and bad code; this is where you stop them.
+      agentalloy contract show <slug>
 
-  ## 1. Start from the contract
+  (Replace `<slug>` with the active contract slug — run `agentalloy contracts list` to find
+  it if you're not sure.) If it does not exist, you skipped intake; STOP and go back.
 
-  Read your work-item contract (`agentalloy contract show <slug>`) — the work-item intake
-  handed you (the request and agreed scope), and the domain skills the proxy already
-  front-loaded from it on entry. Sharpen what's there; don't re-interview from
-  scratch.
+  You MUST record the spec via `agentalloy contract artifact-set --phase spec --slug <slug>
+  --name spec.md --body <text>` (or `--body-file -` for stdin) with its **Acceptance
+  Criteria** and **Out of Scope** sections. There is no file to write — this is a store
+  write, not a filesystem document. You MUST NOT design solutions or touch `src/` here — spec
+  settles *what* and *done*, never *how*.
 
-  ## 2. Surface your assumptions first
+  You have one job: turn the intake contract's fuzzy ask into a spec precise enough that
+  design and build can't drift from it. Bad specs cascade downstream into bad designs and
+  bad code — this is where you stop them.
 
-  Before writing a line of spec, list what you're assuming — stack, data model,
-  auth, the boundary of "this" — and have the user correct them:
+  ## 1. Ground your questions in the codebase
 
-      Assuming: session cookies (not JWT), Postgres (existing schema), web only.
+  Before you ask the user anything, understand what's possible in this codebase.
+  Use the tools available in your tool set — the code-index and knowledge-graph
+  queries — to find answers about the existing codebase. These aren't design
+  tools; they're reconnaissance tools. You're preparing to ask the user about
+  outcomes, and you can't ask good questions if you don't understand the terrain.
+
+  - **Code-index**: What are the entry points? What patterns does this repo
+    follow? What's the data flow? (e.g. "the app has a FastAPI entry at
+    `/api/v1` with Pydantic models in `models/`")
+  - **Knowledge graph**: What domain concepts exist? What are the relationships
+    between entities? What constraints are baked in? (e.g. "User → Order →
+    Payment with a status transition constraint")
+
+  This is reconnaissance, not design. Query the code-index and knowledge graph
+  to inform your questions — don't use them to make method decisions. If you
+  don't have code-index or knowledge-graph tools available, skip reconnaissance
+  and proceed from the intake contract.
+
+  ## 2. Ask about outcomes — not methods
+
+  The user's job is to say what they want. Your job is to understand and clarify.
+
+  Ask about **outcomes** — what should *happen* when the work is done, not *how* it
+  happens. The method is design's call.
+
+  When the user describes their goal, decide what outcomes they need:
+
+  - **One clear outcome?** Confirm it's specific enough to test.
+  - **Multiple outcomes?** Present them as a numbered list and have the user prioritize.
+  - **Two or more reasonable options?** Present both as options with a recommendation.
+
+  When you present options, **always include your recommendation**. The user has context
+  about their goals that you don't — but you have context about the codebase and
+  trade-offs that they don't. Present the options, recommend, and let the user decide.
+
+  Example:
+
+      Option A: User authenticates via session cookies.
+      Option B: User authenticates via OAuth (GitHub).
+      Recommendation: A — simpler, and the user base doesn't currently need SSO.
+      B can be added later if needed.
+
+  The how — which pattern to follow, which library to use, how to structure the code —
+  is design's job. Your job is to make sure the user knows what they're asking for.
+
+  ## 3. Surface your assumptions
+
+  Before writing acceptance criteria, list what you're assuming — the scope of "this,"
+  the constraints you're working within, the things you're *guessing* about the context.
+  Have the user correct them:
+
+      Assuming: this changes the API only (not the UI), the data model stays the same,
+      and we're targeting 4G connectivity.
       Correct me now, or I build on these.
 
-  A silent assumption is the most expensive misunderstanding there is. The spec
-  exists to surface them *before* code does.
+  A silent assumption is the most expensive misunderstanding there is. The spec exists to
+  surface them *before* code does.
 
-  ## 3. Reframe the ask into checkable acceptance
+  ## 4. Reframe into checkable acceptance
 
-  Translate every vague want into a condition a test or a person can mark
-  true/false:
+  Translate every outcome into a condition a test or a person can mark true/false:
 
       "make the dashboard faster"  →  LCP < 2.5s on 4G, data load < 500ms
 
-  If you can't make a requirement checkable, it isn't a requirement yet —
-  resolve it with the user, don't guess.
+  If you can't make a requirement checkable, it isn't a requirement yet — resolve it
+  with the user, don't guess.
 
-  ## 4. Name what you're NOT doing
+  ## 5. Name what you're NOT doing
 
-  Write the non-goals down. An "Out of Scope" list is the cheapest scope control
-  there is, and the first thing you point at when the work starts to sprawl.
+  Write the non-goals down. An "Out of Scope" list is the cheapest scope control there
+  is, and the first thing you point at when the work starts to sprawl.
 
-  ## 5. Record it + hand off
+  ## 6. Record it + prepare the hand-off
 
-  The **spec artifact** is the deliverable and the single source of truth for
-  acceptance — record it with `agentalloy contract artifact-set --phase spec
-  --slug <task-slug> --name spec.md --body <text>`, carrying
-  `## Acceptance Criteria` and `## Out of Scope` sections. That completes spec.
+  The **spec artifact** is the deliverable and the single source of truth for acceptance —
+  record it with:
 
-  Then seed **design's work-item** — the contract the design phase opens on,
-  reusing the slug so the work chains:
+      agentalloy contract artifact-set --phase spec --slug <task-slug> --name spec.md
+
+  The body MUST include `## Acceptance Criteria` and `## Out of Scope` sections. That
+  completes spec.
+
+  Then **prepare the hand-off** to design:
 
       agentalloy contract init --phase design --slug <task-slug>
 
-  Fill `domain_tags` with the *design surface* (the tech and patterns design will
-  reason about — `caching`, `async`, `postgres-schema`, not process words) and
-  write the body as what design must produce for this feature; set
-  `scope.touches/avoids`. That body is design's retrieval prompt, so on entry the
-  proxy front-loads the matching skills. Don't copy acceptance into it — the spec
-  doc is acceptance's one home, no drift.
+  In the design work-item, fill `domain_tags` with the *design surface* (the tech and
+  patterns design will reason about — `caching`, `async`, `postgres-schema`, not process
+  words) and write the body as what design must produce for this feature. Set
+  `scope.touches/avoids`. Don't copy acceptance into it — the spec artifact is
+  acceptance's one home.
 
-  Then PRESENT the spec in full and STOP — do not advance yourself. The forward
-  jump to design is a human checkpoint: only once the user explicitly approves do
-  you run `agentalloy approve spec` (it records the approval and carries you into
-  design) — or, after approval, advance with `agentalloy phase set design`.
-  Phase advance ends this session; the next phase begins in a fresh one, and
-  `agentalloy resume` rebuilds context. If anything's still unresolved — an
-  assumption the user hasn't confirmed, an acceptance criterion you can't make
-  checkable — **stop and surface it** instead of advancing; resolve it first. The
-  phase guard refuses the jump until the spec artifact is recorded with its
-  required sections AND a human approval is recorded, so a premature `phase set`
-  or `approve` just tells you what's still missing.
+  Then **PRESENT the spec in full and STOP** — do not advance yourself. The forward jump
+  to design is a human checkpoint: only once the user explicitly approves do you run
+  `agentalloy approve spec` (it records the approval and carries you into design) — or,
+  after approval, advance with `agentalloy phase set design`. Phase advance ends this
+  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
+  context. If anything's still unresolved — an assumption the user hasn't confirmed, an
+  acceptance criterion you can't make checkable — **stop and surface it** instead of
+  advancing; resolve it first. The phase guard refuses the jump until the spec artifact
+  is recorded with its required sections AND a human approval is recorded, so a premature
+  `phase set` or `approve` just names what's missing, including a forgotten artifact or
+  a missing section.
 
   ## Not this
 
-  Don't design the solution here — no architecture, no file-by-file plan;
-  that's design's job, and doing it now locks in choices you haven't earned.
-  Don't pad the spec with boilerplate the repo already documents (build
-  commands, directory layout). Don't leave acceptance fuzzy to "figure out
-  later" — later is more expensive. And if it now feels too small for the full
-  lane, intake over-called it: bail with `agentalloy phase set sdd-fast`.
+  Don't design the solution here — no architecture, no file-by-file plan; that's design's
+  job, and doing it now locks in choices you haven't earned. Don't pad the spec with
+  boilerplate the repo already documents. Don't leave acceptance fuzzy to "figure out
+  later" — later is more expensive. And if it now feels too small for the full lane,
+  intake over-called it: bail with `agentalloy phase set sdd-fast`.

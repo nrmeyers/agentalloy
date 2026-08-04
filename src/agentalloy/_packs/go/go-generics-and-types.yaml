@@ -7,7 +7,7 @@ domain_tags: [type-parameters, constraint-interface, type-inference, comparable-
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — Go spec on type parameter declarations https://go.dev/ref/spec#Type_parameter_declarations (verified 2026-05-05 against fixtures/upstream/curated/go.yaml topic `typing_and_generics`); golang.org/x/exp/constraints https://pkg.go.dev/golang.org/x/exp/constraints; Intro to Generics blog https://go.dev/blog/intro-generics; Go FAQ on generics https://go.dev/doc/faq#generics. Skill scope: when to add type parameters, how to write constraint interfaces, the limits of type inference, and the meaning of `comparable`; not the details of type sets in interface definitions beyond constraints, not generic algorithm design at the language-comparison level.
 

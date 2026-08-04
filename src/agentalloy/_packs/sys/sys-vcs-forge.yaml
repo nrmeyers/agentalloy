@@ -11,7 +11,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build, qa, ship]
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: "golden default: detect-first forge skill (gh/glab); the org customization point for VCS conventions"
 raw_prose: |
   # VCS forge

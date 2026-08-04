@@ -12,7 +12,7 @@ requires:
 - performance-budgets
 phase_scope: [design, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # Design Review — Non-Functional Requirements

@@ -13,7 +13,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # Amazon Redshift Loading Data — COPY

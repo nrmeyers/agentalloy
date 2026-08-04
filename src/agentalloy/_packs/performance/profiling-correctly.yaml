@@ -7,7 +7,7 @@ domain_tags: [sampling-profiler, instrumented-tracing, flame-graph, observer-eff
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Brendan Gregg's flame graph documentation https://www.brendangregg.com/flamegraphs.html (verified 2026-05-04 against fixtures/upstream/curated/perf.yaml topic `flame_graphs`); *Systems Performance* (2nd ed.) ch. 6 on profilers; pprof documentation https://go.dev/blog/pprof; py-spy https://github.com/benfred/py-spy. Skill scope: how to use profilers correctly to find bottlenecks; not optimization decisions (covered in measure-before-optimizing), not Amdahl's-law analysis (covered in finding-the-bottleneck).
 

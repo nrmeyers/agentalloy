@@ -7,7 +7,7 @@ domain_tags: [error-codes, uncaught-exception, unhandled-rejection, abort-contro
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Node.js 22 errors docs https://nodejs.org/docs/latest-v22.x/api/errors.html (verified 2026-05-04 against fixtures/upstream/curated/nodejs.yaml topic `error_handling_and_exceptions`); process docs https://nodejs.org/docs/latest-v22.x/api/process.html for uncaughtException, unhandledRejection, exit codes, and signal handling. Skill scope: Node-specific error handling — error codes, process-level events, signals, exit; not language-level error handling (covered in TS/python error-handling skills), not framework error middleware.
 

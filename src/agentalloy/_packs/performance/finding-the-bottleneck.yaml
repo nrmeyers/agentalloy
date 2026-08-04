@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Gene Amdahl's 1967 paper "Validity of the Single Processor Approach to Achieving Large-Scale Computing Capabilities" (verified 2026-05-04 against fixtures/upstream/curated/perf.yaml topic `amdahl`); Brendan Gregg's USE Method documentation https://www.brendangregg.com/usemethod.html; internal review history on N+1 query bugs and lock-contention misdiagnoses. Skill scope: how to identify which part of a system is the bottleneck and how much improvement is available; not optimization techniques, not profiler usage.
 

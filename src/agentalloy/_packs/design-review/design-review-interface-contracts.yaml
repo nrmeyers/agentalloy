@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [design, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
   # Design Review — Interface Contracts and API Design

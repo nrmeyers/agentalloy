@@ -16,7 +16,7 @@ phase_scope:
 - qa
 category_scope:
 - ops
-author: navistone
+author: agentalloy
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
   # Webhooks — Signature Verification

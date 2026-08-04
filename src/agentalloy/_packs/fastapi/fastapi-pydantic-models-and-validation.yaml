@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. FastAPI 0.115+ and Pydantic v2 flavored. Covers declaring request bodies as Pydantic models, Field constraints, ConfigDict (strict, extra="forbid", str_strip_whitespace), v2 @field_validator/@model_validator (replacing the deprecated v1 @validator/@root_validator), response_model with output filtering, response_model_exclude_unset/none/include/exclude, multiple body params, Body(embed=True), HTTPException, and OpenAPI extras (description, examples). Citations resolved against fastapi.tiangolo.com/tutorial/body, /tutorial/body-fields, /tutorial/response-model, /tutorial/extra-models, /tutorial/handling-errors, plus docs.pydantic.dev/latest/concepts/models and /concepts/validators (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure). Original authoring — scaffolded with citations against FastAPI and Pydantic v2 docs, not a verbatim copy of upstream prose.
 raw_prose: |

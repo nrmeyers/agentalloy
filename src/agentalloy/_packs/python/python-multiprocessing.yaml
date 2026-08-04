@@ -12,7 +12,7 @@ domain_tags:
   - python
 phase_scope: [build]
 category_scope: [language]
-author: navistone
+author: agentalloy
 change_summary: initial authoring draft
 raw_prose: |
   # Python multiprocessing

@@ -112,6 +112,31 @@ def _home_fingerprint() -> tuple[tuple[str, float, int], ...]:
     return tuple(out)
 
 
+@pytest.fixture(
+    scope="session",
+    autouse=True,
+)
+def _preserve_repo_upstream(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Back up the repo's ``.agentalloy/upstream`` so tests that unlink it
+    (uninstall, unwire, worktree teardown) don't disconnect a running session.
+
+    The guard fixture (_guard_real_home_wiring) asserts *after* each test yields —
+    too late: the proxy reads the file *during* the test, and once it's gone the
+    session drops before the assertion fires. This fixture restores the file at
+    session end so the developer's local wiring survives the suite.
+    """
+    upstream = Path(__file__).resolve().parent.parent / ".agentalloy" / "upstream"
+    backup: Path | None = None
+    if upstream.exists():
+        stash = tmp_path_factory.mktemp("preserve") / "upstream"
+        shutil.copy2(str(upstream), str(stash))
+        backup = stash
+    yield
+    if backup is not None:
+        upstream.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(backup), str(upstream))
+
+
 @pytest.fixture(autouse=True)
 def _guard_real_home_wiring() -> Iterator[None]:
     """Fail any test that mutates real-home wiring artifacts."""

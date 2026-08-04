@@ -15,7 +15,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |
   # Fastify Schemas with TypeBox

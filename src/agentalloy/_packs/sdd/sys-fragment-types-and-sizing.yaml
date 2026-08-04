@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — meta pack, codifies the six fragment
   types, the 80–800 word band, and self-containment rules used by the qwen3-embedding:0.6b
   retriever. 2026-07-14: converted from _packs/meta/sys-fragment-types-and-sizing.md

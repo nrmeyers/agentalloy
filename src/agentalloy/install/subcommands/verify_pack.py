@@ -202,7 +202,17 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
                 phase_list: list[str] = skill["phase_scope"] or ["build"]
                 # Use the first non-system phase as our probe phase.
                 _VALID_PROBE_PHASES = frozenset(
-                    {"intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill"}
+                    {
+                        "intake",
+                        "spec",
+                        "design",
+                        "plan",
+                        "build",
+                        "qa",
+                        "ship",
+                        "sdd-fast",
+                        "add-skill",
+                    }
                 )
                 probe_phase = next((p for p in phase_list if p in _VALID_PROBE_PHASES), "build")
 

@@ -41,7 +41,7 @@ class MockRecord:
 
 def test_store_backed_phases_are_complete() -> None:
     """The canonical set matches all SDD store-backed phases."""
-    assert {"spec", "design", "qa", "ship", "fast"} == _STORE_BACKED_PHASES
+    assert {"spec", "design", "plan", "qa", "ship", "fast"} == _STORE_BACKED_PHASES
 
 
 # ---------------------------------------------------------------------------

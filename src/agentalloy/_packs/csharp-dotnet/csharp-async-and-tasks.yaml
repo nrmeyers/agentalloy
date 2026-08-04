@@ -14,7 +14,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — C# asynchronous programming guide https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/, Task Parallel Library https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/task-parallel-library-tpl, System.Threading.Channels https://learn.microsoft.com/en-us/dotnet/api/system.threading.channels?view=net-9.0, System.Threading.CancellationToken https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtoken?view=net-9.0 (all verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `concurrency_and_async`). Per the curated yaml's known_gaps, the `view=net-9.0` query parameter was confirmed on each versioned API URL because learn.microsoft.com versioned subtrees can silently redirect to older .NET versions. Skill scope: `Task`/`Task<T>` and `async`/`await` desugaring, `ValueTask<T>` allocation tradeoffs on hot paths, `CancellationToken` propagation and `CancellationTokenSource.CreateLinkedTokenSource`, `Task.WaitAsync(ct)` for adding cancellation to non-cancellable tasks, `ConfigureAwait(false)` semantics in library code (and the post-net6 ASP.NET Core sync-context absence), `Task.WhenAll`/`Task.WhenAny` and the WhenAll-only-throws-the-first-exception edge, `System.Threading.Channels` bounded vs unbounded, `Parallel.ForEachAsync` (.NET 6+), and the standard async anti-patterns (`async void`, `.Result`/`.Wait()`, `await Task.Run` to "make it async"). Out of scope: TaskScheduler internals, custom awaitable types, AsyncLocal, IAsyncEnumerable beyond a passing reference.
 raw_prose: |

@@ -9,7 +9,7 @@ requires:
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [ops]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Donald Knuth's "premature optimization is the root of all evil" essay, *Structured Programming with go to Statements* (1974) (verified 2026-05-04 via cached PDF; full quote context preserved); Brendan Gregg's *Systems Performance* (2nd ed.) on the measure-first discipline; internal review history on optimization PRs that improved a metric while making the user-visible flow slower. Skill scope: the discipline of measuring before optimizing and confirming improvement after; not specific profiling tools (covered in profiling-correctly), not budgets (covered in performance-budgets).
 

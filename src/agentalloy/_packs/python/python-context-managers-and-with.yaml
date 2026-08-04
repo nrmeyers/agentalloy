@@ -7,7 +7,7 @@ domain_tags: [with-statement, contextmanager-decorator, exitstack, async-with, r
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Python 3.13 contextlib docs https://docs.python.org/3.13/library/contextlib.html (verified 2026-05-04 against fixtures/upstream/curated/python.yaml topic `io_and_filesystem` and `concurrency_and_async`); language reference for `with` statement https://docs.python.org/3.13/reference/compound_stmts.html#the-with-statement; PEP 343 https://peps.python.org/pep-0343/ for the original `with`-statement design. Skill scope: writing and using context managers idiomatically; not specific resource types (file IO, locks — covered in their respective skills).
 

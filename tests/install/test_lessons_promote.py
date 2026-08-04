@@ -416,3 +416,68 @@ def test_promote_registered_and_parses():
     assert args.slug == "my-slug"
     assert args.allow_duplicates is True
     assert callable(args.func)
+
+
+# --- store-backed lessons (the docs/solutions -> artifact migration) ---------
+
+
+def _store_lesson(root: Path, slug: str, body: str = LESSON) -> None:
+    from agentalloy.api.state_router import _repo_key_for
+    from agentalloy.lessons_artifact import LESSON_NAME, LESSON_PHASE
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None
+    store.for_repo(_repo_key_for(str(root))).set_artifact(LESSON_PHASE, slug, LESSON_NAME, body)
+
+
+def test_stored_lesson_promotes_without_any_file(tmp_path: Path):
+    """The migration's point for this path: promote reads the store, so a lesson
+    that was never written to docs/solutions/ still reaches the corpus."""
+    _store_lesson(tmp_path, "stored-lesson")
+    installed: list[Path] = []
+
+    res = promote_lesson(
+        "stored-lesson",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        install=lambda pack_dir, **_kw: (installed.append(pack_dir), {"ok": True})[1],
+        route_fn=_WRITE_HOST,
+    )
+
+    assert res["action"] == "promoted"
+    assert len(installed) == 1
+    assert not (tmp_path / "docs" / "solutions").exists()
+
+
+def test_disk_lesson_still_promotes_when_store_has_none(tmp_path: Path):
+    """Pre-migration repos keep working — the 5 lessons already on disk promote
+    exactly as before."""
+    _write_lesson(tmp_path, "disk-only-lesson")
+    installed: list[Path] = []
+
+    res = promote_lesson(
+        "disk-only-lesson",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        install=lambda pack_dir, **_kw: (installed.append(pack_dir), {"ok": True})[1],
+        route_fn=_WRITE_HOST,
+    )
+
+    assert res["action"] == "promoted"
+    assert len(installed) == 1
+
+
+def test_missing_in_both_places_reports_not_found(tmp_path: Path):
+    res = promote_lesson(
+        "nowhere-at-all",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        install=lambda *a, **k: {},
+        route_fn=_WRITE_HOST,
+    )
+    assert res["action"] == "lesson_not_found"
+    assert "not in the store" in res["error"]

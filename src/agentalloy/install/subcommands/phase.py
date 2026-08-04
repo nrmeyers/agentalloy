@@ -29,7 +29,17 @@ logger = logging.getLogger(__name__)
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
-VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
+VALID_PHASES = (
+    "intake",
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+)
 
 SCHEMA_VERSION = 1
 
@@ -48,6 +58,7 @@ _APPROVAL_SINCE = {
 _APPROVAL_STORE_NAME_GLOB = {
     "spec": "*.md",
     "design": "*.md",
+    "plan": "*.md",  # tasks.md + test-plan.md
 }
 
 
@@ -78,6 +89,50 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
         "last_updated": state.last_updated,
         "workflow": state.workflow,
     }
+
+
+def _migrate_design_to_plan(store: Any) -> None:
+    """Copy a pre-split repo's ``tasks.md``/``test-plan.md`` from design to plan.
+
+    Repos that entered ``design`` before the design/plan split hold those two
+    artifacts under ``phase=design``. The plan→build gate looks for them under
+    ``phase=plan`` (rows are keyed ``(repo, phase, slug, name)``), so without
+    this the repo advances into plan and then cannot leave without ``--force``.
+
+    Three properties, each load-bearing:
+
+    - **Idempotent**, guarded on plan already holding rows for the slug rather
+      than on a marker — re-entering plan must not clobber an edit the user made
+      after the migration.
+    - **Slug-scoped**: only slugs that appear in design, not a phase-wide copy.
+    - **Design rows are left alone.** Design's recorded approval is a digest over
+      its own artifacts; deleting or moving them would invalidate an approval the
+      user already gave, and the failure is silent — approve reports success and
+      the gate stays blocked.
+
+    Approval deliberately does NOT carry over: ``plan`` is in
+    ``_ALWAYS_APPROVAL_PHASES`` and must be approved on its own, since no human
+    ever approved a plan phase that did not exist.
+    """
+    if store is None:
+        return
+    wanted = ("tasks.md", "test-plan.md")
+    design_by_slug: dict[str, list[str]] = {}
+    for row in store.list_artifacts("design"):
+        if row["name"] in wanted:
+            design_by_slug.setdefault(row["slug"], []).append(row["name"])
+    if not design_by_slug:
+        return
+
+    # Slugs plan already knows about are skipped wholesale — see idempotency above.
+    plan_slugs = {row["slug"] for row in store.list_artifacts("plan")}
+    for slug, names in design_by_slug.items():
+        if slug in plan_slugs:
+            continue
+        for name in names:
+            art = store.get_artifact("design", slug, name)
+            if art is not None and art.get("content") is not None:
+                store.set_artifact("plan", slug, name, art["content"])
 
 
 def _forward_gate_blocks(
@@ -226,6 +281,12 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
             "advisories": verdict.get("advisories", []),
             "reason": verdict.get("result", "not_met"),
         }
+
+    # Pre-split repos keep tasks.md/test-plan.md under design; move them into
+    # plan before the phase write so the user lands with the plan gate already
+    # satisfiable. After the gate passes, so approval/completeness still applied.
+    if current == "design" and phase == "plan":
+        _migrate_design_to_plan(gate_store)
 
     # Record who caused a real transition, mirroring the proxy's
     # `skill_loader._write_phase_atomic` — lets a *different* session's next

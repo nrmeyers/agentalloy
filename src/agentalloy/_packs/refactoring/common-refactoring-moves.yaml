@@ -7,7 +7,7 @@ domain_tags: [extract-function, inline-function, rename-symbol, replace-conditio
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Martin Fowler, *Refactoring* (2nd ed., 2018) catalog at https://refactoring.com/catalog/ (verified 2026-05-04 against fixtures/upstream/curated/fowler.yaml topic `refactoring_catalog`); Joshua Kerievsky, *Refactoring to Patterns*; internal review history on extract-function PRs that produced the wrong abstraction. Skill scope: the small repertoire of refactoring moves that handle the majority of day-to-day cleanup; not the full Fowler catalog (>60 named moves), not refactoring decisions or safety (covered separately).
 

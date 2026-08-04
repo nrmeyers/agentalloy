@@ -181,21 +181,35 @@ def generate_lesson_pack(lesson_path: Path, dest_root: Path) -> dict[str, Any]:
     ``skill_id`` and the fragment contents (for the caller's dedup probe).
     Writes ``<dest_root>/<slug>-lesson/{pack.yaml, <skill_id>.yaml}``.
     """
-    t0 = time.monotonic()
     if not lesson_path.is_file():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "lesson_not_found",
             "error": f"lesson file not found: {lesson_path}",
         }
+    return generate_lesson_pack_from_text(
+        lesson_path.stem,
+        lesson_path.read_text(encoding="utf-8"),
+        dest_root,
+        source=str(lesson_path),
+    )
 
-    slug = lesson_path.stem
-    text = lesson_path.read_text(encoding="utf-8")
+
+def generate_lesson_pack_from_text(
+    slug: str, text: str, dest_root: Path, *, source: str | None = None
+) -> dict[str, Any]:
+    """Generate a domain-skill pack from lesson ``text`` under ``dest_root``.
+
+    The body of :func:`generate_lesson_pack`, split out so a store-backed lesson
+    (``phase='qa', name='solution'``) can be promoted without first being
+    written to disk. ``source`` only labels errors.
+    """
+    t0 = time.monotonic()
     if not text.strip():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "lesson_empty",
-            "error": f"lesson file is empty: {lesson_path}",
+            "error": f"lesson is empty: {source or slug}",
         }
 
     skill_id = _sanitize_skill_id(slug)

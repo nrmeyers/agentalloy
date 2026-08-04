@@ -20,10 +20,36 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install.lesson_pack import generate_lesson_pack
+from agentalloy.install.lesson_pack import generate_lesson_pack, generate_lesson_pack_from_text
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.lessons_artifact import LESSON_NAME, LESSON_PHASE
 
 SCHEMA_VERSION = 1
+
+
+def _read_store_lesson(root: Path, slug: str) -> str | None:
+    """The stored lesson body for ``slug``, or None when the store has no such
+    artifact (or is unreachable) — the caller then falls back to disk.
+
+    Best-effort by design: an unreachable store must degrade to the pre-migration
+    disk path, not fail the promote.
+    """
+    try:
+        from agentalloy.api.state_router import _repo_key_for
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        if store is None:
+            return None
+        scoped = store.for_repo(_repo_key_for(str(root)))
+        row = scoped.get_artifact(LESSON_PHASE, slug, LESSON_NAME)
+    except Exception:
+        return None
+    if not row:
+        return None
+    content = row.get("content")
+    return content if content and content.strip() else None
+
 
 # Injected seams (overridable in tests). A real embed takes a string and returns
 # a raw vector; a real store is a FragmentStore; a real install runs the rail.
@@ -177,16 +203,26 @@ def promote_lesson(
         push_pack_to_service,
     )
 
-    lesson_path = root / "docs" / "solutions" / f"{slug}.md"
-    if not lesson_path.is_file():
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "action": "lesson_not_found",
-            "slug": slug,
-            "error": f"no lesson at docs/solutions/{slug}.md — nothing to promote.",
-        }
-
-    gen = generate_lesson_pack(lesson_path, root / ".agentalloy" / "custom-skills")
+    dest_root = root / ".agentalloy" / "custom-skills"
+    lesson_text = _read_store_lesson(root, slug)
+    if lesson_text is not None:
+        gen = generate_lesson_pack_from_text(
+            slug, lesson_text, dest_root, source=f"store:{LESSON_PHASE}/{slug}/{LESSON_NAME}"
+        )
+    else:
+        # Pre-migration repos still keep lessons on disk; promote those unchanged.
+        lesson_path = root / "docs" / "solutions" / f"{slug}.md"
+        if not lesson_path.is_file():
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "action": "lesson_not_found",
+                "slug": slug,
+                "error": (
+                    f"no lesson for '{slug}' — not in the store "
+                    f"({LESSON_PHASE}/{slug}/{LESSON_NAME}) and no docs/solutions/{slug}.md."
+                ),
+            }
+        gen = generate_lesson_pack(lesson_path, dest_root)
     if gen.get("action") != "generated":
         return gen
     pack_dir = Path(gen["pack_dir"])

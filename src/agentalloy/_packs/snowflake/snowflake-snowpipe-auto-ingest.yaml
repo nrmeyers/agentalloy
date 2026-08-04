@@ -14,7 +14,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]
-author: navistone
+author: agentalloy
 change_summary: 'hand-authored Opus expansion; merged 2026-06-03: absorbed Snowpipe overview from snowflake-data-loading'
 raw_prose: |
   # Snowflake Snowpipe and Auto-Ingest

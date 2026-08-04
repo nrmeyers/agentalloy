@@ -7,7 +7,7 @@ domain_tags: [readable-stream, writable-stream, pipeline, fs-promises, backpress
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Node.js 22 fs docs https://nodejs.org/docs/latest-v22.x/api/fs.html (verified 2026-05-04 against fixtures/upstream/curated/nodejs.yaml topic `io_and_filesystem`); stream docs https://nodejs.org/docs/latest-v22.x/api/stream.html; path docs https://nodejs.org/docs/latest-v22.x/api/path.html. Skill scope: filesystem and stream APIs for IO-bound work; not networking (covered separately), not language-level async patterns (covered in event-loop-and-async).
 

@@ -7,7 +7,7 @@ domain_tags: [module-info-descriptor, exports-package, requires-transitive, serv
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — Oracle Java SE 21 module-system overview https://docs.oracle.com/en/java/javase/21/module-system/overview-module-system.html (verified 2026-05-06 against fixtures/upstream/curated/java.yaml topic packaging_and_dependency_management); JEP 261: Module System https://openjdk.org/jeps/261 (verified 2026-05-06); java.base module-summary https://docs.oracle.com/en/java/javase/21/docs/api/java.base/module-summary.html (verified 2026-05-06); JEP 403: Strongly Encapsulate JDK Internals https://openjdk.org/jeps/403 (verified 2026-05-06); JEP 282 jlink and JEP 238 multi-release jars (verified 2026-05-06). Known gap from the curated registry: build tooling (Maven, Gradle) is entirely outside canonical Java docs; this skill is scoped to JPMS — the language- and runtime-level module system — and does NOT cover artifact coordination, which Maven/Gradle still own.
 

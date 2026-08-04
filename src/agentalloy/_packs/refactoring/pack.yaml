@@ -1,8 +1,8 @@
 name: refactoring
-version: 1.0.5
+version: 1.0.6
 tier: foundation
 description: Refactoring practices that span stacks — when to refactor, how to refactor safely, the most common moves, and when to stop. Always installed.
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT

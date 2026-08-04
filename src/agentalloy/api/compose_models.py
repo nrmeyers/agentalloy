@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 # fast-lane route (one compressed pass) intake can branch to; add-skill is the
 # custom-skill authoring lane (scaffold → validate → approve → install) that
 # returns to intake when done.
-Phase = Literal["intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill"]
+Phase = Literal["intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings; build/ship
 # revisited upward in #13). Short-form action phases historically got k=2, but
@@ -38,6 +38,7 @@ DEFAULT_K_BY_PHASE: dict[str, int] = {
     "qa": 4,  # safer default; long-form qa (postmortem) needs anchor context
     "spec": 4,
     "design": 4,
+    "plan": 4,  # long-form decomposition — wants the design anchor context
     "intake": 4,  # interview entry — wants anchor context for routing
 }
 
@@ -53,6 +54,7 @@ DEFAULT_MAX_TOKENS_BY_PHASE: dict[str, int] = {
     "qa": 4096,
     "spec": 4096,
     "design": 4096,
+    "plan": 4096,  # lockstep with DEFAULT_K_BY_PHASE plan=4
     "intake": 4096,
 }
 

@@ -12,7 +12,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [language]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |
   # Gradle Build Tool

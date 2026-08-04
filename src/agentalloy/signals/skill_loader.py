@@ -439,7 +439,7 @@ def _has_legacy_contract_layout(contracts_root: Path) -> bool:
         return False
     if any(contracts_root.glob("*.md")):
         return True
-    for d in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill"):
+    for d in ("intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill"):
         if (contracts_root / d).is_dir():
             return True
     if (contracts_root / "_superseded").is_dir():

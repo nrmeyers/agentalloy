@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — meta pack, codifies domain_tags rules
   with the protocol-tier soft ceiling, the title-stem-overlap ban, and pairwise synonym
   ban from the routing-reform v1 lint pass. 2026-07-14: converted from _packs/meta/sys-skill-tagging-rules.md

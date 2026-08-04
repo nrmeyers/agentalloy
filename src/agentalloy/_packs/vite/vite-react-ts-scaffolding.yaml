@@ -13,7 +13,7 @@ phase_scope:
 - build
 category_scope:
 - framework
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion
 raw_prose: |-
   # Vite — Scaffold a React + TypeScript SPA

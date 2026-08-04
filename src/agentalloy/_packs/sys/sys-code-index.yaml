@@ -12,7 +12,7 @@ phase_scope:
   - build
   - qa
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: "golden default: phase-scoped pull commands for the local code index; availability-gated proxy-side"
 raw_prose: |
   # Code index

@@ -7,7 +7,7 @@ domain_tags: [behavior-preserving, rule-of-three, just-in-time-refactor, opportu
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Martin Fowler, *Refactoring* (2nd ed., 2018) https://martinfowler.com/books/refactoring.html (verified 2026-05-04 against fixtures/upstream/curated/fowler.yaml topic `refactoring_definitions`); Kent Beck's "rule of three" formulation in *Smalltalk Best Practice Patterns*; internal review history on "preemptive refactor" PRs that introduced bugs in code that was working fine. Skill scope: deciding when refactoring is justified and when it is premature; not specific refactoring moves (covered in common-refactoring-moves), not refactoring safely (covered in refactoring-safely-with-tests).
 

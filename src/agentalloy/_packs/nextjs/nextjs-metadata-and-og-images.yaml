@@ -16,7 +16,7 @@ always_apply: false
 phase_scope:
 - build
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-06. Sources — Next.js 16.2.4 docs https://nextjs.org/docs/app/getting-started/metadata-and-og-images (verified 2026-05-06 against fixtures/upstream/registry.yaml entry nextjs via tier-2 llms_url procedure); generateMetadata API reference https://nextjs.org/docs/app/api-reference/functions/generate-metadata; metadata file conventions https://nextjs.org/docs/app/api-reference/file-conventions/metadata (sitemap.xml.ts, robots.ts, opengraph-image.tsx); ImageResponse https://nextjs.org/docs/app/api-reference/functions/image-response. Skill scope: SEO and social-share metadata in the App Router — static `metadata` exports, `generateMetadata` for dynamic routes, file-convention metadata files (sitemap, robots, opengraph-image), and `ImageResponse` for generated OG images. Original authoring scaffolded with citations against nextjs.org docs, not a verbatim copy of upstream prose.
 raw_prose: |

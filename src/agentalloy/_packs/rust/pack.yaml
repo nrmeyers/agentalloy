@@ -1,8 +1,8 @@
 name: rust
-version: 1.0.6
+version: 1.0.7
 tier: language
 description: Rust language patterns — ownership and borrowing, Result/Option error handling, async/await + Send/Sync concurrency with tokio, Cargo manifests and feature flags,
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT

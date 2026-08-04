@@ -10,7 +10,7 @@ requires:
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Python 3.13 asyncio docs https://docs.python.org/3.13/library/asyncio.html (verified 2026-05-04 against fixtures/upstream/curated/python.yaml topic `concurrency_and_async`); asyncio task docs https://docs.python.org/3.13/library/asyncio-task.html for `TaskGroup` (3.11+); concurrent.futures docs for the executor pattern. Skill scope: writing correct async Python — when to use it, common pitfalls, modern patterns; not framework-level concurrency (FastAPI workers, Django async views — covered in framework packs), not multiprocessing.
 

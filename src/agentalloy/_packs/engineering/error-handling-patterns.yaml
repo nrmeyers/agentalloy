@@ -7,7 +7,7 @@ domain_tags: [error-propagation, validation-boundary, fail-fast, swallow-anti-pa
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Joe Armstrong's Erlang error-handling philosophy https://www.cs.otago.ac.nz/staffpriv/ok/Joe.Armstrong/joe.html (verified 2026-05-04 against fixtures/upstream/curated/error-handling.yaml topic `let_it_crash`); Go error-handling guide https://go.dev/blog/error-handling-and-go; Rust `Result` documentation https://doc.rust-lang.org/std/result/; internal review history on swallowed exceptions and over-defensive validation. Skill scope: how errors propagate through a system, where to catch them, when to validate; not language-specific exception syntax (covered in language packs), not retry logic (covered in cross-cutting/error-handling).
 

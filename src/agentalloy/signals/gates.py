@@ -30,7 +30,10 @@ _PHASE_GRAPH: dict[str, str] = {
     "intake": "spec",  # entry phase: default (full) route. The fast route
     #                    overrides this with a next_phase_hint of "sdd-fast".
     "spec": "design",
-    "design": "build",
+    "design": "plan",  # design settles approach/decisions/rationale only; plan
+    #                    decomposes it into tasks, test cases, and one build
+    #                    contract per task (the density floor lives on plan→build)
+    "plan": "build",
     "build": "qa",
     "qa": "ship",
     "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
@@ -463,9 +466,19 @@ _APPROVAL_SINCE: dict[str, str] = {
     "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
+# MUST mirror each pack's `approval_recorded: since_name_glob`. This map and the
+# pack are two sources of truth for the same set, and `run_approve` digests via
+# this map while the gate re-digests via the pack's arg — so any disagreement
+# records an approval digest the gate can never reproduce, and the phase stays
+# blocked while the CLI reports success. test_approval_globs_match_packs pins it.
 _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
     "spec": "*.md",
-    "design": "*.md",
+    # design produces exactly approach.md post-split; narrower than "*.md" on
+    # purpose, so a leftover pre-split tasks.md under phase=design can't shift
+    # the digest.
+    "design": "approach.md",
+    # plan produces tasks.md + test-plan.md, so "*.md" covers both.
+    "plan": "*.md",
 }
 
 

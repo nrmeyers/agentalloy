@@ -1,8 +1,8 @@
 name: documentation
-version: 1.0.5
+version: 1.0.6
 tier: foundation
 description: Documentation practices that span stacks — README, API reference, changelogs, inline comments. Always installed for foundation-tier coverage.
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT

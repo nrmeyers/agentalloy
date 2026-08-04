@@ -6,7 +6,7 @@ always_apply: false
 phase_scope:
 - add-skill
 category_scope: null
-author: navistone
+author: agentalloy
 change_summary: 'initial authoring 2026-05-04 — conventions pack, codifies skill_id,
   file-name, canonical_name, change_summary, and pack-name conventions used across
   the agentalloy corpus. 2026-07-14: converted from _packs/conventions/sys-skill-naming.md

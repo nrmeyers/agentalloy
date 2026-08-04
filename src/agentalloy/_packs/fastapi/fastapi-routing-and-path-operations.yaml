@@ -13,7 +13,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: framework
-author: navistone
+author: agentalloy
 change_summary: "Initial authoring 2026-05-06 — scaffolded with citations against fastapi.tiangolo.com (tutorial/path-params, tutorial/query-params, tutorial/path-operation-configuration, tutorial/bigger-applications, reference/apirouter) verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure. FastAPI 0.115+. Original authoring — not a verbatim import of upstream prose."
 raw_prose: |
   # FastAPI Routing and Path Operations

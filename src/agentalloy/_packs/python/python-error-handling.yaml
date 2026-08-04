@@ -7,7 +7,7 @@ domain_tags: [eafp-vs-lbyl, exception-chaining, raise-from, exceptiongroup, narr
 always_apply: false
 phase_scope: [build]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-04. Sources — Python 3.13 exceptions docs https://docs.python.org/3.13/library/exceptions.html (verified 2026-05-04 against fixtures/upstream/curated/python.yaml topic `error_handling_and_exceptions`); errors tutorial https://docs.python.org/3.13/tutorial/errors.html; PEP 654 https://peps.python.org/pep-0654/ for ExceptionGroup (Python 3.11+). Skill scope: Python's exception model and idiomatic patterns; not generic error-handling philosophy (covered in engineering/error-handling-patterns).
 

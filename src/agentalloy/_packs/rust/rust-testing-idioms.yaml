@@ -7,7 +7,7 @@ domain_tags: [unit-test-attribute, integration-test-tree, doc-test-runnable, cfg
 always_apply: false
 phase_scope: [build, qa]
 category_scope: language
-author: navistone
+author: agentalloy
 change_summary: |
   Initial authoring 2026-05-05. Sources — The Rust Programming Language ch11 https://doc.rust-lang.org/book/ch11-00-testing.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `testing_idioms`); Rust Reference, Testing attributes https://doc.rust-lang.org/reference/attributes/testing.html (verified 2026-05-05); Cargo Book, Tests https://doc.rust-lang.org/cargo/guide/tests.html (verified 2026-05-05). Skill scope: how Rust's built-in test runner shapes test code — `#[test]`, `#[cfg(test)]`, integration tests in `tests/`, doc tests, `#[should_panic]`, `Result`-returning tests, `#[ignore]`, plus the community-canonical crates `proptest`, `quickcheck`, `criterion`, and `tempfile` (community status called out per honest authorship). Not test-driven development methodology, not mocking patterns (covered in foundation tier).
 

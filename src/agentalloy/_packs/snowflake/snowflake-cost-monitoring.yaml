@@ -14,7 +14,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]
-author: navistone
+author: agentalloy
 change_summary: 'hand-authored Opus expansion; Deprecated 2026-06-03: superseded by snowflake-warehouses-and-cost'
 raw_prose: |
   # Snowflake Cost Monitoring and Optimization

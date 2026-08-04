@@ -17,7 +17,7 @@ domain_tags:
 always_apply: false
 phase_scope: [build]
 category_scope: [language]
-author: navistone
+author: agentalloy
 change_summary: hand-authored Opus expansion; Phase 1 absorbed src layout, editable install, dependencies/lockfiles, virtual environments, versioning from python-packaging-and-pyproject
 raw_prose: |
   # Python Packaging — pyproject.toml

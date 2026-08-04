@@ -1,8 +1,8 @@
 name: core
-version: 2.0.6
+version: 2.0.7
 tier: foundation
 description: Process & engineering discipline — TDD, code review, debugging, verification, planning, git workflow. Always installed. Re-authored 2026-05-04 against R1 tiered sourcing; pre-POC v1 archived to archive/pre-poc-packs-2026-05-04/.
-author: navistone
+author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
 license: MIT
