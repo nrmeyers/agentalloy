@@ -308,6 +308,15 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         fail_on_state_error(exc)
         raise  # unreachable
 
+    # Stamp the phase-entry HEAD SHA so the build→qa ``scope_touched_in_diff``
+    # gate can diff what changed *during* the phase. Only on a real transition
+    # (``current != phase``); an idempotent same-phase set leaves the prior
+    # marker in place. Fail-soft: never aborts the phase change.
+    if current != phase:
+        from agentalloy.signals.skill_loader import _record_phase_start_ref  # noqa: PLC0415
+
+        _record_phase_start_ref(root)
+
     data: dict[str, Any] = {
         "phase": phase,
         "started_at": state.started_at if state else _now_iso(),
@@ -320,6 +329,8 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         data["free_since"] = state.free_since
     if state and state.transitioned_by:
         data["transitioned_by"] = state.transitioned_by
+    if state and state.phase_start_ref:
+        data["phase_start_ref"] = state.phase_start_ref
 
     # On a real transition, SEED the work-item cursor to the new phase's first work-item
     # (filename order) so "which task is current" is reliably set — the single source of

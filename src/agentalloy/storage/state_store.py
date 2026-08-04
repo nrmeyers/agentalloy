@@ -173,6 +173,7 @@ class PhaseState:
     free_since: str | None = None
     transitioned_by: str | None = None
     started_at: str | None = None
+    phase_start_ref: str | None = None
     last_updated: str | None = None
     workflow: str = ""
 
@@ -746,9 +747,35 @@ class DuckDBStateStore:
             free_since=_opt_str(blob.get("free_since")),
             transitioned_by=_opt_str(blob.get("transitioned_by")),
             started_at=_opt_str(blob.get("started_at")),
+            phase_start_ref=_opt_str(blob.get("phase_start_ref")),
             last_updated=_opt_str(blob.get("last_updated")),
             workflow=f"sdd-{phase}",
         )
+
+    def set_phase_start_ref(self, ref: str) -> None:
+        """Stamp *ref* (a git SHA) as the phase-entry marker on the phase row.
+
+        Used by the build→qa ``scope_touched_in_diff`` gate to diff what changed
+        *during* the phase. A targeted in-place update of the blob's
+        ``phase_start_ref`` key — preserves every other field (``mode``,
+        ``started_at``, ``transitioned_by``, …) untouched, mirroring ``write_phase``
+        semantics without re-deriving them. Fail-soft is the caller's job; this
+        always writes when the row exists.
+        """
+        with self.transaction():
+            raw = self.read("phase")
+            if raw is None:
+                return
+            data = self._from_json(raw)
+            if isinstance(data, str):
+                data = {"phase": data}
+            if not isinstance(data, dict):
+                return
+            blob: dict[str, Any] = cast("dict[str, Any]", data)
+            if not blob.get("phase"):
+                return
+            blob["phase_start_ref"] = ref
+            self.write("phase", json.dumps({k: v for k, v in blob.items() if v is not None}))
 
     def write_phase(
         self,
@@ -758,6 +785,7 @@ class DuckDBStateStore:
         mode: str | None = None,
         free_since: str | None = None,
         owner: str | None = None,
+        phase_start_ref: str | None = None,
     ) -> StateWriteResult:
         """Write the ``phase`` row as a blob, preserving what the caller didn't set.
 
@@ -773,6 +801,10 @@ class DuckDBStateStore:
           actor, so a different session can still tell the phase moved and that
           it wasn't the one that moved it.
         * ``started_at`` is preserved across writes; only the first write sets it.
+        * ``phase_start_ref`` is carried forward from ``prev`` on an idempotent
+          same-phase write, so the phase-start HEAD stamp set on the real
+          transition survives rewrites — only a genuine transition lets a
+          caller overwrite it (the proxy uses that to seed it from HEAD).
         * ``workflow`` is **derived** here as ``sdd-<phase>`` and is never taken
           from a caller — a caller cannot poison the row with a bogus workflow.
 
@@ -799,6 +831,15 @@ class DuckDBStateStore:
             resolved_since = prev.free_since if (free_since is None and prev) else free_since
             is_transition = prev is None or prev.phase != phase
             resolved_actor = actor if is_transition else prev.transitioned_by  # type: ignore[union-attr]
+            # ``phase_start_ref`` is carried forward on an idempotent same-phase
+            # write; only a real transition accepts a caller-supplied stamp so a
+            # stale marker from a prior phase can't be re-armed by a rewrite.
+            if phase_start_ref is not None and is_transition:
+                resolved_phase_start_ref = phase_start_ref
+            elif prev is not None and not is_transition:
+                resolved_phase_start_ref = prev.phase_start_ref  # type: ignore[union-attr]
+            else:
+                resolved_phase_start_ref = phase_start_ref or None
 
             blob: dict[str, Any] = {
                 "phase": phase,
@@ -806,6 +847,7 @@ class DuckDBStateStore:
                 "free_since": resolved_since or None,
                 "transitioned_by": resolved_actor or None,
                 "started_at": (prev.started_at if prev and prev.started_at else now),
+                "phase_start_ref": resolved_phase_start_ref,
                 "last_updated": now,
                 "workflow": f"sdd-{phase}",
             }

@@ -6,6 +6,7 @@ exercise them in isolation without going through the signal CLI.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -191,7 +192,133 @@ def test_transitioned_by_absent_with_no_session_history() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _record_phase_start_ref / phase-start ref stamping on transition
+# ---------------------------------------------------------------------------
+
+
+def _rev_parse_run(sha: str):
+    """A fake subprocess.run that only intercepts ``git rev-parse``."""
+
+    orig = subprocess.run
+
+    class _R:
+        def __init__(self, rc: int, out: str) -> None:
+            self.returncode = rc
+            self.stdout = out
+
+    def fake(args: Any, **kw: Any) -> Any:
+        if isinstance(args, list) and "rev-parse" in args:
+            return _R(0, f"{sha}\n")
+        return orig(args, **kw)
+
+    return fake
+
+
+def test_record_phase_start_ref_writes_markered_sha(tmp_path: Path) -> None:
+    """A phase transition stamps the current HEAD into the store's phase blob."""
+    from agentalloy.signals.skill_loader import _record_phase_start_ref
+    from agentalloy.storage.state_store import DuckDBStateStore
+
+    db = tmp_path / "test.db"
+    store = DuckDBStateStore(db).open()
+    store.migrate()
+    store.write_phase("build")  # need a phase row for _record_phase_start_ref to find
+    with (
+        patch("agentalloy.signals.skill_loader._phase_view", return_value=store),
+        patch(
+            "agentalloy.signals.skill_loader.subprocess.run", side_effect=_rev_parse_run("deadbeef")
+        ),
+    ):
+        _record_phase_start_ref(tmp_path)
+    got = store.read_phase()
+    assert got is not None
+    assert got.phase_start_ref == "deadbeef"
+    store.close()
+
+
+def test_record_phase_start_ref_fail_soft_without_git(tmp_path: Path) -> None:
+    """No git / git failure: marker untouched, never raises."""
+    from agentalloy.signals.skill_loader import _record_phase_start_ref
+    from agentalloy.storage.state_store import DuckDBStateStore
+
+    db = tmp_path / "test.db"
+    store = DuckDBStateStore(db).open()
+    store.migrate()
+    store.write_phase("build")
+    with (
+        patch("agentalloy.signals.skill_loader._phase_view", return_value=store),
+        patch(
+            "agentalloy.signals.skill_loader.subprocess.run",
+            side_effect=FileNotFoundError("no git"),
+        ),
+    ):
+        _record_phase_start_ref(tmp_path)  # must not raise
+    got = store.read_phase()
+    assert got is not None
+    assert got.phase_start_ref is None
+    store.close()
+
+
+def test_record_phase_start_ref_ignores_empty_rev(tmp_path: Path) -> None:
+    """A rev-parse that succeeds but yields no SHA leaves no marker."""
+    from agentalloy.signals.skill_loader import _record_phase_start_ref
+    from agentalloy.storage.state_store import DuckDBStateStore
+
+    class _R:
+        def __init__(self, rc: int, out: str) -> None:
+            self.returncode = rc
+            self.stdout = out
+
+    db = tmp_path / "test.db"
+    store = DuckDBStateStore(db).open()
+    store.migrate()
+    store.write_phase("build")
+    with (
+        patch("agentalloy.signals.skill_loader._phase_view", return_value=store),
+        patch(
+            "agentalloy.signals.skill_loader.subprocess.run",
+            return_value=_R(0, ""),
+        ),
+    ):
+        _record_phase_start_ref(tmp_path)
+    got = store.read_phase()
+    assert got is not None
+    assert got.phase_start_ref is None
+    store.close()
+
+
+def test_write_phase_atomic_stamps_phase_start_ref_on_real_transition(tmp_path: Path) -> None:
+    """Entering a new phase stamps the marker; an idempotent rewrite does not."""
+    from agentalloy.signals.skill_loader import _write_phase_atomic
+    from agentalloy.storage.state_store import DuckDBStateStore
+
+    db = tmp_path / "test.db"
+    store = DuckDBStateStore(db).open()
+    store.migrate()
+
+    with patch("agentalloy.signals.skill_loader._phase_view", return_value=store):
+        with patch(
+            "agentalloy.signals.skill_loader.subprocess.run", side_effect=_rev_parse_run("sha-1")
+        ):
+            _write_phase_atomic(tmp_path, "build")  # prev None != "build" -> stamp
+        got = store.read_phase()
+        assert got is not None
+        assert got.phase_start_ref == "sha-1"
+
+        # Idempotent rewrite (prev == phase) leaves the prior marker untouched.
+        with patch(
+            "agentalloy.signals.skill_loader.subprocess.run", side_effect=_rev_parse_run("sha-2")
+        ):
+            _write_phase_atomic(tmp_path, "build")
+        got = store.read_phase()
+        assert got is not None
+        assert got.phase_start_ref == "sha-1"
+    store.close()
+
+
+# ---------------------------------------------------------------------------
 # _load_workflow_skill_for_phase — packs fallback
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
 

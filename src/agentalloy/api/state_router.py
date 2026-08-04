@@ -159,6 +159,24 @@ def _write_result_to_response(
 _ARTIFACT_PREDICATES = ("artifact_exists", "artifact_contains")
 
 
+def _stamp_phase_start_ref(store: DuckDBStateStore, project_root: Path | None) -> None:
+    """Stamp the current HEAD SHA as the phase-start ref on a real transition.
+
+    Called from the HTTP API so that every real phase transition (whether
+    initiated via the CLI or the HTTP API) records the entry-point HEAD,
+    which the ``scope_touched_in_diff`` predicate later reads.
+    """
+    try:
+        from agentalloy.signals.skill_loader import _record_phase_start_ref
+
+        # Use the passed project_root — it's the canonical repo root the caller
+        # resolved. The store handle already comes from ``get_repo_store`` which
+        # scopes to the same repo.
+        _record_phase_start_ref(project_root or Path.cwd())
+    except Exception:  # noqa: BLE001 — soft; the phase advance must not fail
+        pass
+
+
 def _owed_artifacts(gates: dict[str, Any]) -> list[str]:
     """The distinct artifact paths a phase's exit gates require.
 
@@ -429,6 +447,7 @@ async def read_phase(
         started_at=phase.started_at,
         last_updated=phase.last_updated,
         workflow=phase.workflow or None,
+        phase_start_ref=phase.phase_start_ref,
     )
 
 
@@ -695,6 +714,9 @@ async def write_phase(
             await asyncio.to_thread(
                 _rewrite_posture, Path(repo_root), phase_value, written.mode if written else None
             )
+        # Stamp the phase-start HEAD ref on a real transition (soft — must not
+        # block the phase advance).
+        _stamp_phase_start_ref(store, project_root)
         return PhaseAdvanceResponse(
             kind=result.kind,
             # ``result.value`` is the stored blob; callers want the bare name.

@@ -42,10 +42,10 @@ def wired(tmp_path: Path):
         store.close()
 
 
-def _seed(store: DuckDBStateStore, repo_root: Path) -> DuckDBStateStore:
+def _seed(store: DuckDBStateStore, repo_root: Path, *, phase: str = "build") -> DuckDBStateStore:
     """Give *repo_root* a phase blob with metadata, and return its store view."""
     view = store.for_repo(_repo_key_for(str(repo_root)))
-    view.write_phase("build", actor="proxy", mode="workflow")
+    view.write_phase(phase, actor="proxy", mode="workflow")
     return view
 
 
@@ -127,18 +127,20 @@ class TestResume:
     def test_owed_artifacts_are_listed(self, wired, tmp_path: Path) -> None:
         """The gates carry paths; resume must surface them, not swallow them.
 
-        This is the assertion whose absence let ``owed_artifacts`` be silently
-        ``None`` — the extractor read a gate shape the corpus never emits, and
-        the surrounding ``except`` hid it.
+        Re-anchored on ``add-skill`` (build's exit gate is now scope/diff-based
+        per #513 and intentionally carries no owed file artifact): add-skill's
+        exit gate carries a path-form ``artifact_exists`` for custom-skill
+        YAML under ``.agentalloy/custom-skills``, which resume must surface.
         """
         store, client = wired
         repo = tmp_path / "repo"
-        _seed(store, repo)
+        _seed(store, repo, phase="add-skill")
 
         owed = client.get("/state/resume", params={"repo_root": str(repo)}).json()["owed_artifacts"]
 
-        assert owed, "build has artifact gates; resume returned nothing"
+        assert owed, "add-skill carries a path-form artifact gate; resume returned nothing"
         assert all(isinstance(p, str) and "/" in p for p in owed)
+        assert ".agentalloy/custom-skills/**/*.yaml" in owed
 
 
 class TestOwedArtifactExtraction:

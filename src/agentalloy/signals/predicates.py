@@ -6,6 +6,7 @@ They never raise; they return UNKNOWN on any IO or context failure.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import re
 import subprocess
@@ -71,16 +72,23 @@ class PredicateContext:
 
 
 def _glob_files(root: Path, pattern: str) -> list[Path]:
-    """Return files matching glob pattern under root (or absolute if pattern is absolute)."""
+    r"""Return files matching glob pattern under root (or absolute if pattern is absolute).
+
+    A bare trailing ``/**`` (e.g. ``"src/**"``) is meant to read "all files
+    under ``src/``" — but pathlib's ``src/**`` matches the ``src`` *directory*
+    itself (and subdirs), never the files within it, so an empty ``src/`` would
+    vacuously satisfy an ``artifact_exists`` gate (#513). Normalize ``X/**`` to
+    ``X/**/*`` and keep only real files, so the gate proves a file exists, not
+    that the folder does.
+    """
     try:
         if Path(pattern).is_absolute():
             p = Path(pattern)
-            if p.exists():
+            if p.is_file():
                 return [p]
             return []
-        # Use rglob-style glob
-        results = list(root.glob(pattern))
-        return results
+        glob_pattern = f"{pattern}/*" if pattern.endswith("/**") else pattern
+        return [f for f in root.glob(glob_pattern) if f.is_file()]
     except Exception:
         return []
 
@@ -644,6 +652,139 @@ def eval_git_state(args: dict[str, Any], ctx: PredicateContext) -> PredicateResu
     return PredicateResult.MET
 
 
+def _read_phase_start_ref(project_root: Path, store: Any | None = None) -> str | None:
+    """The phase-entry HEAD SHA stamped on the last real phase transition.
+
+    Absent (no marker yet, or git was unavailable at transition time) → None,
+    which callers treat as UNKNOWN (fail-open) per the absent-vs-unavailable
+    rule: a missing marker must not read as NOT_MET and block a legitimate
+    advance. Written by ``skill_loader._record_phase_start_ref`` on both the
+    CLI and proxy auto-advance transition paths.
+
+    Reads from the store (``phase_start_ref`` blob field) when a ``store``
+    handle is provided (tests pass their temp-store here); otherwise falls
+    back to the store's global process handle.  The stamp lives in the phase
+    blob, not on disk.
+    """
+    try:
+        if store is not None:
+            state = store.read_phase()
+            return state.phase_start_ref if state else None
+        # Fallback: global process handle (production path, not used in tests)
+        from agentalloy.signals.skill_loader import (
+            _phase_view,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        view = _phase_view(project_root)
+        if view is None:
+            return None
+        state = view.read_phase()
+        return state.phase_start_ref if state else None
+    except Exception:  # noqa: BLE001 — fail-soft by design
+        return None
+
+
+def _changed_paths_since(project_root: Path, base_ref: str) -> list[str] | None:
+    """Repo-relative paths changed since *base_ref* (committed + working tree).
+
+    Combines ``git diff --name-only <ref>..HEAD`` (committed during the phase)
+    with ``git status --porcelain`` (staged/uncommitted/untracked) so a
+    commit-per-concern workflow that leaves the tree clean at advance time is
+    still caught. Returns ``None`` on any total git failure (callers fail open).
+    A shallow clone where ``<ref>..HEAD`` is unreachable degrades to the
+    working-tree signal alone rather than failing outright.
+    """
+    paths: set[str] = set()
+    diff_ok = True
+    try:
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", f"{base_ref}..HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=project_root,
+        )
+        diff_ok = diff.returncode == 0
+        if diff_ok:
+            paths.update(line.strip() for line in diff.stdout.splitlines() if line.strip())
+        st = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=project_root,
+        )
+        if st.returncode == 0:
+            for line in st.stdout.splitlines():
+                if len(line) > 3:
+                    paths.add(line[3:].strip())
+        if not diff_ok and st.returncode != 0:
+            return None
+    except Exception:
+        return None
+    return sorted(paths)
+
+
+def _path_in_scope(path: str, scope_patterns: list[str]) -> bool:
+    """Whether a repo-relative *path* is covered by any ``scope.touches`` pattern.
+
+    Matches exact paths, directory prefixes (``src/auth`` covers
+    ``src/auth/x.py``), and glob patterns (``src/**/*.py``). Pure; unit-tested.
+    """
+    p = path.strip()
+    for s in scope_patterns:
+        pat = s.strip().rstrip("/")
+        if not pat:
+            continue
+        if p == pat or p.startswith(pat + "/"):
+            return True
+        if fnmatch.fnmatch(p, pat):
+            return True
+    return False
+
+
+def eval_scope_touched_in_diff(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """MET iff the current phase changed a path inside the work-item's scope.touches.
+
+    Replaces the vacuous ``artifact_exists{path: "src/**"}`` build→qa gate
+    (#513): that node matched any repo with a ``src/`` dir, even empty. This
+    diffs ``<phase-entry SHA>..HEAD`` (+ working tree) against the cursor'd
+    contract's ``scope.touches``, so the gate proves the build actually touched
+    the declared scope — not that the repo merely has source.
+
+    Fail-open (UNKNOWN) on any infra gap — no phase-start marker, no store, no
+    contract, an undeclared scope, or a git failure — never NOT_MET: a degraded
+    read must not return the shape of success (the absent-vs-unavailable
+    convention, #531/#530/#526).
+    """
+    phase = args.get("phase") or ctx.current_phase
+    if phase is None:
+        return PredicateResult.UNKNOWN
+
+    base_ref = _read_phase_start_ref(ctx.project_root, store=ctx.store)
+    if not base_ref:
+        return PredicateResult.UNKNOWN
+
+    contracts = _query_store_contracts(ctx, phase=str(phase))
+    if not contracts:
+        # None (store errored) or [] (no store / no contract) — can't tell either way.
+        return PredicateResult.UNKNOWN
+    slug = _resolve_workitem_slug(ctx, str(phase))
+    chosen = next((c for c in contracts if c.get("slug") == slug), None) or contracts[0]
+    touches = chosen.get("scope_touches") or []
+    if not touches:
+        return PredicateResult.UNKNOWN  # undeclared scope → don't block
+
+    changed = _changed_paths_since(ctx.project_root, base_ref)
+    if changed is None:
+        return PredicateResult.UNKNOWN  # git failed → infra
+    if not changed:
+        return PredicateResult.NOT_MET  # nothing changed this phase — a no-op build
+    if any(_path_in_scope(c, list(touches)) for c in changed):
+        return PredicateResult.MET
+    return PredicateResult.NOT_MET  # changed things, but nothing in the declared scope
+
+
 def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
     count_min = args.get("count_min", 1)
 
@@ -956,6 +1097,7 @@ PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResu
     "file_type_active": eval_file_type_active,
     "build_contracts_cover_tasks": eval_build_contracts_cover_tasks,
     "build_contract_tag_focus": eval_build_contract_tag_focus,
+    "scope_touched_in_diff": eval_scope_touched_in_diff,
 }
 
 

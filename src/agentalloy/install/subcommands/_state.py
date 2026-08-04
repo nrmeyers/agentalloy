@@ -178,6 +178,7 @@ class _ServiceAccess:
             transitioned_by=body.get("transitioned_by"),
             started_at=body.get("started_at"),
             last_updated=body.get("last_updated"),
+            phase_start_ref=body.get("phase_start_ref"),
             # Derived, not trusted from the wire — same rule the store applies.
             workflow=f"sdd-{phase}",
         )
