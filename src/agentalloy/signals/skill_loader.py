@@ -36,12 +36,14 @@ __all__ = [
     "_read_composed",
     "_read_cursor",
     "_read_lifecycle_mode",
+    "_read_orientation_announced",
     "_read_phase",
     "_read_transitioned_by",
     "_write_announced_atomic",
     "_write_composed_atomic",
     "_write_cursor_atomic",
     "_write_lifecycle_mode",
+    "_write_orientation_announced_atomic",
     "_write_phase_atomic",
     "exit_gates_for_phase",
     "read_flow_state",
@@ -435,6 +437,70 @@ def _write_announced_atomic(
         view.write("announced", value)
     except Exception:
         logger.warning("announced write failed for %s", project_root, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Orientation cadence helpers (once-per-session injection cadence)
+# ---------------------------------------------------------------------------
+#
+# ``orientation`` (store kind, repo-scoped row) records whether the orientation
+# marker has already fired for the current session. The proxy fires the
+# orientation block exactly once per session (when a session key is present and
+# the session is not yet in the oriented set), then burns the marker so the
+# block stays quiet on subsequent turns. This decouples the orientation marker
+# from per-turn injection: worst case is one extra re-orient on the next turn,
+# not a broken proxy response. Like ``announced``, this is proxy-exclusive and
+# store-only — see ``_state_view``.
+
+
+def _read_orientation_announced(project_root: Path) -> tuple[str | None, list[str]]:
+    """Read the ``orientation`` store row as ``(phase, [session_keys])``.
+
+    The value is ``"<phase>\\t<key1>,<key2>,..."`` — the phase plus the set of
+    sessions already oriented for it — so orientation is keyed per *(phase,
+    session)*: a new session on an already-orientated phase still re-orients,
+    while a session already in the set stays quiet. ``(None, [])`` means nothing
+    oriented yet, or the store is out of reach from this process
+    (proxy-exclusive: see ``_state_view``).
+    """
+    view = _state_view(project_root)
+    if view is None:
+        return None, []
+    try:
+        raw = view.read("orientation")
+    except Exception:
+        logger.warning("orientation read failed for %s", project_root, exc_info=True)
+        return None, []
+    if raw is None:
+        return None, []
+    phase, _, keys_csv = raw.partition("\t")
+    keys = [k for k in keys_csv.split(",") if k]
+    return (phase or None), keys
+
+
+def _write_orientation_announced_atomic(
+    project_root: Path, phase: str, session_keys: list[str] | None = None
+) -> None:
+    """Record *(phase, session_keys)* as oriented (session cadence).
+
+    Writes ``"<phase>\\t<key1>,<key2>,..."``; a bare ``phase`` when no session
+    keys (back-compat with the historical single-value format). Best-effort like
+    the rest of this cadence pair: an unreachable store or a write failure is
+    logged and dropped rather than raised, since worst case is one extra
+    re-orient on the next turn, not a broken proxy response. Respects
+    ``_MAX_ANNOUNCED_SESSIONS`` when capping session keys — oldest keys dropped
+    first (LRU-ish).
+    """
+    keys = [k for k in (session_keys or []) if k][-_MAX_ANNOUNCED_SESSIONS:]
+    value = f"{phase}\t{','.join(keys)}" if keys else phase
+    view = _state_view(project_root)
+    if view is None:
+        logger.warning("no state store bound — orientation write dropped for %s", project_root)
+        return
+    try:
+        view.write("orientation", value)
+    except Exception:
+        logger.warning("orientation write failed for %s", project_root, exc_info=True)
 
 
 def cli_session_key() -> str | None:
