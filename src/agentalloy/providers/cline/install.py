@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from agentalloy.api.proxy_context import Upstream
 from agentalloy.providers.base import WireRecord
 
 
@@ -42,6 +43,89 @@ def providers_json_path(data_dir: Path | None = None) -> Path:
     if data_dir is not None:
         return data_dir / "settings" / "providers.json"
     return Path.home() / ".cline" / "data" / "settings" / "providers.json"
+
+
+def _is_proxy_entry(settings: dict[str, Any]) -> bool:
+    """True when a provider entry is the one agentalloy itself injected.
+
+    ``render_providers`` always writes the synthetic model name
+    ``agentalloy-proxy`` pointing at the local proxy's bare ``/v1`` surface.
+    That model name is the canonical marker (also what the proxy's
+    ``_resolve_model`` maps back to the real upstream), so it reliably
+    identifies *our* entry regardless of which host/port the proxy runs on.
+    """
+    return settings.get("model") == "agentalloy-proxy"
+
+
+def extract_upstream(root: Path, data_dir: Path | None = None) -> Upstream | None:
+    """Recover the upstream LLM from cline's user-scoped provider store.
+
+    Cline reads ``~/.cline/data/settings/providers.json`` (the store ``cline
+    auth`` writes; the repo-local ``.cline/settings.json`` is inert). Each
+    provider entry carries ``{settings: {provider, apiKey, model, baseUrl}}``
+    plus a top-level ``lastUsedProvider`` naming the active one. ``root`` is
+    unused — cline config is home-scoped, not per-repo (reading the repo-local
+    store back would adopt the proxy as its own upstream).
+
+    Selection mirrors qwen's guard: agentalloy's own wiring writes an
+    ``openai-compatible`` entry pointing at the proxy with the synthetic model
+    ``agentalloy-proxy``, which we skip so we never adopt the proxy as its own
+    upstream. Prefer ``lastUsedProvider`` when it isn't the proxy; otherwise
+    adopt the sole remaining non-proxy provider; return ``None`` when the store
+    is absent, malformed, or the non-proxy set is empty/ambiguous (the user
+    then passes ``--upstream-url``).
+
+    ``key_env`` is always ``None``: cline stores the upstream API key as a
+    *literal* in ``settings.apiKey``, which can't be mapped to the env-var
+    *name* ``Upstream.key_env`` requires the proxy to resolve at request time.
+    So adoption is auth-transparent — correct for keyless local upstreams
+    (llama-server / ollama), the primary ``add cline`` case; the global
+    ``UPSTREAM`` / ``--key-env`` path still covers keyed cloud providers.
+    """
+    _ = root
+    path = providers_json_path(data_dir)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    providers = parsed.get("providers")
+    last_used = parsed.get("lastUsedProvider")
+    if not isinstance(providers, dict) or not providers:
+        return None
+
+    def _settings_of(key: object) -> dict[str, Any] | None:
+        entry = providers.get(key)  # type: ignore[arg-type]
+        settings = entry.get("settings") if isinstance(entry, dict) else None
+        return settings if isinstance(settings, dict) else None
+
+    def _to_upstream(settings: dict[str, Any]) -> Upstream | None:
+        url = settings.get("baseUrl")
+        model = settings.get("model")
+        if not (isinstance(url, str) and url) or not (isinstance(model, str) and model):
+            return None
+        return Upstream(url=url.rstrip("/"), model=model, key_env=None)
+
+    # Prefer the active provider unless it is our own proxy entry.
+    if isinstance(last_used, str):
+        settings = _settings_of(last_used)
+        if settings is not None and not _is_proxy_entry(settings):
+            return _to_upstream(settings)
+
+    # Otherwise fall back to the sole remaining non-proxy provider.
+    real = [
+        settings
+        for settings in (_settings_of(k) for k in providers)
+        if settings is not None and not _is_proxy_entry(settings)
+    ]
+    if len(real) == 1:
+        return _to_upstream(real[0])
+    return None
 
 
 def render_providers(port: int, existing: dict[str, Any] | None = None) -> dict[str, Any]:

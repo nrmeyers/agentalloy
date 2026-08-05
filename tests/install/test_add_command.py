@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pytest
@@ -185,3 +186,185 @@ class TestAddRun:
         )
 
         assert _repo_phase(str(repo)) == "build"
+
+
+# ---------------------------------------------------------------------------
+# Cline upstream adoption (GH#514 follow-up: `add cline` recovered no upstream).
+# ---------------------------------------------------------------------------
+
+
+def _global_cline_providers(home: Path, store: dict) -> None:
+    """Write a cline provider store at ``home/.cline/data/settings/providers.json``."""
+    path = home / ".cline" / "data" / "settings" / "providers.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(store))
+
+
+def _cline_provider(
+    *,
+    base_url: str = "http://10.0.0.9:60000/v1",
+    model: str = "qwen3.6",
+) -> dict:
+    """A cline provider entry in the exact schema ``cline auth`` writes."""
+    return {
+        "settings": {
+            "provider": "openai-compatible",
+            "apiKey": "sk-real-key",
+            "model": model,
+            "baseUrl": base_url,
+        },
+        "tokenSource": "manual",
+    }
+
+
+class TestExtractUpstreamCline:
+    def test_adopts_last_used_provider(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {
+                "providers": {
+                    "openai": _cline_provider(),
+                    "anthropic": _cline_provider(
+                        base_url="https://api.anthropic.com", model="claude-3"
+                    ),
+                },
+                "lastUsedProvider": "openai",
+            },
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from agentalloy.providers.cline import install as cline_install
+
+        up = cline_install.extract_upstream(tmp_path)
+        assert up is not None
+        assert up.url == "http://10.0.0.9:60000/v1"
+        assert up.model == "qwen3.6"
+        # cline stores the key as a literal, so adoption is auth-transparent.
+        assert up.key_env is None
+
+    def test_skips_the_proxy_entry_and_adopts_the_real_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {
+                "providers": {
+                    # agentalloy's own injected entry (last-used after wiring).
+                    "openai-compatible": _cline_provider(
+                        base_url="http://localhost:47950/v1", model="agentalloy-proxy"
+                    ),
+                    "openai": _cline_provider(),
+                },
+                "lastUsedProvider": "openai-compatible",
+            },
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from agentalloy.providers.cline import install as cline_install
+
+        up = cline_install.extract_upstream(tmp_path)
+        assert up is not None
+        assert up.url == "http://10.0.0.9:60000/v1"
+        assert up.model == "qwen3.6"
+
+    def test_ambiguous_non_proxy_providers_return_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {
+                "providers": {
+                    "openai": _cline_provider(),
+                    "anthropic": _cline_provider(
+                        base_url="https://api.anthropic.com", model="claude-3"
+                    ),
+                },
+                # lastUsedProvider is the proxy, so it is skipped; two real
+                # providers remain -> ambiguous.
+                "lastUsedProvider": "openai-compatible",
+            },
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from agentalloy.providers.cline import install as cline_install
+
+        assert cline_install.extract_upstream(tmp_path) is None
+
+    def test_missing_or_malformed_store_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from agentalloy.providers.cline import install as cline_install
+
+        # Absent store.
+        assert cline_install.extract_upstream(tmp_path) is None
+
+        # Malformed JSON.
+        path = home / ".cline" / "data" / "settings" / "providers.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        assert cline_install.extract_upstream(tmp_path) is None
+
+    def test_only_proxy_entry_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {
+                "providers": {
+                    "openai-compatible": _cline_provider(
+                        base_url="http://localhost:47950/v1", model="agentalloy-proxy"
+                    )
+                },
+                "lastUsedProvider": "openai-compatible",
+            },
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        from agentalloy.providers.cline import install as cline_install
+
+        assert cline_install.extract_upstream(tmp_path) is None
+
+
+class TestCaptureUpstreamCline:
+    def test_adopts_cline_upstream_and_writes_repo_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {"providers": {"openai": _cline_provider()}, "lastUsedProvider": "openai"},
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        up = add.capture_upstream("cline", tmp_path)
+        assert up is not None
+        assert up.url == "http://10.0.0.9:60000/v1"
+        assert up.model == "qwen3.6"
+        # Recorded for the proxy to read per-repo.
+        assert read_upstream(tmp_path) == UpstreamFile(kind="valid", upstream=up)
+
+    def test_cli_override_wins_for_cline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_cline_providers(
+            home,
+            {"providers": {"openai": _cline_provider()}, "lastUsedProvider": "openai"},
+        )
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        up = add.capture_upstream(
+            "cline", tmp_path, upstream_url="http://override:1/v1", upstream_model="m9"
+        )
+        assert up is not None
+        assert up.url == "http://override:1/v1"
+        assert up.model == "m9"

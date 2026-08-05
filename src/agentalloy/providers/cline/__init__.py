@@ -48,4 +48,5 @@ REGISTRY["cline"] = HarnessSpec(
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
     install_writer=_install_writer,
+    upstream_extractor=install.extract_upstream,
 )
