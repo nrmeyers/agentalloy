@@ -175,8 +175,6 @@ def _start_llama_server(
         str(LLAMA_EMBED_PORT),
         "--threads",
         str(LLAMA_EMBED_THREADS),
-        "--threads-embed",
-        str(LLAMA_EMBED_THREADS),
         "--ubatch-size",
         str(LLAMA_UBATCH_SIZE),
     ]
