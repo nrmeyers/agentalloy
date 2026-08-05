@@ -211,7 +211,9 @@ class ContractCreateRequest(BaseModel):
     domain_tags: list[str] | None = Field(default=None, description="Domain tag list")
     scope_touches: list[str] | None = Field(default=None, description="Files the contract touches")
     scope_avoids: list[str] | None = Field(default=None, description="Files the contract avoids")
-    success_criteria: list[str] | None = Field(default=None, description="Success criteria list")
+    success_criteria: list[str | dict[str, Any]] | None = Field(
+        default=None, description="Success criteria list of strings or {id, text} dicts"
+    )
     body: str | None = Field(default=None, description="Contract body (markdown)")
 
 
@@ -222,7 +224,7 @@ class ContractPatchRequest(BaseModel):
     domain_tags: list[str] | None = None
     scope_touches: list[str] | None = None
     scope_avoids: list[str] | None = None
-    success_criteria: list[str] | None = None
+    success_criteria: list[dict] | None = None
 
 
 class ContractSupersedeRequest(BaseModel):
@@ -236,7 +238,7 @@ class ContractSupersedeRequest(BaseModel):
     domain_tags: list[str] | None = None
     scope_touches: list[str] | None = None
     scope_avoids: list[str] | None = None
-    success_criteria: list[str] | None = None
+    success_criteria: list[dict] | None = None
     body: str | None = None
 
 
@@ -251,7 +253,7 @@ class ContractResponse(BaseModel):
     domain_tags: list[str] | None
     scope_touches: list[str] | None
     scope_avoids: list[str] | None
-    success_criteria: list[str] | None
+    success_criteria: list[dict] | None
     status: str
     supersedes: str | None
     created_at: str

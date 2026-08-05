@@ -1148,10 +1148,74 @@ class TestArchiveAll:
     ) -> None:
         """TC4 — the specific /artifact/… route takes priority over /{kind}."""
         state_store.set_artifact("build", "c", "x.md", "x")
-        # If the catch-all /{kind} matched first, this would return 200
-        # with kind='artifact' — but the specific route should handle it.
         resp = state_client.get("/state/artifact/build/c/x.md")
         assert resp.status_code == 200
         body = resp.json()
         assert body["phase"] == "build"
         assert body["content"] == "x"
+
+    # ------------------------------------------------------------------
+    # PUT /state/artifact — AC parsing on spec artifact set
+    # ------------------------------------------------------------------
+
+    def test_put_artifact_spec_parses_ac_headings(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC5 — PUT /state/artifact with phase=spec parses AC headings into contract."""
+        # Create a spec contract first
+        state_store.put_contract(
+            "test-ac-slug",
+            phase="spec",
+            slug="test-ac-slug",
+            body="# Test contract",
+        )
+        # Set artifact with AC headings
+        body = "## AC-1: login works\n## AC-2: logout works\n## Out of Scope\n## AC-3: signup works"
+        resp = state_client.put(
+            "/state/artifact",
+            json={
+                "phase": "spec",
+                "slug": "test-ac-slug",
+                "name": "spec.md",
+                "content": body,
+            },
+        )
+        assert resp.status_code == 200
+
+        # Verify contract was updated with structured ACs
+        contract = state_store.get_contract("test-ac-slug")
+        assert contract is not None
+        criteria = contract.get("success_criteria") or []
+        assert len(criteria) == 3
+        ids = [c["id"] for c in criteria if isinstance(c, dict)]
+        assert "AC-1" in ids
+        assert "AC-2" in ids
+        assert "AC-3" in ids
+
+    def test_put_artifact_non_spec_ignores_ac_headings(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """TC6 — PUT /state/artifact with non-spec phase does not parse AC headings."""
+        state_store.put_contract(
+            "test-no-ac",
+            phase="build",
+            slug="test-no-ac",
+            body="# Build contract",
+        )
+        body = "## AC-1: should be ignored"
+        resp = state_client.put(
+            "/state/artifact",
+            json={
+                "phase": "build",
+                "slug": "test-no-ac",
+                "name": "tasks.md",
+                "content": body,
+            },
+        )
+        assert resp.status_code == 200
+
+        # Contract should not have ACs parsed from artifact
+        contract = state_store.get_contract("test-no-ac")
+        assert contract is not None
+        criteria = contract.get("success_criteria") or []
+        assert len(criteria) == 0
