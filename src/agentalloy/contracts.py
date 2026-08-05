@@ -59,7 +59,7 @@ class Contract:
     task_slug: str
     domain_tags: list[str]
     scope: ContractScope
-    success_criteria: list[str]
+    success_criteria: list[str | dict[str, Any]]
     related_contracts: list[str]
     created_at: datetime | None
     body: str
@@ -166,7 +166,8 @@ def parse_contract_text(
         avoids=[str(g) for g in cast(list[Any], scope_raw.get("avoids") or [])],
     )
 
-    success_criteria = [str(c) for c in cast(list[Any], data.get("success_criteria") or [])]
+    success_criteria_raw = cast(list[Any], data.get("success_criteria") or [])
+    success_criteria = _normalize_success_criteria(success_criteria_raw)
 
     # related_contracts — list of contract_ids (strings)
     related_raw: list[Any] = data.get("related_contracts") or []
@@ -204,6 +205,54 @@ def parse_contract_text(
     )
 
 
+def _normalize_success_criteria(raw: list[Any]) -> list[str | dict[str, Any]]:
+    """Normalize success_criteria to list[str | dict[str, Any]] with id/text keys.
+
+    Handles both legacy format (list[str]) and new format (list[dict]).
+
+    Legacy: ["AC-1: feature works", "AC-2: another feature"]
+    New: [{"id": "AC-1", "text": "feature works"}, ...]
+
+    Legacy entries are preserved as-is with auto-generated IDs to maintain
+    backward compatibility. New entries must have both id and text keys.
+    """
+    if not raw:
+        return []
+
+    normalized: list[str | dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            # New format: already has id/text
+            normalized.append(
+                {
+                    "id": str(item.get("id", "")),
+                    "text": str(item.get("text", "")),
+                }
+            )
+        else:
+            # Legacy format: string, preserve as-is
+            normalized.append({"id": str(item), "text": str(item)})
+
+    return normalized
+
+
+def parse_ac_headings(markdown: str) -> list[dict[str, Any]]:
+    """Extract AC IDs and text from markdown headings.
+
+    Matches ## AC-N: text or ### AC-N: text patterns.
+    Returns list of {id: f"AC-{n}", text: stripped_text}.
+    """
+    import re
+
+    pattern = r"^(?:#{2,3})\s+AC-(\d+)[\s:]+\s*(.+)$"
+    results: list[dict[str, Any]] = []
+    for line in markdown.split("\n"):
+        m = re.match(pattern, line.strip())
+        if m:
+            results.append({"id": f"AC-{m.group(1)}", "text": m.group(2).strip()})
+    return results
+
+
 def contract_from_row(row: dict[str, Any]) -> Contract:
     """Construct a :class:`Contract` from a store row dict.
 
@@ -221,7 +270,7 @@ def contract_from_row(row: dict[str, Any]) -> Contract:
     domain_tags = row.get("domain_tags") or []
     scope_touches = row.get("scope_touches") or []
     scope_avoids = row.get("scope_avoids") or []
-    success_criteria = row.get("success_criteria") or []
+    success_criteria_raw = row.get("success_criteria") or []
 
     route = str(row.get("route") or "full").strip().lower()
     if route not in ("full", "fast", "add-skill"):
@@ -236,7 +285,7 @@ def contract_from_row(row: dict[str, Any]) -> Contract:
             touches=[str(g) for g in scope_touches],
             avoids=[str(g) for g in scope_avoids],
         ),
-        success_criteria=[str(c) for c in success_criteria],
+        success_criteria=_normalize_success_criteria(success_criteria_raw),
         related_contracts=[],
         created_at=created_at,
         body=str(row.get("body") or ""),

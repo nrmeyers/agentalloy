@@ -207,7 +207,7 @@ class TestContractFromRow:
         assert contract.domain_tags == ["api-design"]
         assert contract.scope.touches == ["src/auth/"]
         assert contract.scope.avoids == ["src/billing/"]
-        assert contract.success_criteria == ["tests pass"]
+        assert contract.success_criteria == [{"id": "tests pass", "text": "tests pass"}]
         assert contract.body == "# Auth Middleware"
 
     def test_missing_optional_fields(self) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import os
 import re
 import subprocess
 import traceback
@@ -1217,3 +1218,91 @@ def evaluate_predicate(
         return PREDICATES[predicate_name](args, ctx)
     except Exception:
         return PredicateResult.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Gate feedback — AC completeness check for phase gates
+# ---------------------------------------------------------------------------
+
+
+def _gate_trigger_enabled() -> bool:
+    """Whether the gate-trigger (AC feedback) feature is enabled.
+
+    Reads ``AGENTALLOY_GATE_TRIGGER_ENABLED`` env var. Defaults to ``True``.
+    """
+    try:
+        val = os.environ.get("AGENTALLOY_GATE_TRIGGER_ENABLED", "1")
+        return val.lower() not in ("0", "false", "no", "")
+    except Exception:
+        return True
+
+
+def _ac_is_met(
+    store: Any,
+    phase: str,
+    slug: str,
+    ac_id: str,
+    ac_text: str,
+) -> bool:
+    """Whether a single acceptance criterion is met in the phase's artifacts.
+
+    Lists artifacts for ``phase``/``slug``, reads each artifact's content,
+    checks if ``ac_id`` or ``ac_text`` appears as a substring.
+    """
+    try:
+        rows = _list_store_artifacts(
+            PredicateContext(project_root=Path.cwd(), store=store),
+            phase=phase,
+            slug=slug,
+        )
+        if rows is None:
+            return False
+        for row in rows:
+            content = row.get("content") or ""
+            if ac_id in content or ac_text in content:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _evaluate_ac_feedback(
+    store: Any,
+    contract: dict[str, Any],
+) -> str | None:
+    """Evaluate AC feedback for a contract's success criteria.
+
+    For each structured AC in ``success_criteria``, checks if the AC ID or
+    text appears in any artifact for the phase (simple substring match).
+    Returns ``[agentalloy-gate-feedback] Unmet criteria: AC-X, AC-Y`` if any
+    are unmet, or ``None`` if all met.
+    """
+    if not _gate_trigger_enabled():
+        return None
+
+    success_criteria = contract.get("success_criteria") or []
+    phase = str(contract.get("phase", ""))
+    slug = str(contract.get("slug", ""))
+
+    if not phase or not slug:
+        return None
+
+    unmet: list[str] = []
+    for criterion in success_criteria:
+        if isinstance(criterion, dict):
+            ac_id = str(criterion.get("id", ""))
+            ac_text = str(criterion.get("text", ""))
+        else:
+            # String criterion: treat the whole string as both id and text
+            ac_id = str(criterion)
+            ac_text = str(criterion)
+
+        if not ac_id or not ac_text:
+            continue
+
+        if not _ac_is_met(store, phase, slug, ac_id, ac_text):
+            unmet.append(ac_id)
+
+    if unmet:
+        return f"[agentalloy-gate-feedback] Unmet criteria: {', '.join(unmet)}"
+    return None

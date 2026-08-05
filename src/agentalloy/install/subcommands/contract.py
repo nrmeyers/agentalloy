@@ -217,7 +217,10 @@ def _render_show(result: dict[str, Any]) -> None:
     if criteria:
         print_rich("\n  [bold]Success Criteria[/bold]")
         for criterion in criteria:
-            print_rich(f"  - {criterion}")
+            if isinstance(criterion, dict):
+                print_rich(f"  - {criterion.get('id', '')}: {criterion.get('text', '')}")
+            else:
+                print_rich(f"  - {criterion}")
     body = result.get("body")
     if body:
         print_rich(f"\n  [bold]Body[/bold]\n{body}")

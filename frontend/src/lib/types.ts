@@ -644,7 +644,7 @@ export interface Contract {
   domain_tags: string[] | null;
   scope_touches: string[] | null;
   scope_avoids: string[] | null;
-  success_criteria: string[] | null;
+  success_criteria: { id: string; text: string }[] | null;
   status: 'active' | 'archived' | 'superseded';
   supersedes: string | null;
   created_at: string;
@@ -661,7 +661,7 @@ export interface ContractPatchRequest {
   domain_tags?: string[];
   scope_touches?: string[];
   scope_avoids?: string[];
-  success_criteria?: string[];
+  success_criteria?: { id: string; text: string }[];
 }
 
 export interface ContractsListParams {

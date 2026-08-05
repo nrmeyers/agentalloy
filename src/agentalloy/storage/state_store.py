@@ -1004,7 +1004,7 @@ class DuckDBStateStore:
         domain_tags: list[str] | None = None,
         scope_touches: list[str] | None = None,
         scope_avoids: list[str] | None = None,
-        success_criteria: list[str] | None = None,
+        success_criteria: list[str | dict[str, Any]] | None = None,
         body: str | None = None,
         status: str = "active",
         supersedes: str | None = None,
@@ -1159,7 +1159,7 @@ class DuckDBStateStore:
         domain_tags: list[str] | None = None,
         scope_touches: list[str] | None = None,
         scope_avoids: list[str] | None = None,
-        success_criteria: list[str] | None = None,
+        success_criteria: list[str | dict[str, Any]] | None = None,
         body: str | None = None,
     ) -> str:
         """Supersede a contract: write a new row and flip the prior to 'superseded'.
@@ -1214,7 +1214,7 @@ class DuckDBStateStore:
         domain_tags: list[str] | None = None,
         scope_touches: list[str] | None = None,
         scope_avoids: list[str] | None = None,
-        success_criteria: list[str] | None = None,
+        success_criteria: list[str | dict[str, Any]] | None = None,
     ) -> bool:
         """In-place correction: update specified fields and bump updated_at.
 

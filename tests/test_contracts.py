@@ -90,7 +90,7 @@ def test_parse_contract_full_fields(tmp_path: Path):
     c = parse_contract(f)
     assert c.scope.touches == ["src/auth/**"]
     assert c.scope.avoids == ["src/billing/**"]
-    assert c.success_criteria == ["Tests pass"]
+    assert c.success_criteria == [{"id": "Tests pass", "text": "Tests pass"}]
     assert c.created_at is not None
     assert c.created_at.year == 2026
     assert c.body.strip() == "Full contract body."

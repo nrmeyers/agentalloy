@@ -40,8 +40,10 @@ jobs:
         # would resolve locally.
         run: uv run ruff check --fix .
 
-      - name: Format check
-        run: uv run ruff format --check .
+      - name: Format
+        # Auto-format (mirrors pre-commit's ruff-format hook).
+        # CI no longer fails on formatting — it fixes it inline.
+        run: uv run ruff format .
 
       - name: Type check
         run: uv run pyright
