@@ -298,6 +298,29 @@ async def _trigger_compose_in_process(
         except Exception:
             logger.exception("In-process compose failed for contract %s", contract_id)
 
+        # 4. Gate feedback: evaluate AC completeness after compose and store
+        #     feedback as a gate_feedback artifact.
+        try:
+            from agentalloy.signals.predicates import (
+                _evaluate_ac_feedback,
+                _gate_trigger_enabled,
+            )
+
+            if _gate_trigger_enabled():
+                feedback = _evaluate_ac_feedback(store, contract)
+                if feedback is not None:
+                    store.set_artifact(
+                        contract["repo"],
+                        contract["phase"],
+                        contract["slug"],
+                        "gate_feedback",
+                        feedback,
+                    )
+        except Exception:
+            logger.debug(
+                "Gate feedback evaluation failed for contract %s", contract_id, exc_info=True
+            )
+
     task = asyncio.create_task(_run())
     # Prevent GC: store the task on app.state keyed by contract_id.
     # The task self-removes on completion via the done callback.
@@ -1098,4 +1121,26 @@ async def set_artifact(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ArtifactResponse:
     row = await asyncio.to_thread(store.set_artifact, req.phase, req.slug, req.name, req.content)
+
+    # When phase=spec, parse AC headings from the artifact body and update
+    # the contract's success_criteria if any AC-N headings are found.
+    if req.phase == "spec":
+        from agentalloy.contracts import parse_ac_headings
+
+        ac_headings = parse_ac_headings(req.content)
+        if ac_headings:
+            # Find existing contract for this slug in spec phase
+            existing = store.get_contract(req.slug)
+            if existing:
+                # Merge: new ACs from artifact, preserve any existing ones not overwritten
+                existing_criteria = existing.get("success_criteria") or []
+                ac_ids = {h["id"] for h in ac_headings}
+                merged = [
+                    c
+                    for c in existing_criteria
+                    if not (isinstance(c, dict) and c.get("id") in ac_ids)
+                ]
+                merged.extend(ac_headings)
+                await asyncio.to_thread(store.update_contract, req.slug, success_criteria=merged)
+
     return ArtifactResponse(**row)

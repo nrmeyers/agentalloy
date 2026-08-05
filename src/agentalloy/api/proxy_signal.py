@@ -878,6 +878,23 @@ async def evaluate_signal(
 
         await asyncio.to_thread(_run_gates)
 
+    # 6b. AC feedback: evaluate the current work-item's success criteria against
+    #     its phase artifacts and append a [agentalloy-gate-feedback] advisory
+    #     when any criterion is unmet.
+    ac_feedback = None
+    if contract_id is not None and ctx.store is not None:
+        try:
+            from agentalloy.signals.predicates import _evaluate_ac_feedback
+
+            contract_row = ctx.store.get_contract(contract_id)
+            if contract_row is not None:
+                ac_feedback = _evaluate_ac_feedback(ctx.store, contract_row)
+        except Exception:
+            logger.debug("AC feedback evaluation failed", exc_info=True)
+
+    if ac_feedback is not None:
+        advisories.append(ac_feedback)
+
     # Did any semantic gate / transition-trigger intent hit an embed failure this
     # turn? Read off the shared ctx (the trigger ran on this thread, the gates in
     # the worker thread — both mutate the same diagnostics sink, and to_thread
@@ -964,6 +981,22 @@ async def evaluate_signal(
             new_sessions = last_sessions
         pending_announce = (phase, new_sessions)
     pending_composed = contract_id if (announce_cursor and contract_id is not None) else None
+
+    # 6c. Gate feedback artifact injection: read any gate_feedback artifact
+    #     from the store and append it to advisories. Soft — failures yield
+    #     None and don't break the proxy request.
+    if ctx.store is not None and contract_slug is not None:
+        try:
+            gate_fb = ctx.store.get_artifact(
+                phase,
+                contract_slug,
+                "gate_feedback",
+                status="active",
+            )
+            if gate_fb and gate_fb.get("content"):
+                advisories.append(f"[agentalloy-gate-feedback] {gate_fb['content']}")
+        except Exception:
+            logger.debug("Gate feedback artifact read failed", exc_info=True)
 
     return SignalResult(
         should_compose=True,
