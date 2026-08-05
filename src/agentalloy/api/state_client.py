@@ -277,6 +277,7 @@ class StateClient:
         *,
         phase: str | None = None,
         slug: str | None = None,
+        work_item: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         """List contracts with optional filters."""
@@ -285,6 +286,8 @@ class StateClient:
             params.append(("phase", phase))
         if slug is not None:
             params.append(("slug", slug))
+        if work_item is not None:
+            params.append(("work_item", work_item))
         if status is not None:
             params.append(("status", status))
 

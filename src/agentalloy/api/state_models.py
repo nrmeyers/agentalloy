@@ -301,9 +301,12 @@ class PhaseAdvanceResponse(BaseModel):
     It carries the result (``met``, ``not_met``, ``unknown``), the blocking
     reason, and a list of missing-artifact paths so the CLI can render
     operator-facing guidance without re-evaluating the gate itself.
+
+    ``success`` is False when the gate blocked the write (``gate_verdict``
+    carries the reason) — a blocked advance must never report success (#501).
     """
 
-    success: Literal[True] = True
+    success: bool = True
     kind: str
     value: str
     owner: str | None = None

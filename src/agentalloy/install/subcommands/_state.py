@@ -191,8 +191,15 @@ class _ServiceAccess:
         mode: str | None = None,
         free_since: str | None = None,
         override: bool = False,
-    ) -> None:
-        self.client.set_phase(
+    ) -> dict[str, Any] | None:
+        """Advance the phase over HTTP and return the service's response body.
+
+        The body carries ``gate_verdict`` when the service re-evaluated and
+        declined to write (the CLI already gate-checks locally, but the two
+        must agree — when they don't, the caller must see the verdict, not a
+        silent no-op) (#501).
+        """
+        return self.client.set_phase(
             phase,
             repo_root=str(self.root),
             actor=actor,

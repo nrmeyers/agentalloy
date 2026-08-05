@@ -55,6 +55,13 @@ class PredicateContext:
     # caused by "nothing to classify". See record_embed_failure / embed_failed.
     _diagnostics: dict[str, bool] = field(default_factory=lambda: cast(dict[str, bool], {}))
 
+    # Per-phase cache of the resolved active work-item slug, so a whole gate
+    # evaluation resolves it exactly once (#518). Same frozen-dataclass-safe
+    # mutability trick as _git_cache / _diagnostics.
+    _active_slug_cache: dict[str, str | None] = field(
+        default_factory=lambda: cast(dict[str, str | None], {})
+    )
+
     def record_embed_failure(self) -> None:
         """Flag that a semantic predicate's embed call failed this evaluation.
 
@@ -69,6 +76,42 @@ class PredicateContext:
     def embed_failed(self) -> bool:
         """True if any semantic predicate hit an embed failure this evaluation."""
         return bool(self._diagnostics.get("embed_failed"))
+
+    def resolve_active_slug(self, phase: str | None = None) -> str | None:
+        """The active work-item slug for ``phase`` (default ``current_phase``).
+
+        THE single resolution point (#518). Any predicate that must scope a
+        store query to the active work item calls this — or, better, relies on
+        the store-query helpers that default-scope to it — instead of
+        hand-rolling slug resolution, so the rule "store queries are
+        slug-scoped unless explicitly marked" has exactly one place to change.
+
+        Store-first and cursor-aware (#514): queries the store for ``phase``'s
+        active contracts, reads the work-item cursor (from the store when a
+        store handle is bound, falling back to the pre-migration
+        ``.agentalloy/cursor`` file), and returns the cursor'd contract's slug,
+        else the sole contract in the phase, else ``None``.
+        """
+        phase = phase or self.current_phase
+        if phase is None:
+            return None
+        cache = self._active_slug_cache
+        if phase in cache:
+            return cache[phase]
+        slug = _resolve_workitem_slug(self, phase)
+        cache[phase] = slug
+        return slug
+
+
+# Sentinel marking "scope to the active work item (the default)", so an
+# explicit ``slug=None`` can still mean repo-global for the few predicates that
+# genuinely evaluate cross-work-item invariants (#518: the default must be
+# per-item; opt-out must be deliberate).
+class _ScopeSentinel:
+    __slots__ = ()
+
+
+_ACTIVE = _ScopeSentinel()
 
 
 def _glob_files(root: Path, pattern: str) -> list[Path]:
@@ -136,7 +179,11 @@ def _emit_legacy_glob_trace(glob_pattern: str) -> None:
 
 
 def _query_store_contracts(
-    ctx: PredicateContext, *, phase: str | None = None, slug: str | None = None
+    ctx: PredicateContext,
+    *,
+    phase: str | None = None,
+    slug: str | None = None,
+    work_item: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Query the store for contracts.
 
@@ -152,28 +199,96 @@ def _query_store_contracts(
       turns an empty result into NOT_MET, which would refuse a phase advance
       because the service blipped.
     * ``list``    — the matching rows.
+
+    ``work_item`` is an explicit, opt-in filter (default ``None`` = repo-global
+    within ``phase``). Contract work-item scoping is relationship-specific — a
+    build contract's ``work_item`` is its *parent* design/plan slug, not its own
+    slug — so ``_query_store_contracts`` does not auto-resolve it the way the
+    artifact helper does; the cursor-based attribution lives in
+    :func:`_item_build_contracts`. Artifact queries, by contrast, are
+    default-scoped (see :func:`_list_store_artifacts`).
     """
     if ctx.store is None:
         return []
     try:
-        return ctx.store.list_contracts(phase=phase, slug=slug, status="active")
+        return ctx.store.list_contracts(
+            phase=phase, slug=slug, work_item=work_item, status="active"
+        )
     except Exception:
         return None
 
 
-def _list_store_artifacts(
-    ctx: PredicateContext, *, phase: str, name_glob: str | None = None, slug: str | None = None
-) -> list[dict[str, Any]] | None:
-    """Query the store for artifacts. ``None`` means "can't tell" — no store
-    bound, or the bound store errored — callers must fail closed (UNKNOWN),
-    never treat it as "no artifacts" (NOT_MET would incorrectly block a gate
-    whose predicates own the fail-open rule, not the caller; see
-    ``test_no_store_handle_fails_open``). Only a store that is present AND
-    answers (even with an empty list) yields a real result.
+def _resolve_workitem_slug_for(store: Any, project_root: Path, phase: str) -> str | None:
+    """Store-side active work-item slug resolver — the one shared by the gate
+    (via :meth:`PredicateContext.resolve_active_slug`) and by ``run_approve``, so
+    the approval digest the CLI records and the digest the gate recomputes always
+    cover the *same* artifact set (#501/#518).
 
-    ``slug`` narrows to a single work-item (the codify gate needs per-task
-    scoping); the phase-wide gates leave it None.
+    Store-first (#514): the cursor is read from the store when ``store`` is a
+    handle that exposes ``read``, falling back to the pre-migration
+    ``.agentalloy/cursor`` file; then the sole active contract in ``phase``;
+    else ``None``.
     """
+    in_phase: list[dict[str, Any]] = []
+    if store is not None and hasattr(store, "list_contracts"):
+        try:
+            in_phase = store.list_contracts(phase=phase, status="active") or []
+        except Exception:
+            in_phase = []
+
+    raw = ""
+    if store is not None and hasattr(store, "read"):
+        try:
+            cursor_value = store.read("cursor")
+            if cursor_value:
+                raw = str(cursor_value).strip()
+        except Exception:  # noqa: BLE001 — fall through to the legacy file
+            pass
+    if not raw:
+        try:
+            raw = (project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
+        except OSError:
+            raw = ""
+
+    if raw:
+        cursor_slug = Path(raw).stem
+        for c in in_phase:
+            if c.get("slug") == cursor_slug or c.get("contract_id") == raw:
+                return c.get("slug")
+
+    if len(in_phase) == 1:
+        return in_phase[0].get("slug")
+    return None
+
+
+def _list_store_artifacts(
+    ctx: PredicateContext,
+    *,
+    phase: str,
+    name_glob: str | None = None,
+    slug: str | None | _ScopeSentinel = _ACTIVE,
+) -> list[dict[str, Any]] | None:
+    """Query the store for artifacts, scoped to the active work-item by default.
+
+    ``None`` means "can't tell" — no store bound, or the bound store errored —
+    callers must fail open (UNKNOWN), never treat it as "no artifacts" (NOT_MET
+    would incorrectly block a gate whose predicates own the fail-open rule, not
+    the caller; see ``test_no_store_handle_fails_open``). Only a store that is
+    present AND answers (even with an empty list) yields a real result.
+
+    Default scope (#518/#501): when ``slug`` is the ``_ACTIVE`` sentinel, resolves
+    the active work-item slug for ``phase`` via
+    :meth:`PredicateContext.resolve_active_slug` and filters to it — a prior
+    work-item's artifacts can never affect this item's gate verdict. When no
+    single work item resolves, it falls back to repo-global (``slug=None``), the
+    pre-migration behavior; this is a documented boundary — the cursor is seeded
+    on phase entry, so genuine multi-item ambiguity is rare, and failing open
+    here would silently gut every store-backed completeness gate. Pass an
+    explicit string to pin a specific slug, or ``None`` to deliberately evaluate
+    repo-global.
+    """
+    if slug is _ACTIVE:
+        slug = ctx.resolve_active_slug(phase)
     if ctx.store is None:
         return None
     try:
@@ -493,8 +608,14 @@ def eval_approval_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predi
         if ctx.store is None:
             return PredicateResult.UNKNOWN  # store required but unavailable → fail closed
         since_name_glob = args.get("since_name_glob")
+        # Scope to the active work-item so a PRIOR item's artifact can neither
+        # satisfy this item's approval nor poison its digest, and so the gate
+        # and `run_approve` agree on the exact row set (#501/#518). Both fall
+        # back to repo-global (slug=None) only when no single work item resolves
+        # — a degenerate state where they still digest an identical set.
+        slug = ctx.resolve_active_slug(str(phase))
         try:
-            rows = ctx.store.list_artifacts(str(phase), name_glob=since_name_glob)
+            rows = ctx.store.list_artifacts(str(phase), slug=slug, name_glob=since_name_glob)
             approval = ctx.store.get_approval(str(phase))
         except Exception:
             return PredicateResult.UNKNOWN
@@ -890,32 +1011,15 @@ def _count_task_items(content: str) -> int:
 def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
     """The cursor'd work-item slug for ``phase`` — phase-strict.
 
-    Queries the store for active contracts in ``phase``. If a cursor is set and
-    points to a contract in this phase, returns that contract's slug. Falls back
-    to the sole contract in the phase, else ``None``. So a design→build gate
-    always scopes to the design work-item, never a sibling the cursor drifted to.
+    Delegates to :func:`_resolve_workitem_slug_for` (store-first cursor read,
+    sole-contract fallback) so the gate and ``run_approve`` share one resolution
+    path (#518). Queries the store for active contracts in ``phase``; if a
+    cursor is set and points to a contract in this phase, returns that
+    contract's slug; falls back to the sole contract in the phase, else
+    ``None``. So a design→build gate always scopes to the design work-item,
+    never a sibling the cursor drifted to.
     """
-    # Read cursor value
-    try:
-        raw = (ctx.project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
-    except OSError:
-        raw = ""
-
-    # Query store for contracts in this phase
-    in_phase = _query_store_contracts(ctx, phase=phase) or []
-
-    if raw:
-        # Cursor points to a contract_id (e.g. "build/01-task.md" or just "01-task.md")
-        cursor_slug = Path(raw).stem
-        for c in in_phase:
-            if c.get("slug") == cursor_slug or c.get("contract_id") == raw:
-                return c.get("slug")
-
-    # Fall back to sole contract in phase
-    if len(in_phase) == 1:
-        return in_phase[0].get("slug")
-
-    return None
+    return _resolve_workitem_slug_for(ctx.store, ctx.project_root, phase)
 
 
 def _contract_work_item(content: str) -> str | None:

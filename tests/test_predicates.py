@@ -253,6 +253,131 @@ def test_artifact_contains_returns_unknown_on_io_error(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# #518 / #501 — work-item scoping: a PRIOR item's artifact must not affect the
+# current item's gate verdict (the shared symptom of #378/#501, made the
+# default for store-backed artifact queries).
+# ---------------------------------------------------------------------------
+
+
+def _seed_spec_items(
+    tmp_path: Path, *, cursor_slug: str | None = "slug-b", slug_a_spec: str | None = None
+) -> PredicateContext:
+    """Two spec work-items (slug-a, slug-b) with store artifacts + contracts.
+
+    ``slug_a_spec`` controls whether slug-a records a ``spec.md`` artifact: when
+    omitted it has none (for the ``artifact_exists`` scoping case); to exercise
+    ``artifact_contains`` leave it as the INCOMPLETE spec. The cursor (stored in
+    the store, not on disk — #514) pins the selected item, so the gate must
+    judge only that item's artifacts.
+    """
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    repo = store._repo()  # type: ignore[attr-defined]
+    rows = [
+        f"('{repo}', 'spec/slug-a', 'slug-a', '[]', NULL, 'spec', 'active', CURRENT_TIMESTAMP)",
+        f"('{repo}', 'spec/slug-b', 'slug-b', '[]', NULL, 'spec', 'active', CURRENT_TIMESTAMP)",
+    ]
+    store.execute(
+        "INSERT INTO sdd_contract "
+        "(repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at) "
+        "VALUES " + ", ".join(rows) + ";"
+    )
+    if slug_a_spec is not None:
+        store.set_artifact("spec", "slug-a", "spec.md", slug_a_spec)
+    store.set_artifact(
+        "spec",
+        "slug-b",
+        "spec.md",
+        "# Complete\n\n## Acceptance Criteria\n- a\n\n## Out of Scope\n- b\n",
+    )
+    if cursor_slug is not None:
+        # Store-backed cursor (#514) — no .agentalloy/cursor file on disk.
+        store.write("cursor", f"active/spec/{cursor_slug}.md")
+    return _ctx(tmp_path, current_phase="spec", store=store)
+
+
+def test_regression_prior_item_artifact_does_not_poison_contains(tmp_path: Path) -> None:
+    """#501/#518: slug-a's incomplete spec must NOT block slug-b's exit.
+
+    The gate scopes to the cursor'd work item (slug-b), whose spec carries both
+    required sections → MET, despite slug-a's spec lacking them repo-wide.
+    """
+    ctx = _seed_spec_items(
+        tmp_path, cursor_slug="slug-b", slug_a_spec="# Incomplete\n\nno sections here\n"
+    )
+    result = eval_artifact_contains(
+        {
+            "phase": "spec",
+            "name": "*.md",
+            "sections": ["Acceptance Criteria", "Out of Scope"],
+        },
+        ctx,
+    )
+    assert result == MET
+
+
+def test_regression_artifact_exists_is_slug_scoped(tmp_path: Path) -> None:
+    """A prior item's artifact must not satisfy THIS item's artifact_exists.
+
+    Recurrences of the defect: with slug-a cursor'd (no ``spec.md`` artifact for
+    it) the gate must be NOT_MET even though slug-b's ``spec.md`` exists — the
+    repo-global query that leaked prior items is what broke it (#501).
+    """
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        "INSERT INTO sdd_contract "
+        "(repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at) "
+        f"VALUES ('{repo}','spec/slug-a','slug-a','[]',NULL,'spec','active',CURRENT_TIMESTAMP), "
+        f"('{repo}','spec/slug-b','slug-b','[]',NULL,'spec','active',CURRENT_TIMESTAMP);"
+    )
+    # slug-a has NO spec.md artifact; slug-b does.
+    store.set_artifact("spec", "slug-b", "spec.md", "# Complete\n")
+
+    # Cursor pins slug-a → its gate must be NOT_MET (slug-b's spec.md not counted).
+    store.write("cursor", "active/spec/slug-a.md")
+    ctx_a = _ctx(tmp_path, current_phase="spec", store=store)
+    assert eval_artifact_exists({"phase": "spec", "name": "spec.md"}, ctx_a) == NOT_MET
+
+    # Repoint the cursor to slug-b → its own spec.md counts → MET.
+    store.write("cursor", "active/spec/slug-b.md")
+    ctx_b = _ctx(tmp_path, current_phase="spec", store=store)
+    assert eval_artifact_exists({"phase": "spec", "name": "spec.md"}, ctx_b) == MET
+
+
+def test_active_slug_resolves_from_store_cursor(tmp_path: Path) -> None:
+    """#514: the active work-item slug resolves from the STORE cursor, with no
+    ``.agentalloy/cursor`` file on disk (that disk read is #514's migration
+    target — the store is authoritative)."""
+    from agentalloy.signals.predicates import _resolve_workitem_slug  # noqa: PLC0415
+
+    ctx = _seed_spec_items(tmp_path, cursor_slug="slug-b")
+    assert not (tmp_path / ".agentalloy" / "cursor").exists()
+    assert ctx.resolve_active_slug("spec") == "slug-b"
+    # The old helper is the same single resolution point.
+    assert _resolve_workitem_slug(ctx, "spec") == "slug-b"
+
+
+def test_single_contract_falls_back_to_sole_slug(tmp_path: Path) -> None:
+    """No cursor, single active contract in the phase → that slug is the scope."""
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        "INSERT INTO sdd_contract "
+        "(repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at) "
+        f"VALUES ('{repo}', 'spec/only', 'only', '[]', NULL, 'spec', 'active', CURRENT_TIMESTAMP);"
+    )
+    store.set_artifact("spec", "only", "spec.md", "# Only\n")
+    ctx = _ctx(tmp_path, current_phase="spec", store=store)
+    assert ctx.resolve_active_slug("spec") == "only"
+
+
+# ---------------------------------------------------------------------------
 # artifact_size_min
 # ---------------------------------------------------------------------------
 
