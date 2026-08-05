@@ -51,6 +51,33 @@ _VALID_PHASES = (
     "add-skill",
 )
 
+# Hardcoded orientation prose — fires BEFORE the workflow block, once per session.
+# This is the pre-script that orients the agent on its first request in a session:
+# it confirms current phase, checks mode (free-flow vs workflow), and presents
+# three choices (continue / enable or resume workflow / start fresh).
+# The intake skill's raw_prose is trimmed of duplicate phase-get + resume logic
+# since this orientation handles that upfront.
+_COMPOSE_ORIENTATION = """[agentalloy-orientation]
+You are running inside AgentAlloy, an agentic orchestrator for the Software Design
+and Delivery (SDD) workflow. This is your **session orientation** — it fires once
+at the start of every session and then disappears.
+
+**Current mode:** {mode}
+**Current phase:** {phase}
+
+{options_text}
+
+---
+[/agentalloy-orientation]
+"""
+
+# Options text templates, dynamically selected based on mode.
+_OPTIONS_TEXT_FREE = (
+    "We're in free-flow mode — workflow instructions are paused. "
+    "Run ``agentalloy flow resume`` to turn workflow instructions back on."
+)
+_OPTIONS_TEXT_WORKFLOW = "Workflow instructions are active."
+
 
 def _tier2_k() -> int | None:
     """Explicit per-work-item k for the Tier-2 domain leg.
@@ -363,9 +390,22 @@ async def _compose_block(
     message_text = "\n\n".join(
         p for p in (advisory_block, confirm_block, tier1_fragments, tier2, decision_block) if p
     )
+
+    # Orientation block: prepended BEFORE the workflow block when the orientation
+    # cadence fires (first request in this session for the current phase). Fires
+    # once per session, then disappears.
+    orientation_block = ""
+    if signal.announce_orientation:
+        mode = "free-flow" if signal.free_mode else "workflow"
+        options_text = _OPTIONS_TEXT_FREE if signal.free_mode else _OPTIONS_TEXT_WORKFLOW
+        orientation_block = _COMPOSE_ORIENTATION.format(
+            phase=signal.phase, mode=mode, options_text=options_text
+        )
+
     return _ComposedBlock(
-        text=text,
-        message_text=message_text,
+        text=orientation_block + ("\n" + text if text else orientation_block),
+        message_text=orientation_block
+        + ("\n" + message_text if message_text else orientation_block),
         tier1_text=bool(tier1),
         cursor_terminal=tier2_terminal,
         cursor_text=bool(tier2),
@@ -509,6 +549,8 @@ class InjectOutcome[T]:
       on a no-op (nothing composed, or the block could not be injected).
     - ``announce_emitted`` / ``cursor_emitted``: candidate Tier 1 / Tier 2 commits,
       pending a 2xx forward.
+    - ``orientation_emitted``: candidate orientation commit, pending a 2xx forward.
+      The orientation marker fires BEFORE the workflow block, once per session.
     """
 
     injected: T | None
@@ -517,6 +559,7 @@ class InjectOutcome[T]:
     cursor_emitted: bool
     # Merged skill/fragment provenance for the consolidated proxy trace row.
     telemetry: ProxyComposeTelemetry
+    orientation_emitted: bool = False
 
 
 async def apply_signal[T](
@@ -552,6 +595,7 @@ async def apply_signal[T](
             signal=signal,
             announce_emitted=False,
             cursor_emitted=False,
+            orientation_emitted=False,
             telemetry=composed.telemetry,
         )
     inject_text = composed.message_text if use_message_text else composed.text
@@ -562,6 +606,7 @@ async def apply_signal[T](
         signal=signal,
         announce_emitted=composed.tier1_text and (was_delivered or not inject_text),
         cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
+        orientation_emitted=signal.announce_orientation and (was_delivered or not inject_text),
         telemetry=composed.telemetry,
     )
 
@@ -573,7 +618,7 @@ def commit_outcome(project_root: Path, outcome: InjectOutcome[Any], *, upstream_
     processed the injected block). A non-2xx (529 overloaded, 5xx, connection error)
     leaves ``.agentalloy/{announced,composed}`` untouched, so ``evaluate_signal``
     re-announces on the harness's retry instead of silently dropping orientation.
-    No-op when nothing was injected (both emit flags False).
+    No-op when nothing was injected (all emit flags False).
     """
     if not upstream_ok:
         return
@@ -582,4 +627,5 @@ def commit_outcome(project_root: Path, outcome: InjectOutcome[Any], *, upstream_
         outcome.signal,
         announce_emitted=outcome.announce_emitted,
         cursor_emitted=outcome.cursor_emitted,
+        orientation_emitted=outcome.orientation_emitted,
     )
