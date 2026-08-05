@@ -681,11 +681,13 @@ async def write_phase(
     project_root = Path(repo_root) if repo_root else None
     verdict = _evaluate_phase_gate(store, current_phase, phase_value, project_root, req.override)
     if verdict is not None:
-        # Gate blocks the transition — return verdict without writing.
+        # Gate blocks the transition — return verdict without writing. Mark
+        # success=False so a 2xx cannot be read as a recorded advance (#501).
         return PhaseAdvanceResponse(
             kind="phase",
             value=phase_value,
             gate_verdict=verdict,
+            success=False,
         )
 
     # Fast path: no contract — use the existing non-transactional path
@@ -938,10 +940,13 @@ async def create_contract(
 async def list_contracts(
     phase: str | None = Query(default=None, description="Filter by phase"),
     slug: str | None = Query(default=None, description="Filter by slug"),
+    work_item: str | None = Query(default=None, description="Filter by work-item slug"),
     status: str | None = Query(default=None, description="Filter by status"),
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractListResponse:
-    rows = await asyncio.to_thread(store.list_contracts, phase=phase, slug=slug, status=status)
+    rows = await asyncio.to_thread(
+        store.list_contracts, phase=phase, slug=slug, work_item=work_item, status=status
+    )
     return ContractListResponse(contracts=[_contract_row_to_response(row) for row in rows])
 
 

@@ -212,9 +212,11 @@ def _approval_gate_blocks(
     ctx = PredicateContext(project_root=root, current_phase=current, store=store)
     if current in _APPROVAL_STORE_NAME_GLOB:
         name_glob = _APPROVAL_STORE_NAME_GLOB[current]
-        rows = store.list_artifacts(current, name_glob=name_glob) if store is not None else []
-        if not rows:
-            return False, []  # nothing produced yet → completeness gate handles it
+        if store is None:
+            return False, []  # no store → nothing to evaluate against
+        # Always evaluate the approval predicate: an empty scoped row set must
+        # BLOCK (the approval checkpoint is unforgeable by --force), not defer
+        # to the bypassable completeness gate (#516).
         result = eval_approval_recorded({"since_name_glob": name_glob}, ctx)
     else:
         since = _APPROVAL_SINCE.get(current, "")
@@ -302,7 +304,19 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         # `mode`/`free_since` are deliberately not passed: omitting them carries
         # the stored pair forward, so a phase set never drops the repo out of
         # free-flow. Only `agentalloy flow` sets them.
-        access.write(phase, actor=cli_session_key() or None, override=force)
+        write_result = access.write(phase, actor=cli_session_key() or None, override=force)
+        # A service-backed store re-evaluates the gate and may decline even
+        # though the CLI's local check passed (the two must agree on the scoped
+        # verdict — #501). Surface that rather than reporting a silent no-op.
+        if isinstance(write_result, dict) and write_result.get("gate_verdict"):
+            gv = write_result["gate_verdict"]
+            return {
+                "phase": current or phase,
+                "blocked": True,
+                "target": phase,
+                "advisories": gv.get("advisories", []),
+                "reason": gv.get("result", "not_met"),
+            }
         state = access.read()
     except StateClientError as exc:
         fail_on_state_error(exc)
@@ -317,8 +331,12 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
         _record_phase_start_ref(root)
 
+    # Read back the stored phase rather than echo the requested value, so a
+    # declined/redirected write cannot be reported as land in the target phase
+    # (#501).
+    phase_actual = state.phase if state and state.phase else phase
     data: dict[str, Any] = {
-        "phase": phase,
+        "phase": phase_actual,
         "started_at": state.started_at if state else _now_iso(),
         "last_updated": state.last_updated if state else _now_iso(),
         "workflow": f"sdd-{phase}",

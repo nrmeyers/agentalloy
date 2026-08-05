@@ -527,8 +527,12 @@ def evaluate_phase_gate(
         approval_blocked = False
         if current_phase in _APPROVAL_STORE_NAME_GLOB and project_root:
             name_glob = _APPROVAL_STORE_NAME_GLOB[current_phase]
-            rows = store.list_artifacts(current_phase, name_glob=name_glob) if store else []
-            if rows:  # nothing produced yet → let the forward gate handle it
+            if store is not None:
+                # Always run the approval predicate — an empty scoped row set
+                # must BLOCK here (the Tier 2 approval checkpoint survives
+                # --force), not defer to the forward gate that override skips
+                # (#516). eval_approval_recorded itself returns NOT_MET when
+                # nothing is produced/approvable.
                 ctx = PredicateContext(
                     project_root=project_root, current_phase=current_phase, store=store
                 )

@@ -285,12 +285,16 @@ class TestGuardedAdvance:
 
     def test_forward_guard_blocks_when_artifact_missing(self, repo_root: Path) -> None:
         # TC15: in `spec` with no recorded artifact → spec→design refuses.
+        # #516: an EMPTY artifact set in an approval-gated phase now blocks on the
+        # Tier 2 approval checkpoint (reason='approval'), not the completeness
+        # gate that --force could bypass.
         run_phase_set("spec", root=repo_root)
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is True
         assert result["phase"] == "spec"  # unchanged
         assert result["target"] == "design"
-        assert any("artifact-set --phase spec" in a for a in result["advisories"])
+        assert result["reason"] == "approval"
+        assert any("approve spec" in a for a in result["advisories"])
         # phase file still says spec
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
@@ -303,12 +307,17 @@ class TestGuardedAdvance:
         assert result["blocked"] is False
         assert result["phase"] == "design"
 
-    def test_force_bypasses_the_gate(self, repo_root: Path) -> None:
-        # TC17: --force writes regardless of the gate.
+    def test_force_does_not_bypass_approval_when_nothing_producible(self, repo_root: Path) -> None:
+        # TC17: --force only waives completeness — never the human approval
+        # checkpoint. #516: with NO spec artifact (so nothing is approvable),
+        # even --force is refused on the Tier 2 approval gate — the old code
+        # deferred the approval check on empty rows and let --force sail through
+        # with no gate at all.
         run_phase_set("spec", root=repo_root)
         result = run_phase_set("design", root=repo_root, force=True)
-        assert result["blocked"] is False
-        assert result["phase"] == "design"
+        assert result["blocked"] is True
+        assert result["reason"] == "approval"
+        assert result["phase"] == "spec"  # unchanged
 
     def test_backward_and_bail_are_unguarded(self, repo_root: Path) -> None:
         # TC18: backward (qa→build, design→spec) and bail (sdd-fast→spec) never gate.
@@ -421,14 +430,15 @@ class TestApprovalGate:
         assert result["blocked"] is True
         assert result["reason"] == "approval"
 
-    def test_missing_artifact_defers_to_completeness_gate(self, repo_root: Path) -> None:
-        # No exit artifact at all → approval gate steps aside; the completeness
-        # gate drives the "record its exit artifact" message (no reason='approval').
+    def test_missing_artifact_blocks_on_approval(self, repo_root: Path) -> None:
+        # #516: an empty artifact set in an approval-gated phase must block on the
+        # Tier 2 approval checkpoint (reason='approval'), not defer to the forward
+        # completeness gate that --force bypasses.
         run_phase_set("spec", root=repo_root)
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is True
-        assert result.get("reason") != "approval"
-        assert any("artifact-set --phase spec" in a for a in result["advisories"])
+        assert result["reason"] == "approval"
+        assert any("approve spec" in a for a in result["advisories"])
 
 
 class TestShipResetAutoArchive:

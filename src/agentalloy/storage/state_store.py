@@ -1097,6 +1097,7 @@ class DuckDBStateStore:
         *,
         phase: str | None = None,
         slug: str | None = None,
+        work_item: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         """List contracts with optional filters."""
@@ -1109,6 +1110,9 @@ class DuckDBStateStore:
         if slug is not None:
             conditions.append("slug=?")
             params.append(slug)
+        if work_item is not None:
+            conditions.append("work_item=?")
+            params.append(work_item)
         if status is not None:
             conditions.append("status=?")
             params.append(status)

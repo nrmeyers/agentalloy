@@ -414,11 +414,15 @@ class TestPhaseSetIntegration:
 
     def test_phase_set_valid_phases(self, fixture_repo: Path) -> None:
         """All valid phases can be set."""
-        from agentalloy.install.subcommands.phase import VALID_PHASES
+        from agentalloy.install.subcommands.phase import VALID_PHASES, run_phase_clear
 
         for phase in VALID_PHASES:
-            # force=True avoids forward-transition gates (exit-artifact checks)
-            # so we only verify that every valid phase value is accepted.
+            # Clear first so every value is set from a phase-less store: a set
+            # from ``current=None`` is unguarded, so approval-gated forwards
+            # (spec/design/add-skill) can't block on a missing approval — this
+            # only verifies that every valid phase value is accepted (#516
+            # keeps --force from bypassing approval on a real forward).
+            run_phase_clear(root=fixture_repo)
             result = run_phase_set(phase, root=fixture_repo, force=True)
             assert result["phase"] == phase
             assert result["blocked"] is False

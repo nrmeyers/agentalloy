@@ -110,7 +110,10 @@ def run_approve(
         from agentalloy.signals.gates import (  # noqa: PLC0415
             _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
         )
-        from agentalloy.signals.predicates import _artifact_digest  # noqa: PLC0415
+        from agentalloy.signals.predicates import (  # noqa: PLC0415
+            _artifact_digest,
+            _resolve_workitem_slug_for,
+        )
 
         handle = access.contracts_handle()
         # MUST digest exactly the set the gate re-digests when it checks the
@@ -119,7 +122,16 @@ def run_approve(
         # counts. Live for design now that the split narrowed its glob to
         # approach.md while a pre-split repo may still hold tasks.md and
         # test-plan.md under phase=design.
-        rows = handle.list_artifacts(phase, name_glob=_APPROVAL_STORE_NAME_GLOB.get(phase))
+        #
+        # Scope to the active work-item with the SAME resolver the gate uses, so
+        # both sides re-digest an identical row set (#501/#518). When no single
+        # work item resolves (degenerate repo with no contract), both sides fall
+        # back to repo-global (slug=None) — identical, so the digest still
+        # matches. Only a *non-empty differentiated* row set would diverge.
+        slug = _resolve_workitem_slug_for(handle, root, phase)
+        rows = handle.list_artifacts(
+            phase, slug=slug, name_glob=_APPROVAL_STORE_NAME_GLOB.get(phase)
+        )
         if not rows:
             return {
                 "ok": False,
