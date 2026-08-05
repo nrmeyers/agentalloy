@@ -224,7 +224,7 @@ class ContractPatchRequest(BaseModel):
     domain_tags: list[str] | None = None
     scope_touches: list[str] | None = None
     scope_avoids: list[str] | None = None
-    success_criteria: list[dict] | None = None
+    success_criteria: list[str | dict[str, Any]] | None = None
 
 
 class ContractSupersedeRequest(BaseModel):
@@ -238,7 +238,7 @@ class ContractSupersedeRequest(BaseModel):
     domain_tags: list[str] | None = None
     scope_touches: list[str] | None = None
     scope_avoids: list[str] | None = None
-    success_criteria: list[dict] | None = None
+    success_criteria: list[str | dict[str, Any]] | None = None
     body: str | None = None
 
 
@@ -253,7 +253,7 @@ class ContractResponse(BaseModel):
     domain_tags: list[str] | None
     scope_touches: list[str] | None
     scope_avoids: list[str] | None
-    success_criteria: list[dict] | None
+    success_criteria: list[str | dict[str, Any]] | None
     status: str
     supersedes: str | None
     created_at: str

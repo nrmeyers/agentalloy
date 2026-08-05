@@ -310,7 +310,6 @@ async def _trigger_compose_in_process(
                 feedback = _evaluate_ac_feedback(store, contract)
                 if feedback is not None:
                     store.set_artifact(
-                        contract["repo"],
                         contract["phase"],
                         contract["slug"],
                         "gate_feedback",

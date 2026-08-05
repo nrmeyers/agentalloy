@@ -59,7 +59,7 @@ class Contract:
     task_slug: str
     domain_tags: list[str]
     scope: ContractScope
-    success_criteria: list[dict]
+    success_criteria: list[str | dict[str, Any]]
     related_contracts: list[str]
     created_at: datetime | None
     body: str
@@ -205,8 +205,8 @@ def parse_contract_text(
     )
 
 
-def _normalize_success_criteria(raw: list[Any]) -> list[dict]:
-    """Normalize success_criteria to list[dict] with id/text keys.
+def _normalize_success_criteria(raw: list[Any]) -> list[str | dict[str, Any]]:
+    """Normalize success_criteria to list[str | dict[str, Any]] with id/text keys.
 
     Handles both legacy format (list[str]) and new format (list[dict]).
 
@@ -219,7 +219,7 @@ def _normalize_success_criteria(raw: list[Any]) -> list[dict]:
     if not raw:
         return []
 
-    normalized: list[dict] = []
+    normalized: list[str | dict[str, Any]] = []
     for item in raw:
         if isinstance(item, dict):
             # New format: already has id/text
@@ -236,7 +236,7 @@ def _normalize_success_criteria(raw: list[Any]) -> list[dict]:
     return normalized
 
 
-def parse_ac_headings(markdown: str) -> list[dict]:
+def parse_ac_headings(markdown: str) -> list[dict[str, Any]]:
     """Extract AC IDs and text from markdown headings.
 
     Matches ## AC-N: text or ### AC-N: text patterns.
@@ -245,7 +245,7 @@ def parse_ac_headings(markdown: str) -> list[dict]:
     import re
 
     pattern = r"^(?:#{2,3})\s+AC-(\d+)[\s:]+\s*(.+)$"
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     for line in markdown.split("\n"):
         m = re.match(pattern, line.strip())
         if m:
