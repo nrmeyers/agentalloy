@@ -216,7 +216,7 @@ def _render_llama_embed_unit(
         "[Service]\n"
         "Type=simple\n"
         f"ExecStart={llama_bin} --embeddings --pooling mean --port {_LLAMA_EMBED_PORT} "
-        f"--threads 4 --threads-embed 4 --ubatch-size 4096{ngl_flag} -m {model_path}\n"
+        f"--threads 4 --ubatch-size 4096{ngl_flag} -m {model_path}\n"
         f"{env_lines}"
         "Restart=on-failure\n"
         "RestartSec=5\n"
@@ -672,8 +672,6 @@ def _write_llama_launchd_agents(
                 "--port",
                 str(_LLAMA_EMBED_PORT),
                 "--threads",
-                "4",
-                "--threads-embed",
                 "4",
                 "--ubatch-size",
                 "4096",
