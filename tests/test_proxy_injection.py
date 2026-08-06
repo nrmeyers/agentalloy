@@ -13,6 +13,8 @@ import json
 from typing import Any
 
 from agentalloy.api.proxy_injection import (
+    ANTHROPIC_INSTRUCTIONS_BEGIN,
+    ANTHROPIC_INSTRUCTIONS_END,
     ANTHROPIC_MARKER_END,
     BANNER_MARKER_BEGIN,
     BANNER_MARKER_END,
@@ -590,9 +592,18 @@ class TestOpenAIBannerInjection:
 
 
 class TestOpenAISystemPromptInjection:
-    """Tests for inject_into_openai_system_prompt."""
+    """Tests for inject_into_openai_system_prompt.
 
-    def test_injects_into_first_system_message(self) -> None:
+    New behavior (separate system message):
+    - Appends a NEW system message at the end of the list instead of
+      appending to the first system message's content.
+    - If no system message exists, creates one with AgentAlloy's prose.
+    - Idempotence checks ALL system messages for the current-phase marker.
+    - Stale strip removes prior phase blocks from the first system message.
+    """
+
+    # TC-02-1: OpenAI — separate system message appended
+    def test_appends_new_system_message(self) -> None:
         messages = [
             ProxyMessage(role="system", content="You are a helpful assistant."),
             ProxyMessage(role="user", content="Hello"),
@@ -601,60 +612,93 @@ class TestOpenAISystemPromptInjection:
             messages, "Phase: intake — capture the request.", phase="intake"
         )
         assert result is not None
+        # Original system message is unchanged
+        assert result[0].content == "You are a helpful assistant."
+        # User message preserved in the middle
+        assert result[1].role == "user"
+        assert result[1].content == "Hello"
+        # A new system message is appended at the end
+        assert len(result) == 3
+        assert result[2].role == "system"
+        content = result[2].content
+        assert isinstance(content, str)
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in content
+        assert ANTHROPIC_INSTRUCTIONS_END in content
+        assert 'phase="intake"' in content
+        assert "Phase: intake" in content
+
+    # TC-02-2: OpenAI — creates system message if none exists
+    def test_creates_system_message_if_none_exists(self) -> None:
+        messages = [ProxyMessage(role="user", content="Hello")]
+        result = inject_into_openai_system_prompt(messages, "Phase instructions", phase="intake")
+        assert result is not None
+        assert len(result) == 2
         assert result[0].role == "system"
         content = result[0].content
         assert isinstance(content, str)
-        assert anthropic_marker_begin("intake") in content
-        assert ANTHROPIC_MARKER_END in content
-        assert "Phase: intake" in content
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in content
+        assert ANTHROPIC_INSTRUCTIONS_END in content
+        assert 'phase="intake"' in content
+        assert "Phase instructions" in content
+        # User message preserved after new system message
+        assert result[1].role == "user"
+        assert result[1].content == "Hello"
 
-    def test_idempotent_within_phase(self) -> None:
+    # TC-02-3: OpenAI — idempotent for same phase
+    def test_idempotent_for_same_phase(self) -> None:
         messages = [
             ProxyMessage(role="system", content="You are helpful."),
             ProxyMessage(role="user", content="Hello"),
         ]
         once = inject_into_openai_system_prompt(messages, "Phase instructions", phase="design")
         assert once is not None
-        # Second call with same phase returns None (no-op, already has marker)
+        assert len(once) == 3  # system + user + appended system
+        # Second call with same phase returns None (no-op)
         twice = inject_into_openai_system_prompt(once, "Different text", phase="design")
         assert twice is None  # idempotent: no change needed
-        # Original content preserved
-        content = once[0].content
+        # List unchanged after second call
+        assert len(once) == 3
+        # Original harness content preserved in first message
+        assert once[0].content == "You are helpful."
+        # User message preserved
+        assert once[1].role == "user"
+        # Phase block in the appended message
+        content = once[2].content
         assert isinstance(content, str)
-        assert content.count(anthropic_marker_begin("design")) == 1
+        assert content.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
+        assert 'phase="design"' in content
         assert "Phase instructions" in content
         assert "Different text" not in content
 
-    def test_replaces_on_phase_transition(self) -> None:
+    # TC-02-4: OpenAI — stale strip prior phase
+    def test_strips_stale_prior_phase_block(self) -> None:
+        old_block = f'{ANTHROPIC_INSTRUCTIONS_BEGIN} phase="intake">\nPhase: intake\n{ANTHROPIC_INSTRUCTIONS_END}'
         messages = [
-            ProxyMessage(role="system", content="You are helpful."),
+            ProxyMessage(
+                role="system",
+                content=f"You are helpful.\n\n{old_block}",
+            ),
             ProxyMessage(role="user", content="Hello"),
         ]
-        once = inject_into_openai_system_prompt(messages, "Phase: intake", phase="intake")
-        assert once is not None
-        twice = inject_into_openai_system_prompt(once, "Phase: build", phase="build")
-        assert twice is not None
-        content = twice[0].content
-        assert isinstance(content, str)
-        assert "Phase: intake" not in content
-        assert "Phase: build" in content
-        assert content.count(anthropic_marker_begin("build")) == 1
-
-    def test_no_system_message_returns_none(self) -> None:
-        messages = [ProxyMessage(role="user", content="Hello")]
-        result = inject_into_openai_system_prompt(messages, "Phase instructions", phase="intake")
-        assert result is None  # no system message to inject into
-
-    def test_string_content_preserved(self) -> None:
-        messages = [
-            ProxyMessage(role="system", content="Original system text"),
-            ProxyMessage(role="user", content="Hello"),
-        ]
-        result = inject_into_openai_system_prompt(messages, "Phase instructions", phase="intake")
+        result = inject_into_openai_system_prompt(messages, "Phase: build", phase="build")
         assert result is not None
-        content = result[0].content
-        assert isinstance(content, str)
-        assert "Original system text" in content
+        # First system message: stale block stripped, harness content preserved
+        first_content = result[0].content
+        assert isinstance(first_content, str)
+        assert "You are helpful." in first_content
+        assert 'phase="intake"' not in first_content
+        # User message preserved in the middle
+        assert result[1].role == "user"
+        assert result[1].content == "Hello"
+        # A new system message is appended with the current phase
+        assert len(result) == 3
+        assert result[2].role == "system"
+        second_content = result[2].content
+        assert isinstance(second_content, str)
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in second_content
+        assert ANTHROPIC_INSTRUCTIONS_END in second_content
+        assert 'phase="build"' in second_content
+        assert "Phase: build" in second_content
 
 
 class TestAnthropicSystemPromptInjection:
@@ -670,8 +714,9 @@ class TestAnthropicSystemPromptInjection:
         assert result is not None
         system = result["system"]
         assert isinstance(system, str)
-        assert anthropic_marker_begin("intake") in system
-        assert ANTHROPIC_MARKER_END in system
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in system
+        assert ANTHROPIC_INSTRUCTIONS_END in system
+        assert 'phase="intake"' in system
         assert "Phase: intake" in system
 
     def test_injects_into_list_system(self) -> None:
@@ -685,7 +730,9 @@ class TestAnthropicSystemPromptInjection:
         system = result["system"]
         assert isinstance(system, list)
         joined = "\n".join(b.get("text", "") for b in system if b.get("type") == "text")
-        assert anthropic_marker_begin("intake") in joined
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in joined
+        assert ANTHROPIC_INSTRUCTIONS_END in joined
+        assert 'phase="intake"' in joined
         assert "Phase: intake" in joined
 
     def test_idempotent_within_phase_string_system(self) -> None:
@@ -702,7 +749,7 @@ class TestAnthropicSystemPromptInjection:
         # Original content preserved
         system = once["system"]
         assert isinstance(system, str)
-        assert system.count(anthropic_marker_begin("design")) == 1
+        assert system.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
         assert "Phase instructions" in system
         assert "Different text" not in system
 
@@ -892,8 +939,9 @@ class TestResponsesInstructionsInjection:
         assert isinstance(instructions, str)
         assert "You are codex." in instructions
         assert ANTHRO_BLOCK in instructions
-        assert instructions.count(anthropic_marker_begin("design")) == 1
-        assert instructions.count(ANTHROPIC_MARKER_END) == 1
+        assert instructions.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
+        assert instructions.count(ANTHROPIC_INSTRUCTIONS_END) == 1
+        assert 'phase="design"' in instructions
         # Input is leg 1/2 territory and must not be disturbed.
         assert result["input"] == payload["input"]
         assert payload["instructions"] == "You are codex."
@@ -904,19 +952,20 @@ class TestResponsesInstructionsInjection:
         twice = inject_into_responses_instructions(once, ANTHRO_BLOCK, phase="design")
 
         assert twice is once  # same object -> no second delivery
-        assert once["instructions"].count(anthropic_marker_begin("design")) == 1
+        assert once["instructions"].count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
 
     def test_stale_phase_block_replaced_on_transition(self) -> None:
-        spec_block = f"{anthropic_marker_begin('spec')}\nspec prose\n{ANTHROPIC_MARKER_END}"
-        payload = self._payload(instructions=f"You are codex.\n\n{spec_block}")
+        old_block = f'{ANTHROPIC_INSTRUCTIONS_BEGIN} phase="spec">\nspec prose\n{ANTHROPIC_INSTRUCTIONS_END}'
+        payload = self._payload(instructions=f"You are codex.\n\n{old_block}")
 
         result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
 
         instructions = result["instructions"]
         assert result is not payload
-        assert anthropic_marker_begin("spec") not in instructions
+        assert 'phase="spec"' not in instructions
         assert "spec prose" not in instructions
-        assert instructions.count(anthropic_marker_begin("design")) == 1
+        assert instructions.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
+        assert 'phase="design"' in instructions
         assert "You are codex." in instructions
 
     def test_creates_instructions_when_absent(self) -> None:
@@ -926,9 +975,11 @@ class TestResponsesInstructionsInjection:
         result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="build")
 
         assert result is not payload
-        assert result["instructions"] == (
-            f"{anthropic_marker_begin('build')}\n{ANTHRO_BLOCK}\n{ANTHROPIC_MARKER_END}"
+        # _block_text produces: begin\nblock\nend
+        expected = (
+            f'{ANTHROPIC_INSTRUCTIONS_BEGIN}build">\n{ANTHRO_BLOCK}\n{ANTHROPIC_INSTRUCTIONS_END}'
         )
+        assert result["instructions"] == expected
         assert "instructions" not in payload
 
     def test_creates_instructions_when_none_or_empty(self) -> None:
@@ -939,7 +990,7 @@ class TestResponsesInstructionsInjection:
             instructions = result["instructions"]
             assert isinstance(instructions, str)
             assert ANTHRO_BLOCK in instructions
-            assert instructions.count(anthropic_marker_begin("build")) == 1
+            assert instructions.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
 
     def test_non_str_instructions_left_alone(self) -> None:
         for odd in ([{"text": "x"}], 42, {"a": 1}, True):
@@ -951,3 +1002,101 @@ class TestResponsesInstructionsInjection:
         payload = self._payload()
         result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="qa")
         assert result["input"] is payload["input"]
+
+    # ---- TC-03-1: Anthropic — uses delimited block tags ----
+
+    def test_anthropic_uses_delimited_block_tags(self) -> None:
+        """TC-03-1: prose is wrapped in <agentalloy-instructions phase="...">...</agentalloy-instructions>."""
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, ANTHRO_BLOCK, phase="design")
+        assert result is not None
+        system = result["system"]
+        assert isinstance(system, str)
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in system
+        assert ANTHROPIC_INSTRUCTIONS_END in system
+        assert 'phase="design"' in system
+        assert ANTHRO_BLOCK in system
+        # Old HTML-style markers must NOT be present.
+        assert "<!-- BEGIN AGENTALLOY-CONTEXT" not in system
+        assert "<!-- END AGENTALLOY-CONTEXT -->" not in system
+
+    def test_anthropic_uses_delimited_block_tags_list_system(self) -> None:
+        """TC-03-1 also covers list-shaped system field."""
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [{"type": "text", "text": "You are helpful."}],
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        result = inject_into_anthropic_system_prompt(payload, ANTHRO_BLOCK, phase="design")
+        assert result is not None
+        system = result["system"]
+        assert isinstance(system, list)
+        joined = "\n".join(b.get("text", "") for b in system if b.get("type") == "text")
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in joined
+        assert ANTHROPIC_INSTRUCTIONS_END in joined
+        assert 'phase="design"' in joined
+        assert ANTHRO_BLOCK in joined
+
+    # ---- TC-03-2: Responses — uses delimited block tags ----
+
+    def test_responses_uses_delimited_block_tags(self) -> None:
+        """TC-03-2: prose is wrapped in <agentalloy-instructions phase="...">...</agentalloy-instructions>."""
+        payload = self._payload()
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
+        assert result is not payload
+        instructions = result["instructions"]
+        assert isinstance(instructions, str)
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in instructions
+        assert ANTHROPIC_INSTRUCTIONS_END in instructions
+        assert 'phase="design"' in instructions
+        assert ANTHRO_BLOCK in instructions
+        assert "You are codex." in instructions
+        # Old HTML-style markers must NOT be present.
+        assert "<!-- BEGIN AGENTALLOY-CONTEXT" not in instructions
+        assert "<!-- END AGENTALLOY-CONTEXT -->" not in instructions
+
+    # ---- TC-03-3: Anthropic — idempotent for same phase ----
+
+    def test_anthropic_idempotent_same_phase(self) -> None:
+        """TC-03-3: second call with same phase returns None (no-op)."""
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        once = inject_into_anthropic_system_prompt(payload, ANTHRO_BLOCK, phase="design")
+        assert once is not None
+        # Second call with same phase returns None (no-op).
+        twice = inject_into_anthropic_system_prompt(once, ANTHRO_BLOCK, phase="design")
+        assert twice is None
+        # Exactly one block present.
+        system = once["system"]
+        assert isinstance(system, str)
+        assert system.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
+        assert ANTHRO_BLOCK in system
+
+    # ---- TC-03-4: Responses — stale strip prior phase ----
+
+    def test_responses_stale_strip_prior_phase(self) -> None:
+        """TC-03-4: prior phase's delimited block is stripped and current phase block is appended."""
+        old_block = (
+            f'{ANTHROPIC_INSTRUCTIONS_BEGIN}spec">\nspec prose\n{ANTHROPIC_INSTRUCTIONS_END}'
+        )
+        payload = self._payload(instructions=f"You are codex.\n\n{old_block}")
+
+        result = inject_into_responses_instructions(payload, ANTHRO_BLOCK, phase="design")
+
+        instructions = result["instructions"]
+        assert result is not payload
+        assert 'phase="spec"' not in instructions
+        assert "spec prose" not in instructions
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in instructions
+        assert 'phase="design"' in instructions
+        assert ANTHRO_BLOCK in instructions
+        assert "You are codex." in instructions
+        # Exactly one block present.
+        assert instructions.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1

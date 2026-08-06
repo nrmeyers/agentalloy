@@ -222,7 +222,7 @@ def test_inject_into_last_user_message_system_also_injected(tmp_path: Path) -> N
     # The system field carries the phase-pure WORKFLOW prose (its own per-turn leg),
     # with the harness's original system text preserved alongside it.
     assert "SYSTEM-CACHED-BLOCK" in sent["system"]
-    assert "phase=build" in sent["system"]
+    assert '<agentalloy-instructions phase="build">' in sent["system"]
     assert "WORKFLOW-PROSE" in sent["system"]
     # ...and NOT the turn-varying composed output, which belongs on the message leg.
     assert "INJECTED-PROSE" not in sent["system"]
@@ -260,7 +260,7 @@ def test_idempotent_when_phase_block_already_present(tmp_path: Path) -> None:
     assert sent["messages"][-1]["content"].count("BEGIN AGENTALLOY-CONTEXT") == 1
     # The system field was NOT pre-marked, so the workflow leg still fires
     # independently even though the user-message leg no-opped.
-    assert "phase=build" in sent["system"]
+    assert '<agentalloy-instructions phase="build">' in sent["system"]
     assert "WORKFLOW-PROSE" in sent["system"]
 
 
@@ -281,8 +281,9 @@ def test_both_legs_no_op_when_both_already_marked(tmp_path: Path) -> None:
     marker_block = (
         "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
     )
+    xml_marker_block = '<agentalloy-instructions phase="build">\nx\n</agentalloy-instructions>'
     body["messages"][-1]["content"] = f"the real task\n\n{marker_block}"
-    body["system"] = f"SYSTEM-CACHED-BLOCK\n\n{marker_block}"
+    body["system"] = f"SYSTEM-CACHED-BLOCK\n\n{xml_marker_block}"
     signal = SignalResult(
         should_compose=True,
         announce=True,
@@ -330,7 +331,7 @@ def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Pat
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
     # System field received the workflow prose; user message unchanged from input.
-    assert "phase=build" in sent["system"]
+    assert '<agentalloy-instructions phase="build">' in sent["system"]
     assert "WORKFLOW-PROSE" in sent["system"]
     assert sent["messages"][-1]["content"] == body["messages"][-1]["content"]
     # The composed block was NOT delivered -> marker withheld, re-fires next turn.
