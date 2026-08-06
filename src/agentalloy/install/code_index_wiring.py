@@ -145,11 +145,11 @@ def service_module_status(port: int) -> str | None:
             body = cast(dict[str, Any], json.loads(resp.read()))
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
-    modules = body.get("modules")
-    if not isinstance(modules, dict):
-        return None
-    state = modules.get("code_index")
-    return state if isinstance(state, str) else None
+    modules = body.get("modules") if isinstance(body, dict) else None
+    if isinstance(modules, dict):
+        state = modules.get("code_index")
+        return state if isinstance(state, str) else None
+    return None
 
 
 def registry_slugs(port: int) -> list[str] | None:
@@ -160,7 +160,9 @@ def registry_slugs(port: int) -> list[str] | None:
             body = cast(list[dict[str, Any]], json.loads(resp.read()))
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
-    return [str(r["slug"]) for r in body if "slug" in r]
+    if not isinstance(body, list):
+        return None
+    return [str(r["slug"]) for r in body if isinstance(r, dict) and "slug" in r]
 
 
 def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:

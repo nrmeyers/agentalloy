@@ -249,8 +249,10 @@ class HttpReranker:
         }
         resp = self._client.post("/v1/rerank", json=payload)
         resp.raise_for_status()
-        data: dict[str, Any] = resp.json() if isinstance(resp.json(), dict) else {}  # type: ignore[assignment]
-        results: list[Any] = data.get("results", [])
+        data: Any = resp.json()
+        results: Any = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            raise ValueError(f"rerank response missing 'results' list: {data!r}")
         scores = [0.0] * len(passages)
         for item in results:
             if not isinstance(item, dict):

@@ -85,6 +85,8 @@ def parse_git_remote(url: str) -> tuple[str, str, str] | None:
     >>> parse_git_remote("https://gitlab.com/team/backend/repo.git")
     ('gitlab.com', 'team/backend', 'repo')
     """
+    if not isinstance(url, str):
+        return None
     candidate = url.strip()
     if not candidate:
         return None

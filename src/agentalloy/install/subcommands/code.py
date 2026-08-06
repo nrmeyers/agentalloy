@@ -131,7 +131,11 @@ def _slug_from_registry(port: int, abspath: Path) -> str | None:
             rows: list[dict[str, Any]] = cast(list[dict[str, Any]], resp.json())
     except (httpx.HTTPError, ValueError):
         return None
+    if not isinstance(rows, list):
+        return None
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         rp, slug = row.get("repo_path"), row.get("slug")
         if not isinstance(rp, str) or not isinstance(slug, str):
             continue

@@ -2105,6 +2105,9 @@ def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = Fals
     except (json.JSONDecodeError, OSError):
         return False
 
+    if not isinstance(data, dict):
+        return False
+
     permissions = build_claude_code_permissions(phase, free_mode=free_mode)
     data["permissions"] = permissions
 
@@ -2142,6 +2145,9 @@ def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> 
     try:
         data: dict[str, Any] = _tomllib.loads(config_path.read_text())
     except (Exception, OSError):  # noqa: BLE001
+        return False
+
+    if not isinstance(data, dict):
         return False
 
     ww = build_codex_workspace_write(phase, free_mode=free_mode)
@@ -2311,6 +2317,8 @@ def verify_enforcement_posture(root: Path, phase: str, mode: str | None) -> list
             import tomllib as _tomllib
 
             data = _tomllib.loads(config_path.read_text())
+            if isinstance(data, dict):
+                actual_ww = data.get("workspace-write")
         except Exception:  # noqa: BLE001 - matches _apply_codex_posture's parse guard
             actual_ww = None
         # An empty expected block means "no workspace-write key at all".
