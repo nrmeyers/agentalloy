@@ -13,6 +13,11 @@ is never touched). Both proxy surfaces inject into the user message:
 Both use the same phase-stamped workflow markers so a stale block can be
 detected and replaced when the phase advances.
 
+Anthropic system-prompt and Responses-instructions injection uses XML-style
+``<agentalloy-instructions>`` tags (distinct from the HTML-style markers used
+for user-message injection) so the block is visually and structurally clear
+where AgentAlloy's instructions begin and end.
+
 Public API
 ----------
 inject_into_anthropic_messages
@@ -20,7 +25,9 @@ inject_into_anthropic_messages
 inject_into_openai_messages
     Inject into the last user message of a ``list[ProxyMessage]``.
 anthropic_marker_begin / ANTHROPIC_MARKER_END
-    Phase-stamped workflow markers shared by both injectors.
+    Phase-stamped workflow markers for user-message injection (HTML-style).
+ANTHROPIC_INSTRUCTIONS_BEGIN / ANTHROPIC_INSTRUCTIONS_END
+    Phase-stamped delimited-block tags for system-prompt / instructions injection.
 BANNER_MARKER_BEGIN / BANNER_MARKER_END
     Non-phase-stamped markers for the one-line per-turn phase banner
     (``kind="banner"``: strip-and-replaced every carrier turn).
@@ -76,9 +83,20 @@ BANNER_MARKER_END = "<!-- END AGENTALLOY-BANNER -->"
 ORIENTATION_MARKER_BEGIN = "<!-- BEGIN AGENTALLOY-ORIENTATION -->"
 ORIENTATION_MARKER_END = "<!-- END AGENTALLOY-ORIENTATION -->"
 
+# Delimited-block tags for Anthropic system-prompt and Responses instructions
+# injection.  XML-style tags make the block visually and structurally distinct
+# from the harness's own instructions.
+# Matches the phase value inside a delimited-block begin tag.
+ANTHROPIC_INSTRUCTIONS_BEGIN = '<agentalloy-instructions phase="'
+ANTHROPIC_INSTRUCTIONS_END = "</agentalloy-instructions>"
+
 # Matches the phase value inside a workflow begin marker.
 _WORKFLOW_BEGIN_PREFIX = "<!-- BEGIN AGENTALLOY-CONTEXT phase="
 _WORKFLOW_BEGIN_SUFFIX = " -->"
+
+# Matches the phase value inside a delimited-block begin tag.
+_DELIMITED_BEGIN_PREFIX = '<agentalloy-instructions phase="'
+_DELIMITED_BEGIN_SUFFIX = '">'
 
 
 def _workflow_begin_any() -> str:
@@ -132,6 +150,35 @@ def _strip_banner_block(text: str) -> str:
 def _strip_orientation_block(text: str) -> str:
     """Remove the orientation block from *text* (once-per-session, not strip-and-replace)."""
     return _strip_block(text, ORIENTATION_MARKER_BEGIN, ORIENTATION_MARKER_END)
+
+
+def _find_delimited_phase(text: str) -> str | None:
+    """Return the phase of the first delimited-block marker in *text*, or None."""
+    start = text.find(_DELIMITED_BEGIN_PREFIX)
+    if start == -1:
+        return None
+    value_start = start + len(_DELIMITED_BEGIN_PREFIX)
+    value_end = text.find(_DELIMITED_BEGIN_SUFFIX, value_start)
+    if value_end == -1:
+        return None
+    return text[value_start:value_end]
+
+
+def _strip_delimited_block(text: str, phase: str) -> str:
+    """Remove the first delimited-block for *phase* (inclusive)."""
+    return _strip_block(
+        text,
+        f"{_DELIMITED_BEGIN_PREFIX}{phase}{_DELIMITED_BEGIN_SUFFIX}",
+        ANTHROPIC_INSTRUCTIONS_END,
+    )
+
+
+def _strip_any_delimited_block(text: str) -> str:
+    """Remove any delimited-block (regardless of phase) from *text*."""
+    phase = _find_delimited_phase(text)
+    if phase is None:
+        return text
+    return _strip_delimited_block(text, phase)
 
 
 def _block_text(begin: str, block: str, end: str) -> str:
@@ -567,51 +614,69 @@ def inject_into_openai_messages(
 def inject_into_openai_system_prompt(
     messages: list[ProxyMessage], block: str, *, phase: str
 ) -> list[ProxyMessage] | None:
-    """Inject *block* into the first ``role == "system"`` message.
+    """Append a new ``role == "system"`` message carrying *block*.
+
+    OpenAI Chat Completions supports multiple system messages — the model
+    treats the last system message as most authoritative.  By sending
+    AgentAlloy's prose as a **separate trailing** system message it gets
+    priority over the harness's system message, which is preserved as the
+    first system message.
 
     Uses phase-stamped workflow markers so the injection is idempotent within
-    a phase; a stale block from a prior phase is stripped before injecting.
+    a phase; a stale block from a prior phase is stripped from the first
+    system message before appending a fresh one.
 
-    Returns a NEW list with only the system message replaced, or ``None`` on
-    every no-op:
-    - no system message to inject into (and we don't create one — the harness
-      owns that),
-    - the target already carries the current-phase marker (idempotent),
-    - an unexpected content shape.
+    Returns a NEW list with an appended system message, or ``None`` on every
+    no-op:
+    - a system message with the current-phase marker already exists
+      (idempotent),
+    - the list has no messages at all (nothing to do).
+
+    If no system message exists, a new one is created with just AgentAlloy's
+    prose — we *do* create one here (unlike the old behaviour where we
+    returned ``None``).
     """
-    sys_idx: int | None = None
-    for i, msg in enumerate(messages):
-        if msg.role == "system":
-            sys_idx = i
-            break
-    if sys_idx is None:
-        return None
+    begin = f"{_DELIMITED_BEGIN_PREFIX}{phase}{_DELIMITED_BEGIN_SUFFIX}"
+    end = ANTHROPIC_INSTRUCTIONS_END
 
-    begin = anthropic_marker_begin(phase)
-    end = ANTHROPIC_MARKER_END
-    target = messages[sys_idx]
+    # Collect all system-message indices.
+    sys_indices: list[int] = [i for i, msg in enumerate(messages) if msg.role == "system"]
+
+    # Idempotence: if ANY system message carries the current-phase marker,
+    # we are already injected — return None (no-op).
+    for si in sys_indices:
+        content = messages[si].content
+        if isinstance(content, str) and begin in content:
+            return None
+        if isinstance(content, list) and any(_text_block_contains(b, begin) for b in content):
+            return None
+
+    # Build the new system message content.
+    new_block = _block_text(begin, block, end)
+    if not sys_indices:
+        # No system message at all — create one with just the block.
+        new_messages = [ProxyMessage(role="system", content=new_block), *messages]
+        return new_messages
+
+    # At least one system message exists.  Strip stale blocks from the first
+    # one, then append a fresh system message at the end.
+    first = sys_indices[0]
+    target = messages[first]
     content = target.content
 
-    # Idempotent: current-phase block already present.
     if isinstance(content, str):
-        if begin in content:
-            return None
-        stripped = _strip_workflow_block(content)
-        new_block = _block_text(begin, block, end)
-        new_content: str | list[dict[str, Any]] = (
-            f"{stripped}\n\n{new_block}" if stripped else new_block
-        )
+        stripped = _strip_any_delimited_block(content)
+        new_content: str | list[dict[str, Any]] = stripped
     elif isinstance(content, list):
-        if any(_text_block_contains(b, begin) for b in content):
-            return None
-        blocks = [b for b in content if not _text_block_contains(b, _workflow_begin_any())]
-        new_block = _block_text(begin, block, end)
-        new_content = [*blocks, {"type": "text", "text": new_block}]
+        blocks = [b for b in content if not _text_block_contains(b, _DELIMITED_BEGIN_PREFIX)]
+        new_content = blocks
     else:
+        # Unexpected content shape — leave list untouched.
         return None
 
     new_messages = list(messages)
-    new_messages[sys_idx] = target.model_copy(update={"content": new_content})
+    new_messages[first] = target.model_copy(update={"content": new_content})
+    new_messages.append(ProxyMessage(role="system", content=new_block))
     return new_messages
 
 
@@ -621,9 +686,9 @@ def inject_into_responses_instructions(
     """Inject *block* into a Responses payload's top-level ``instructions``.
 
     The Responses-surface sibling of :func:`inject_into_openai_system_prompt`:
-    same phase-stamped workflow markers, same idempotence and stale-strip
-    semantics, but ``instructions`` is an optional top-level ``str`` rather
-    than a message in an array.
+    same XML-style ``<agentalloy-instructions>`` tags, same idempotence and
+    stale-strip semantics, but ``instructions`` is an optional top-level
+    ``str`` rather than a message in an array.
 
     Follows the convention of its own surface (:func:`inject_into_responses_input`),
     NOT the ``-> None`` convention of the Chat Completions helpers: returns a NEW
@@ -640,8 +705,8 @@ def inject_into_responses_instructions(
     - ``instructions`` is present but neither ``str`` nor ``None``.
     """
     current = payload.get("instructions")
-    begin = anthropic_marker_begin(phase)
-    new_block = _block_text(begin, block, ANTHROPIC_MARKER_END)
+    begin = f"{_DELIMITED_BEGIN_PREFIX}{phase}{_DELIMITED_BEGIN_SUFFIX}"
+    new_block = _block_text(begin, block, ANTHROPIC_INSTRUCTIONS_END)
 
     if current is None or current == "":
         return {**payload, "instructions": new_block}
@@ -650,7 +715,7 @@ def inject_into_responses_instructions(
     if begin in current:
         return payload
 
-    stripped = _strip_workflow_block(current)
+    stripped = _strip_any_delimited_block(current)
     new_value = f"{stripped}\n\n{new_block}" if stripped else new_block
     return {**payload, "instructions": new_value}
 
@@ -705,7 +770,8 @@ def inject_into_anthropic_system_prompt(
     """Inject *block* into the Anthropic top-level ``system`` field.
 
     The Anthropic ``system`` field can be a string or a list of content blocks.
-    Uses phase-stamped workflow markers for idempotency within a phase.
+    Uses XML-style ``<agentalloy-instructions phase="...">`` tags for
+    idempotency within a phase.
 
     Returns a NEW payload dict on a real injection, or ``None`` on every no-op:
     - no ``system`` field present,
@@ -716,8 +782,8 @@ def inject_into_anthropic_system_prompt(
     if system is None:
         return None
 
-    begin = anthropic_marker_begin(phase)
-    end = ANTHROPIC_MARKER_END
+    begin = f"{_DELIMITED_BEGIN_PREFIX}{phase}{_DELIMITED_BEGIN_SUFFIX}"
+    end = ANTHROPIC_INSTRUCTIONS_END
 
     if isinstance(system, str):
         # NOTE: a string `system` has nowhere to hang `cache_control` — that requires
@@ -729,7 +795,7 @@ def inject_into_anthropic_system_prompt(
         # follow-up (it is valid API); if it sends a list, this branch is moot.
         if begin in system:
             return None
-        stripped = _strip_workflow_block(system)
+        stripped = _strip_any_delimited_block(system)
         new_block = _block_text(begin, block, end)
         new_system: str | list[Any] = f"{stripped}\n\n{new_block}" if stripped else new_block
     elif isinstance(system, list):
@@ -740,7 +806,7 @@ def inject_into_anthropic_system_prompt(
         blocks = []
         for b in system:
             d = _as_dict(b)
-            if d is None or not _text_block_contains(d, _workflow_begin_any()):
+            if d is None or not _text_block_contains(d, _DELIMITED_BEGIN_PREFIX):
                 blocks.append(b)
         new_block = _block_text(begin, block, end)
         entry: dict[str, Any] = {"type": "text", "text": new_block}

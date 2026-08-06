@@ -231,16 +231,34 @@ _BANNER = "[agentalloy · build] out.md not yet produced · 1/2 sections (missin
 
 
 def _last_user_content(captured: dict[str, Any]) -> str:
+    """Return the content of the last user message (not the last message overall)."""
     sent = json.loads(captured["body"])
-    last = sent["messages"][-1]
-    assert last["role"] == "user"
-    assert isinstance(last["content"], str)
-    return last["content"]
+    # Walk backwards to find the last user message (the appended system message is last).
+    for msg in reversed(sent["messages"]):
+        if msg["role"] == "user":
+            assert isinstance(msg["content"], str)
+            return msg["content"]
+    raise AssertionError("no user message found")
 
 
 def _system_content(captured: dict[str, Any]) -> str:
+    """Return the content of the LAST system message (where AgentAlloy prose lives)."""
     sent = json.loads(captured["body"])
+    # AgentAlloy prose is now in a separate trailing system message.
+    for msg in reversed(sent["messages"]):
+        if msg["role"] == "system":
+            return msg["content"]
+    # Fallback to first message for backwards compatibility.
     return sent["messages"][0]["content"]
+
+
+def _harness_system_content(captured: dict[str, Any]) -> str:
+    """Return the content of the FIRST system message (the harness's)."""
+    sent = json.loads(captured["body"])
+    for msg in sent["messages"]:
+        if msg["role"] == "system":
+            return msg["content"]
+    raise AssertionError("no system message found")
 
 
 def test_banner_only_turn_injects_into_upstream_last_user(tmp_path: Path) -> None:
@@ -277,9 +295,12 @@ def test_banner_appended_after_workflow_block_upstream(tmp_path: Path) -> None:
         resp = client.post("/v1/chat/completions", json=_body(tmp_path))
     assert resp.status_code == 200
     content = _last_user_content(captured)
-    # Both blocks present; the banner is the freshest (last) text.
-    assert "operate like so" in content
+    # Workflow prose is delivered via the system-message leg (leg 3), not the user
+    # message (leg 1), so it does NOT appear in the user message content.
+    # The composed block (ORIENTATION-PROSE), phase marker, and banner are present.
+    assert "ORIENTATION-PROSE" in content
     assert "phase=build" in content
+    assert "operate like so" not in content
     assert _BANNER in content
     assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
     assert content.count("BEGIN AGENTALLOY-BANNER") == 1
@@ -327,11 +348,12 @@ def test_prose_lands_on_system_message(tmp_path: Path) -> None:
         resp = client.post("/v1/chat/completions", json=_body(tmp_path))
     assert resp.status_code == 200
     system = _system_content(captured)
-    # Harness's own system prompt preserved, prose appended under one marker pair.
-    assert system.startswith("SYSTEM-CACHED")
+    # Harness's own system prompt preserved (first system message).
+    assert _harness_system_content(captured) == "SYSTEM-CACHED"
+    # AgentAlloy prose in a separate trailing system message.
     assert _PROSE in system
-    assert system.count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
-    assert system.count("END AGENTALLOY-CONTEXT") == 1
+    assert system.count('<agentalloy-instructions phase="build">') == 1
+    assert system.count("</agentalloy-instructions>") == 1
 
 
 def test_prose_fires_on_a_quiet_turn(tmp_path: Path) -> None:
@@ -366,7 +388,7 @@ def test_prose_repeats_byte_identically_across_turns(tmp_path: Path) -> None:
 
     assert _PROSE in seen[0]
     assert seen[1] == seen[0]  # byte-identical within a phase
-    assert seen[1].count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+    assert seen[1].count('<agentalloy-instructions phase="build">') == 1
 
 
 def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
@@ -375,14 +397,26 @@ def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
     app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
 
     # Turn 1 at build, then turn 2 at qa — with the harness replaying the system
-    # message the proxy produced on turn 1 (a codex-style harness that persists what
-    # it was handed would do exactly this).
+    # messages the proxy produced on turn 1 (a codex-style harness that persists
+    # what it was handed would do exactly this).
     with patch(_SIGNAL, return_value=_prose_signal()), TestClient(app) as client:
         client.post("/v1/chat/completions", json=_body(tmp_path))
-    build_system = _system_content(captured)
 
+    # Capture both system messages from turn 1: harness (first) + AgentAlloy (last).
+    sent = json.loads(captured["body"])
+    harness_sys = next(
+        m for m in sent["messages"] if m["role"] == "system" and m["content"] == "SYSTEM-CACHED"
+    )
+    build_agentalloy_sys = next(
+        m for m in sent["messages"] if m["role"] == "system" and m["content"] != "SYSTEM-CACHED"
+    )
+
+    # Simulate harness replay: first system = harness's original, plus the AgentAlloy
+    # system message from turn 1. The harness sees both system messages and replays
+    # them in order.
     replayed = _body(tmp_path)
-    replayed["messages"][0]["content"] = build_system
+    replayed["messages"][0] = harness_sys  # harness's original system message
+    replayed["messages"].append(build_agentalloy_sys)  # AgentAlloy's system from turn 1
     qa_prose = "# SDD — QA\nProve the acceptance criteria."
     with (
         patch(_SIGNAL, return_value=_prose_signal(phase="qa", workflow_system_prose=qa_prose)),
@@ -392,11 +426,12 @@ def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
     system = _system_content(captured)
-    assert "phase=build" not in system
+    assert 'phase="build"' not in system
     assert _PROSE not in system
     assert qa_prose in system
-    assert system.count("BEGIN AGENTALLOY-CONTEXT phase=qa") == 1
-    assert system.startswith("SYSTEM-CACHED")
+    assert system.count('<agentalloy-instructions phase="qa">') == 1
+    # Harness's own system prompt preserved (first system message).
+    assert _harness_system_content(captured) == "SYSTEM-CACHED"
 
 
 def test_composed_block_does_not_reach_the_system_message(tmp_path: Path) -> None:
@@ -432,8 +467,13 @@ def test_composed_block_does_not_reach_the_system_message(tmp_path: Path) -> Non
     assert _announced_file(tmp_path) == "build\tsess-1"
 
 
-def test_no_system_message_is_a_no_op_for_prose(tmp_path: Path) -> None:
-    """Helper deliberately does not create a system message; other legs still land."""
+def test_creates_system_message_when_none_exists(tmp_path: Path) -> None:
+    """When the harness sends no system message, leg 3 creates one with AgentAlloy prose.
+
+    The new behavior (separate system message) creates a system message if none
+    exists, rather than returning None (no-op). Other legs (banner in user message)
+    still land normally.
+    """
     (tmp_path / ".agentalloy").mkdir()
     captured: dict[str, Any] = {}
     app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
@@ -443,8 +483,13 @@ def test_no_system_message_is_a_no_op_for_prose(tmp_path: Path) -> None:
         resp = client.post("/v1/chat/completions", json=body)
     assert resp.status_code == 200
     sent = json.loads(captured["body"])
-    assert [m["role"] for m in sent["messages"]] == ["user"]
-    assert _PROSE not in json.dumps(sent)
+    roles = [m["role"] for m in sent["messages"]]
+    # A system message was created with the prose
+    assert "system" in roles
+    # Check the system message content directly (not via json.dumps which escapes em-dash).
+    sys_msg = next(m for m in sent["messages"] if m["role"] == "system")
+    assert _PROSE in sys_msg["content"]
+    # Banner still lands in the user message
     assert _BANNER in _last_user_content(captured)
 
 

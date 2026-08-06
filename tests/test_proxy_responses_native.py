@@ -283,8 +283,8 @@ def test_prose_lands_on_instructions(tmp_path: Path) -> None:
     instructions = forwarded["instructions"]
     assert instructions.startswith("CACHED-SYSTEM-PROMPT")
     assert _PROSE in instructions
-    assert instructions.count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
-    assert instructions.count("END AGENTALLOY-CONTEXT") == 1
+    assert instructions.count('<agentalloy-instructions phase="build">') == 1
+    assert instructions.count("</agentalloy-instructions>") == 1
     # `input` is leg 1/2 territory — untouched by leg 3.
     assert forwarded["input"] == _responses_body()["input"]
 
@@ -319,7 +319,7 @@ def test_prose_repeats_byte_identically_across_turns(tmp_path: Path) -> None:
 
     assert _PROSE in seen[0]
     assert seen[1] == seen[0]  # byte-identical within a phase
-    assert seen[1].count("BEGIN AGENTALLOY-CONTEXT phase=build") == 1
+    assert seen[1].count('<agentalloy-instructions phase="build">') == 1
 
 
 def test_banner_and_prose_land_on_different_fields(tmp_path: Path) -> None:
@@ -362,10 +362,10 @@ def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
     instructions = json.loads(captured["body"])["instructions"]
-    assert "phase=build" not in instructions
+    assert 'phase="build"' not in instructions
     assert _PROSE not in instructions
     assert qa_prose in instructions
-    assert instructions.count("BEGIN AGENTALLOY-CONTEXT phase=qa") == 1
+    assert instructions.count('<agentalloy-instructions phase="qa">') == 1
     assert instructions.startswith("CACHED-SYSTEM-PROMPT")
 
 

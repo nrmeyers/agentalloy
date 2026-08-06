@@ -310,8 +310,6 @@ async def _maybe_inject(
             orchestrator=orchestrator,
             inject=_inject_anthropic,
             delivered=lambda out: out is not before,
-            # Workflow prose is delivered by the system-prompt leg below, not here.
-            use_message_text=True,
         )
         if outcome.injected is not None:
             current = outcome.injected

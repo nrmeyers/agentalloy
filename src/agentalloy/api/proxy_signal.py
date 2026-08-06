@@ -44,13 +44,11 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_cursor,
     _read_lifecycle_mode,
     _read_orientation_announced,
-    _read_state,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
     _write_orientation_announced_atomic,
     _write_phase_atomic,
-    _write_state_atomic,
     exit_gates_for_phase,
 )
 from agentalloy.storage.protocols import TelemetryStore
@@ -184,9 +182,6 @@ class SignalResult:
     # When True the compose path takes the compose-only branch
     # (``_compose_free_block``) instead of the 3-tier workflow block.
     free_mode: bool = False
-    # The once-per-24h free-flow reminder line ("workflow paused ... flow
-    # resume"), riding the same injection block. None when not due this turn.
-    reminder: str | None = None
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
@@ -430,28 +425,6 @@ def _glob_first_exists(path_glob: str, project_root: Path) -> bool:
 _FREE_ANNOUNCED = "__free__"
 
 
-def _free_reminder_due(cwd: Path, free_since: str | None) -> bool:
-    """Whether the daily free-flow reminder should fire this turn.
-
-    Baseline is the last-reminder marker (``.agentalloy/free-reminded``) when
-    present, else ``free_since``; due when the baseline is >= 24h old. No
-    baseline at all (hand-edited phase file without ``free_since``) → never due;
-    an unparseable baseline → due (the stamp that follows repairs it).
-    """
-    from datetime import UTC, datetime, timedelta
-
-    raw = _read_state(cwd, "free-reminded") or free_since
-    if not raw:
-        return False
-    try:
-        baseline = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if baseline.tzinfo is None:
-            baseline = baseline.replace(tzinfo=UTC)
-    except ValueError:
-        return True
-    return datetime.now(UTC) - baseline >= timedelta(hours=24)
-
-
 def _evaluate_free_flow(
     request: ProxyRequest,
     cwd: Path,
@@ -463,18 +436,15 @@ def _evaluate_free_flow(
 ) -> SignalResult:
     """Evaluate a proxy request for a repo in free-flow mode (compose-only).
 
-    Workflow steering is fully suppressed — no Tier 1 orientation, no banner, no
-    exit-gate evaluation, no phase transition, no intake compose, no advisories.
-    What remains:
+    Free-flow is fully silent: no Tier 1 orientation, no banner, no daily
+    reminder, no exit-gate evaluation, no phase transition, no intake compose,
+    no advisories. What remains:
 
     - **Domain compose**, once per (carrier) session, keyed on the request's task
       text rather than a work-item contract. Cadence rides the existing announced
       machinery under the :data:`_FREE_ANNOUNCED` sentinel; the marker is
       committed by the injection path only after delivery (``pending_announce``),
       exactly like the workflow-mode Tier 1.
-    - **The daily reminder**: one line, at most once per 24h, stamped eagerly
-      here (mirroring the banner-turn counter precedent — best-effort cadence, a
-      one-off miss on an upstream error is harmless).
 
     Carrier-gated like workflow mode: only identifiable sessions (``session_key`` present)
     trigger compose/cadence; anonymous requests are forwarded silently.
@@ -498,23 +468,6 @@ def _evaluate_free_flow(
             session_source=session_source,
         )
 
-    reminder: str | None = None
-    if _free_reminder_due(cwd, free_since):
-        since_date = (free_since or "")[:10] or "recently"
-        reminder = (
-            f"AgentAlloy workflow paused (free-flow) since {since_date} — "
-            "run `agentalloy flow resume` when ready."
-        )
-        if mutate:
-            from datetime import UTC, datetime
-
-            try:
-                _write_state_atomic(
-                    cwd, "free-reminded", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                )
-            except OSError:
-                logger.debug("free-reminded write failed", exc_info=True)
-
     # Once-per-session domain compose cadence, on the announced machinery under
     # the free sentinel. Without a session key, fall back to once-per-entry.
     last_phase, last_sessions = _read_announced_state(cwd)
@@ -525,7 +478,7 @@ def _evaluate_free_flow(
     )
     announce = announce and bool(task)
 
-    if not (announce or reminder):
+    if not announce:
         return SignalResult(
             should_compose=False,
             phase=phase,
@@ -552,7 +505,6 @@ def _evaluate_free_flow(
         phase=phase,
         task=task,
         free_mode=True,
-        reminder=reminder,
         repo=repo,
         session_key=session_key,
         session_source=session_source,

@@ -23,7 +23,6 @@ Per harness (skipped when its binary is absent):
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,14 +31,17 @@ import pytest
 
 from tests.harness_e2e.conftest import EXPECT_INJECTION
 from tests.harness_e2e.drivers import CASES, HarnessCase
-from tests.harness_e2e.upstream_stub import CapturedRequest, UpstreamStub, system_texts, user_texts
+from tests.harness_e2e.upstream_stub import (
+    LEG3_BLOCK,
+    CapturedRequest,
+    UpstreamStub,
+    system_texts,
+    user_texts,
+)
 
 pytestmark = pytest.mark.harness_e2e
 
 INJECTION_MARKER = "AGENTALLOY"
-# Leg 3 lands on the system leg under the same marker pair leg 1 uses on the
-# user leg — the two are told apart by which leg they land on, not by text.
-LEG3_BLOCK = re.compile(r"BEGIN AGENTALLOY-CONTEXT phase=(\w+)")
 
 
 def _run(
