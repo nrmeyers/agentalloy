@@ -299,11 +299,7 @@ async def _compose_block(
             )
             tier1 = (
                 tier1_result.output
-                if (
-                    tier1_result is not None
-                    and not isinstance(tier1_result, EmptyResult)
-                    and tier1_result.output
-                )
+                if (not isinstance(tier1_result, EmptyResult) and tier1_result.output)
                 else ""
             )
         except Exception:
