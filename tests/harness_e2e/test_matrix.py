@@ -37,9 +37,10 @@ from tests.harness_e2e.upstream_stub import CapturedRequest, UpstreamStub, syste
 pytestmark = pytest.mark.harness_e2e
 
 INJECTION_MARKER = "AGENTALLOY"
-# Leg 3 lands on the system leg under the same marker pair leg 1 uses on the
-# user leg — the two are told apart by which leg they land on, not by text.
-LEG3_BLOCK = re.compile(r"BEGIN AGENTALLOY-CONTEXT phase=(\w+)")
+# Leg 3 lands on the system leg under either the HTML-style workflow marker
+# (legacy, user-message injection) or the XML-style delimited-block tag
+# (D3, system-message injection). Both carry the phase value.
+LEG3_BLOCK = re.compile(r"(?:BEGIN AGENTALLOY-CONTEXT phase=(\w+)|<agentalloy-instructions phase=")
 
 
 def _run(
