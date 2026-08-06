@@ -402,6 +402,7 @@ def _emit_llm_sent(
     workflow_skill_id: str | None,
     system_prompt_sha: str | None,
     repo: str | None = None,
+    workflow_delivered: bool | None = None,
 ) -> None:
     if writer is None:
         return
@@ -414,6 +415,7 @@ def _emit_llm_sent(
             workflow_skill_id=workflow_skill_id,
             system_prompt_sha=system_prompt_sha,
             repo=repo,
+            workflow_delivered=workflow_delivered,
         )
     except Exception:  # noqa: BLE001 — soft-fail by design
         logger.debug("llm_sent telemetry write failed", exc_info=True)
@@ -1046,6 +1048,9 @@ async def proxy_chat_completions(
         workflow_skill_id=signal_result.workflow_skill_id if signal_result else None,
         system_prompt_sha=_system_prompt_sha(modified_request),
         repo=repo,
+        workflow_delivered=(
+            signal_result.workflow_system_prose is not None if signal_result else None
+        ),
     )
 
     if modified_request.stream:

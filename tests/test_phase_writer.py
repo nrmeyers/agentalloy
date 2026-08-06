@@ -43,7 +43,9 @@ class TestPhaseStart:
 
         writer.phase_start(trace_id, phase, model="gpt-4", tokens_in=100, tokens_out=50)
 
-        assert len(store.calls) == 4  # DDL + ADD COLUMN + CREATE INDEX + INSERT
+        assert (
+            len(store.calls) == 5
+        )  # DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + CREATE INDEX + INSERT
         sql, params = store.calls[-1]
         assert "INSERT INTO phase_events" in sql
         assert params[0] == trace_id  # trace_id
@@ -54,6 +56,7 @@ class TestPhaseStart:
         assert params[7] == 50  # tokens_out
         assert params[10] is None  # success
         assert params[11] is None  # error_message
+        assert params[15] is None  # workflow_delivered
 
     def test_success_flag_is_written(self) -> None:
         store = _MockStore()
@@ -164,8 +167,8 @@ class TestSoftFail:
         writer = PhaseTelemetryWriter(store)
 
         writer.phase_complete("t1", "p1")
-        # Called 4x: DDL + ADD COLUMN + CREATE INDEX + INSERT, all fail silently
-        assert store.execute.call_count == 4
+        # Called 5x: DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + CREATE INDEX + INSERT, all fail silently
+        assert store.execute.call_count == 5
 
     def test_llm_error_soft_fails(self) -> None:
         writer = PhaseTelemetryWriter(MagicMock(side_effect=OSError("disk full")))
@@ -259,13 +262,13 @@ class TestSchema:
 
         assert "repo VARCHAR" in _CREATE_DDL
 
-    def test_insert_sql_has_fifteen_placeholders(self) -> None:
-        """Regression: the table has 15 columns (14 + repo, issue #522); the
+    def test_insert_sql_has_sixteen_placeholders(self) -> None:
+        """Regression: the table has 16 columns (15 + workflow_delivered, D3); the
         INSERT must match exactly or every write raises (silently, under the
         soft-fail except block)."""
         from agentalloy.telemetry.phase_writer import _INSERT_SQL
 
-        assert _INSERT_SQL.count("?") == 15
+        assert _INSERT_SQL.count("?") == 16
 
     def test_insert_sql_names_columns_explicitly(self) -> None:
         """INSERT INTO phase_events (col, col, ...) VALUES (...) — not a bare

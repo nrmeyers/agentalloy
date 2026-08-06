@@ -41,6 +41,7 @@ class PhaseEvent:
     system_prompt_sha: str | None = None
     direction: str | None = None
     repo: str | None = None
+    workflow_delivered: bool | None = None
 
 
 class TelemetryStore(Protocol):
@@ -53,8 +54,9 @@ _INSERT_SQL = """\
 INSERT INTO phase_events (
     trace_id, correlation_id, request_ts, phase, event_type,
     model, tokens_in, tokens_out, latency_ms, success,
-    error_message, workflow_skill_id, system_prompt_sha, direction, repo
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    error_message, workflow_skill_id, system_prompt_sha, direction, repo,
+    workflow_delivered
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _CREATE_DDL = """\
@@ -73,7 +75,8 @@ CREATE TABLE IF NOT EXISTS phase_events (
     workflow_skill_id VARCHAR,
     system_prompt_sha VARCHAR,
     direction VARCHAR,
-    repo VARCHAR
+    repo VARCHAR,
+    workflow_delivered BOOLEAN
 );
 CREATE INDEX IF NOT EXISTS idx_phase_events_ts ON phase_events(request_ts);
 CREATE INDEX IF NOT EXISTS idx_phase_events_phase ON phase_events(phase);
@@ -83,6 +86,9 @@ CREATE INDEX IF NOT EXISTS idx_phase_events_trace ON phase_events(trace_id);
 
 _ADD_REPO_COLUMN_SQL = "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS repo VARCHAR"
 _CREATE_REPO_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_phase_events_repo ON phase_events(repo)"
+_ADD_WORKFLOW_DELIVERED_COLUMN_SQL = (
+    "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS workflow_delivered BOOLEAN DEFAULT NULL"
+)
 
 
 class PhaseTelemetryWriter:
@@ -135,6 +141,7 @@ class PhaseTelemetryWriter:
         direction: str | None = None,
         correlation_id: str | None = None,
         repo: str | None = None,
+        workflow_delivered: bool | None = None,
     ) -> None:
         try:
             self._ensure_schema()
@@ -153,6 +160,7 @@ class PhaseTelemetryWriter:
                 system_prompt_sha=system_prompt_sha,
                 direction=direction,
                 repo=repo,
+                workflow_delivered=workflow_delivered,
             )
             params: tuple[Any, ...] = (
                 event.trace_id,
@@ -170,6 +178,7 @@ class PhaseTelemetryWriter:
                 event.system_prompt_sha,
                 event.direction,
                 event.repo,
+                event.workflow_delivered,
             )
             self._store.execute(_INSERT_SQL, params)
         except Exception:  # noqa: BLE001 — soft-fail by design
@@ -191,6 +200,12 @@ class PhaseTelemetryWriter:
                 self._store.execute(_ADD_REPO_COLUMN_SQL)
             except Exception:  # noqa: BLE001
                 logger.debug("phase_events repo-column migration failed", exc_info=True)
+            try:
+                # Self-healing migration: add workflow_delivered column for
+                # D3 instruction telemetry (decision D3).
+                self._store.execute(_ADD_WORKFLOW_DELIVERED_COLUMN_SQL)
+            except Exception:  # noqa: BLE001
+                logger.debug("phase_events workflow_delivered migration failed", exc_info=True)
             try:
                 # Index creation must follow the column migration — on an old
                 # DB the column (and thus the index target) doesn't exist
