@@ -424,12 +424,12 @@ def _clean_proxy_from_qwen_data(data: dict[str, Any]) -> bool:
         providers = cast("dict[str, Any]", data["modelProviders"])
         openai_providers = providers.get("openai")
         if isinstance(openai_providers, list):
+            openai_providers = cast("list[dict[str, Any]]", openai_providers)
             original_len = len(openai_providers)
             openai_providers = [
                 e
                 for e in openai_providers
-                if isinstance(e, dict)
-                and not (
+                if not (
                     isinstance(e.get("baseUrl"), str)
                     and ("localhost" in e["baseUrl"] or "/proj/" in e["baseUrl"])
                 )

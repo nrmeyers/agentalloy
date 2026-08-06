@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``reset-step`` subcommand.
 
 Clears a step's entry from ``install-state.json`` so the next install
@@ -61,7 +62,7 @@ def reset_step(
 ) -> dict[str, Any]:
     """Clear a step (and its dependents) from install state."""
 
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
 
@@ -108,7 +109,7 @@ def reset_step(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "reset-step",

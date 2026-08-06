@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``reembed`` subcommand — forward to ``agentalloy.reembed.cli``.
 
 The reembed CLI itself lives in ``agentalloy.reembed.cli`` and has its
@@ -17,7 +18,7 @@ import argparse
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "reembed",

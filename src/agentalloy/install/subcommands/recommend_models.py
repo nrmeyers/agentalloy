@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``recommend-models`` subcommand.
 
 Given hardware + chosen host target, return the ``{embed_model, embed_runner,
@@ -159,7 +159,7 @@ def recommend_models(
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "recommend-models",
         help="Given hardware + host target, return the model set and resolved preset.",

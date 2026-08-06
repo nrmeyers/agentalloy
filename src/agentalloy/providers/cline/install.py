@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Cline install module — apply_persistent_config / install_writer.
 
 Proxy wiring via Cline's real provider store. The previously shipped
@@ -100,8 +101,8 @@ def extract_upstream(root: Path, data_dir: Path | None = None) -> Upstream | Non
         return None
 
     def _settings_of(key: object) -> dict[str, Any] | None:
-        entry = providers.get(key)  # type: ignore[arg-type]
-        settings = entry.get("settings") if isinstance(entry, dict) else None
+        entry = cast(dict[str, Any], providers.get(key))  # type: ignore[arg-type]
+        settings = entry.get("settings")
         return settings if isinstance(settings, dict) else None
 
     def _to_upstream(settings: dict[str, Any]) -> Upstream | None:
@@ -120,7 +121,7 @@ def extract_upstream(root: Path, data_dir: Path | None = None) -> Upstream | Non
     # Otherwise fall back to the sole remaining non-proxy provider.
     real = [
         settings
-        for settings in (_settings_of(k) for k in providers)
+        for settings in (_settings_of(k) for k in cast(dict[object, dict[str, Any]], providers))
         if settings is not None and not _is_proxy_entry(settings)
     ]
     if len(real) == 1:

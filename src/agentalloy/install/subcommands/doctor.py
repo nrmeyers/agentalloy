@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``doctor`` subcommand — diagnose and optionally repair a broken install.
 
 Two deployment modes (read from ``install-state.json``):
@@ -518,7 +518,8 @@ def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "detail": f"Service not running on port {port} — module state unknown until start",
         }
-    modules = health.get("modules") if isinstance(health.get("modules"), dict) else {}
+    raw_modules = health.get("modules")
+    modules = raw_modules if isinstance(raw_modules, dict) else {}
     state = modules.get("code_index")
     if state == "unavailable":
         return {
@@ -580,9 +581,8 @@ def _check_module_drift(env: dict[str, str], health: dict[str, Any] | None) -> d
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "detail": "service /health unreachable — module drift unknown",
         }
-    modules = health.get("modules") if isinstance(health.get("modules"), dict) else {}
-    if not isinstance(modules, dict):
-        modules = {}
+    raw_modules = health.get("modules")
+    modules = raw_modules if isinstance(raw_modules, dict) else {}
     drifts: list[str] = []
     states: list[str] = []
     for key, info in sorted(env_forwarding.MODULE_TOGGLES.items()):
@@ -1295,7 +1295,7 @@ def _render_human_result(result: dict[str, Any]) -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "doctor",

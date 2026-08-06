@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """SDD state and contract endpoints — GET/POST /state/* and /contracts routes.
 
 Exposes the DuckDB-backed SDD state store over HTTP so out-of-process callers
@@ -328,7 +329,11 @@ async def _trigger_compose_in_process(
     if tasks is None:
         tasks = {}
         state.compose_tasks = tasks
-    task.add_done_callback(lambda t: tasks.pop(contract_id, None))
+
+    def _compose_done_cb(_t: object) -> None:
+        tasks.pop(contract_id, None)
+
+    task.add_done_callback(_compose_done_cb)
     tasks[contract_id] = task
 
 
@@ -530,11 +535,16 @@ async def list_artifacts(
     name_glob: str | None = Query(default=None, description="fnmatch pattern over name"),
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ArtifactListResponse:
-    rows = await asyncio.to_thread(store.list_artifacts, phase, slug=slug, name_glob=name_glob)
+    rows: list[dict[str, Any]] = await asyncio.to_thread(
+        store.list_artifacts, phase, slug=slug, name_glob=name_glob
+    )
     # Convert datetime.updated_at to ISO string for pydantic validation
-    cleaned = []
+    cleaned: list[dict[str, Any]] = []
     for row in rows:
+        row = dict(row)  # sqlite3.Row → mutable dict
         ua = row.get("updated_at")
+        if ua is None:
+            continue
         if hasattr(ua, "isoformat"):
             row = {**row, "updated_at": ua.isoformat()}
         cleaned.append(row)

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy knowledge`` — CLI for the Knowledge module (decisions over code).
 
     agentalloy knowledge why <symbol> [--repo]    Decisions governing a symbol
@@ -95,14 +96,14 @@ def _run_knowledge(args: argparse.Namespace) -> int:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "knowledge",
         help="Knowledge module: the decisions governing a symbol (why it's this way).",
     )
     p.set_defaults(func=_run_knowledge)
-    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(  # pyright: ignore[reportPrivateUsage]
+    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(
         dest="knowledge_cmd"
     )
 

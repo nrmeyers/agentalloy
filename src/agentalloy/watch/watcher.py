@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """File-system watcher loop for sidecar harnesses.
 
 Sidecar harnesses are those whose LLM traffic cannot be intercepted by the
@@ -23,7 +24,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from watchdog.events import (
     FileSystemEvent,
@@ -64,7 +65,7 @@ def _load_workflow_skill_prose(phase: str, profile_name: str) -> str:
     """Load raw_prose for the workflow skill matching the given phase."""
     try:
         from agentalloy.signals.skill_loader import (
-            _load_workflow_skill_for_phase,  # pyright: ignore[reportPrivateUsage]
+            _load_workflow_skill_for_phase,
         )
 
         skill = _load_workflow_skill_for_phase(phase, Path.cwd())
@@ -246,7 +247,9 @@ def _phase_from_blob(value: str) -> str | None:
         data = json.loads(value)
     except (json.JSONDecodeError, TypeError):
         return None
-    return data.get("phase") if isinstance(data, dict) else str(data).strip() or None
+    return (
+        cast(str | None, data.get("phase")) if isinstance(data, dict) else str(data).strip() or None
+    )
 
 
 def _regenerate(

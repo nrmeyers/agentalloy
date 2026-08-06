@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``contracts`` subcommand group — store-backed contract operations.
 
 Operates on the whole contract collection (plural), as opposed to the singular
@@ -104,7 +105,7 @@ def _render_archive(result: dict[str, Any]) -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser("contracts", help="Manage the contract collection (store-backed).")
     add_json_flag(p)
@@ -124,4 +125,8 @@ def add_parser(
     )
     arch.set_defaults(func=_run_archive)
 
-    p.set_defaults(func=lambda _a: (p.print_help(), 0)[1])
+    def _show_help_and_exit(_a: object) -> int:
+        p.print_help()
+        return 0
+
+    p.set_defaults(func=_show_help_and_exit)

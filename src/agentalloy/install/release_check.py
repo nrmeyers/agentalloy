@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Release-update check — the single place that talks to the GitHub releases API.
 
 The running service is otherwise offline by design (it makes no outbound calls).
@@ -28,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.install import state as install_state
 
@@ -114,10 +115,10 @@ def _get_json(url: str, timeout: float) -> dict[str, Any] | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — fixed https URL
-            payload: Any = json.loads(resp.read().decode("utf-8"))
+            payload = cast(dict[str, Any], json.loads(resp.read().decode("utf-8")))
     except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
         return None
-    return payload if isinstance(payload, dict) else None
+    return payload
 
 
 def fetch_latest_tag(timeout: float = 10.0) -> str | None:
@@ -165,10 +166,10 @@ def fetch_release_info(ref: str | None = None, timeout: float = 10.0) -> dict[st
 def read_cache() -> dict[str, Any]:
     """Read the JSON cache, or ``{}`` when absent/corrupt. Never raises."""
     try:
-        data: Any = json.loads(cache_path().read_text(encoding="utf-8"))
+        data = cast(dict[str, Any], json.loads(cache_path().read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return data
 
 
 def _write_cache(data: dict[str, Any]) -> None:

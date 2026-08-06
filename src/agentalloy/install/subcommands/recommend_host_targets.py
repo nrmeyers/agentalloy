@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``recommend-host-targets`` subcommand.
 
 Given confirmed hardware JSON, return valid host targets
@@ -121,7 +121,7 @@ def recommend_targets(hw: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "recommend-host-targets",
         help="Given confirmed hardware, return valid host targets with tradeoff notes.",

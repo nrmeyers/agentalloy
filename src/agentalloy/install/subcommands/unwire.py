@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``unwire`` verb — remove AgentAlloy sentinels from the current repo.
 
 Per-repo cleanup by default. Walks ``harness_files_written`` entries and removes
@@ -32,7 +33,7 @@ from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "unwire",
@@ -287,7 +288,7 @@ def _scan_carriers(
     and already-clean files are no-ops. Returns ``(removed, modified, warnings)``.
     """
     from agentalloy.install.subcommands.uninstall_proxy import (
-        _remove_sentinel_block,  # pyright: ignore[reportPrivateUsage]
+        _remove_sentinel_block,
     )
 
     removed: list[dict[str, Any]] = []
@@ -353,7 +354,7 @@ def _run(args: argparse.Namespace) -> int:
     # as a full uninstall otherwise.
     harness = getattr(args, "harness", None)
     all_repos = getattr(args, "all_repos", False)
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     scan_root = _repo_root()
 

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Load-bearing invariants for customized system/workflow skills.
 
 A user may customize a system/workflow skill's *language* (``raw_prose``), but
@@ -31,7 +32,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agentalloy.signals.prefilter import (
-    _extract_gate_store_specs,  # pyright: ignore[reportPrivateUsage]
+    _extract_gate_store_specs,
     extract_gate_paths,
 )
 

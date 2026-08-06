@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Server-process helpers — detect, start, stop the agentalloy uvicorn.
 
 The ``serve`` subcommand runs uvicorn in the foreground. The ``server-*``

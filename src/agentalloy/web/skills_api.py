@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Web UI skill browser/editor endpoints + signal simulator.
 
 - ``GET /api/skills`` — filterable corpus listing with provenance (which
@@ -65,8 +66,8 @@ def _override_layer(skill_id: str) -> str | None:
     from agentalloy.install.subcommands import customize
 
     try:
-        layers = customize._resolve_skill_layers(skill_id, None)  # pyright: ignore[reportPrivateUsage]
-        layer, path = customize._active_layer(layers)  # pyright: ignore[reportPrivateUsage]
+        layers = customize._resolve_skill_layers(skill_id, None)
+        layer, path = customize._active_layer(layers)
     except Exception:  # noqa: BLE001 — provenance is decoration, never a 500
         return None
     return layer if layer != "default" and path is not None else None
@@ -251,7 +252,7 @@ def _layers_for(skill_id: str, repo: str | None) -> dict[str, Any]:
     from agentalloy.install.subcommands import customize
 
     cwd = Path(repo) if repo else None
-    return customize._resolve_skill_layers(skill_id, None, cwd=cwd)  # pyright: ignore[reportPrivateUsage]
+    return customize._resolve_skill_layers(skill_id, None, cwd=cwd)
 
 
 def _load_layer_yaml(path: Path | None) -> dict[str, Any]:
@@ -259,7 +260,7 @@ def _load_layer_yaml(path: Path | None) -> dict[str, Any]:
 
     if path is None:
         return {}
-    return customize._load_yaml(path)  # pyright: ignore[reportPrivateUsage]
+    return customize._load_yaml(path)
 
 
 _LOCKED_FIELDS = (
@@ -284,7 +285,7 @@ async def get_override(skill_id: str, repo: str | None = Query(default=None)) ->
         layers = _layers_for(skill_id, repo)
         if layers.get("default") is None and layers.get("skill_class") is None:
             raise HTTPException(status_code=404, detail=f"not an overridable skill: {skill_id}")
-        layer, active_path = customize._active_layer(layers)  # pyright: ignore[reportPrivateUsage]
+        layer, active_path = customize._active_layer(layers)
         shipped = _load_layer_yaml(layers.get("default"))
         active = _load_layer_yaml(active_path) if active_path else shipped
         invariants: list[str] = []
@@ -344,7 +345,7 @@ async def put_override(
         data["raw_prose"] = body.raw_prose
         if body.domain_tags is not None:
             data["domain_tags"] = body.domain_tags
-        errors = customize._validate_skill_data(data, skill_id)  # pyright: ignore[reportPrivateUsage]
+        errors = customize._validate_skill_data(data, skill_id)
         if errors:
             raise HTTPException(
                 status_code=400, detail={"error": "validation_failed", "errors": errors}
@@ -361,7 +362,7 @@ async def put_override(
         target.write_text(
             yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
         )
-        customize._ingest_skill(str(layers["active_profile_name"]), data)  # pyright: ignore[reportPrivateUsage]
+        customize._ingest_skill(str(layers["active_profile_name"]), data)
         return OverrideWriteResult(
             status="ok",
             layer=body.layer,
@@ -398,11 +399,11 @@ async def delete_override(
         profile_name = str(layers["active_profile_name"])
         # Revert the profile store to whatever layer remains active.
         remaining = _layers_for(skill_id, repo)
-        _, still_active = customize._active_layer(remaining)  # pyright: ignore[reportPrivateUsage]
+        _, still_active = customize._active_layer(remaining)
         if still_active is not None and remaining.get("default") != still_active:
-            customize._ingest_skill(profile_name, _load_layer_yaml(still_active))  # pyright: ignore[reportPrivateUsage]
+            customize._ingest_skill(profile_name, _load_layer_yaml(still_active))
         else:
-            customize._delete_from_store(profile_name, skill_id)  # pyright: ignore[reportPrivateUsage]
+            customize._delete_from_store(profile_name, skill_id)
         return OverrideWriteResult(
             status="ok",
             layer=layer,

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy customize`` — user-facing skill override CLI.
 
 Three-layer resolution (highest to lowest priority):
@@ -878,7 +879,7 @@ def _render_revalidate(result: dict[str, Any]) -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "customize",

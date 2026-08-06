@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -344,7 +344,7 @@ def _extract_tokens_out(body: dict[str, Any]) -> int | None:
     """Pull ``usage.completion_tokens`` from a non-streaming chat-completions body."""
     usage = body.get("usage")
     if isinstance(usage, dict):
-        val = usage.get("completion_tokens")
+        val = cast(dict[str, Any], usage).get("completion_tokens")
         if isinstance(val, int):
             return val
     return None
@@ -386,9 +386,9 @@ class _SseUsageScanner:
             obj = json.loads(data)
         except ValueError:
             return
-        usage = obj.get("usage") if isinstance(obj, dict) else None
+        usage = cast(dict[str, Any], obj).get("usage") if isinstance(obj, dict) else None
         if isinstance(usage, dict):
-            val = usage.get("completion_tokens")
+            val = cast(dict[str, Any], usage).get("completion_tokens")
             if isinstance(val, int):
                 self.latest = val
 

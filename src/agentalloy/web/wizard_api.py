@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Web UI custom-skill creation wizard — the human-driven twin of the add-skill lane.
 
 Same rails as the lane, driven by clicks instead of prose: scaffold
@@ -194,7 +195,7 @@ async def install(
         from agentalloy.install.subcommands.approve import run_approve
         from agentalloy.install.subcommands.install_pack import install_local_pack
         from agentalloy.install.subcommands.status import (
-            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+            _repo_phase,
         )
 
         approval: dict[str, Any] | None = None

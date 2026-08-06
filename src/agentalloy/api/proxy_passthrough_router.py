@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Native Anthropic Messages passthrough (the ``/proj/<token>/v1/messages`` path).
 
 This path does **no** Anthropic↔OpenAI translation. It:
@@ -30,8 +31,8 @@ from fastapi.responses import StreamingResponse
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import (
     InjectOutcome,
-    _compose_block,  # pyright: ignore[reportPrivateUsage]  # noqa: F401 — re-exported for callers/tests
-    _ComposedBlock,  # pyright: ignore[reportPrivateUsage]  # noqa: F401 — re-exported for callers/tests
+    _compose_block,  # noqa: F401 — re-exported for callers/tests
+    _ComposedBlock,  # noqa: F401 — re-exported for callers/tests
     apply_signal,
     commit_outcome,
 )
@@ -42,7 +43,7 @@ from agentalloy.api.proxy_injection import (
 )
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import (
-    _get_phase_telemetry_writer,  # pyright: ignore[reportPrivateUsage]
+    _get_phase_telemetry_writer,
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,
@@ -298,7 +299,8 @@ async def _maybe_inject(
             # on commit, permanently forfeiting the delivery).
             raw_messages = before.get("messages")
             has_user_message = isinstance(raw_messages, list) and any(
-                isinstance(m, dict) and m.get("role") == "user" for m in raw_messages
+                isinstance(m, dict) and cast(dict[str, Any], m).get("role") == "user"
+                for m in cast(list[Any], raw_messages)
             )
             if not has_user_message:
                 return None

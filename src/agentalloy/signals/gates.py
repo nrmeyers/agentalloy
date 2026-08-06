@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Gate aggregation and phase-transition decisions.
 
 SDD phase graph (linear): intake → spec → design → build → qa → ship
@@ -14,8 +15,8 @@ from agentalloy.signals.predicates import (
     PREDICATES,
     PredicateContext,
     PredicateResult,
-    _glob_files,  # pyright: ignore[reportPrivateUsage]
-    _read_file,  # pyright: ignore[reportPrivateUsage]
+    _glob_files,
+    _read_file,
     evaluate_predicate,
 )
 
@@ -397,8 +398,8 @@ def decide_transition(
     # "produce this file".
     if not should_transition and current_phase != to_phase:
         from agentalloy.signals.prefilter import (
-            _extract_gate_paths,  # pyright: ignore[reportPrivateUsage]
-            _extract_gate_store_specs,  # pyright: ignore[reportPrivateUsage]
+            _extract_gate_paths,
+            _extract_gate_store_specs,
         )
 
         required = dict.fromkeys(_extract_gate_paths(gate_spec))

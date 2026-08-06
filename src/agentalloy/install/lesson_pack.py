@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Lesson -> domain-skill pack generator (compound-engineering bridge, task 03).
 
 Turns a ``docs/solutions/<slug>.md`` lesson into a valid AgentAlloy domain-skill

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``lessons promote`` subcommand — promote a codified lesson into the corpus.
 
 Compound-engineering bridge, task 04. Reads ``docs/solutions/<slug>.md``, turns
@@ -398,7 +399,7 @@ def _finalize_promote(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "lessons",
@@ -417,7 +418,12 @@ def add_parser(
     )
     add_json_flag(pr)
     pr.set_defaults(func=_run_promote)
-    p.set_defaults(func=lambda _args: p.print_help() or 1)
+
+    def _show_help_and_exit(_args: object) -> int:
+        p.print_help()
+        return 1
+
+    p.set_defaults(func=_show_help_and_exit)
 
 
 def _render_human(result: dict[str, Any]) -> None:
@@ -442,7 +448,7 @@ def _render_human(result: dict[str, Any]) -> None:
 
 
 def _run_promote(args: argparse.Namespace) -> int:
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     result = promote_lesson(
         args.slug,

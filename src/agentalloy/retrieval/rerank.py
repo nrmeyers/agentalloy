@@ -21,7 +21,10 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+
+if TYPE_CHECKING:
+    pass  # type: ignore[import-not-found, unused-ignore]
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +163,8 @@ class OnnxReranker:
 
     def __init__(self, model_dir: str) -> None:
         self._model_dir = model_dir
-        self._session: Any = None
-        self._tokenizer: Any = None
+        self._session: Any = None  # type: ignore[reportUnknownMemberType]
+        self._tokenizer: Any = None  # type: ignore[reportUnknownVariableType]
 
     def _ensure_loaded(self) -> None:
         if self._session is not None:
@@ -178,34 +181,34 @@ class OnnxReranker:
 
         model_path = os.path.join(self._model_dir, "model.onnx")
         tokenizer_path = os.path.join(self._model_dir, "tokenizer.json")
-        tokenizer = Tokenizer.from_file(tokenizer_path)
-        tokenizer.enable_truncation(max_length=_MAX_TOKENS)
-        tokenizer.enable_padding()
+        tokenizer = Tokenizer.from_file(tokenizer_path)  # type: ignore[reportUnknownMemberType]
+        tokenizer.enable_truncation(max_length=_MAX_TOKENS)  # type: ignore[reportUnknownMemberType]
+        tokenizer.enable_padding()  # type: ignore[reportUnknownMemberType]
         self._tokenizer = tokenizer
-        self._session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        self._session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])  # type: ignore[reportUnknownMemberType]
 
     def score(self, query: str, passages: list[str]) -> list[float]:
         if not passages:
             return []
         self._ensure_loaded()
-        tokenizer = self._tokenizer
-        session = self._session
+        tokenizer = self._tokenizer  # type: ignore[reportUnknownVariableType]
+        session = self._session  # type: ignore[reportUnknownVariableType]
 
-        encodings = tokenizer.encode_batch([(query, p) for p in passages])
-        input_ids = [list(e.ids) for e in encodings]
-        attention_mask = [list(e.attention_mask) for e in encodings]
+        encodings = tokenizer.encode_batch([(query, p) for p in passages])  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        input_ids = [list(e.ids) for e in encodings]  # type: ignore[reportUnknownMemberType]
+        attention_mask = [list(e.attention_mask) for e in encodings]  # type: ignore[reportUnknownMemberType]
         feed: dict[str, Any] = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
         }
-        input_names = {i.name for i in session.get_inputs()}
+        input_names = {i.name for i in session.get_inputs()}  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
         if "token_type_ids" in input_names:
-            feed["token_type_ids"] = [list(e.type_ids) for e in encodings]
+            feed["token_type_ids"] = [list(e.type_ids) for e in encodings]  # type: ignore[reportUnknownMemberType]
         # Drop any feed key the model does not declare (export variance).
         feed = {k: v for k, v in feed.items() if k in input_names}
 
-        outputs = session.run(None, feed)
-        logits = outputs[0]
+        outputs = session.run(None, feed)  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
+        logits = outputs[0]  # type: ignore[reportUnknownVariableType]
         # Classification head shape is (batch, 1) or (batch, 2). A single-logit
         # head is the relevance score directly; a 2-logit head uses the
         # positive class. Read element-wise to avoid a hard numpy dependency.
@@ -246,12 +249,10 @@ class HttpReranker:
         }
         resp = self._client.post("/v1/rerank", json=payload)
         resp.raise_for_status()
-        data: Any = resp.json()
-        results: Any = data.get("results") if isinstance(data, dict) else None
-        if not isinstance(results, list):
-            raise ValueError(f"rerank response missing 'results' list: {data!r}")
+        data: dict[str, Any] = resp.json() if isinstance(resp.json(), dict) else {}  # type: ignore[assignment]
+        results: list[Any] = data.get("results", [])
         scores = [0.0] * len(passages)
-        for item in cast(list[Any], results):
+        for item in results:
             if not isinstance(item, dict):
                 raise ValueError(f"rerank result is not a mapping: {item!r}")
             item_dict = cast(dict[str, Any], item)

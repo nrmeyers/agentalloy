@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``wrap`` verb — run a child process with AgentAlloy wiring active.
 
 Usage::
@@ -33,7 +34,7 @@ from agentalloy.install import state as install_state
 from agentalloy.install.output import print_rich, print_rich_stderr
 from agentalloy.install.subcommands.wire_harness import (
     VALID_HARNESSES,
-    _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
+    _wire_harness_core,
 )
 from agentalloy.providers import REGISTRY
 
@@ -371,7 +372,7 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "wrap",

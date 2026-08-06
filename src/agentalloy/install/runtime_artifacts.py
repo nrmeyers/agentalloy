@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Single source of truth for AgentAlloy's on-host runtime artifacts.
 
 A running native install leaves three classes of artifact on the host:
@@ -153,7 +154,7 @@ def _safe_find_pid(port: int) -> int | None:
 
 
 def _cmdline(pid: int) -> str:
-    return server_proc._read_cmdline(pid)  # pyright: ignore[reportPrivateUsage]
+    return server_proc._read_cmdline(pid)
 
 
 def _port_alive(port: int) -> bool:

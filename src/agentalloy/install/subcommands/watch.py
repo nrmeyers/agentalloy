@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy watch`` — file-watching sidecar for non-proxy-wired harnesses.
 
 Commands:
@@ -185,13 +186,13 @@ def _status(args: argparse.Namespace) -> int:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "watch",
         help="File-watching sidecar for non-proxy-wired harnesses — regenerates rules files on phase/contract changes",
     )
-    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(dest="watch_cmd")  # pyright: ignore[reportPrivateUsage]
+    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(dest="watch_cmd")
 
     start: argparse.ArgumentParser = sub.add_parser("start", help="Start the watcher (foreground)")
     start.add_argument(

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Pure domain helpers for phase management and workflow skill loading.
 
 The proxy path (``proxy_signal``) and the watcher reuse this logic without

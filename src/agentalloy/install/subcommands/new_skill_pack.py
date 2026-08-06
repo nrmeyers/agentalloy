@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``new-skill-pack`` subcommand — scaffold a local pack.yaml + skill YAML.
 
 Closes the "hand-write a pack.yaml from scratch against the spec doc" gap in
@@ -393,7 +393,7 @@ def new_skill_pack(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "new-skill-pack",

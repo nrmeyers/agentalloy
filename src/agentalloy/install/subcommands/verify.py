@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 """``verify`` subcommand — install-time smoke test.
 
 Runs 8 enumerated checks from contracts.md:
@@ -930,7 +930,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "verify",
         help="Install-time smoke test (embed → retrieve → 768-dim, harness config, etc.).",

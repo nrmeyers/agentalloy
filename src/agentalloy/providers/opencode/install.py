@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """OpenCode install module — apply_persistent_config / install_writer.
 
 Proxy wiring: repo-local ``opencode.json`` with an ``agentalloy`` provider on
@@ -32,7 +33,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     # Lazy import: wire_harness imports the provider registry at module load,
     # so a top-level import here would be circular.
     from agentalloy.install.subcommands.wire_harness import (
-        _wire_proxy_opencode,  # pyright: ignore[reportPrivateUsage]
+        _wire_proxy_opencode,
     )
 
     _ = force

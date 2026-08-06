@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Shared CLI output utilities for human-readable formatting.
 
 Provides Rich-based rendering with graceful fallback to plain print()

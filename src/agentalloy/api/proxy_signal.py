@@ -12,6 +12,10 @@ SignalResult
 
 from __future__ import annotations
 
+# Structural cross-module reuse of private signal-layer helpers (imported into
+# this public API module on purpose) — suppress private-usage reporting for the
+# whole module rather than per call site.
+# pyright: reportPrivateUsage=false
 import asyncio
 import logging
 import os

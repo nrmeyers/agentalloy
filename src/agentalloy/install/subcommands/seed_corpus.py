@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 """``seed-corpus`` subcommand â€” presence + integrity check.
 
 The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`` as the
@@ -291,7 +291,7 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "seed-corpus",
         help="Verify the in-repo seed corpus is present and valid.",

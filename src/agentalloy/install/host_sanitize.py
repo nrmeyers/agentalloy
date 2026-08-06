@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """State-independent host sanitizer — the engine behind ``cleanup --deep``.
 
 The lifecycle verbs ``cleanup`` and ``uninstall`` are *state-driven*: they remove
@@ -282,9 +283,7 @@ def _unwire_one(repo: Path, *, dry_run: bool) -> list[Action]:
     # Lazy import: the heavy uninstall module is only pulled when we actually sweep.
     from agentalloy.install.subcommands import uninstall
 
-    proxy_removed, files_removed = uninstall._unwire_repo_local(  # pyright: ignore[reportPrivateUsage]
-        repo, set(), remove_lifecycle=True
-    )
+    proxy_removed, files_removed = uninstall._unwire_repo_local(repo, set(), remove_lifecycle=True)
     count = len(proxy_removed) + len(files_removed)
     if count == 0:
         return []
@@ -357,7 +356,7 @@ def _cli_hint() -> str | None:
     from agentalloy.install.subcommands import uninstall
 
     try:
-        info = uninstall._detect_install_mode()  # pyright: ignore[reportPrivateUsage]
+        info = uninstall._detect_install_mode()
     except Exception:  # noqa: BLE001 — a best-effort hint must never break sanitize
         return None
     mode = info.get("mode")

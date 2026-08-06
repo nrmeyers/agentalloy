@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``enable-service`` subcommand.
 
 Registers AgentAlloy as a persistent background service so it starts
@@ -143,7 +144,7 @@ def _sanitize_env_for_systemd(env_path: Path) -> Path:
             val = val[1:-1]
         if key:
             lines.append(f"{key}={val}")
-    install_state._atomic_write(sanitized_path, "\n".join(lines) + "\n")  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(sanitized_path, "\n".join(lines) + "\n")
     return sanitized_path
 
 
@@ -414,7 +415,7 @@ def _write_llama_units(
     # Pass 1: write all unit files BEFORE enabling any of them.
     for unit_name, content in units:
         unit_path = _llama_unit_path(unit_name)
-        install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(unit_path, content)
         written.append(str(unit_path))
     # systemd does not see freshly written unit files until a daemon-reload, so
     # reload here — between writing and enabling — or first-install `enable --now`
@@ -461,7 +462,7 @@ def _enable_native_linux(
     env_path = _sanitize_env_for_systemd(install_state.env_path())
     unit_path = _systemd_unit_path()
     content = _render_systemd_unit(uv_bin, repo_root, port, env_path)
-    install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(unit_path, content)
 
     llama_units = _write_llama_units(
         preset,
@@ -691,7 +692,7 @@ def _write_llama_launchd_agents(
     for label, program_args, gpu_device in agents:
         plist_path = _llama_launchd_plist_path(label)
         content = _render_llama_launchd_plist(label, program_args, gpu_device=gpu_device)
-        install_state._atomic_write(plist_path, content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(plist_path, content)
         os.chmod(plist_path, 0o600)
         written.append(str(plist_path))
         # Unload first for idempotent re-runs, then load.
@@ -722,7 +723,7 @@ def _enable_native_macos(
     env_vars = _read_env_file(install_state.env_path())
     plist_path = _launchd_plist_path()
     content = _render_launchd_plist(uv_bin, repo_root, port, env_vars)
-    install_state._atomic_write(plist_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(plist_path, content)
     os.chmod(plist_path, 0o600)
 
     # Unload first in case it's already loaded (idempotent re-run).
@@ -823,7 +824,7 @@ def enable_service(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "enable-service",

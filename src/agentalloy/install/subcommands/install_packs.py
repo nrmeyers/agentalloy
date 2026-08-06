@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``install-packs`` subcommand — interactive pack picker + bulk local install.
 
 Runs after ``seed-corpus`` in the setup composer. Discovers in-tree packs
@@ -173,7 +173,7 @@ def _shell_quote(value: str) -> str:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "install-packs",
@@ -824,17 +824,11 @@ def _run_container_guard(
     from agentalloy.reembed.cli import run_bulk_reembed
 
     no_restart: bool = getattr(args, "no_restart", False)
-    if not isinstance(no_restart, bool):
-        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
 
     container_stopped: bool = False
     native_unit_stopped: bool = False
     if is_in_container() and not no_restart:
         container_stopped = stop_service_in_container()
-        if not isinstance(container_stopped, bool):
-            raise TypeError(
-                f"stop_service_in_container must return bool, got {type(container_stopped).__name__}"
-            )
         if container_stopped:
             print(
                 "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
@@ -895,10 +889,6 @@ def _run_container_guard(
     finally:
         if container_stopped and not no_restart:
             ok: bool = restart_service_in_container()
-            if not isinstance(ok, bool):
-                raise TypeError(
-                    f"restart_service_in_container must return bool, got {type(ok).__name__}"
-                )
             if not ok:
                 print(
                     "[agentalloy] WARNING: Failed to restart service after install-packs. "
