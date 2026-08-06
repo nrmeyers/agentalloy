@@ -295,9 +295,12 @@ def test_banner_appended_after_workflow_block_upstream(tmp_path: Path) -> None:
         resp = client.post("/v1/chat/completions", json=_body(tmp_path))
     assert resp.status_code == 200
     content = _last_user_content(captured)
-    # Both blocks present; the banner is the freshest (last) text.
-    assert "operate like so" in content
+    # Workflow prose is delivered via the system-message leg (leg 3), not the user
+    # message (leg 1), so it does NOT appear in the user message content.
+    # The composed block (ORIENTATION-PROSE), phase marker, and banner are present.
+    assert "ORIENTATION-PROSE" in content
     assert "phase=build" in content
+    assert "operate like so" not in content
     assert _BANNER in content
     assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
     assert content.count("BEGIN AGENTALLOY-BANNER") == 1
