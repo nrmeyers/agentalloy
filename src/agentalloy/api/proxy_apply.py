@@ -444,9 +444,6 @@ async def _compose_free_block(
     text = domain
     return _ComposedBlock(
         text=text,
-        # Free-flow never carries workflow prose (steering is paused), so there is
-        # nothing for a system-prompt leg to take over — both surfaces get the same text.
-        message_text=text,
         tier1_text=domain_terminal,
         cursor_terminal=False,
         cursor_text=False,
