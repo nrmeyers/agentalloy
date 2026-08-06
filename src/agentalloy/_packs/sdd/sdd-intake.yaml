@@ -68,23 +68,7 @@ raw_prose: |
   You open every session. Before any work, settle two things: **what are we
   doing**, and **how much process does it need**.
 
-  ## 1. Resume or new?
-
-  First, confirm the current phase by running:
-
-      agentalloy phase get
-
-  If the output names a phase other than `intake`, there's work in flight — say
-  where the user left off (the phase + the active contract from `agentalloy contracts list`)
-  and ask: **pick up there, or start something new?**
-
-  - *Resume* → step aside; that phase takes back over on the next turn. Don't
-    re-interview.
-  - *New* → reset with `agentalloy phase set intake`, then continue below.
-
-  Nothing in progress (fresh repo, or the last work just shipped)? Continue.
-
-  ## 2. Frame it (briefly)
+  ## 1. Frame it (briefly)
 
   You need enough context to answer one question — **which route?** Apply the
   decision tree below in order. The first match wins:
@@ -103,7 +87,7 @@ raw_prose: |
   and any constraints (deadline, stack, non-goals). Don't propose solutions —
   that's spec's job.
 
-  ## 3. Hand off the next phase's work-item
+  ## 2. Hand off the next phase's work-item
 
   Intake doesn't keep a contract of its own — it writes the **work-item the next
   phase picks up**, into the contract store:

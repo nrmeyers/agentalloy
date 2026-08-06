@@ -43,10 +43,12 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_composed,
     _read_cursor,
     _read_lifecycle_mode,
+    _read_orientation_announced,
     _read_state,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
+    _write_orientation_announced_atomic,
     _write_phase_atomic,
     _write_state_atomic,
     exit_gates_for_phase,
@@ -165,6 +167,16 @@ class SignalResult:
     # cursor id for the composed file.
     pending_announce: tuple[str, list[str]] | None = None
     pending_composed: str | None = None
+
+    # Orientation marker cadence. ``announce_orientation`` is True when this is the
+    # first request in this session for the current phase (orientation should fire).
+    # ``pending_orientation`` is ``(phase, session_keys)`` for the orientation
+    # cadence file; committed by ``commit_markers`` after the orientation block is
+    # actually emitted. Follows the same once-per-(phase, session) pattern as
+    # ``pending_announce`` but uses the orientation marker family (fires BEFORE the
+    # workflow block).
+    announce_orientation: bool = False
+    pending_orientation: tuple[str, list[str]] | None = None
 
     # Free-flow mode (``mode: free`` in the store's phase row): ALL workflow
     # steering is paused (orientation, banner, exit gates, transitions, intake)
@@ -801,6 +813,23 @@ async def evaluate_signal(
         (phase_changed or session_key not in last_sessions) if session_key else phase_changed
     )
 
+    # 4b. Orientation cadence: the orientation marker fires once per (phase, session),
+    #    BEFORE the workflow block. Uses its own cadence file (`_read_orientation_announced`
+    #    / `_write_orientation_announced_atomic`) so the workflow announce and orientation
+    #    cadence are independent — a degraded workflow announce never burns the orientation
+    #    marker, and vice versa. Same carrier gate: a background tool-less request must not
+    #    burn the orientation marker. Unlike Tier 1 announce, orientation REQUIRES an
+    #    explicit session_id (not a fingerprinted key) — anonymous requests never get
+    #    orientation.
+    last_orientation_phase, last_orientation_sessions = _read_orientation_announced(cwd)
+    orientation_phase_changed = last_orientation_phase != phase
+    # Only fire orientation when there's an explicit session_id (not fingerprinted).
+    announce_orientation = (
+        is_carrier
+        and bool(session_id)
+        and (orientation_phase_changed or session_key not in last_orientation_sessions)
+    )
+
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
     #    a turn carrying no completion/approval signal the trigger does not fire,
@@ -982,6 +1011,15 @@ async def evaluate_signal(
         pending_announce = (phase, new_sessions)
     pending_composed = contract_id if (announce_cursor and contract_id is not None) else None
 
+    # Orientation cadence: build the pending tuple so commit_markers can write it.
+    pending_orientation: tuple[str, list[str]] | None = None
+    if announce_orientation and session_key:
+        if orientation_phase_changed:
+            orient_sessions = [session_key]
+        else:
+            orient_sessions = [*last_orientation_sessions, session_key][-_MAX_ANNOUNCED_SESSIONS:]
+        pending_orientation = (phase, orient_sessions)
+
     # 6c. Gate feedback artifact injection: read any gate_feedback artifact
     #     from the store and append it to advisories. Soft — failures yield
     #     None and don't break the proxy request.
@@ -1022,6 +1060,8 @@ async def evaluate_signal(
         session_source=session_source,
         pending_announce=pending_announce,
         pending_composed=pending_composed,
+        announce_orientation=announce_orientation,
+        pending_orientation=pending_orientation,
     )
 
 
@@ -1126,6 +1166,7 @@ def commit_markers(
     *,
     announce_emitted: bool,
     cursor_emitted: bool,
+    orientation_emitted: bool = False,
 ) -> None:
     """Commit the deferred Tier 1 / Tier 2 cadence markers after injection.
 
@@ -1139,9 +1180,12 @@ def commit_markers(
       delivered skills or composed to a clean empty result, NOT a transient compose
       error → commit ``pending_composed`` to ``.agentalloy/composed`` so a work-item
       with genuinely no domain skills does not re-fire every turn.
+    - ``orientation_emitted``: the orientation marker block carried real text and was
+      injected → commit ``pending_orientation`` to the orientation cadence file so the
+      orientation marker does not re-fire this session.
 
     No-op when the corresponding ``pending_*`` is unset (the signal did not decide
-    to announce / advance the cursor this turn).
+    to announce / advance the cursor / orient this turn).
     """
     if announce_emitted and signal.pending_announce is not None:
         phase, sessions = signal.pending_announce
@@ -1154,3 +1198,9 @@ def commit_markers(
             _write_composed_atomic(project_root, signal.pending_composed)
         except OSError as e:
             logger.warning("Failed to write composed file: %s", e)
+    if orientation_emitted and signal.pending_orientation is not None:
+        phase, sessions = signal.pending_orientation
+        try:
+            _write_orientation_announced_atomic(project_root, phase, sessions)
+        except OSError as e:
+            logger.warning("Failed to write orientation announced file: %s", e)

@@ -305,3 +305,59 @@ class TestTransitionedBy:
         seed_phase(fixture_repo, "spec", actor="session-xyz")
         sl._write_phase_atomic(fixture_repo, "spec")  # same phase
         assert sl._read_transitioned_by(fixture_repo) == "session-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Orientation cadence tests
+# ---------------------------------------------------------------------------
+
+
+class TestOrientationAnnounced:
+    """_read_orientation_announced / _write_orientation_announced_atomic behaviour."""
+
+    def test_read_orientation_when_absent(self, fixture_repo: Path) -> None:
+        """No orientation key → (None, [])."""
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase is None
+        assert keys == []
+
+    def test_write_and_read_round_trip(self, fixture_repo: Path) -> None:
+        """Write orientation, read it back."""
+        sl._write_orientation_announced_atomic(fixture_repo, "spec", ["sess-1", "sess-2"])
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase == "spec"
+        assert set(keys) == {"sess-1", "sess-2"}
+
+    def test_write_without_session_keys(self, fixture_repo: Path) -> None:
+        """Write orientation with no session keys → round-trips as phase-only."""
+        sl._write_orientation_announced_atomic(fixture_repo, "design")
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase == "design"
+        assert keys == []
+
+    def test_override_orientation(self, fixture_repo: Path) -> None:
+        """Rewriting orientation replaces the prior value."""
+        sl._write_orientation_announced_atomic(fixture_repo, "spec", ["s1"])
+        sl._write_orientation_announced_atomic(fixture_repo, "build", ["s2", "s3"])
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase == "build"
+        assert set(keys) == {"s2", "s3"}
+
+    def test_max_sessions_cap(self, fixture_repo: Path) -> None:
+        """_MAX_ANNOUNCED_SESSIONS is 8 and caps session keys."""
+        assert sl._MAX_ANNOUNCED_SESSIONS == 8
+        # Write more keys than the cap — the write should cap them.
+        many_keys = [f"sess-{i:02d}" for i in range(12)]
+        sl._write_orientation_announced_atomic(fixture_repo, "spec", many_keys)
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase == "spec"
+        assert len(keys) == sl._MAX_ANNOUNCED_SESSIONS
+        # Oldest keys dropped first (LRU-ish): first 4 dropped, last 8 kept.
+        assert keys == many_keys[4:]
+
+    def test_empty_session_keys_filtered(self, fixture_repo: Path) -> None:
+        """Empty-string session keys are filtered out."""
+        sl._write_orientation_announced_atomic(fixture_repo, "spec", ["s1", "", "s2"])
+        phase, keys = sl._read_orientation_announced(fixture_repo)
+        assert phase == "spec"
+        assert set(keys) == {"s1", "s2"}

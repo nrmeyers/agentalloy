@@ -26,7 +26,7 @@ from agentalloy.signals.prefilter import PreFilterMatch
 from agentalloy.signals.skill_loader import (
     _read_announced as _store_read_announced,  # pyright: ignore[reportPrivateUsage]
 )
-from tests.support import seed_announced, seed_phase
+from tests.support import seed_announced, seed_orientation, seed_phase
 
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
@@ -1003,3 +1003,104 @@ class TestBannerCadence:
                 for _ in range(3)
             ]
         assert emitted == [True, True, True]
+
+
+class TestOrientationAnnounceCadence:
+    """The orientation marker fires once per (phase, session), tracked via its own
+    cadence file (_read_orientation_announced / _write_orientation_announced_atomic)."""
+
+    @staticmethod
+    def _build_skill() -> dict[str, Any]:
+        return {
+            "signal_keywords": [],
+            "exit_gates": _gates_with_sections(),
+            "applies_to_phases": ["build"],
+            "raw_prose": "Workflow instructions.",
+        }
+
+    def test_orientation_fires_on_new_session(self, tmp_path: Path) -> None:
+        """Orientation fires on the first request of a session for the current phase."""
+        _set_phase(tmp_path, "build")
+        # Orientation cadence is fresh (no seed_orientation call).
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._build_skill(),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id=SESSION))
+        assert result.announce_orientation is True
+        assert result.pending_orientation is not None
+        assert result.pending_orientation[0] == "build"
+
+    def test_orientation_does_not_fire_when_already_oriented(self, tmp_path: Path) -> None:
+        """Orientation does not fire when the session is already oriented for this phase."""
+        _set_phase(tmp_path, "build")
+        seed_orientation(tmp_path, "build", [SESSION])
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._build_skill(),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id=SESSION))
+        assert result.announce_orientation is False
+        assert result.pending_orientation is None
+
+    def test_orientation_fires_on_phase_change(self, tmp_path: Path) -> None:
+        """Orientation fires when the phase changes, even for an already-oriented session."""
+        _set_phase(tmp_path, "spec")
+        seed_orientation(tmp_path, "build", [SESSION])
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value={
+                    "signal_keywords": [],
+                    "exit_gates": _gates_with_sections(),
+                    "applies_to_phases": ["spec"],
+                    "raw_prose": "Spec workflow.",
+                },
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id=SESSION))
+        assert result.announce_orientation is True
+        assert result.pending_orientation is not None
+        assert result.pending_orientation[0] == "spec"
+
+    def test_orientation_does_not_fire_for_anonymous_requests(self, tmp_path: Path) -> None:
+        """Orientation does not fire when there is no session key (anonymous request)."""
+        _set_phase(tmp_path, "build")
+        # No session_id passed — the request is not a carrier for orientation.
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._build_skill(),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+        assert result.announce_orientation is False
+        assert result.pending_orientation is None
+
+    def test_orientation_session_key_capped_at_max(self, tmp_path: Path) -> None:
+        """Orientation session keys are capped at _MAX_ANNOUNCED_SESSIONS (8)."""
+        _set_phase(tmp_path, "build")
+        # Seed with 8 sessions already — adding a 9th should cap.
+        sessions = [f"sess-{i}" for i in range(8)]
+        seed_orientation(tmp_path, "build", sessions)
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._build_skill(),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            # sess-8 is new — should announce and cap.
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id="sess-8"))
+        assert result.announce_orientation is True
+        assert result.pending_orientation is not None
+        _, pending_sessions = result.pending_orientation
+        assert len(pending_sessions) <= proxy_signal._MAX_ANNOUNCED_SESSIONS
