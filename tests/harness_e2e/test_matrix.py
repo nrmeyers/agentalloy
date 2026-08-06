@@ -40,7 +40,9 @@ INJECTION_MARKER = "AGENTALLOY"
 # Leg 3 lands on the system leg under either the HTML-style workflow marker
 # (legacy, user-message injection) or the XML-style delimited-block tag
 # (D3, system-message injection). Both carry the phase value.
-LEG3_BLOCK = re.compile(r"(?:BEGIN AGENTALLOY-CONTEXT phase=(\w+)|<agentalloy-instructions phase=")
+LEG3_BLOCK = re.compile(
+    r'(?:BEGIN AGENTALLOY-CONTEXT phase=(\w+)|<agentalloy-instructions phase=">)'
+)
 
 
 def _run(
