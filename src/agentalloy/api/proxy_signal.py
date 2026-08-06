@@ -44,7 +44,6 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_cursor,
     _read_lifecycle_mode,
     _read_orientation_announced,
-    _read_state,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
