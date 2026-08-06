@@ -8,7 +8,12 @@ for a surface would turn the leg-3 check into a no-op.
 
 from __future__ import annotations
 
-from tests.harness_e2e.upstream_stub import CapturedRequest, system_texts, user_texts
+from tests.harness_e2e.upstream_stub import (
+    LEG3_BLOCK,
+    CapturedRequest,
+    system_texts,
+    user_texts,
+)
 
 BLOCK = "<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->prose<!-- END AGENTALLOY-CONTEXT -->"
 
@@ -75,3 +80,40 @@ def test_user_texts_still_reads_the_user_leg_not_the_system_leg() -> None:
     )
     assert user_texts([req]) == ["hi"]
     assert system_texts([req]) == [BLOCK]
+
+
+class TestLeg3BlockDetector:
+    """The matrix's leg-3 detector must recognize BOTH delivery formats.
+
+    Leg 3 (the SDD workflow prose) moved to system-message injection under the
+    D3 delimited-block tag (``<agentalloy-instructions phase=\"…\">``) — the
+    HTML-style marker is the legacy, user-message form. The matrix counts the
+    detector's matches, so a detector that misses either format silently reads
+    every leg-3 block as absent and turns the every-turn assert into a broken
+    no-op (the #499 deliver-once regression it exists to catch). These pin the
+    exact delivered begin markers.
+    """
+
+    def test_matches_html_style_marker_exactly_once(self) -> None:
+        assert LEG3_BLOCK.findall(BLOCK) == ["BEGIN AGENTALLOY-CONTEXT phase=build"]
+
+    def test_matches_xml_delimited_tag_exactly_once(self) -> None:
+        # Delivered by proxy_injection's ANTHROPIC_INSTRUCTIONS_BEGIN/SUFFIX
+        # (<agentalloy-instructions phase=\"intake\">…</agentalloy-instructions>).
+        leg = '<agentalloy-instructions phase="intake">prose</agentalloy-instructions>'
+        assert LEG3_BLOCK.findall(leg) == ['<agentalloy-instructions phase="intake">']
+
+    def test_does_not_match_a_bare_phase_quote(self) -> None:
+        # The malformed literal pattern (``phase=\">``) must never be the
+        # vehicle again — the real tag always carries a phase value.
+        assert (
+            LEG3_BLOCK.findall('<agentalloy-instructions phase="></agentalloy-instructions>') == []
+        )
+
+    def test_counts_each_block_independently(self) -> None:
+        leg = (
+            "prefix "
+            '<agentalloy-instructions phase="build">a</agentalloy-instructions> '
+            '<agentalloy-instructions phase="build">b</agentalloy-instructions>'
+        )
+        assert len(LEG3_BLOCK.findall(leg)) == 2

@@ -23,7 +23,6 @@ Per harness (skipped when its binary is absent):
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,17 +31,17 @@ import pytest
 
 from tests.harness_e2e.conftest import EXPECT_INJECTION
 from tests.harness_e2e.drivers import CASES, HarnessCase
-from tests.harness_e2e.upstream_stub import CapturedRequest, UpstreamStub, system_texts, user_texts
+from tests.harness_e2e.upstream_stub import (
+    LEG3_BLOCK,
+    CapturedRequest,
+    UpstreamStub,
+    system_texts,
+    user_texts,
+)
 
 pytestmark = pytest.mark.harness_e2e
 
 INJECTION_MARKER = "AGENTALLOY"
-# Leg 3 lands on the system leg under either the HTML-style workflow marker
-# (legacy, user-message injection) or the XML-style delimited-block tag
-# (D3, system-message injection). Both carry the phase value.
-LEG3_BLOCK = re.compile(
-    r'(?:BEGIN AGENTALLOY-CONTEXT phase=(\w+)|<agentalloy-instructions phase=">)'
-)
 
 
 def _run(

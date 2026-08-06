@@ -15,6 +15,7 @@ terminate after one round trip.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -125,6 +126,17 @@ def system_texts(requests: list[CapturedRequest]) -> list[str]:
                 parts.append("\n".join(b.get("text", "") for b in content if isinstance(b, dict)))
         texts.append("\n".join(parts))
     return texts
+
+
+# The leg-3 SDD workflow block the matrix counts per system leg. Leg 3 lands on
+# the system leg under either the HTML-style workflow marker (legacy,
+# user-message injection) or the XML-style delimited-block tag (D3,
+# system-message injection). Both carry the phase value — e.g.
+# ``<agentalloy-instructions phase="intake">…</agentalloy-instructions>``.
+# Assertions count matches, so matching the exact begin marker is what matters.
+LEG3_BLOCK = re.compile(
+    r"(?:BEGIN AGENTALLOY-CONTEXT phase=\w+|<agentalloy-instructions phase=\"\w+\">)"
+)
 
 
 def _openai_json(model: str) -> dict[str, Any]:
