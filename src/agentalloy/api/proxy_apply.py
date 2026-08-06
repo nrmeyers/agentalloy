@@ -458,7 +458,7 @@ async def _compose_free_block(
         except Exception:
             logger.warning("free-flow domain compose failed -- passing through", exc_info=True)
 
-    text = "\n\n".join(p for p in (signal.reminder or "", domain) if p)
+    text = domain
     return _ComposedBlock(
         text=text,
         # Free-flow never carries workflow prose (steering is paused), so there is

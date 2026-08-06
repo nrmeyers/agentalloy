@@ -3,10 +3,10 @@
 Covers the phase-file ``mode``/``free_since`` round-trip (back/forward
 compatible with the workflow-mode format), the compose-only guard in
 ``evaluate_signal`` (no orientation / banner / gates / intake, domain compose
-kept, once-per-session cadence, daily reminder), and the hermetic proxy e2e on
-both surfaces (native Anthropic passthrough + OpenAI chat-completions): domain
-fragments are injected while every workflow-steering artifact is absent, and
-the consolidated telemetry row is tagged ``category='free-flow'``.
+kept, once-per-session cadence), and the hermetic proxy e2e on both surfaces
+(native Anthropic passthrough + OpenAI chat-completions): domain fragments are
+injected while every workflow-steering artifact is absent, and the consolidated
+telemetry row is tagged ``category='free-flow'``.
 """
 
 from __future__ import annotations
@@ -292,44 +292,6 @@ class TestEvaluateSignalFreeFlow:
         assert after.announce is True  # intake orients as if first request
         assert after.workflow_prose == "INTAKE-ORIENTATION"
 
-    # -- daily reminder ------------------------------------------------------
-
-    def test_reminder_fires_after_24h_and_stamps_marker(self, tmp_path: Path) -> None:
-        since = _iso(datetime.now(UTC) - timedelta(hours=25))
-        _write_phase_file(tmp_path, "build", free=True, free_since=since)
-        r = _eval(_req("task"), tmp_path, session_id="s1")
-        assert r.reminder is not None
-        assert "workflow paused (free-flow)" in r.reminder
-        assert since[:10] in r.reminder
-        assert "agentalloy flow resume" in r.reminder
-        assert (tmp_path / ".agentalloy" / "free-reminded").exists()
-        # Same day, second request: no reminder.
-        again = _eval(_req("task two"), tmp_path, session_id="s1")
-        assert again.reminder is None
-
-    def test_reminder_quiet_within_24h(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)  # free_since = now
-        r = _eval(_req("task"), tmp_path, session_id="s1")
-        assert r.reminder is None
-        assert not (tmp_path / ".agentalloy" / "free-reminded").exists()
-
-    def test_reminder_not_stamped_when_read_only(self, tmp_path: Path) -> None:
-        since = _iso(datetime.now(UTC) - timedelta(hours=48))
-        _write_phase_file(tmp_path, "build", free=True, free_since=since)
-        r = _eval(_req("task"), tmp_path, session_id="s1", mutate=False)
-        assert r.reminder is not None
-        assert not (tmp_path / ".agentalloy" / "free-reminded").exists()
-
-    def test_resume_clears_reminder_marker(self, tmp_path: Path) -> None:
-        since = _iso(datetime.now(UTC) - timedelta(hours=25))
-        _write_phase_file(tmp_path, "build", free=True, free_since=since)
-        _eval(_req("task"), tmp_path, session_id="s1")
-        assert (tmp_path / ".agentalloy" / "free-reminded").exists()
-        from agentalloy.install.subcommands.flow import run_flow_resume
-
-        run_flow_resume(root=tmp_path)
-        assert not (tmp_path / ".agentalloy" / "free-reminded").exists()
-
 
 # ---------------------------------------------------------------------------
 # Proxy e2e — native Anthropic passthrough surface
@@ -414,7 +376,11 @@ class TestPassthroughSurfaceFreeFlow:
         assert rows[0].category == "free-flow"
         assert rows[0].phase == "build"
 
-    def test_reminder_line_rides_the_injection(self, tmp_path: Path) -> None:
+    def test_no_reminder_line_in_injection(self, tmp_path: Path) -> None:
+        """TC-01-2: free-flow produces no reminder, even after 24+ hours.
+
+        TC-01-4: free-flow does not write free-reminded state.
+        """
         since = _iso(datetime.now(UTC) - timedelta(hours=30))
         _write_phase_file(tmp_path, "build", free=True, free_since=since)
         captured: dict[str, Any] = {}
@@ -423,12 +389,12 @@ class TestPassthroughSurfaceFreeFlow:
         with TestClient(app) as client:
             client.post(f"/proj/{token}/v1/messages", json=_anthropic_body())
             forwarded_first = captured["body"].decode("utf-8")
-            # Second request, same session fingerprint burnt + reminder stamped:
+            # Second request, same session:
             client.post(f"/proj/{token}/v1/messages", json=_anthropic_body())
             forwarded_second = captured["body"].decode("utf-8")
-        assert "workflow paused (free-flow)" in forwarded_first
-        assert (tmp_path / ".agentalloy" / "free-reminded").exists()
+        assert "workflow paused (free-flow)" not in forwarded_first
         assert "workflow paused (free-flow)" not in forwarded_second
+        assert not (tmp_path / ".agentalloy" / "free-reminded").exists()
 
     def test_workflow_mode_unchanged(self, tmp_path: Path) -> None:
         """Guard: without ``mode: free`` the workflow path still orients."""
