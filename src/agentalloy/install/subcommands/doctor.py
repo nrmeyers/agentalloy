@@ -488,6 +488,77 @@ def _check_orphans() -> dict[str, Any]:
     }
 
 
+def _check_worktree_wiring() -> dict[str, Any]:
+    """Check 11: a linked worktree that isn't wired to its own /proj token (#549).
+
+    A git worktree created with plain ``git worktree add`` (not via
+    ``agentalloy worktree``) gets auto-wired by the post-checkout hook IF the
+    main checkout was already wired at the time the worktree was created (see
+    ``agentalloy.install.git_hooks`` / ``auto_wire_worktree``). Two ways that
+    can still leave a worktree silently unwired:
+
+    - it predates the hook's installation (no hook was there to fire), or
+    - the hook fired but failed silently (soft-fail by design — see
+      ``auto_wire_worktree.run_auto_wire_worktree``).
+
+    An unwired worktree composes nothing and, for Claude Code, a session
+    started there inherits ``ANTHROPIC_BASE_URL`` from whatever shell env it
+    was launched in — typically the main checkout's token — so it silently
+    reports as the main checkout instead of its own stream.
+    """
+    t0 = time.monotonic()
+    try:
+        from agentalloy.install.subcommands.auto_wire_worktree import _main_checkout_root
+    except Exception as exc:  # noqa: BLE001 — detection must never break doctor
+        return {
+            "name": "worktree_wiring",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Could not check worktree wiring: {exc}",
+        }
+
+    cwd = Path.cwd().resolve()
+    main_root = _main_checkout_root(cwd)
+    if main_root is None:
+        # Not a linked worktree (or not a git repo at all) — nothing to check.
+        return {
+            "name": "worktree_wiring",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "not a linked worktree",
+        }
+
+    if not (main_root / ".agentalloy").exists():
+        # The main checkout itself was never wired — nothing to auto-wire from.
+        return {
+            "name": "worktree_wiring",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "main checkout is not wired",
+        }
+
+    if (cwd / ".agentalloy").exists():
+        return {
+            "name": "worktree_wiring",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "worktree has its own AgentAlloy wiring",
+        }
+
+    return {
+        "name": "worktree_wiring",
+        "passed": True,
+        "severity": "warn",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": (
+            f"this is a linked worktree of {main_root} with no wiring of its own — "
+            "a session started here reports as the main checkout"
+        ),
+        "remediation": "run `agentalloy auto-wire-worktree` (or `agentalloy add <harness>`) here",
+    }
+
+
 def _env_truthy(value: str | None) -> bool:
     """Env-file truthiness matching pydantic's bool coercion for our toggles."""
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
@@ -1101,6 +1172,7 @@ def _run_doctor_host() -> dict[str, Any]:
     checks.append(_check_orphans())
     checks.append(_check_code_index(env, port))
     checks.append(_check_code_indexer_legacy())
+    checks.append(_check_worktree_wiring())
 
     all_passed = all(c["passed"] for c in checks)
     return {
