@@ -251,11 +251,11 @@ async def _compose_block(
     when none has content) and whose flags tell the caller which cadence markers
     are safe to commit post-injection.
 
-    Free-flow (``signal.free_mode``) takes the compose-only branch instead: no
+    Free-flow (``signal.paused_mode``) takes the compose-only branch instead: no
     advisory / Tier 1 / Tier 2, just the task-keyed domain leg plus the daily
     reminder line (see :func:`_compose_free_block`).
     """
-    if signal.free_mode:
+    if signal.paused_mode:
         return await _compose_free_block(signal, orchestrator)
 
     phase = signal.phase
@@ -381,8 +381,8 @@ async def _compose_block(
     # once per session, then disappears.
     orientation_block = ""
     if signal.announce_orientation:
-        mode = "free-flow" if signal.free_mode else "workflow"
-        options_text = _OPTIONS_TEXT_FREE if signal.free_mode else _OPTIONS_TEXT_WORKFLOW
+        mode = "free-flow" if signal.paused_mode else "workflow"
+        options_text = _OPTIONS_TEXT_FREE if signal.paused_mode else _OPTIONS_TEXT_WORKFLOW
         orientation_block = _COMPOSE_ORIENTATION.format(
             phase=signal.phase, mode=mode, options_text=options_text
         )

@@ -102,7 +102,7 @@ class StateClient:
         repo_root: str | None = None,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         override: bool = False,
     ) -> dict[str, Any]:
         """Set the current phase via the service.
@@ -126,8 +126,8 @@ class StateClient:
             body["mode"] = mode
         if override:
             body["override"] = True
-        if free_since is not None:
-            body["free_since"] = free_since
+        if paused_since is not None:
+            body["paused_since"] = paused_since
         return self._post("/state/phase", body, repo_root=repo_root)
 
     def set_phase_with_contract(

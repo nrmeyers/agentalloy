@@ -119,7 +119,7 @@ def run_workflow_pause(root: Path | None = None) -> dict[str, Any]:
             return {
                 "phase": phase,
                 "mode": resolved_mode,
-                "paused_since": state.free_since,
+                "paused_since": state.paused_since,
                 "changed": False,
             }
         since = _now_iso()
@@ -188,7 +188,7 @@ def run_workflow_status(root: Path | None = None) -> dict[str, Any]:
     return {
         "phase": state.phase if state else None,
         "mode": mode,
-        "paused_since": (state.free_since if state else None) if mode != "workflow" else None,
+        "paused_since": (state.paused_since if state else None) if mode != "workflow" else None,
     }
 
 

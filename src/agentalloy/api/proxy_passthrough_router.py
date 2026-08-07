@@ -264,7 +264,7 @@ def _write_passthrough_trace(
         repo=signal.repo,
         session_key=signal.session_key,
         session_source=signal.session_source,
-        category="free-flow" if signal.free_mode else None,
+        category="free-flow" if signal.paused_mode else None,
         contract_id=tel.contract_id if tel else None,
         contract_tags=tel.contract_tags if tel else None,
     )
@@ -416,7 +416,7 @@ async def _maybe_inject(
             filtered = filter_tools_for_phase(
                 cast("list[dict[str, Any]]", raw_tools),
                 signal.phase,
-                free_mode=signal.free_mode,
+                free_mode=signal.paused_mode,
             )
             if filtered is not raw_tools:
                 injected_payload = {**injected_payload, "tools": filtered}

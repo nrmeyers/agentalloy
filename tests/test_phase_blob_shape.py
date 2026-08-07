@@ -26,12 +26,14 @@ def store(tmp_path: Path) -> DuckDBStateStore:
 
 class TestRoundTrip:
     def test_all_fields_survive(self, store: DuckDBStateStore) -> None:
-        store.write_phase("design", actor="sess-1", mode="free", free_since="2026-07-28T00:00:00Z")
+        store.write_phase(
+            "design", actor="sess-1", mode="free", paused_since="2026-07-28T00:00:00Z"
+        )
         got = store.read_phase()
         assert got is not None
         assert got.phase == "design"
         assert got.mode == "free"
-        assert got.free_since == "2026-07-28T00:00:00Z"
+        assert got.paused_since == "2026-07-28T00:00:00Z"
         assert got.transitioned_by == "sess-1"
         assert got.started_at
         assert got.last_updated
@@ -54,21 +56,21 @@ class TestRoundTrip:
 class TestPreservation:
     def test_free_flow_survives_a_transition(self, store: DuckDBStateStore) -> None:
         """AC-3. The regression `flow.py`'s hardcoded workflow currently masks."""
-        store.write_phase("spec", mode="free", free_since="2026-07-28T01:02:03Z")
+        store.write_phase("spec", mode="free", paused_since="2026-07-28T01:02:03Z")
         store.write_phase("design")  # a transition that says nothing about flow
         got = store.read_phase()
         assert got is not None
         assert got.mode == "free"
-        assert got.free_since == "2026-07-28T01:02:03Z"
+        assert got.paused_since == "2026-07-28T01:02:03Z"
 
     def test_empty_string_clears(self, store: DuckDBStateStore) -> None:
         """`flow resume` drops free-flow; ``None`` means "leave it", ``""`` clears."""
-        store.write_phase("design", mode="free", free_since="2026-07-28T01:02:03Z")
-        store.write_phase("design", mode="", free_since="")
+        store.write_phase("design", mode="free", paused_since="2026-07-28T01:02:03Z")
+        store.write_phase("design", mode="", paused_since="")
         got = store.read_phase()
         assert got is not None
         assert got.mode is None
-        assert got.free_since is None
+        assert got.paused_since is None
 
     def test_started_at_is_stable(self, store: DuckDBStateStore) -> None:
         store.write_phase("spec")

@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from agentalloy.install.subcommands import flow as flow_mod
 from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
+from agentalloy.install.subcommands import workflow as flow_mod
 from agentalloy.providers.base import (
     DENIED_PHASES,
     build_claude_code_permissions,
@@ -254,16 +254,16 @@ class TestCLIPhaseWritesAreRepoScoped:
 
     def test_flow_free_keeps_the_phase_name_unprefixed(self, tmp_path: Path) -> None:
         phase_mod.run_phase_set("design", root=tmp_path)
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         row = self._row(tmp_path)
         assert row.phase == "design"  # not "free-flow:design"
-        assert row.mode == "free"
-        assert row.free_since
+        assert row.mode == "paused"
+        assert row.paused_since
 
     def test_flow_resume_restores_the_exact_phase(self, tmp_path: Path) -> None:
         phase_mod.run_phase_set("design", root=tmp_path)
-        flow_mod.run_flow_free(root=tmp_path)
-        flow_mod.run_flow_resume(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
+        flow_mod.run_workflow_resume(root=tmp_path)
         row = self._row(tmp_path)
         assert row.phase == "design"  # not "resume:design"
         assert not row.mode

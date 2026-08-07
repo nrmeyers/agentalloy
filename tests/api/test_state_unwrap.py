@@ -191,7 +191,7 @@ class TestPhaseWrite:
         store, client = wired
         repo = tmp_path / "repo"
         view = store.for_repo(_repo_key_for(str(repo)))
-        view.write_phase("design", actor="cli", mode="free", free_since="2026-07-28T00:00:00Z")
+        view.write_phase("design", actor="cli", mode="free", paused_since="2026-07-28T00:00:00Z")
 
         client.post(
             "/state/phase",
@@ -202,7 +202,7 @@ class TestPhaseWrite:
         after = view.read_phase()
         assert after is not None
         assert (after.phase, after.mode) == ("build", "free")
-        assert after.free_since == "2026-07-28T00:00:00Z"
+        assert after.paused_since == "2026-07-28T00:00:00Z"
 
     def test_a_contract_advance_keeps_blob_semantics_too(self, wired, tmp_path: Path) -> None:
         """The transactional path shares the caller's BEGIN rather than nesting."""

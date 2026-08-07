@@ -36,9 +36,9 @@ from typing import Any
 
 import pytest
 
-from agentalloy.install.subcommands import flow as flow_mod
 from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
+from agentalloy.install.subcommands import workflow as flow_mod
 from agentalloy.providers.base import (
     DENIED_PHASES,
     build_claude_code_permissions,
@@ -117,14 +117,14 @@ class TestPostureInvariantMatrix:
     """
 
     @pytest.mark.parametrize("phase", ALL_PHASES)
-    @pytest.mark.parametrize("mode", ["workflow", "free"])
+    @pytest.mark.parametrize("mode", ["workflow", "paused"])
     def test_written_posture_matches_builder(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, mode: str
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
 
-        expected = build_claude_code_permissions(phase, free_mode=(mode == "free"))
+        expected = build_claude_code_permissions(phase, free_mode=(mode in ("free", "paused")))
         assert _permissions(settings) == expected
 
     def test_resume_direction_reengages_deny_rules_in_a_denied_phase(
@@ -133,10 +133,10 @@ class TestPostureInvariantMatrix:
         """free -> workflow, landing back in a denied phase, must restore deny rules."""
         settings = _wire_claude_code(tmp_path, monkeypatch)
         phase_mod.run_phase_set("design", root=tmp_path, force=True)
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         assert _permissions(settings) == {"deny": []}  # free: unlocked
 
-        flow_mod.run_flow_resume(root=tmp_path)
+        flow_mod.run_workflow_resume(root=tmp_path)
         assert _permissions(settings) == build_claude_code_permissions("design", free_mode=False)
         assert _permissions(settings)["deny"] != []
 
@@ -178,12 +178,12 @@ class TestPostureSurvivesAnUnreachableStore:
         wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="workflow")
         assert _permissions(settings)["deny"] != []  # sanity: denied before free
 
-        result = flow_mod.run_flow_free(root=tmp_path)
+        result = flow_mod.run_workflow_pause(root=tmp_path)
         assert result["changed"] is True
 
         # The old bug: this would still show deny rules here, because the
         # posture rewrite silently fell back to "workflow" through the dead
-        # read. The fix passes mode="free" in directly, bypassing that read.
+        # read. The fix passes mode="paused" in directly, bypassing that read.
         assert _permissions(settings) == {"deny": []}
 
     def test_flow_resume_reengages_deny_rules_even_though_the_store_read_is_dead(
@@ -191,10 +191,10 @@ class TestPostureSurvivesAnUnreachableStore:
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         phase_mod.run_phase_set("spec", root=tmp_path, force=True)
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         assert _permissions(settings) == {"deny": []}
 
-        result = flow_mod.run_flow_resume(root=tmp_path)
+        result = flow_mod.run_workflow_resume(root=tmp_path)
         assert result["changed"] is True
 
         # The dangerous polarity: gates must RE-ENGAGE here. Before the fix,
@@ -216,8 +216,8 @@ class TestRewriteEnforcementPostureExplicitMode:
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         # No phase row exists at all, so any re-derivation of mode would find
-        # nothing. Passing mode="free" explicitly must still clear deny rules.
-        rewritten = wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="free")
+        # nothing. Passing mode="paused" explicitly must still clear deny rules.
+        rewritten = wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="paused")
         assert rewritten == ["claude-code"]
         assert _permissions(settings) == {"deny": []}
 
@@ -278,9 +278,11 @@ class TestCodexPostureRoundTrip:
     def test_matrix_matches_builder(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config = _wire_codex(tmp_path, monkeypatch)
         for phase in ALL_PHASES:
-            for mode in ("workflow", "free"):
+            for mode in ("workflow", "paused"):
                 wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
-                expected = build_codex_workspace_write(phase, free_mode=(mode == "free"))
+                expected = build_codex_workspace_write(
+                    phase, free_mode=(mode in ("free", "paused"))
+                )
                 assert _workspace_write(config) == (expected or None)
 
     def test_free_then_resume_in_a_denied_phase(
@@ -295,11 +297,11 @@ class TestCodexPostureRoundTrip:
         assert ww is not None
         assert ww["writable_roots"] == build_codex_workspace_write("design")["writable_roots"]
 
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         # Key is absent entirely under free mode — not an empty table.
         assert _workspace_write(config) is None
 
-        flow_mod.run_flow_resume(root=tmp_path)
+        flow_mod.run_workflow_resume(root=tmp_path)
         ww = _workspace_write(config)
         assert ww is not None
         assert ww["writable_roots"] == build_codex_workspace_write("design")["writable_roots"]

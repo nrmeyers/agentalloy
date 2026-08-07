@@ -34,7 +34,7 @@ from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
     _read_phase,
     _write_phase_atomic,
-    read_flow_state,
+    read_pause_state,
 )
 from agentalloy.storage.telemetry_store import open_telemetry_store
 from tests.support import seed_phase
@@ -60,8 +60,8 @@ def _write_phase_file(
         seed_phase(
             tmp_path,
             phase,
-            mode="free",
-            free_since=free_since or _iso(datetime.now(UTC)),
+            mode="paused",
+            paused_since=free_since or _iso(datetime.now(UTC)),
         )
     else:
         seed_phase(tmp_path, phase)
@@ -121,11 +121,11 @@ def _orchestrator(output: str, captured_reqs: list[Any] | None = None) -> Compos
 class TestPhaseRowFlowState:
     def test_row_without_mode_reads_workflow(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
-        assert read_flow_state(tmp_path) == ("workflow", None)
+        assert read_pause_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"
 
     def test_absent_row_reads_workflow(self, tmp_path: Path) -> None:
-        assert read_flow_state(tmp_path) == ("workflow", None)
+        assert read_pause_state(tmp_path) == ("workflow", None)
 
     def test_bare_phase_row_reads_workflow(self, tmp_path: Path) -> None:
         """A pre-blob row is a bare string; the store normalizes it."""
@@ -136,25 +136,25 @@ class TestPhaseRowFlowState:
         assert store is not None
         store.for_repo(_repo_key_for(str(tmp_path))).write("phase", "build")
 
-        assert read_flow_state(tmp_path) == ("workflow", None)
+        assert read_pause_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"
 
     def test_free_row_round_trip(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "design", free=True, free_since="2026-07-01T00:00:00Z")
-        assert read_flow_state(tmp_path) == ("free", "2026-07-01T00:00:00Z")
+        assert read_pause_state(tmp_path) == ("paused", "2026-07-01T00:00:00Z")
         assert _read_phase(tmp_path) == "design"
 
     def test_write_phase_atomic_preserves_free_flow_fields(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build", free=True, free_since="2026-07-01T00:00:00Z")
         _write_phase_atomic(tmp_path, "qa")
         assert _read_phase(tmp_path) == "qa"
-        assert read_flow_state(tmp_path) == ("free", "2026-07-01T00:00:00Z")
+        assert read_pause_state(tmp_path) == ("paused", "2026-07-01T00:00:00Z")
 
     def test_write_phase_atomic_without_mode_stays_clean(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         _write_phase_atomic(tmp_path, "qa")
         assert _read_phase(tmp_path) == "qa"
-        assert read_flow_state(tmp_path) == ("workflow", None)
+        assert read_pause_state(tmp_path) == ("workflow", None)
 
     def test_phase_writes_require_a_bound_store(self, tmp_path: Path) -> None:
         """Store out of reach ≠ store empty — a dropped transition must be loud."""
@@ -178,7 +178,7 @@ class TestEvaluateSignalFreeFlow:
     def test_free_mode_composes_domain_only(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build", free=True)
         r = _eval(_req("poke around the auth code"), tmp_path, session_id="s1")
-        assert r.free_mode is True
+        assert r.paused_mode is True
         assert r.should_compose is True
         assert r.announce is True  # drives the task-keyed domain leg
         # Every workflow-steering channel is suppressed.
@@ -189,7 +189,7 @@ class TestEvaluateSignalFreeFlow:
         assert r.current_contract is None and r.announce_cursor is False
         # Phase preserved, cadence deferred under the free sentinel.
         assert r.phase == "build"
-        assert r.pending_announce is not None and r.pending_announce[0] == "__free__"
+        assert r.pending_announce is not None and r.pending_announce[0] == "__paused__"
 
     def test_no_banner_or_system_prose_on_any_free_return(self, tmp_path: Path) -> None:
         """Free flow is silent on BOTH workflow-steering legs, on every return path.
@@ -206,7 +206,7 @@ class TestEvaluateSignalFreeFlow:
         #    text, `resolve_session_key` fingerprints one even when session_id is None,
         #    so a session-less request is still a carrier.
         anon = _eval(_req(), tmp_path, session_id=None)
-        assert anon.free_mode is True and anon.should_compose is False
+        assert anon.paused_mode is True and anon.should_compose is False
         assert anon.banner is None and anon.workflow_system_prose is None
 
         # 2. Compose turn (first for the session).
@@ -231,14 +231,14 @@ class TestEvaluateSignalFreeFlow:
             mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
         ):
             r = asyncio.run(evaluate_signal(_req("task"), tmp_path, session_id="s1"))
-        assert r.free_mode is False
+        assert r.paused_mode is False
 
     def test_toolless_carrier_composes_in_free_mode(self, tmp_path: Path) -> None:
         # Unified carrier gate: session_key presence is the sole carrier signal,
         # so a tool-less request with a session id still composes on first entry.
         _write_phase_file(tmp_path, "build", free=True)
         r = _eval(_req("background ping", tools=False), tmp_path, session_id="s1")
-        assert r.should_compose is True and r.free_mode is True
+        assert r.should_compose is True and r.paused_mode is True
 
     def test_once_per_session_cadence(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build", free=True)
@@ -262,7 +262,7 @@ class TestEvaluateSignalFreeFlow:
         _write_phase_file(tmp_path, "intake", free=True)
         r = _eval(_req("just exploring"), tmp_path, session_id="s1")
         # No intake orientation is composed; only the domain leg.
-        assert r.free_mode is True and r.workflow_prose is None
+        assert r.paused_mode is True and r.workflow_prose is None
         commit_markers(tmp_path, r, announce_emitted=True, cursor_emitted=False)
 
     def test_resume_runs_intake_as_first_request(self, tmp_path: Path) -> None:
@@ -270,9 +270,9 @@ class TestEvaluateSignalFreeFlow:
         r = _eval(_req("just exploring"), tmp_path, session_id="s1")
         commit_markers(tmp_path, r, announce_emitted=True, cursor_emitted=False)
         # Resume: mode cleared, phase untouched.
-        from agentalloy.install.subcommands.flow import run_flow_resume
+        from agentalloy.install.subcommands.workflow import run_workflow_resume
 
-        result = run_flow_resume(root=tmp_path)
+        result = run_workflow_resume(root=tmp_path)
         assert result == {"phase": "intake", "mode": "workflow", "changed": True}
         skill = {
             "skill_id": "sdd-intake",
@@ -288,7 +288,7 @@ class TestEvaluateSignalFreeFlow:
             mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
         ):
             after = asyncio.run(evaluate_signal(_req("real task"), tmp_path, session_id="s1"))
-        assert after.free_mode is False
+        assert after.paused_mode is False
         assert after.announce is True  # intake orients as if first request
         assert after.workflow_prose == "INTAKE-ORIENTATION"
 
@@ -379,7 +379,7 @@ class TestPassthroughSurfaceFreeFlow:
     def test_no_reminder_line_in_injection(self, tmp_path: Path) -> None:
         """TC-01-2: free-flow produces no reminder, even after 24+ hours.
 
-        TC-01-4: free-flow does not write free-reminded state.
+        TC-01-4: free-flow does not write pause-reminded state.
         """
         since = _iso(datetime.now(UTC) - timedelta(hours=30))
         _write_phase_file(tmp_path, "build", free=True, free_since=since)
@@ -394,7 +394,7 @@ class TestPassthroughSurfaceFreeFlow:
             forwarded_second = captured["body"].decode("utf-8")
         assert "workflow paused (free-flow)" not in forwarded_first
         assert "workflow paused (free-flow)" not in forwarded_second
-        assert not (tmp_path / ".agentalloy" / "free-reminded").exists()
+        assert not (tmp_path / ".agentalloy" / "pause-reminded").exists()
 
     def test_workflow_mode_unchanged(self, tmp_path: Path) -> None:
         """Guard: without ``mode: free`` the workflow path still orients."""

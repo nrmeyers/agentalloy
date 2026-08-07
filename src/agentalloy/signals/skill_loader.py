@@ -150,7 +150,7 @@ def read_pause_state(project_root: Path) -> tuple[str, str | None]:
     """
     state = _phase_state(project_root)
     if state is not None and (state.mode or "").lower() in ("paused", "free"):
-        return "paused", state.free_since or None
+        return "paused", state.paused_since or None
     return "workflow", None
 
 

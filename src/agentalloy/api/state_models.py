@@ -22,7 +22,7 @@ ALL_KINDS: frozenset[str] = frozenset(
         "composed",
         "approved",
         "banner-turns",
-        "free-reminded",
+        "pause-reminded",
     }
 )
 
@@ -131,7 +131,7 @@ class PhaseReadResponse(StateReadResponse):
     """
 
     mode: str | None = None
-    free_since: str | None = None
+    paused_since: str | None = None
     transitioned_by: str | None = None
     started_at: str | None = None
     last_updated: str | None = None
@@ -173,7 +173,7 @@ class PhaseAdvanceRequest(BaseModel):
             "value forward — only `agentalloy flow free/resume` sets it."
         ),
     )
-    free_since: str | None = Field(
+    paused_since: str | None = Field(
         default=None,
         description="ISO timestamp free-flow was entered; empty string clears it.",
     )

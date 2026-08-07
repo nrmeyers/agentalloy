@@ -99,19 +99,15 @@ def resolve_repo_root(repo_root: str | None = _REPO_ROOT_QUERY) -> Path:
 
 @lru_cache(maxsize=256)
 def _repo_key_for(root: str) -> str:
-    """Slug a repo root, memoised — ``repo_slug`` shells out to git.
+    """Hash a repo root path into a unique key.
 
-    Imported from ``code_index.slug`` deliberately: that module is the canonical
-    worktree-aware implementation and is pure stdlib, so importing it does not
-    drag in the ``[code-index]`` extra.
+    Unlike ``repo_slug``, this does NOT resolve through git. Each distinct
+    path (including worktree roots) gets its own key, which is exactly what
+    the multi-worktree state isolation requires.
     """
-    from agentalloy.code_index.slug import repo_slug
+    import hashlib
 
-    try:
-        return repo_slug(Path(root))
-    except Exception:
-        logger.debug("repo_slug failed for %s — falling back to basename", root, exc_info=True)
-        return Path(root).name
+    return hashlib.sha256(root.encode()).hexdigest()[:16]
 
 
 def get_repo_store(
@@ -469,7 +465,7 @@ async def read_phase(
         kind="phase",
         value=phase.phase,
         mode=phase.mode,
-        free_since=phase.free_since,
+        paused_since=phase.paused_since,
         transitioned_by=phase.transitioned_by,
         started_at=phase.started_at,
         last_updated=phase.last_updated,
@@ -730,7 +726,7 @@ async def write_phase(
             actor=actor,
             owner=req.owner,
             mode=req.mode,
-            free_since=req.free_since,
+            paused_since=req.paused_since,
         )
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
@@ -772,7 +768,7 @@ async def write_phase(
                 actor=actor,
                 owner=req.owner,
                 mode=req.mode,
-                free_since=req.free_since,
+                paused_since=req.paused_since,
             )
             # conflict.owner is None when no row exists yet — non-blocking
             if result.conflict is not None and result.conflict.owner is not None:

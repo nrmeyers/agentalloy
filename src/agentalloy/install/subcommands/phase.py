@@ -335,8 +335,8 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     }
     if state and state.mode:
         data["mode"] = state.mode
-    if state and state.free_since:
-        data["free_since"] = state.free_since
+    if state and state.paused_since:
+        data["paused_since"] = state.paused_since
     if state and state.transitioned_by:
         data["transitioned_by"] = state.transitioned_by
     if state and state.phase_start_ref:

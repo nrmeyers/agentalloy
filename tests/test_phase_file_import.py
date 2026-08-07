@@ -66,7 +66,7 @@ class TestPhaseImport:
         assert got.phase == "build"
         assert got.mode == "full"
         assert got.transitioned_by == "proxy"
-        assert got.free_since == "2026-07-28T09:00:00Z"
+        assert got.paused_since == "2026-07-28T09:00:00Z"
 
     def test_file_is_deleted_once_imported(self, store: DuckDBStateStore, tmp_path: Path) -> None:
         ag = _mirror(tmp_path, phase=PHASE_FILE)

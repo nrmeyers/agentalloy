@@ -629,7 +629,7 @@ async def evaluate_signal(
     # (and re-runs intake) as if this were the first request.
     # Legacy alias: ``mode: free`` (old name) reads as paused.
     paused_mode = phase_state is not None and (phase_state.mode or "").lower() in ("paused", "free")
-    pause_since = phase_state.free_since if (paused_mode and phase_state) else None
+    pause_since = phase_state.paused_since if (paused_mode and phase_state) else None
     if paused_mode:
         return _evaluate_pause_mode(request, cwd, phase, pause_since, session_id, mutate=mutate)
 

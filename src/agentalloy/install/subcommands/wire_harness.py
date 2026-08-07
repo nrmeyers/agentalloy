@@ -2254,7 +2254,7 @@ def rewrite_enforcement_posture(
     else:
         flow_mode = mode or "workflow"
 
-    free_mode = (flow_mode or "").lower() == "free"
+    free_mode = (flow_mode or "").lower() in ("free", "paused")
 
     rewritten: list[str] = []
 
@@ -2293,7 +2293,7 @@ def verify_enforcement_posture(root: Path, phase: str, mode: str | None) -> list
         build_codex_workspace_write,
     )
 
-    free_mode = (mode or "").lower() == "free"
+    free_mode = (mode or "").lower() in ("free", "paused")
     mismatched: list[str] = []
 
     if _has_wire_record_for_harness(root, "claude-code"):

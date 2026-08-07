@@ -1012,7 +1012,7 @@ async def proxy_chat_completions(
     gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False
     # Mode tag for every telemetry write of this request: "free-flow" rows are
     # distinguishable so free→contract conversion is measurable later.
-    trace_category = "free-flow" if signal_result and signal_result.free_mode else None
+    trace_category = "free-flow" if signal_result and signal_result.paused_mode else None
 
     def _commit(status: int) -> None:
         """Commit the deferred cadence markers, 2xx-gated. No-op if nothing composed."""
@@ -1025,7 +1025,7 @@ async def proxy_chat_completions(
             modified_request,
             upstream_model,
             phase=phase,
-            free_mode=signal_result.free_mode if signal_result else False,
+            free_mode=signal_result.paused_mode if signal_result else False,
         )
     except ValueError as e:
         return JSONResponse(
