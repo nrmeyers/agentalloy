@@ -171,6 +171,59 @@ class TestPhasesQuery:
         assert result["per_phase"] == []
         assert result["timeline"] == []
         assert result["llm_latency"]["count"] == 0
+        assert result["delivery"] == []
+
+
+class TestPhasesDelivery:
+    """workflow_delivered instruction-delivery rate (#547 sub-4)."""
+
+    def _seed_delivery(self, db_path: Path) -> None:
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.llm_sent("t1", "intake", model="qwen3-235b", workflow_delivered=True)
+            writer.llm_sent("t2", "intake", model="qwen3-235b", workflow_delivered=True)
+            writer.llm_sent("t3", "intake", model="qwen3-235b", workflow_delivered=False)
+            writer.llm_sent("t4", "build", model="qwen3-235b", workflow_delivered=True)
+        finally:
+            store.close()
+
+    def _run(self, db_path: Path, **arg_overrides: object) -> dict:
+        settings = MagicMock(telemetry_db_path=str(db_path))
+        with (
+            patch("agentalloy.install.subcommands.telemetry._service_port", return_value=47950),
+            patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+            patch("agentalloy.config.get_settings", return_value=settings),
+            patch("agentalloy.install.subcommands.telemetry.write_result") as mock_write,
+        ):
+            rc = telemetry._run_phases(_args(**arg_overrides))
+        assert rc == 0
+        return mock_write.call_args[0][0]
+
+    def test_delivery_rate_per_phase(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "telemetry.duck"
+        self._seed_delivery(db_path)
+        result = self._run(db_path)
+        by_phase = {row["phase"]: row for row in result["delivery"]}
+        assert by_phase["intake"] == {
+            "phase": "intake",
+            "delivered": 2,
+            "not_delivered": 1,
+            "delivery_rate": round(2 / 3, 3),
+        }
+        assert by_phase["build"] == {
+            "phase": "build",
+            "delivered": 1,
+            "not_delivered": 0,
+            "delivery_rate": 1.0,
+        }
+
+    def test_delivery_rate_filtered_by_phase(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "telemetry.duck"
+        self._seed_delivery(db_path)
+        result = self._run(db_path, phase="intake")
+        assert len(result["delivery"]) == 1
+        assert result["delivery"][0]["phase"] == "intake"
 
 
 class TestPhasesScope:
@@ -260,6 +313,7 @@ class TestPhasesScope:
         result = self._run(db_path, all_repos=False)
         assert result["per_phase"] == []
         assert result["timeline"] == []
+        assert result["delivery"] == []
         assert result["repo"] == "/repo/this"
 
     def test_all_flag_against_old_schema_db_also_returns_empty_not_error(
@@ -272,4 +326,5 @@ class TestPhasesScope:
         result = self._run(db_path, all_repos=True)
         assert result["per_phase"] == []
         assert result["timeline"] == []
+        assert result["delivery"] == []
         assert result["repo"] is None
