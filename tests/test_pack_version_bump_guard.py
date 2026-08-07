@@ -1,12 +1,25 @@
 """CI guard: pack content edits must bump the pack's version field.
 
 The base ref is ``PACK_GUARD_BASE_REF`` if set; otherwise it defaults to
-``merge-base(HEAD, origin/main)`` so local runs, pre-commit, push, and CI all
-ask the same question ("which packs did this branch change relative to main?")
-and retargeting a PR cannot change the verdict.  CI no longer sets the env —
-both sides compute the merge-base.  Only when ``origin/main`` cannot be
-resolved (shallow clone with no network, fresh orphan worktree) does the guard
-skip, and loudly — never a silent pass.
+``origin/main``.  Either way the guard merge-bases it against HEAD, so local
+runs, pre-commit, push, and CI all ask the same question ("which packs did this
+branch change relative to main?") and retargeting a PR cannot change the
+verdict.  CI no longer sets the env — both sides compute the merge-base.  Only
+when ``origin/main`` cannot be resolved (shallow clone with no network, fresh
+orphan worktree) does the guard skip, and loudly — never a silent pass.
+
+The comparison is against the **working tree**, not HEAD: committed, staged,
+unstaged, and untracked pack files all count, and the version is read from
+``pack.yaml`` on disk.  This is deliberate.  A HEAD-anchored guard cannot see
+an uncommitted pack edit, so it was structurally incapable of failing before
+the commit that introduces the problem — it could only ever fail in CI, after
+a push.  Locally the guard therefore sees *more* than CI does, which is the
+point; CI checks out clean, so worktree == HEAD there and the verdict is
+identical.
+
+Practical consequence: the suite goes red the moment you edit a pack and stays
+red until you bump that pack's version.  Bump it as the first edit of a pack
+change, not the last.
 
 Propagation is version-gated BY DESIGN to preserve the SkillVersion rollback
 chain (see PR #99/#104).  Editing pack files without a version bump means the
@@ -102,16 +115,16 @@ def _format_failures(failures: list[PackFailure]) -> str:
 
 
 def _git_diff_names(base_ref: str, repo_root: Path) -> list[str]:
-    """Return changed file paths between base_ref and HEAD under _packs/."""
+    """Return pack files that differ between ``base_ref`` and the WORKING TREE.
+
+    Two-dot against the resolved merge-base, so the comparison reaches the
+    worktree and covers committed, staged, and unstaged edits in one command.
+    Untracked files are unioned in separately — ``git diff`` cannot see them,
+    and a new skill YAML dropped into an existing pack is exactly the case the
+    guard exists to catch.
+    """
     result = subprocess.run(
-        [
-            "git",
-            "diff",
-            "--name-only",
-            f"{base_ref}...HEAD",
-            "--",
-            _PACKS_PREFIX,
-        ],
+        ["git", "diff", "--name-only", base_ref, "--", _PACKS_PREFIX],
         capture_output=True,
         text=True,
         timeout=30,
@@ -119,7 +132,33 @@ def _git_diff_names(base_ref: str, repo_root: Path) -> list[str]:
     )
     if result.returncode != 0:
         pytest.skip(f"git diff failed (shallow clone or bad ref?): {result.stderr.strip()}")
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    names = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", _PACKS_PREFIX],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=repo_root,
+    )
+    if untracked.returncode != 0:
+        pytest.skip(f"git ls-files failed: {untracked.stderr.strip()}")
+    names.update(line.strip() for line in untracked.stdout.splitlines() if line.strip())
+    return sorted(names)
+
+
+def _worktree_version(pack: str, repo_root: Path) -> str | None:
+    """Return the version field from a pack's pack.yaml **on disk**.
+
+    Returns None when the file is absent, which is the correct answer mid-
+    deletion: falling back to ``git show HEAD`` there would resurrect a stale
+    version and flag a pack being removed as un-bumped.
+    """
+    path = repo_root / _PACKS_PREFIX / pack / "pack.yaml"
+    if not path.is_file():
+        return None
+    data: dict[str, object] = yaml.safe_load(path.read_text())
+    return str(data["version"])
 
 
 def _git_show_version(ref: str, pack: str, repo_root: Path) -> str | None:
@@ -169,19 +208,23 @@ def _git_fetch(remote: str, branch: str, repo_root: Path) -> bool:
     return result.returncode == 0
 
 
-def _resolve_base_ref(repo_root: Path) -> str | None:
-    """Resolve the pack-guard base ref, defaulting to ``merge-base(HEAD, origin/main)``.
+def _resolve_base_ref(repo_root: Path, ref: str = "origin/main") -> str | None:
+    """Resolve the pack-guard base ref to ``merge-base(HEAD, ref)``.
 
-    Tries the local ``origin/main`` remote-tracking ref first; if absent (shallow
-    clone, fresh worktree without the ref), attempts a best-effort
-    ``git fetch origin main`` and retries.  Returns None only when ``origin/main``
-    cannot be resolved at all — the caller then skips *loudly*, never silently.
+    Tries the ref as-is first; if it cannot be resolved (shallow clone, fresh
+    worktree without ``origin/main``), attempts a best-effort ``git fetch origin
+    main`` and retries.  Returns None only when it cannot be resolved at all —
+    the caller then skips *loudly*, never silently.
+
+    An explicit ``PACK_GUARD_BASE_REF`` is merge-based too, not used raw: the
+    diff is two-dot against the working tree, so a divergent base would
+    otherwise report files changed on the *base* side as this branch's work.
     """
-    mb = _git_merge_base("origin/main", repo_root)
+    mb = _git_merge_base(ref, repo_root)
     if mb:
         return mb
     if _git_fetch("origin", "main", repo_root):
-        return _git_merge_base("origin/main", repo_root)
+        return _git_merge_base(ref, repo_root)
     return None
 
 
@@ -193,21 +236,24 @@ def _resolve_base_ref(repo_root: Path) -> str | None:
 def test_pack_version_bump_guard() -> None:
     """Fail if any pack's content changed but its version was not bumped.
 
-    The base ref is ``PACK_GUARD_BASE_REF`` if set, else
-    ``merge-base(HEAD, origin/main)``.  Never skips silently on an unset env —
-    that made the guard invisible locally and on push.  It skips only when
-    ``origin/main`` genuinely cannot be resolved, and then loudly.
+    Compares the **working tree** against ``merge-base(HEAD, base)``, where base
+    is ``PACK_GUARD_BASE_REF`` if set, else ``origin/main``.  Worktree-anchored
+    so an uncommitted pack edit fails here, before it can reach CI; the old
+    HEAD-anchored form could only fail after the offending commit was pushed.
+    Never skips silently on an unset env.  It skips only when the base genuinely
+    cannot be resolved, and then loudly.
     """
     repo_root = Path(__file__).parent.parent
 
-    base_ref = os.environ.get("PACK_GUARD_BASE_REF", "").strip()
-    if not base_ref:
-        base_ref = _resolve_base_ref(repo_root) or ""
+    env_ref = os.environ.get("PACK_GUARD_BASE_REF", "").strip()
+    base_ref = (
+        _resolve_base_ref(repo_root, env_ref) if env_ref else _resolve_base_ref(repo_root)
+    ) or ""
     if not base_ref:
         pytest.skip(
             "Could not resolve a base ref for the pack version bump guard: "
-            "PACK_GUARD_BASE_REF is unset and merge-base(HEAD, origin/main) is "
-            "unavailable (no origin/main and fetch failed or was offline). "
+            f"merge-base(HEAD, {env_ref or 'origin/main'}) is unavailable "
+            "(ref missing and fetch failed or was offline). "
             "Set PACK_GUARD_BASE_REF explicitly or run with network access."
         )
 
@@ -216,7 +262,7 @@ def test_pack_version_bump_guard() -> None:
         return  # nothing under _packs/ changed
 
     def head_ver(pack: str) -> str | None:
-        return _git_show_version("HEAD", pack, repo_root)
+        return _worktree_version(pack, repo_root)
 
     def base_ver(pack: str) -> str | None:
         return _git_show_version(base_ref, pack, repo_root)
@@ -336,19 +382,27 @@ def test_unit_skip_loudly_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> 
         test_pack_version_bump_guard()
 
 
-def test_unit_env_set_overrides_merge_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit PACK_GUARD_BASE_REF wins; the merge-base resolver is never called."""
-    monkeypatch.setenv("PACK_GUARD_BASE_REF", "deadbeef")
+def test_unit_env_set_is_merge_based_not_used_raw(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PACK_GUARD_BASE_REF chooses the ref, but is still merge-based against HEAD.
 
-    def _no_diff(base: str, root: Path) -> list[str]:
+    The diff is two-dot against the working tree, so feeding a divergent base in
+    raw would report changes made on the *base* side as this branch's work.
+    """
+    monkeypatch.setenv("PACK_GUARD_BASE_REF", "some-other-branch")
+    seen: list[str] = []
+
+    def _record_merge_base(ref: str, root: Path) -> str | None:
+        seen.append(ref)
+        return "mb-sha"
+
+    def _expect_mb(base: str, root: Path) -> list[str]:
+        assert base == "mb-sha", f"guard diffed against {base!r}, not the merge-base"
         return []
 
-    def _boom_resolve(root: Path) -> str | None:
-        raise AssertionError("merge-base resolver must not run when env is set")
-
-    monkeypatch.setattr(f"{__name__}._git_diff_names", _no_diff)
-    monkeypatch.setattr(f"{__name__}._resolve_base_ref", _boom_resolve)
+    monkeypatch.setattr(f"{__name__}._git_merge_base", _record_merge_base)
+    monkeypatch.setattr(f"{__name__}._git_diff_names", _expect_mb)
     test_pack_version_bump_guard()  # returns early — no pack changes
+    assert seen == ["some-other-branch"]
 
 
 def test_unit_changed_files_capped_at_ten_in_message() -> None:
