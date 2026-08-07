@@ -6,6 +6,9 @@ the agent to confirm the phase with the user before adopting it — the per-repo
 phase file is contended by concurrent sessions, so a stale mid-build resume is
 worth a check. Rides the same [agentalloy-confirm] seam and (phase, session)
 marker as T1; never writes the phase file.
+
+For intake specifically, new sessions always get a confirm directive directing
+the agent to run ``agentalloy contract init`` (T4 intake confirmation boundary).
 """
 
 from __future__ import annotations
@@ -53,11 +56,14 @@ async def test_new_session_on_build_confirms(tmp_path: Path):
     assert "build" in joined and "confirm" in joined
 
 
-async def test_new_session_on_intake_is_silent(tmp_path: Path):
+async def test_new_session_on_intake_confirms(tmp_path: Path):
+    """New sessions on intake get a confirm directive to run contract init."""
     _set_phase(tmp_path, "intake")
     _seed_announced(tmp_path, "intake", ["other-session"])
     sig = await evaluate_signal(_req(), tmp_path, session_id="me")
-    assert not sig.confirm_directives, "intake resume is the happy path — no confirm"
+    assert sig.confirm_directives, "new session on intake must confirm"
+    joined = "\n".join(sig.confirm_directives).lower()
+    assert "contract init" in joined and "intake" in joined
 
 
 async def test_known_session_does_not_reconfirm(tmp_path: Path):

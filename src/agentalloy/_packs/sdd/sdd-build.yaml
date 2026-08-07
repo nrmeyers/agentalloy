@@ -76,7 +76,9 @@ category_scope: [process]
 author: agentalloy
 change_summary: "two-tier injection: build no longer authors contracts (design emits one per task); walk the per-task build contracts with `agentalloy task next`, which front-loads each task's domain skills + the task itself before coding — no skill-selection reasoning; contract body is now the retrieval prompt (a real task description, not a tasks.md pointer); strict TDD against test-plan.md unchanged"
 raw_prose: |
-  # SDD — Build
+
+  **Before writing any code, verify the preceding phase's deliverables exist**
+  (`docs/plan/*/tasks.md`, `docs/plan/*/test-plan.md`).  # SDD — Build
 
   **Checkpoint first.** You MUST confirm the design artifact (approach.md) and the
   plan artifacts (tasks.md, test-plan.md) exist before writing any code — if they

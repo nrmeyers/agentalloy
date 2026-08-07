@@ -136,6 +136,24 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     )
 
 
+def _build_contract_exists_advisory(args: dict[str, Any], ctx: PredicateContext) -> str:
+    """Advisory for ``contract_exists`` NOT_MET during intake.
+
+    When the intake phase's ``contract_exists`` gate fires but no contracts exist
+    in the next phase, tell the agent the concrete action: write the contract and
+    present it for approval, then STOP. This gives intake's gate forward gear
+    instead of echoing the posture silently.
+    """
+    target_phase = str(args.get("phase", "spec"))
+    to_phase = _PHASE_GRAPH.get(target_phase, target_phase)
+    return (
+        f"You are in intake, but no contracts exist for phase '{target_phase}'. "
+        f"Run ``agentalloy contract init --phase {target_phase} --slug <task-slug>`` to "
+        f"write the contract, then PRESENT it in full and STOP — do not draft solutions. "
+        f"The user will advance to '{to_phase}' once they approve the contract."
+    )
+
+
 def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
     """Advisory for ``build_contract_tag_focus`` NOT_MET — name the over-tagged contracts.
 
@@ -276,7 +294,9 @@ def evaluate_node(
     except ValueError:
         result = PredicateResult.UNKNOWN
 
-    if predicate_name == "approval_recorded" and result == PredicateResult.NOT_MET:
+    if predicate_name == "contract_exists" and result == PredicateResult.NOT_MET:
+        advisory = _build_contract_exists_advisory(args, ctx)
+    elif predicate_name == "approval_recorded" and result == PredicateResult.NOT_MET:
         advisory = _build_approval_advisory(ctx)
     elif predicate_name == "build_contracts_cover_tasks" and result == PredicateResult.NOT_MET:
         advisory = _build_contract_coverage_advisory(args, ctx)

@@ -99,7 +99,9 @@ category_scope: [process]
 author: agentalloy
 change_summary: "split from sdd-design-and-planning: plan handles task decomposition, test cases, and build contracts; design handles approach, decisions, and rationale only. MIGRATION: `agentalloy task next` is now asserted as a prose invariant (it advances the work-item cursor every later phase resolves its task from, including qa's codify gate), and §5 names DEFAULT_K_BY_PHASE where it explains the k≈4 density floor. A pre-existing enabled profile override for this skill that lacks the `agentalloy task next` token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
 raw_prose: |
-  # SDD — Plan
+
+  **Before writing any code, verify the preceding phase's deliverables exist**
+  (`docs/design/*/tasks.md`, `docs/design/*/test-plan.md`).  # SDD — Plan
 
   **Checkpoint first.** You MUST confirm the design artifact exists by running:
 
