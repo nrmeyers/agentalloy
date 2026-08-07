@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """FastAPI application factory."""
 
 from __future__ import annotations

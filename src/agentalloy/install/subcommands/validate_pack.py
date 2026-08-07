@@ -122,7 +122,7 @@ def validate_pack(pack_dir: Path, *, strict: bool = True) -> dict[str, Any]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "validate-pack",

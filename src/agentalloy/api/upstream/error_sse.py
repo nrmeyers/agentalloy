@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Error SSE helpers for streaming endpoints.
 
 When an upstream httpx call fails during streaming, these helpers produce

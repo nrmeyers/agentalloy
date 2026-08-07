@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy add <harness>`` — adopt a harness's upstream and wire it.
 
 The Tier-1 one-shot: read the harness's own config to recover the upstream LLM
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register the ``add`` subcommand."""
     p = subparsers.add_parser(
@@ -105,9 +106,7 @@ def capture_upstream(
     payload: dict[str, str] = {"url": upstream.url, "model": upstream.model}
     if upstream.key_env:
         payload["key_env"] = upstream.key_env
-    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-        path, yaml.safe_dump(payload, sort_keys=False)
-    )
+    install_state._atomic_write(path, yaml.safe_dump(payload, sort_keys=False))
     return upstream
 
 
@@ -169,17 +168,17 @@ def adopt_and_wire(
 
     # Wire the harness through the proxy (per-repo) and activate the repo.
     from agentalloy.install.subcommands.wire import (
-        _detect_custom_workflow,  # pyright: ignore[reportPrivateUsage]
-        _prompt_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
-        _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
+        _detect_custom_workflow,
+        _prompt_lifecycle_mode,
+        _seed_repo_metadata,
     )
     from agentalloy.install.subcommands.wire_harness import (
-        _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
+        _wire_harness_core,
     )
     from agentalloy.signals.skill_loader import (
-        _read_phase,  # pyright: ignore[reportPrivateUsage]
-        _write_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
-        _write_phase_atomic,  # pyright: ignore[reportPrivateUsage]
+        _read_phase,
+        _write_lifecycle_mode,
+        _write_phase_atomic,
     )
 
     # Lifecycle mode is repo-global (one workflow machine per repo, however

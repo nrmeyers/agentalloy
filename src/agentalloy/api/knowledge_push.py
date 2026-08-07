@@ -13,6 +13,9 @@ the lazy-imported read-handle open/close, per the code-index import discipline.
 
 from __future__ import annotations
 
+# ``_sanitize_skill_id`` is reused cross-module on purpose; suppress private-usage
+# reporting for this module rather than at the call site.
+# pyright: reportPrivateUsage=false
 import asyncio
 import fnmatch
 from dataclasses import dataclass

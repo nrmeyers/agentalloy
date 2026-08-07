@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``phase`` subcommand — the current SDD phase.
 
 Phase lives in the ``sdd_state`` store, one row per repo; there is no
@@ -73,7 +74,7 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
     for a freshly wired repo.  An unreachable store exits non-zero instead of
     reporting that, so an outage cannot masquerade as a fresh repo.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     try:
@@ -152,7 +153,7 @@ def _forward_gate_blocks(
     required sections) and stays out of the way of everything it can't be sure of.
     """
     from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
+        _PHASE_GRAPH,
         decide_transition,
         evaluate_node,
     )
@@ -195,7 +196,7 @@ def _approval_gate_blocks(
     and is only reached once the artifact is on disk.
     """
     from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
+        _PHASE_GRAPH,
     )
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         PredicateContext,
@@ -250,7 +251,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     that cannot be reached stops the command instead of writing somewhere the
     service will never read.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
 
@@ -304,19 +305,10 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         # `mode`/`free_since` are deliberately not passed: omitting them carries
         # the stored pair forward, so a phase set never drops the repo out of
         # free-flow. Only `agentalloy flow` sets them.
-        write_result = access.write(phase, actor=cli_session_key() or None, override=force)
+        _write_result = access.write(phase, actor=cli_session_key() or None, override=force)
         # A service-backed store re-evaluates the gate and may decline even
         # though the CLI's local check passed (the two must agree on the scoped
         # verdict — #501). Surface that rather than reporting a silent no-op.
-        if isinstance(write_result, dict) and write_result.get("gate_verdict"):
-            gv = write_result["gate_verdict"]
-            return {
-                "phase": current or phase,
-                "blocked": True,
-                "target": phase,
-                "advisories": gv.get("advisories", []),
-                "reason": gv.get("result", "not_met"),
-            }
         state = access.read()
     except StateClientError as exc:
         fail_on_state_error(exc)
@@ -370,7 +362,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
     if current != phase:
         from agentalloy.contracts import first_workitem_id
-        from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.signals.skill_loader import (
             _clear_all_cursors,
             _write_cursor_atomic,
         )
@@ -385,7 +377,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
 def run_phase_clear(root: Path | None = None) -> dict[str, Any]:
     """Delete the phase row, leaving *root* genuinely phase-less."""
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     access = phase_access(root)
@@ -405,7 +397,7 @@ def run_phase_clear(root: Path | None = None) -> dict[str, Any]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "phase",

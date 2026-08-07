@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``server-status`` verb — report background server lifecycle state.
 
 Lifecycle-focused: port, pid (if listening), reachability. The broader
@@ -15,7 +16,7 @@ from agentalloy.install.subcommands import server_container
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "server-status",

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Where a corpus write goes (T2).
 
 Every host-side corpus write — ``lessons promote``, ``install-pack``,
@@ -75,7 +76,7 @@ def decide_corpus_write_route(
 
     if blocker_fn is None:
         from agentalloy.install.subcommands.lessons import (
-            _corpus_write_blocker,  # pyright: ignore[reportPrivateUsage]
+            _corpus_write_blocker,
         )
 
         blocker_fn = _corpus_write_blocker

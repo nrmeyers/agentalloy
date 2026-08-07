@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Continue.dev install module — apply_persistent_config / install_writer.
 
 Proxy wiring: a ``models[]`` entry in ``.continuerc.json`` pointing at the
@@ -35,7 +36,7 @@ def apply_persistent_config(
     # Lazy import: wire_harness imports the provider registry at module load,
     # so a top-level import here would be circular.
     from agentalloy.install.subcommands.wire_harness import (
-        _wire_proxy_continue,  # pyright: ignore[reportPrivateUsage]
+        _wire_proxy_continue,
     )
 
     _ = force

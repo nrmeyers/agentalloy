@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Service-mediated corpus ingest — ``POST /corpus/ingest-pack`` (T1).
 
 The endpoint the CLI calls when the service is up, so ``lessons promote`` /
@@ -30,11 +31,11 @@ from pydantic import BaseModel, Field
 from agentalloy.config import get_settings
 from agentalloy.install.ingest_secret import resolve_ingest_secret, secret_matches
 from agentalloy.install.subcommands.install_pack import (
-    _read_pack_manifest,  # pyright: ignore[reportPrivateUsage]
+    _read_pack_manifest,
     install_local_pack,
 )
 from agentalloy.install.subcommands.lessons import (
-    _default_embed,  # pyright: ignore[reportPrivateUsage]
+    _default_embed,
     probe_lesson_duplicates,
 )
 from agentalloy.web.runtime_refresh import refresh_runtime_cache
@@ -91,7 +92,7 @@ def _fragment_texts(pack_dir: Path) -> list[str]:
 
     Reuses the ingest YAML parser so the texts match what would be ingested.
     """
-    from agentalloy.ingest import _load_yaml  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.ingest import _load_yaml
 
     manifest, _errors = _read_pack_manifest(pack_dir)
     if manifest is None:

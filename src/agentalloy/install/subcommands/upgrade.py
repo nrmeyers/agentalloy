@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``upgrade`` subcommand — one command to the latest release.
 
 Operator-tier. Where ``update`` is a *diagnostic* (corpus schema migrations +
@@ -625,7 +626,7 @@ def _upgrade_native(
         rev_payload: dict[str, Any] = json.loads(rev.stdout or "{}")
         rev_warnings = rev_payload.get("warnings")
         if isinstance(rev_warnings, list):
-            warnings.extend(w for w in rev_warnings if isinstance(w, str))
+            warnings.extend(w for w in list[Any](rev_warnings) if isinstance(w, str))
     except (json.JSONDecodeError, ValueError):
         pass
 
@@ -918,7 +919,7 @@ def _upgrade_container(
             rev_payload: dict[str, Any] = json.loads(rev.stdout or "{}")
             rev_warnings = rev_payload.get("warnings")
             if isinstance(rev_warnings, list):
-                warnings.extend(w for w in rev_warnings if isinstance(w, str))
+                warnings.extend(w for w in list[Any](rev_warnings) if isinstance(w, str))
         except (json.JSONDecodeError, ValueError):
             pass
     else:
@@ -1051,7 +1052,9 @@ def _customized_skill_count() -> int:
     if not isinstance(rows, list):
         return 0
     return sum(
-        1 for r in rows if isinstance(r, dict) and r.get("layer") not in (None, "", "default")
+        1
+        for r in list[Any](rows)
+        if isinstance(r, dict) and r.get("layer") not in (None, "", "default")
     )
 
 
@@ -1245,7 +1248,7 @@ def upgrade(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "upgrade",

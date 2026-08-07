@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Shared state access for the phase-touching CLI surfaces.
 
 Phase lives in the DuckDB ``sdd_state`` store and nowhere else — there is no
@@ -105,12 +106,13 @@ class PhaseAccess(Protocol):
         mode: str | None = None,
         free_since: str | None = None,
         override: bool = False,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Write *phase*, carrying forward any field left as ``None``.
 
         ``mode=""``/``free_since=""`` clear those fields; that asymmetry is the
         store's, and it is what lets ``flow resume`` drop free-flow without
-        touching the phase.
+        touching the phase.  Returns the service response body (for gate verdict
+        visibility) or ``None`` when the store has no return type.
         """
         ...
 

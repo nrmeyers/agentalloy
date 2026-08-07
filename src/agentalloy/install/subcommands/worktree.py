@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy worktree <harness> <branch>`` — spin up an isolated parallel session.
 
 Create a git worktree for *branch* and wire *harness* through the proxy at that
@@ -23,7 +24,7 @@ from agentalloy.providers import REGISTRY
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register the ``worktree`` subcommand."""
     p = subparsers.add_parser(

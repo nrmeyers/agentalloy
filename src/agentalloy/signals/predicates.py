@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Deterministic predicate evaluators for phase gate evaluation.
 
 Predicates are pure functions: (args: dict, ctx: PredicateContext) -> PredicateResult.
@@ -794,7 +795,7 @@ def _read_phase_start_ref(project_root: Path, store: Any | None = None) -> str |
             return state.phase_start_ref if state else None
         # Fallback: global process handle (production path, not used in tests)
         from agentalloy.signals.skill_loader import (
-            _phase_view,  # pyright: ignore[reportPrivateUsage]
+            _phase_view,
         )
 
         view = _phase_view(project_root)
@@ -1148,7 +1149,7 @@ def _contract_domain_tags(content: str) -> list[Any] | None:
         fm: dict[str, Any] = _yaml.safe_load(content[3:end]) or {}
     except Exception:
         return None
-    tags = fm.get("domain_tags")
+    tags: list[Any] | None = fm.get("domain_tags")
     return tags if isinstance(tags, list) else []
 
 

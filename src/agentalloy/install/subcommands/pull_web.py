@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Download the prebuilt web UI bundle from GitHub release assets.
 
 Installs are source builds (``uv tool install git+...``) on machines without
@@ -23,7 +24,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.install import state as install_state
 from agentalloy.install.release_check import REPO, current_version
@@ -149,9 +150,12 @@ def pull_web_dist(version: str | None = None, *, force: bool = False) -> dict[st
 
 
 def add_parser(subparsers: argparse._SubParsersAction) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    p = subparsers.add_parser(
-        "pull-web",
-        help="Download the prebuilt web UI bundle for the installed version",
+    p = cast(
+        argparse.ArgumentParser,
+        subparsers.add_parser(
+            "pull-web",
+            help="Download the prebuilt web UI bundle for the installed version",
+        ),
     )
     p.add_argument("--version", default=None, help="Release version to fetch (default: installed)")
     p.add_argument("--force", action="store_true", help="Re-download even if already present")

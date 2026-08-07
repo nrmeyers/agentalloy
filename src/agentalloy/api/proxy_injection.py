@@ -728,11 +728,12 @@ _CACHE_BREAKPOINT_LIMIT = 4
 def _count_cache_breakpoints(value: Any) -> int:
     """Count `cache_control` keys anywhere in *value* (dicts/lists, recursively)."""
     if isinstance(value, dict):
-        return ("cache_control" in value) + sum(
-            _count_cache_breakpoints(v) for k, v in value.items() if k != "cache_control"
+        d = cast(dict[str, Any], value)
+        return ("cache_control" in d) + sum(
+            _count_cache_breakpoints(v) for k, v in d.items() if k != "cache_control"
         )
     if isinstance(value, list):
-        return sum(_count_cache_breakpoints(v) for v in value)
+        return sum(_count_cache_breakpoints(v) for v in cast(list[Any], value))
     return 0
 
 
@@ -755,12 +756,13 @@ def _forward_ttl(payload: dict[str, Any]) -> str | None:
 def _has_ttl(value: Any, ttl: str) -> bool:
     """True if any `cache_control` anywhere in *value* declares this ttl."""
     if isinstance(value, dict):
-        cc = value.get("cache_control")
-        if isinstance(cc, dict) and cc.get("ttl") == ttl:
+        d = cast(dict[str, Any], value)
+        cc = d.get("cache_control")
+        if isinstance(cc, dict) and cast(dict[str, Any], cc).get("ttl") == ttl:
             return True
-        return any(_has_ttl(v, ttl) for k, v in value.items() if k != "cache_control")
+        return any(_has_ttl(v, ttl) for k, v in d.items() if k != "cache_control")
     if isinstance(value, list):
-        return any(_has_ttl(v, ttl) for v in value)
+        return any(_has_ttl(v, ttl) for v in cast(list[Any], value))
     return False
 
 
@@ -799,12 +801,15 @@ def inject_into_anthropic_system_prompt(
         new_block = _block_text(begin, block, end)
         new_system: str | list[Any] = f"{stripped}\n\n{new_block}" if stripped else new_block
     elif isinstance(system, list):
+        system_blocks = cast(list[Any], system)
         if any(
-            _text_block_contains(d, begin) for d in (_as_dict(b) for b in system) if d is not None
+            _text_block_contains(d, begin)
+            for d in (_as_dict(b) for b in system_blocks)
+            if d is not None
         ):
             return None
-        blocks = []
-        for b in system:
+        blocks: list[Any] = []
+        for b in system_blocks:
             d = _as_dict(b)
             if d is None or not _text_block_contains(d, _DELIMITED_BEGIN_PREFIX):
                 blocks.append(b)

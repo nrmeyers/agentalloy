@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy profile`` — profile management subcommand.
 
 Commands:
@@ -173,7 +174,7 @@ _PROFILE_SUBCOMMANDS = {
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser("profile", help="Manage agentalloy profiles.")
     add_json_flag(p)

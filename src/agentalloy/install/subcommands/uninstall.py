@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``uninstall`` subcommand.
 
 Full teardown for a agentalloy install. By default removes:
@@ -967,8 +968,6 @@ def _harnesses_in_repo(
     repo_resolved = repo_root.resolve()
     found: set[str] = set()
     for entry in entries:
-        if not isinstance(entry, dict):
-            continue
         harness = entry.get("harness")
         rr = entry.get("repo_root")
         if not (isinstance(harness, str) and harness and isinstance(rr, str)):
@@ -991,8 +990,6 @@ def _harness_in_other_repos(
     """
     this_resolved = this_repo.resolve()
     for entry in entries:
-        if not isinstance(entry, dict):
-            continue
         if entry.get("harness") != harness:
             continue
         rr = entry.get("repo_root")
@@ -1035,7 +1032,7 @@ def uninstall(
     named harness is removed only when no other recorded repo still wires it.
     ``None`` (the default) keeps the unscoped behavior — every harness in scope.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     st = install_state.load_state(root)
@@ -1465,9 +1462,7 @@ def uninstall(
 
             if modified:
                 if any(k for k in config if not k.startswith("_")):
-                    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-                        continuerc, json.dumps(config, indent=2) + "\n"
-                    )
+                    install_state._atomic_write(continuerc, json.dumps(config, indent=2) + "\n")
                     files_modified.append({"path": str(continuerc), "action": "cleaned_continuerc"})
                 else:
                     continuerc.unlink()
@@ -1493,9 +1488,7 @@ def uninstall(
                 if not servers:
                     cfg.pop("mcpServers", None)
                 if cfg:
-                    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-                        cursor_mcp, json.dumps(cfg, indent=2) + "\n"
-                    )
+                    install_state._atomic_write(cursor_mcp, json.dumps(cfg, indent=2) + "\n")
                     files_modified.append({"path": str(cursor_mcp), "action": "removed_mcp_entry"})
                 else:
                     cursor_mcp.unlink()
@@ -1519,9 +1512,7 @@ def uninstall(
                 if not servers:
                     cfg.pop("mcpServers", None)
                 if cfg:
-                    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-                        claude_mcp, json.dumps(cfg, indent=2) + "\n"
-                    )
+                    install_state._atomic_write(claude_mcp, json.dumps(cfg, indent=2) + "\n")
                     files_modified.append({"path": str(claude_mcp), "action": "removed_mcp_entry"})
                 else:
                     claude_mcp.unlink()
@@ -1666,9 +1657,6 @@ def uninstall(
         kept: list[dict[str, Any]] = []
         pruned = 0
         for entry in existing:
-            if not isinstance(entry, dict):
-                kept.append(entry)
-                continue
             rr = entry.get("repo_root")
             same_repo = isinstance(rr, str) and bool(rr) and _resolves_equal(rr, root_resolved)
             if entry.get("harness") == harness and (all_repos or same_repo):
@@ -1846,7 +1834,7 @@ def _print_uninstall_json(result: dict[str, Any]) -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "uninstall",

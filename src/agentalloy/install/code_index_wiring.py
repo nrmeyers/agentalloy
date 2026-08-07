@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Per-repo harness block for the code-index module.
 
 A SECOND sentinel pair — independent of the main ``<!-- BEGIN agentalloy
@@ -27,7 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.install.sentinel_utils import remove_sentinel_block, replace_marked_block
@@ -141,7 +142,7 @@ def service_module_status(port: int) -> str | None:
     try:
         req = urllib.request.Request(f"{service_base_url(port)}/health", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
-            body = json.loads(resp.read())
+            body = cast(dict[str, Any], json.loads(resp.read()))
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
     modules = body.get("modules") if isinstance(body, dict) else None
@@ -156,7 +157,7 @@ def registry_slugs(port: int) -> list[str] | None:
     try:
         req = urllib.request.Request(f"{service_base_url(port)}/code/repos", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
-            body = json.loads(resp.read())
+            body = cast(list[dict[str, Any]], json.loads(resp.read()))
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
     if not isinstance(body, list):
@@ -175,10 +176,10 @@ def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            body = json.loads(resp.read())
+            body = cast(dict[str, Any], json.loads(resp.read()))
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
-    return body if isinstance(body, dict) else None
+    return body
 
 
 def offer_index(root: Path, port: int, *, assume_yes: bool = False) -> dict[str, Any] | None:

@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``install-pack`` subcommand — pull a published skill pack into the corpus.
 
 Operator-tier. The skill-pack registry shape is **TBD for v1**; we ship a
@@ -277,12 +277,6 @@ def _ingest_yaml(
     Defaults to False so any caller that doesn't explicitly opt in keeps
     today's non-blocking-lint behavior.
     """
-    if not isinstance(no_restart, bool):
-        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
-    if not isinstance(force, bool):
-        raise TypeError(f"force must be bool, got {type(force).__name__}")
-    if not isinstance(strict, bool):
-        raise TypeError(f"strict must be bool, got {type(strict).__name__}")
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
@@ -640,14 +634,6 @@ def install_local_pack(
     immediately, instead of silently serving zero vectors until someone
     remembers to run ``agentalloy reembed``.
     """
-    if not isinstance(no_restart, bool):
-        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
-    if not isinstance(strict, bool):
-        raise TypeError(f"strict must be bool, got {type(strict).__name__}")
-    if not isinstance(allow_duplicates, bool):
-        raise TypeError(f"allow_duplicates must be bool, got {type(allow_duplicates).__name__}")
-    if not isinstance(allow_unreviewed, bool):
-        raise TypeError(f"allow_unreviewed must be bool, got {type(allow_unreviewed).__name__}")
     t0 = time.monotonic()
     pack_dir = pack_dir.resolve()
 
@@ -1360,7 +1346,7 @@ def install_pack(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "install-pack",

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``status`` verb — show the current install snapshot.
 
 Reads the user-scope state and reports:
@@ -123,7 +124,7 @@ def _release_snapshot() -> dict[str, Any]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "status",

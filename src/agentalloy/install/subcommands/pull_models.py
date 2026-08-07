@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``pull-models`` subcommand.
 
 Idempotent model provisioning for llama-server (llama.cpp), the sole
@@ -1019,7 +1020,7 @@ def pull_models(
     Returns contract-shaped JSON with auto_pulled, manual_steps_required,
     and skipped_already_present arrays.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
 
@@ -1149,7 +1150,7 @@ def pull_models(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "pull-models",

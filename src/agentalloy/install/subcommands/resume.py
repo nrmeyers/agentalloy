@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy resume`` — cold-session bootstrap in one command.
 
 Prints phase, the cursor'd work-item, its ``domain_tags``, ``scope``,
@@ -112,7 +113,7 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "resume",

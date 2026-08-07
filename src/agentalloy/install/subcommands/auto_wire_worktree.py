@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy auto-wire-worktree`` — invoked by the post-checkout git hook.
 
 Not a command users run directly (hidden from ``--help``; see
@@ -23,7 +24,7 @@ _GIT_TIMEOUT_S = 5.0
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register the (hidden) ``auto-wire-worktree`` subcommand.
 
@@ -40,10 +41,8 @@ def add_parser(
         help=argparse.SUPPRESS,  # internal — invoked by the post-checkout hook only
     )
     p.set_defaults(func=_run)
-    subparsers._choices_actions = [  # pyright: ignore[reportPrivateUsage]
-        a
-        for a in subparsers._choices_actions
-        if a.dest != "auto-wire-worktree"  # pyright: ignore[reportPrivateUsage]
+    subparsers._choices_actions = [
+        a for a in subparsers._choices_actions if a.dest != "auto-wire-worktree"
     ]
 
 
@@ -111,10 +110,10 @@ def _try_auto_wire(cwd: Path) -> None:
     from agentalloy.install import state as install_state
     from agentalloy.install.subcommands.add import adopt_and_wire, resolve_port
     from agentalloy.install.subcommands.uninstall import (
-        _harnesses_in_repo,  # pyright: ignore[reportPrivateUsage]
+        _harnesses_in_repo,
     )
     from agentalloy.signals.skill_loader import (
-        _read_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
+        _read_lifecycle_mode,
     )
 
     st = install_state.load_state()

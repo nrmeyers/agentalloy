@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``cleanup`` subcommand — recover from orphaned runtime artifacts.
 
 The user-facing recovery verb. A native install leaves three classes of
@@ -49,7 +50,7 @@ SCHEMA_VERSION = 1
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "cleanup",

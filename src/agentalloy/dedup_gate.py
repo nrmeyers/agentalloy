@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Reembed-boundary dedup gate — cross-pack near-duplicate detection.
 
 Runs after new fragments have been written to the Lance dataset.  For each

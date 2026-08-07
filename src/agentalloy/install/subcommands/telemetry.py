@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``telemetry`` subcommand group — telemetry table management.
 
 Exposes three sub-verbs:
@@ -26,7 +27,7 @@ from __future__ import annotations
 import argparse
 import functools
 import sys
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
@@ -34,7 +35,7 @@ SCHEMA_VERSION = 1
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "telemetry",
@@ -234,10 +235,10 @@ def _fetch_savings_via_api(port: int, repo: str | None = None) -> dict[str, Any]
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
             if resp.status != 200:
                 return None
-            data = json.loads(resp.read().decode("utf-8"))
+            data = cast(dict[str, Any], json.loads(resp.read().decode("utf-8")))
     except (urllib.error.URLError, OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    return data
 
 
 def _run_savings(args: argparse.Namespace) -> int:

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Qwen Code install module — apply_persistent_config / install_writer.
 
 Proxy wiring: repo-local ``.qwen/settings.json`` (QWEN_HOME isolation) with
@@ -87,7 +88,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     """
     # Lazy import: wire_harness imports the provider registry at module load,
     # so a top-level import here would be circular.
-    from agentalloy.install.subcommands.wire_harness import (  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.subcommands.wire_harness import (
         _wire_proxy_qwen_code,
     )
 

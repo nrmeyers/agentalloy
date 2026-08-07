@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy code`` — CLI for the code-index module (``/code/*``).
 
 Thin HTTP clients against the local agentalloy service:
@@ -27,7 +28,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -127,7 +128,7 @@ def _slug_from_registry(port: int, abspath: Path) -> str | None:
         with _make_client(port) as client:
             resp = client.get("/code/repos")
             resp.raise_for_status()
-            rows = resp.json()
+            rows: list[dict[str, Any]] = cast(list[dict[str, Any]], resp.json())
     except (httpx.HTTPError, ValueError):
         return None
     if not isinstance(rows, list):
@@ -324,8 +325,9 @@ def _run_migrate_layout(args: argparse.Namespace) -> int:
                 _print_json(body)
             else:
                 _print_migrate_summary(body, quiet=quiet)
-            jobs = body.get("jobs")
-            if args.dry_run or not args.wait or not isinstance(jobs, list):
+            jobs_raw = body.get("jobs")
+            jobs: list[dict[str, Any]] = jobs_raw if isinstance(jobs_raw, list) else []
+            if args.dry_run or not args.wait:
                 return 0
             failed = 0
             for job in jobs:
@@ -371,9 +373,8 @@ def _print_migrate_summary(body: dict[str, Any], *, quiet: bool) -> None:
         f"{legacy} legacy, {pruned} pruned (gone long enough to be a deletion), "
         f"{unreachable} unreachable (left alone), {busy} busy."
     )
-    entries = body.get("entries")
-    if not isinstance(entries, list):
-        return
+    entries_raw = body.get("entries")
+    entries: list[dict[str, Any]] = entries_raw if isinstance(entries_raw, list) else []
     for entry in entries:
         if entry.get("verdict") in ("legacy", "missing", "unreachable", "busy"):
             print(f"  {entry.get('verdict'):8} {entry.get('action'):8} {entry.get('slug')}")
@@ -691,7 +692,7 @@ def _patch_env_key(key: str, value: str) -> Path:
     else:
         lines.append(new_line)
     path.parent.mkdir(parents=True, exist_ok=True)
-    install_state._atomic_write(path, "\n".join(lines) + "\n")  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(path, "\n".join(lines) + "\n")
     return path
 
 
@@ -874,13 +875,13 @@ def _add_common(p: argparse.ArgumentParser, *, repo_flag: bool = False) -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "code",
         help="Code-index module: index repos, search code, trace call graphs.",
     )
-    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(dest="code_cmd")  # pyright: ignore[reportPrivateUsage]
+    sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(dest="code_cmd")
 
     index_p = sub.add_parser("index", help="Index a repository (async job on the service).")
     index_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
@@ -977,7 +978,7 @@ def add_parser(
     watch_p = sub.add_parser(
         "watch", help="Per-repo watch enrollment + the CODE_INDEX_WATCH master switch."
     )
-    watch_sub: argparse._SubParsersAction[argparse.ArgumentParser] = watch_p.add_subparsers(  # pyright: ignore[reportPrivateUsage]
+    watch_sub: argparse._SubParsersAction[argparse.ArgumentParser] = watch_p.add_subparsers(
         dest="watch_action"
     )
     enable_p = watch_sub.add_parser(

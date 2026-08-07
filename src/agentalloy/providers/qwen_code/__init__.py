@@ -53,4 +53,8 @@ REGISTRY["qwen-code"] = HarnessSpec(
     env_builder=_env_builder,
     install_writer=_install_writer,
     upstream_extractor=install.extract_upstream,
+    # Qwen Code does not send session headers over HTTP. The proxy falls back
+    # to reading it from the runtime.json on disk (see
+    # agentalloy.api.proxy_router._fallback_qwen_session_id).
+    session_header="x-qwen-code-session-id",
 )

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """ComposeOrchestrator — wires retrieval and raw-fragment assembly.
 
 Per v5.4: the runtime path holds no generative LLM. ``/compose`` retrieves
@@ -25,7 +26,7 @@ from agentalloy.api.compose_models import (
     ErrorCode,
     LatencyBreakdown,
     RetrievalDebug,
-    _phase_max_tokens,  # pyright: ignore[reportPrivateUsage]
+    _phase_max_tokens,
 )
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.lm_client import (

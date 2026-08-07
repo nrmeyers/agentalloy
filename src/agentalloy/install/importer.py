@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Fresh-build importer: pack YAML -> agentalloy.duck (+ fragments.lance reembed).
 
 The v5 deterministic corpus builder. Reads ``_packs/<pack>/pack.yaml`` and the

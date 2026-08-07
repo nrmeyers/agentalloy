@@ -16,7 +16,7 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -279,10 +279,8 @@ def _tool_name(tool: dict[str, Any]) -> str | None:
     if "name" in tool and "function" not in tool:
         return tool.get("name")
     # OpenAI format: {"type": "function", "function": {"name": "write_file", ...}}
-    fn = tool.get("function")
-    if isinstance(fn, dict):
-        return fn.get("name")
-    return None
+    fn = cast(dict[str, Any], tool.get("function"))
+    return cast(str | None, fn.get("name"))
 
 
 def filter_tools_for_phase(

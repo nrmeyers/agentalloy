@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``start-rerank-server`` subcommand — bring up the reranker backend.
 
 Runs right after ``start-embed-server`` in the setup pipeline. Reads
@@ -86,7 +87,7 @@ _DEFAULT_NGL = 0
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
