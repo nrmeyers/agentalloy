@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Stage B — LM fragment re-ranker (sub-1B intent layer).
 
 Stage B shows a small instruct-tuned reranker (qwen3-reranker-0.6b) the task
@@ -42,7 +43,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
 
-from agentalloy.retrieval.rerank import _FailureLatch  # pyright: ignore[reportPrivateUsage]
+from agentalloy.retrieval.rerank import _FailureLatch
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,7 @@ def _parse_completion_logprobs(data: Any) -> dict[str, float]:
     choices: Any = data.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError(f"completion response missing choices: {data!r}")
-    first = choices[0]
+    first: dict[str, Any] = choices[0]
     if not isinstance(first, dict):
         raise ValueError(f"completion choice not an object: {first!r}")
     logprobs = cast("dict[str, Any]", first).get("logprobs")

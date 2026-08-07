@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy reset`` — nuclear reset for profile overrides.
 
 Commands:
@@ -33,7 +34,7 @@ def _reingest_profile_defaults(profile_name: str) -> list[str]:
         import yaml
 
         from agentalloy.install.subcommands.customize import (
-            _ingest_skill,  # pyright: ignore[reportPrivateUsage]
+            _ingest_skill,
         )
 
         for yaml_file in sorted(packs_root.rglob("*.yaml")):
@@ -167,7 +168,7 @@ def reset(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "reset",

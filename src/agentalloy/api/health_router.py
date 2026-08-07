@@ -14,7 +14,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -383,7 +383,7 @@ class ReadinessChecker:
         # still race with a reader if a writer is mid-rename, and a partial
         # dict is more useful than a wholesale fallback.
         merged = dict(default)
-        merged.update(parsed)
+        merged.update(cast(dict[str, Any], parsed))
         return merged
 
 

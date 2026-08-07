@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Container-leg implementations of the ``server-*`` lifecycle verbs.
 
 The host (native) path lives in :mod:`agentalloy.install.server_proc` and drives

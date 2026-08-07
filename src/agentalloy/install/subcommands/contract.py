@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy contract`` — contract management subcommand.
 
 All contract operations go through StateClient over HTTP.  Service down
@@ -54,7 +55,7 @@ def _active_design_slug(project_root: Path) -> str | None:
     """
     from agentalloy.contracts import active_dir, resolve_current_contract
     from agentalloy.signals.skill_loader import (
-        cli_session_key,  # pyright: ignore[reportPrivateUsage]
+        cli_session_key,
     )
 
     _cid, path = resolve_current_contract(project_root, "design", cli_session_key())
@@ -99,7 +100,7 @@ def _scaffold_phase_docs(phase: str, slug: str, project_root: Path) -> list[str]
     """Create stub docs for each ``artifact_contains`` gate of *phase*."""
     created: list[str] = []
     try:
-        from agentalloy.signals.prefilter import (  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.signals.prefilter import (
             _extract_artifact_contains_specs,
         )
         from agentalloy.signals.skill_loader import exit_gates_for_phase
@@ -266,7 +267,7 @@ def _render_supersede(result: dict[str, Any]) -> None:
 
 def _init(args: argparse.Namespace) -> int:
     """Scaffold a contract and store it via StateClient."""
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     client = _get_client()
     project_root = _repo_root()
@@ -622,7 +623,7 @@ _HANDLERS = {
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser("contract", help="Manage task contracts.")
     add_json_flag(p)

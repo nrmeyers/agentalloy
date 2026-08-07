@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Pydantic models for the direct retrieve endpoint (NXS-769)."""
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from agentalloy.api.compose_models import (
     Phase,
-    _phase_k,  # pyright: ignore[reportPrivateUsage]
+    _phase_k,
 )
 
 

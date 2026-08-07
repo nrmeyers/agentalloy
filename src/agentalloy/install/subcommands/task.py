@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``task`` subcommand — per-work-item cursor for Tier 2 domain injection.
 
 The build phase fans a phase out into many per-task contracts under
@@ -160,7 +161,7 @@ def run_task_status(root: Path) -> dict[str, object]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "task",
@@ -198,7 +199,7 @@ def _resolve_root(args: argparse.Namespace) -> Path:
     pr = getattr(args, "project_root", None)
     if pr:
         return Path(pr).expanduser().resolve()
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     return _repo_root()
 

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``server-start`` verb — launch uvicorn in the background.
 
 Foreground use is still ``serve``. ``server-start`` exists so users can
@@ -43,7 +44,7 @@ def _print_release_notice() -> None:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "server-start",

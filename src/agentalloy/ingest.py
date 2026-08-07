@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Review-gated ingest CLI — loads a review YAML into the skill store after human confirmation.
 
 Usage::

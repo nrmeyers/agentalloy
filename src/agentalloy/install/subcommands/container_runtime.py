@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.install import env_forwarding
 from agentalloy.install.ingest_secret import SECRET_ENV, resolve_ingest_secret
@@ -1224,12 +1224,12 @@ def _get_bootstrap_progress(runtime: str, container_name: str = "agentalloy") ->
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return {}
     raw = result.stdout
-    if isinstance(raw, bytes):
-        raw = raw.decode(errors="replace")
     if not raw:
         return {}
     try:
         parsed = _json.loads(raw)
     except (_json.JSONDecodeError, TypeError):
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    if not isinstance(parsed, dict):
+        return {}
+    return cast(dict[str, Any], parsed)

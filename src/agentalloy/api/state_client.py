@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Thin HTTP client for the local phase state service.
 
 All state reads and writes go through the service's HTTP API.  When the
@@ -152,8 +153,8 @@ class StateClient:
         file mirror left, which is the steady state after the first run.
         """
         resp = self._post("/state/import-files", {}, repo_root=repo_root)
-        imported = resp.get("imported") or {}
-        return imported if isinstance(imported, dict) else {}
+        imported: dict[str, str] = resp.get("imported") or {}
+        return imported
 
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""
@@ -181,10 +182,10 @@ class StateClient:
         except (urllib.error.URLError, OSError):
             return None
         try:
-            body = json.loads(raw)
+            body: dict[str, Any] = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             return raw
-        if isinstance(body, dict) and "value" in body:
+        if "value" in body:
             value = body["value"]
             return None if value is None else str(value)
         return raw

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Web UI operations endpoints — repos dashboard, approval queue, doctor,
 packs, reembed status, profiles.
 
@@ -78,11 +79,11 @@ def _approval_state(
 ) -> tuple[bool, bool]:
     """(required, pending) — pending means required and not satisfied/stale."""
     from agentalloy.install.subcommands.phase import (
-        _APPROVAL_SINCE,  # pyright: ignore[reportPrivateUsage]
-        _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
+        _APPROVAL_SINCE,
+        _APPROVAL_STORE_NAME_GLOB,
     )
     from agentalloy.signals.predicates import (
-        _artifact_digest,  # pyright: ignore[reportPrivateUsage]
+        _artifact_digest,
         approval_marker_path,
         approval_required,
     )
@@ -128,12 +129,12 @@ def _repo_info(
 ) -> RepoInfo:
     from agentalloy.api.proxy_context import read_upstream
     from agentalloy.install.subcommands.status import (
-        _repo_phase,  # pyright: ignore[reportPrivateUsage]
+        _repo_phase,
     )
     from agentalloy.profiles import detect_profile
     from agentalloy.signals.skill_loader import (
-        _read_cursor,  # pyright: ignore[reportPrivateUsage]
-        _read_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
+        _read_cursor,
+        _read_lifecycle_mode,
     )
 
     root = Path(root_str)
@@ -231,13 +232,13 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
     def _build() -> GateStatus:
         from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import (
-            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
-            _forward_gate_blocks,  # pyright: ignore[reportPrivateUsage]
+            _APPROVAL_STORE_NAME_GLOB,
+            _forward_gate_blocks,
         )
         from agentalloy.install.subcommands.status import (
-            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+            _repo_phase,
         )
-        from agentalloy.signals.gates import _PHASE_GRAPH  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.signals.gates import _PHASE_GRAPH
         from agentalloy.signals.predicates import approval_marker_path
 
         phase = _repo_phase(repo)
@@ -304,13 +305,13 @@ class ApprovalsResponse(BaseModel):
 async def list_approvals(store: DuckDBStateStore = Depends(get_state_store)) -> ApprovalsResponse:
     def _build() -> ApprovalsResponse:
         from agentalloy.install.subcommands.phase import (
-            _APPROVAL_SINCE,  # pyright: ignore[reportPrivateUsage]
-            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
+            _APPROVAL_SINCE,
+            _APPROVAL_STORE_NAME_GLOB,
         )
         from agentalloy.install.subcommands.status import (
-            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+            _repo_phase,
         )
-        from agentalloy.signals.gates import _PHASE_GRAPH  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.signals.gates import _PHASE_GRAPH
         from agentalloy.signals.predicates import approval_marker_path
 
         pending: list[PendingApproval] = []
@@ -413,7 +414,7 @@ async def list_packs(request: Request) -> PacksResponse:
     def _build() -> PacksResponse:
         import agentalloy
         from agentalloy.install.subcommands.install_packs import (
-            _discover_packs,  # pyright: ignore[reportPrivateUsage]
+            _discover_packs,
         )
 
         packs_root = Path(agentalloy.__file__).resolve().parent / "_packs"

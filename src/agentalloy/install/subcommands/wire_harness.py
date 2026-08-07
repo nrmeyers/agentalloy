@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportArgumentType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportArgumentType=false, reportPrivateUsage=false
 """``wire-harness`` subcommand.
 
 .. deprecated::
@@ -348,7 +348,7 @@ def _wire_continue(
     }
 
     content = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(config_path, content)
 
     return [
         {
@@ -428,7 +428,7 @@ def _wire_harness_core(
     If ``legacy=True``, uses the old markdown-injection wiring path instead
     of the default proxy model. Orthogonal to ``--mcp-fallback``.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     if scope not in ("user", "repo"):
         print(f"ERROR: --scope must be 'user' or 'repo', got '{scope}'", file=sys.stderr)
@@ -587,13 +587,13 @@ def _wire_legacy(
                     raise SystemExit(1)
 
     if dedicated:
-        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, rendered)
         action = "wrote_new_file"
         content_sha256 = _sha256(rendered.strip())
     else:
         existing = target_path.read_text() if target_path.exists() else ""
         result_content = _inject_sentinel_block(existing, rendered)
-        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, result_content)
         action = "injected_block"
         content_sha256 = _sha256(rendered.strip())
 
@@ -646,7 +646,7 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
     else:
         content = block + "\n"
 
-    install_state._atomic_write(conf_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(conf_path, content)
     return [
         {
             "path": str(conf_path),
@@ -759,7 +759,7 @@ def _wire_mcp_claude_code(port: int) -> list[dict[str, Any]]:
     servers["agentalloy"] = _mcp_server_entry(port)
     config["mcpServers"] = servers
     serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(config_path, serialized)
     return [
         {
             "path": str(config_path),
@@ -788,7 +788,7 @@ def _wire_mcp_cursor(port: int, root: Path) -> list[dict[str, Any]]:
     servers["agentalloy"] = _mcp_server_entry(port)
     config["mcpServers"] = servers
     serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(config_path, serialized)
     return [
         {
             "path": str(config_path),
@@ -827,9 +827,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
     config["_agentalloy_install_marker"] = marker
 
     serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-        config_path, serialized
-    )
+    install_state._atomic_write(config_path, serialized)
     return [
         {
             "path": str(config_path),
@@ -993,7 +991,7 @@ def _wire_proxy_continue(
         "    roles:\n"
         "      - chat\n"
     )
-    install_state._atomic_write(agent_path, agent_yaml)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(agent_path, agent_yaml)
     agent_record: dict[str, Any] = {
         "path": str(agent_path),
         "action": "wrote_new_file" if original_agent is None else "replaced_file",
@@ -1040,7 +1038,7 @@ def _wire_proxy_continue(
     config["_agentalloy_install_marker"] = marker
 
     serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(config_path, serialized)
 
     return [
         agent_record,
@@ -1099,7 +1097,7 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
     else:
         content = block + "\n"
 
-    install_state._atomic_write(conf_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(conf_path, content)
     return [
         {
             "path": str(conf_path),
@@ -1266,7 +1264,7 @@ def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[P
         )
         return None
 
-    install_state._atomic_write(mise_path, new_content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(mise_path, new_content)
     records.append(
         {
             "path": str(mise_path),
@@ -1335,7 +1333,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
     repo_config.parent.mkdir(parents=True, exist_ok=True)
     original_config = _capture_original(repo_config)
     config_text = yaml.safe_dump(config, sort_keys=False)
-    install_state._atomic_write(repo_config, config_text)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(repo_config, config_text)
     records.append(
         {
             "path": str(repo_config),
@@ -1348,7 +1346,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
     env_path = root / ".hermes" / ".agentalloy-env"
     original_env = _capture_original(env_path)
     env_text = 'export HERMES_HOME="$PWD/.hermes"\n'
-    install_state._atomic_write(env_path, env_text)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(env_path, env_text)
     records.append(
         {
             "path": str(env_path),
@@ -1389,7 +1387,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
                 envrc_content += envrc_block + "\n"
         else:
             envrc_content = envrc_block + "\n"
-        install_state._atomic_write(envrc_path, envrc_content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(envrc_path, envrc_content)
         records.append(
             {
                 "path": str(envrc_path),
@@ -1567,7 +1565,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
     repo_settings.parent.mkdir(parents=True, exist_ok=True)
     original_settings = _capture_original(repo_settings)
     settings_content = json.dumps(settings_data, indent=2) + "\n"
-    install_state._atomic_write(repo_settings, settings_content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(repo_settings, settings_content)
     records.append(
         {
             "path": str(repo_settings),
@@ -1581,7 +1579,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
     env_path = root / ".qwen" / ".agentalloy-env"
     original_env = _capture_original(env_path)
     env_text = 'export QWEN_HOME="$PWD/.qwen"\n'
-    install_state._atomic_write(env_path, env_text)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(env_path, env_text)
     records.append(
         {
             "path": str(env_path),
@@ -1618,7 +1616,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
                 envrc_content += envrc_block + "\n"
         else:
             envrc_content = envrc_block + "\n"
-        install_state._atomic_write(envrc_path, envrc_content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(envrc_path, envrc_content)
         records.append(
             {
                 "path": str(envrc_path),
@@ -1702,7 +1700,7 @@ def _write_qwen_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[Pat
         )
         return None
 
-    install_state._atomic_write(mise_path, new_content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(mise_path, new_content)
     records.append(
         {
             "path": str(mise_path),
@@ -1762,7 +1760,7 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
     # Clean removal rides the WireRecord (original_content restore / delete).
 
     serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(config_path, serialized)
 
     print(
         "[AgentAlloy] opencode wired via repo-local opencode.json "
@@ -1845,7 +1843,7 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
     else:
         content = block + "\n"
 
-    install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(env_path, content)
 
     records: list[dict[str, Any]] = [
         {
@@ -1899,9 +1897,7 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
             if envrc_content and not envrc_content.endswith("\n"):
                 envrc_content += "\n"
             envrc_content += envrc_block + "\n"
-        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-            envrc_path, envrc_content
-        )
+        install_state._atomic_write(envrc_path, envrc_content)
         records.append(
             {
                 "path": str(envrc_path),
@@ -2116,9 +2112,7 @@ def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = Fals
     data["permissions"] = permissions
 
     try:
-        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-            settings_path, json.dumps(data, indent=2) + "\n"
-        )
+        install_state._atomic_write(settings_path, json.dumps(data, indent=2) + "\n")
         return True
     except OSError:
         return False
@@ -2163,9 +2157,7 @@ def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> 
         del data["workspace-write"]
 
     try:
-        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-            config_path, tomli_w.dumps(data)
-        )
+        install_state._atomic_write(config_path, tomli_w.dumps(data))
         return True
     except OSError:
         return False
@@ -2240,7 +2232,7 @@ def rewrite_enforcement_posture(
         # from "the store is unreachable from here" — the latter must never
         # silently coerce to workflow.
         from agentalloy.signals.skill_loader import (
-            _phase_view,  # pyright: ignore[reportPrivateUsage]
+            _phase_view,
         )
 
         view = _phase_view(root)
@@ -2403,7 +2395,7 @@ def _build_result(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Add the wire-harness subparser to an argparse parser.
 

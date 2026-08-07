@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``preflight`` subcommand — verify host prerequisites before any install step.
 
 Two phases:
@@ -740,7 +741,7 @@ def run_preflight(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "preflight",

@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -344,7 +344,7 @@ def _extract_tokens_out(body: dict[str, Any]) -> int | None:
     """Pull ``usage.completion_tokens`` from a non-streaming chat-completions body."""
     usage = body.get("usage")
     if isinstance(usage, dict):
-        val = usage.get("completion_tokens")
+        val = cast(dict[str, Any], usage).get("completion_tokens")
         if isinstance(val, int):
             return val
     return None
@@ -386,9 +386,9 @@ class _SseUsageScanner:
             obj = json.loads(data)
         except ValueError:
             return
-        usage = obj.get("usage") if isinstance(obj, dict) else None
+        usage = cast(dict[str, Any], obj).get("usage") if isinstance(obj, dict) else None
         if isinstance(usage, dict):
-            val = usage.get("completion_tokens")
+            val = cast(dict[str, Any], usage).get("completion_tokens")
             if isinstance(val, int):
                 self.latest = val
 
@@ -863,9 +863,12 @@ async def proxy_chat_completions(
     upstream_client, chat_url, upstream_model = resolved_upstream
 
     # Per-session orientation key: explicit harness header (e.g. Claude Code's
-    # x-claude-code-session-id) else the conversation fingerprint. Drives the
-    # announce cadence and is stamped onto telemetry.
+    # x-claude-code-session-id), then Qwen Code runtime.json fallback, else
+    # the conversation fingerprint. Drives the announce cadence and is stamped
+    # onto telemetry.
     session_id = extract_session_header(fastapi_request.headers)
+    if not session_id:
+        session_id = _fallback_qwen_session_id(cwd)
     session_key, session_source = resolve_session_key(request, session_id)
 
     # Phase-event writer for this request: prefers the lifespan-scoped instance
@@ -1418,3 +1421,38 @@ async def proxy_embeddings(
         status_code=resp.status_code,
         content=body,
     )
+
+
+def _fallback_qwen_session_id(cwd: Path) -> str | None:
+    """Read the current Qwen Code session ID from the local runtime.json.
+
+    Qwen Code does not transmit session IDs over HTTP. When no explicit
+    session header is present, this function reads the most-recently-modified
+    ``runtime.json`` in the project's ``~/.qwen/projects/<encoded-cwd>/chats/``
+    directory and returns its ``session_id`` value.
+
+    Returns ``None`` when no runtime file exists or the session ID is empty,
+    letting the proxy fall back to fingerprint-based resolution.
+    """
+    # Qwen Code encodes the project directory as: leading "-" + path parts
+    # separated by "-", e.g. "/home/nmeyers/dev/agentalloy" →
+    # "-home-nmeyers-dev-agentalloy".
+    encoded = "-" + os.path.realpath(os.fspath(cwd)).lstrip("/").replace("/", "-")
+    chats_dir = Path.home() / ".qwen" / "projects" / encoded / "chats"
+    try:
+        runtime_files = list(chats_dir.glob("*.runtime.json"))
+    except OSError:
+        return None
+    if not runtime_files:
+        return None
+    # Most recently modified runtime.json is the active session.
+    runtime_file = max(runtime_files, key=lambda p: p.stat().st_mtime)
+    try:
+        with runtime_file.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    session_id = data.get("session_id")
+    if isinstance(session_id, str) and session_id.strip():
+        return session_id.strip()
+    return None

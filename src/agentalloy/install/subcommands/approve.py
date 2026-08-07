@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``approve`` subcommand — record a human approval marker and auto-advance.
 
     agentalloy approve spec      — sign off the spec phase, then advance to design
@@ -81,14 +82,14 @@ def run_approve(
     advancing nowhere.  The phase read and write below go through the store
     either way, so there is no second source of truth left to route around.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
     from agentalloy.install.subcommands._state import (  # noqa: PLC0415
         fail_on_state_error,
         phase_access,
     )
     from agentalloy.install.subcommands.phase import run_phase_set  # noqa: PLC0415
     from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
+        _PHASE_GRAPH,
     )
 
     root = root or _repo_root()
@@ -108,7 +109,7 @@ def run_approve(
 
     if phase in _STORE_BACKED_PHASES:
         from agentalloy.signals.gates import (  # noqa: PLC0415
-            _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
+            _APPROVAL_STORE_NAME_GLOB,
         )
         from agentalloy.signals.predicates import (  # noqa: PLC0415
             _artifact_digest,
@@ -174,7 +175,7 @@ def run_approve(
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "approve",

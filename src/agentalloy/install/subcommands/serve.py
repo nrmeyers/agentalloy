@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``serve`` verb — run the AgentAlloy service in the foreground.
 
 Sources the user-scope ``.env`` into the process environment, then
@@ -18,7 +19,7 @@ from agentalloy.install import state as install_state
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "serve",

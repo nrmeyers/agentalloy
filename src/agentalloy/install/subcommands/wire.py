@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``wire`` verb — per-repo harness wiring.
 
 Convenience wrapper over ``wire-harness``. Auto-detects the harness from
@@ -22,7 +23,7 @@ from agentalloy.install.subcommands.wire_harness import (
     SENTINEL_BEGIN,
     SENTINEL_END,
     VALID_HARNESSES,
-    _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
+    _wire_harness_core,
 )
 from agentalloy.providers.base import WireRecord
 from agentalloy.signals.skill_loader import LIFECYCLE_MODES
@@ -38,7 +39,7 @@ def resolve_via(harness: str, via: str | None) -> str:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "wire",
@@ -566,8 +567,6 @@ def _list_wired(args: argparse.Namespace, cwd: Path) -> int:
     entries: list[dict[str, Any]] = st.get("harness_files_written") or []
     wired: list[str] = []
     for entry in entries:
-        if not isinstance(entry, dict):
-            continue
         repo_root = entry.get("repo_root")
         harness = entry.get("harness")
         if not (isinstance(repo_root, str) and isinstance(harness, str) and harness):

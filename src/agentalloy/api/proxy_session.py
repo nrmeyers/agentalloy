@@ -83,10 +83,9 @@ def _first_user_text(request: ProxyRequest) -> str | None:
         # Content-block list (Anthropic-style): concatenate the text blocks.
         parts: list[str] = []
         for block in content:
-            if isinstance(block, dict):
-                t = block.get("text")
-                if isinstance(t, str):
-                    parts.append(t)
+            t = block.get("text")
+            if isinstance(t, str):
+                parts.append(t)
         joined = "".join(parts).strip()
         if joined:
             return joined

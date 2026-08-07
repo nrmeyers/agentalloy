@@ -25,6 +25,7 @@ import contextlib
 import logging
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 import lancedb
 import pyarrow as pa
@@ -114,9 +115,13 @@ class LanceFragmentStore:
         p = Path(path)
         # config points at ``.../corpus/fragments.lance``; lancedb.connect wants
         # the parent dir and a table name whose .lance dir is that path.
-        self._db = lancedb.connect(str(p.parent))
+        # LanceDB's sync bindings carry ``Unknown`` in their signatures (loose
+        # upstream stubs); treat the handles as ``Any`` so the strict facade
+        # boundary stays clean. The table is opened in ``__init__`` and only set
+        # to None by ``close()``.
+        self._db: Any = lancedb.connect(str(p.parent))
         self._table_name = p.stem  # "fragments"
-        self._table = self._open_or_create_table()
+        self._table: Any = self._open_or_create_table()
         self._has_vector_index = self._vector_index_present()
 
     def _open_or_create_table(self):

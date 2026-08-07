@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Compile the rerank model's KV-cache graph on a cold restart by sending one
 tiny /v1/completions request right after the systemd unit's main process starts.
 
@@ -42,7 +43,7 @@ _DEFAULT_PARALLEL_WARMUPS = 8
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
@@ -103,7 +104,11 @@ def _warmup_all_slots(base: str, parallel: int) -> int:
     compiles its graph (graph compilation is per-slot on first inference).
     Returns the count of successful warmups; failures are best-effort."""
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        results = list(pool.map(lambda _: _warmup_request(base), range(parallel)))
+
+        def _warmup_one_slot(_i: int) -> float | None:
+            return _warmup_request(base)
+
+        results = list(pool.map(_warmup_one_slot, range(parallel)))
     return sum(1 for r in results if r is not None)
 
 

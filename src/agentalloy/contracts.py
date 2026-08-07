@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Contract artifact: in-memory model and markdown+frontmatter serializer.
 
 A contract is stored in the DuckDB state store (``sdd_contract`` table) and

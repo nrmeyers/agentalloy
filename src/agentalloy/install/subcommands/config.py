@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``config`` subcommand for managing agentalloy configuration via the .env file.
 
     agentalloy config status
@@ -41,7 +42,7 @@ _FEATURE_TO_ENV = {
 }
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "config",
         help="Manage agentalloy configuration via the user-scoped .env file.",

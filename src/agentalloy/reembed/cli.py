@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Re-embed pass: build the Lance ``fragments`` dataset from the skill store's
 active fragments.
 
@@ -36,7 +37,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agentalloy.config import get_settings
 from agentalloy.dedup_gate import DedupGateResult, run_dedup_gate
@@ -701,7 +702,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                         resp = embed_client._post_json(  # type: ignore[attr-defined]
                             "/tokenize", {"content": s}
                         )
-                        return len(resp.get("tokens", []))
+                        return len(cast(dict[str, Any], resp).get("tokens", []))
 
                     try:
                         for _ in range(6):
@@ -912,7 +913,7 @@ def _stop_main_service() -> str | None:
     them.
     """
     from agentalloy.install import server_proc
-    from agentalloy.install.subcommands.upgrade import (  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.subcommands.upgrade import (
         _is_systemd,
         _systemctl,
     )
@@ -941,7 +942,7 @@ def _start_main_service(mode: str) -> None:
     """Restart what :func:`_stop_main_service` stopped. Best-effort: a restart
     failure must never fail the (already completed) embed pass."""
     from agentalloy.install import server_proc
-    from agentalloy.install.subcommands.upgrade import (  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.subcommands.upgrade import (
         _systemctl,
     )
 

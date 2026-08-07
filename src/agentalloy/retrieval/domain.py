@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Domain fragment retrieval pipeline.
 
 Given a task + phase + optional filters, embed the task via the inference

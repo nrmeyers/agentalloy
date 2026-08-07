@@ -737,9 +737,11 @@ class DuckDBStateStore:
         if isinstance(data, str):
             # Bare phase string (pre-blob row). Not an error — normalize it.
             data = {"phase": data}
-        if not isinstance(data, dict) or not data.get("phase"):
+        if not isinstance(data, dict):
             return None
         blob = cast("dict[str, Any]", data)
+        if not blob.get("phase"):
+            return None
         phase = str(blob["phase"])
         return PhaseState(
             phase=phase,
@@ -1145,7 +1147,7 @@ class DuckDBStateStore:
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self._repo(), contract_id),
         )
         count = result.fetchall()
-        return count and count[0][0] > 0
+        return bool(count) and count[0][0] > 0
 
     def supersede_contract(
         self,
@@ -1248,7 +1250,7 @@ class DuckDBStateStore:
         sql = f"UPDATE sdd_contract SET {', '.join(sets)} WHERE repo=? AND contract_id=?"
         result = self.conn.execute(sql, params)
         count = result.fetchall()
-        return count and count[0][0] > 0
+        return bool(count) and count[0][0] > 0
 
     # -- artifact CRUD ---------------------------------------------------------
     # Deliverable bodies (docs/spec/<slug>.md, docs/design/<slug>/{approach,
@@ -1395,7 +1397,7 @@ class DuckDBStateStore:
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), repo, phase, slug, name),
         )
         count = result.fetchall()
-        return count and count[0][0] > 0
+        return bool(count) and count[0][0] > 0
 
     def archive_all(self) -> dict[str, int]:
         """Archive all active contracts and artifacts in one transaction.

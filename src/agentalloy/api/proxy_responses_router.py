@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Native OpenAI Responses passthrough (the ``/proj/<token>/v1/responses`` path).
 
 The Responses-API sibling of ``proxy_passthrough_router`` (codex et al. —
@@ -38,13 +39,13 @@ from agentalloy.api.proxy_injection import (
 )
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_passthrough_router import (
-    _forward_once,  # pyright: ignore[reportPrivateUsage]
-    _forward_streaming,  # pyright: ignore[reportPrivateUsage]
-    _make_on_status,  # pyright: ignore[reportPrivateUsage]
-    _noop_status,  # pyright: ignore[reportPrivateUsage]
+    _forward_once,
+    _forward_streaming,
+    _make_on_status,
+    _noop_status,
 )
 from agentalloy.api.proxy_router import (
-    _get_phase_telemetry_writer,  # pyright: ignore[reportPrivateUsage]
+    _get_phase_telemetry_writer,
     get_embed_client,
     get_orchestrator_for_proxy,
     get_vector_store,

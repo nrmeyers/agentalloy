@@ -1,4 +1,4 @@
-# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 """``update`` subcommand — keep an existing install current.
 
 Operator-tier. Per the install spec, this:
@@ -194,7 +194,7 @@ def _model_drift(state: dict[str, Any]) -> dict[str, Any]:
 
 def update(root: Path | None = None) -> dict[str, Any]:
     """Run the update flow. Returns a contract-shaped summary dict."""
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     t0 = time.monotonic()
@@ -297,7 +297,7 @@ def update(root: Path | None = None) -> dict[str, Any]:
 
 def _ensure_web_bundle() -> dict[str, Any]:
     """Make sure a web UI dist is servable; pull the release asset if not."""
-    from agentalloy.web.spa import _dist_dir  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.web.spa import _dist_dir
 
     if _dist_dir() is not None:
         return {"present": True, "pulled": False}
@@ -308,7 +308,7 @@ def _ensure_web_bundle() -> dict[str, Any]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "update",

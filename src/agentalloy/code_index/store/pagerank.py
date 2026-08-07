@@ -34,7 +34,7 @@ def compute_pagerank(edges: list[tuple[str, str]]) -> dict[str, float]:
     ~1.0. Returns ``{}`` for an empty graph or one exceeding the node ceiling
     (logged at WARN).
     """
-    edge_set = {(s, d) for s, d in edges if isinstance(s, str) and isinstance(d, str)}
+    edge_set = set(edges)
     if not edge_set:
         return {}
 

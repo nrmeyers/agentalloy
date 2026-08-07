@@ -21,7 +21,7 @@ import logging
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import duckdb
 
@@ -323,7 +323,7 @@ class DuckDBCodeGraphStore:
             start_line=_opt_int(r[4]),
             end_line=_opt_int(r[5]),
             docstring=None if r[6] is None else str(r[6]),
-            decorators=[str(d) for d in (r[7] or [])],
+            decorators=[str(d) for d in (cast(list[str] | None, r[7]) or [])],
             is_exported=None if r[8] is None else bool(r[8]),
             is_async=bool(r[9]),
             is_generator=bool(r[10]),

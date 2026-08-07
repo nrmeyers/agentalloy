@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``write-env`` subcommand.
 
 Validate + write ``.env`` from a preset template.
@@ -218,7 +219,7 @@ def write_env(
             _os.chmod(_backup_path, 0o600)
 
     content = _render_env(values, preset, port)
-    install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
+    install_state._atomic_write(env_path, content)
 
     # Persist original .env content to state for uninstall restore
     # Only store on first write (skip if already backed up)
@@ -254,7 +255,7 @@ def write_env(
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "write-env",
         help="Validate + write .env from a preset template.",

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``flow`` subcommand — free-flow mode management.
 
 Free-flow is a per-repo mode for sessions with no specific task in mind: it
@@ -27,7 +28,7 @@ from typing import Any
 
 from agentalloy.api.state_client import StateClientError
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
-from agentalloy.install.subcommands.phase import _now_iso  # pyright: ignore[reportPrivateUsage]
+from agentalloy.install.subcommands.phase import _now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
     phase no consumer recognises and forced the call to skip the posture
     rewrite so the bogus name would not clear the deny rules.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     access = phase_access(root)
@@ -147,8 +148,8 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     on the ``free`` side, gates would fail to RE-ENGAGE on resume, silently
     leaving writes open after the escape hatch closes.
     """
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-    from agentalloy.signals.skill_loader import _clear_state  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
+    from agentalloy.signals.skill_loader import _clear_state
 
     root = root or _repo_root()
     access = phase_access(root)
@@ -169,7 +170,7 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
 
 def run_flow_status(root: Path | None = None) -> dict[str, Any]:
     """Current flow mode, phase, and (when free) since-when."""
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.install.state import _repo_root
 
     root = root or _repo_root()
     try:
@@ -191,7 +192,7 @@ def run_flow_status(root: Path | None = None) -> dict[str, Any]:
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "flow",

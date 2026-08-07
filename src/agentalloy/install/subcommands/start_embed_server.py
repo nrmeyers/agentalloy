@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``start-embed-server`` subcommand — bring up the embedding backend.
 
 Runs between ``pull-models`` and ``install-packs`` in the setup pipeline.
@@ -44,7 +45,7 @@ LLAMA_START_TIMEOUT = 120
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,

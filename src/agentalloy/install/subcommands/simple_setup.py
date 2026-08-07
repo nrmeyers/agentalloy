@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """``agentalloy setup`` — interactive one-shot install wizard.
 
     pipx install git+https://github.com/nrmeyers/agentalloy.git
@@ -816,9 +817,7 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
     filtered_lines.append(f"UPSTREAM_API_KEY={cfg.upstream_api_key}")
     filtered_lines.append("")
 
-    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-        env_fp, "\n".join(filtered_lines)
-    )
+    install_state._atomic_write(env_fp, "\n".join(filtered_lines))
 
 
 def _test_embed_endpoint(cfg: SetupConfig) -> None:
@@ -1628,9 +1627,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         st["env_original_content"] = env_fp.read_text()
         install_state.save_state(st)
 
-    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
-        env_fp, f"RUNTIME_PORT={cfg.port}\n"
-    )
+    install_state._atomic_write(env_fp, f"RUNTIME_PORT={cfg.port}\n")
 
     # 11. Harness wiring is per-repo: run `agentalloy add <harness>` in each repo
     # (it adopts the harness's own upstream). Setup installs the engine only.
@@ -1716,7 +1713,7 @@ def _teardown_prior_deployment(prior_state: dict[str, Any], prior_deployment: st
 
         _print("  [dim]-> Removing the previous container[/dim]")
         warnings: list[str] = []
-        uninstall._stop_container_stack(prior_state, warnings)  # pyright: ignore[reportPrivateUsage]
+        uninstall._stop_container_stack(prior_state, warnings)
         for w in warnings:
             _print(f"  [yellow]  {w}[/yellow]")
         _print("  [green]  Done.[/green]")
@@ -1824,11 +1821,11 @@ def run_setup(cfg: SetupConfig) -> int:
     datastore_initialized = False
     try:
         from agentalloy.profiles import (
-            _ensure_profile_dir,  # pyright: ignore[reportPrivateUsage]
+            _ensure_profile_dir,
             detect_profile,
         )
 
-        _ensure_profile_dir("default")  # pyright: ignore[reportPrivateUsage]
+        _ensure_profile_dir("default")
         active_profile = detect_profile()
         ds_path = active_profile.datastore_path
 

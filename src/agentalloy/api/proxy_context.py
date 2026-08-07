@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Proxy context — working directory resolution and phase reading.
 
 Determines the project root per request (used for signal evaluation, etc.)
@@ -91,7 +92,7 @@ def read_phase(cwd: Path) -> str | None:
     :func:`agentalloy.signals.skill_loader._read_phase`.
     """
     from agentalloy.signals.skill_loader import (
-        _read_phase,  # pyright: ignore[reportPrivateUsage]
+        _read_phase,
     )
 
     return _read_phase(cwd)

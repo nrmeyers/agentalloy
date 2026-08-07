@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``detect`` subcommand — platform-appropriate hardware detection.
 
 Emits a JSON document matching the ``detect`` schema in contracts.md.
@@ -440,7 +441,7 @@ def detect_hardware() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "detect",
         help="Run platform-appropriate hardware detection.",

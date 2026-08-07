@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """``agentalloy compose`` — CLI wrapper that calls the running compose service.
 
 Usage::
@@ -15,7 +16,7 @@ from pathlib import Path
 
 
 def add_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     p = subparsers.add_parser(
         "compose",

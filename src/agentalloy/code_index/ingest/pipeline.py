@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """The ingest pipeline: parse → graph → centrality → embed → fts → finalize.
 
 ``run_index_job`` is the single orchestration entry point; the ``/code``

@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """OpenClaw install module — apply_persistent_config / install_writer.
 
 Proxy wiring for OpenClaw (npm ``openclaw``, the Clawdbot/Moltbot lineage

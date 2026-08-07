@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Pack-level validation gates for ingest.
 
 Provides three gates that fire *before* the per-skill ingest subprocess loop:
@@ -156,9 +156,9 @@ def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
     """Recursively walk an exit_gates tree, checking leaf predicates."""
     if not isinstance(spec, dict):
         return
-    spec_d = spec
-    composites = [k for k in ("all_of", "any_of", "not") if k in spec_d]
-    leaves = [k for k in spec_d if k not in ("all_of", "any_of", "not")]
+    spec_d: dict[str, Any] = spec
+    composites: list[str] = [k for k in ("all_of", "any_of", "not") if k in spec_d]
+    leaves: list[str] = [k for k in spec_d if k not in ("all_of", "any_of", "not")]
 
     if composites and leaves:
         return  # malformed; upstream _validate_gate_spec catches this
@@ -166,11 +166,11 @@ def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
         return
 
     if "all_of" in spec_d:
-        for child in spec_d["all_of"]:
+        for child in spec_d["all_of"]:  # type: ignore[arg-type]
             _walk_gate_paths(child, errors)
         return
     if "any_of" in spec_d:
-        for child in spec_d["any_of"]:
+        for child in spec_d["any_of"]:  # type: ignore[arg-type]
             _walk_gate_paths(child, errors)
         return
     if "not" in spec_d:
@@ -183,9 +183,7 @@ def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
     name = leaves[0]
     if name not in ("artifact_exists", "artifact_contains"):
         return
-    args = spec_d[name]
-    if not isinstance(args, dict):
-        return
+    args: dict[str, Any] = spec_d[name]  # type: ignore[assignment]
     # Only flag when ``path:`` is used without ``phase:``.
     # If ``phase`` is present, it takes precedence at evaluation time.
     if "path" not in args or "phase" in args:

@@ -26,7 +26,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class _StructuralMigration:
     """
 
     @classmethod
-    def _apply(
+    def apply(
         cls,
         conn: sqlite3.Connection,
         migrations: tuple[tuple[str, str, str], ...],
@@ -245,8 +245,8 @@ class CodeIndexJob:
     finished_at: float | None
     governs_written: int = 0
     governs_dropped: int = 0
-    governs_unresolved_spans: list[str] = field(default_factory=list)
-    governs_suspicious_docs: list[str] = field(default_factory=list)
+    governs_unresolved_spans: list[str] = field(default_factory=lambda: [])
+    governs_suspicious_docs: list[str] = field(default_factory=lambda: [])
 
 
 @dataclass(frozen=True)
@@ -285,7 +285,9 @@ def _json_list(raw: object) -> list[str]:
         data = json.loads(str(raw))
     except (TypeError, ValueError):
         return []
-    return [str(x) for x in data] if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    return [str(x) for x in cast(list[object], data)]
 
 
 def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
@@ -359,7 +361,7 @@ class CodeIndexJobsStore:
                 conn.execute(ddl)
 
         # Structural migrations (table recreation for PK changes)
-        _StructuralMigration._apply(conn, _STRUCTURAL_MIGRATIONS)
+        _StructuralMigration.apply(conn, _STRUCTURAL_MIGRATIONS)
 
     @property
     def conn(self) -> sqlite3.Connection:

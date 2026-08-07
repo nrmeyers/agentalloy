@@ -96,6 +96,10 @@ def _tier2_k() -> int | None:
     return None
 
 
+def _empty_str_list() -> list[str]:
+    return []
+
+
 @dataclass
 class ProxyComposeTelemetry:
     """Skill/fragment provenance for one proxy request, merged across both compose
@@ -134,7 +138,7 @@ class ProxyComposeTelemetry:
     retrieval_latency_ms: int | None = None
     total_latency_ms: int | None = None
     contract_id: str | None = None
-    contract_tags: list[str] = field(default_factory=list)
+    contract_tags: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass
