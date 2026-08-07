@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from agentalloy.storage.state_store import DuckDBStateStore, PhaseState
 
 __all__ = [
-    "FLOW_MODES",
+    "PAUSE_MODES",
     "LIFECYCLE_MODES",
     "_build_predicate_context",
     "_load_workflow_skill_for_phase",
@@ -47,7 +47,7 @@ __all__ = [
     "_write_orientation_announced_atomic",
     "_write_phase_atomic",
     "exit_gates_for_phase",
-    "read_flow_state",
+    "read_pause_state",
 ]
 
 # Per-repo lifecycle modes (see ``_read_lifecycle_mode``). ``full`` is the
@@ -56,13 +56,14 @@ __all__ = [
 LIFECYCLE_MODES = ("full", "off")
 _DEFAULT_LIFECYCLE_MODE = "full"
 
-# Per-repo flow modes, stored as an optional ``mode`` field in the phase row
-# (see ``read_flow_state``). ``workflow`` (the default — an absent/unknown
-# ``mode`` reads as workflow) is today's full SDD steering; ``free`` pauses ALL
+# Per-repo pause modes, stored as an optional ``mode`` field in the phase row
+# (see ``read_pause_state``). ``workflow`` (the default — an absent/unknown
+# ``mode`` reads as workflow) is today's full SDD steering; ``paused`` pauses ALL
 # workflow steering (orientation, banners, exit gates, transitions, intake)
-# while keeping domain-skill composition. Entering free-flow never changes the
+# while keeping domain-skill composition. Entering pause never changes the
 # ``phase`` value, so resume returns to exactly the prior phase.
-FLOW_MODES = ("workflow", "free")
+# Legacy alias: ``free`` (old name) reads as ``paused``.
+PAUSE_MODES = ("workflow", "paused")
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,7 @@ def _phase_state(project_root: Path) -> PhaseState | None:
     """The full :class:`PhaseState` for *project_root*, or ``None``.
 
     In-process only. The three projections below (``_read_phase``,
-    ``read_flow_state``, ``_read_transitioned_by``) all come off one call to
+    ``read_pause_state``, ``_read_transitioned_by``) all come off one call to
     this on the proxy path, so a concurrent transition can never hand a single
     turn a mixed view of phase, mode, and actor.
     """
@@ -137,18 +138,19 @@ def _read_phase(project_root: Path) -> str | None:
     return state.phase if state else None
 
 
-def read_flow_state(project_root: Path) -> tuple[str, str | None]:
-    """The per-repo flow mode as ``(mode, free_since)``.
+def read_pause_state(project_root: Path) -> tuple[str, str | None]:
+    """The per-repo pause mode as ``(mode, paused_since)``.
 
-    ``mode`` is ``"free"`` only when the phase row carries ``mode: free``;
+    ``mode`` is ``"paused"`` only when the phase row carries ``mode: paused``;
     anything else (no row, absent field, unknown value) reads as ``"workflow"``
-    — the historical behavior. ``free_since`` is the ISO timestamp recorded
-    when free-flow was entered (drives the daily reminder), or ``None``.
+    — the historical behavior. ``paused_since`` is the ISO timestamp recorded
+    when pause was entered (drives the daily reminder), or ``None``.
+    Legacy: ``mode: free`` (old name) reads as ``paused``.
     Never raises.
     """
     state = _phase_state(project_root)
-    if state is not None and (state.mode or "").lower() == "free":
-        return "free", state.free_since or None
+    if state is not None and (state.mode or "").lower() in ("paused", "free"):
+        return "paused", state.free_since or None
     return "workflow", None
 
 
@@ -212,8 +214,8 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
 
     The write itself is :meth:`DuckDBStateStore.write_phase`, which does the
     read-modify-write inside a transaction and owns the preservation rules the
-    file version used to hand-roll: ``mode``/``free_since`` carry forward so an
-    auto-transition never silently drops the repo out of (or into) free-flow,
+    file version used to hand-roll: ``mode``/``paused_since`` carry forward so an
+    auto-transition never silently drops the repo out of (or into) pause,
     and ``transitioned_by`` is stamped only on a *real* transition
     (``prev != phase``) — an idempotent rewrite keeps the prior actor, which is
     what lets a *different* session's next turn recognize "the phase moved and
@@ -306,7 +308,7 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
 #
 # ``announced`` and ``banner-turns`` moved to the store (see below) and are no
 # longer in this set.
-_RUNTIME_STATE_KEYS = frozenset({"composed", "free-reminded"})
+_RUNTIME_STATE_KEYS = frozenset({"composed", "pause-reminded"})
 
 
 def _state_file(project_root: Path, name: str) -> Path:

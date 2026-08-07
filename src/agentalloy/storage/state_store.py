@@ -1,9 +1,9 @@
 """DuckDB-backed SDD state store — replaces per-repo files with a session-aware store.
 
 Holds the SDD lifecycle's runtime state (phase, cursor, announced, composed,
-approved, banner-turns, free-reminded) as rows in a single ``sdd_state`` table
+approved, banner-turns, pause-reminded) as rows in a single ``sdd_state`` table
 keyed by ``(repo, kind, session_key)``.  Session-scoped kinds (announced,
-composed, banner-turns, free-reminded) carry a non-null ``session_key``;
+composed, banner-turns, pause-reminded) carry a non-null ``session_key``;
 repo-scoped kinds (phase, cursor, approved) have ``session_key IS NULL``.
 
 The store is owned by the running per-repo service (single-writer DuckDB
@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_sdd_artifact_phase
 # State kinds and their properties
 REPO_SCOPED_KINDS: frozenset[str] = frozenset({"phase", "cursor", "approved"})
 SESSION_SCOPED_KINDS: frozenset[str] = frozenset(
-    {"announced", "composed", "banner-turns", "free-reminded"}
+    {"announced", "composed", "banner-turns", "pause-reminded"}
 )
 LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
@@ -170,7 +170,7 @@ class PhaseState:
 
     phase: str
     mode: str | None = None
-    free_since: str | None = None
+    paused_since: str | None = None
     transitioned_by: str | None = None
     started_at: str | None = None
     phase_start_ref: str | None = None
@@ -743,10 +743,13 @@ class DuckDBStateStore:
         if not blob.get("phase"):
             return None
         phase = str(blob["phase"])
+        # Legacy: ``free_since`` was the old key; read it for backward compat,
+        # falling through to the new ``paused_since`` key.
+        paused = _opt_str(blob.get("paused_since")) or _opt_str(blob.get("free_since"))
         return PhaseState(
             phase=phase,
             mode=_opt_str(blob.get("mode")),
-            free_since=_opt_str(blob.get("free_since")),
+            paused_since=paused,
             transitioned_by=_opt_str(blob.get("transitioned_by")),
             started_at=_opt_str(blob.get("started_at")),
             phase_start_ref=_opt_str(blob.get("phase_start_ref")),
