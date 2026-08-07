@@ -68,7 +68,9 @@ category_scope: [process]
 author: agentalloy
 change_summary: "split from sdd-design-and-planning: design focuses on approach, decisions, and rationale only; task decomposition, test cases, and build contracts moved to sdd-plan-and-contracts"
 raw_prose: |
-  # SDD — Design
+
+  **Before writing any code, verify the preceding phase's deliverables exist**
+  (`docs/spec/*.md` for spec; `docs/design/*/approach.md` for design→plan).  # SDD — Design
 
   **Checkpoint first.** You MUST confirm the spec artifact exists by running:
 

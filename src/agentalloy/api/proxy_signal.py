@@ -1064,7 +1064,16 @@ def _boundary_confirm_directives(
     combined prompt — confirm the phase, then ask about the reset — never two
     blocks.
     """
-    if phase is None or phase == INTAKE_PHASE:
+    # T4 intake confirmation — fires when intake is active and a NEW session
+    # resumes. The agent must confirm it should stay on intake before proceeding.
+    if phase is not None and phase == INTAKE_PHASE:
+        if new_session:
+            return [
+                "You are resuming a NEW session on phase `intake` (the entry phase). "
+                "Before doing any work, RUN `agentalloy contract init --phase spec` "
+                "to write the contract and PRESENT it in full and STOP — do not draft "
+                "solutions. The user will approve and advance the phase."
+            ]
         return []
 
     ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))

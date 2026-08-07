@@ -75,7 +75,9 @@ category_scope: [process]
 author: agentalloy
 change_summary: "outcomes-first spec: code-index + knowledge-graph reconnaissance informs outcome questions; always recommend when presenting options; code-index/knowledge-graph for reconnaissance only, not method decisions; prepare hand-off wording aligned with checkpoint model"
 raw_prose: |
-  # SDD — Spec
+
+  **Before writing any spec, verify intake's contract exists** (`agentalloy contract list --phase spec`),
+  and **before writing code**, verify the preceding phase's deliverables exist.  # SDD — Spec
 
   **Checkpoint first.** You MUST confirm intake's contract exists by running:
 

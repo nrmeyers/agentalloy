@@ -78,7 +78,9 @@ category_scope: [process]
 author: agentalloy
 change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (qa artifact) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until the solutions artifact records this task's lesson (a stale prior-task lesson can't satisfy it), with the solutions artifact asserted as a prose invariant. MIGRATION: the lesson moved off disk — it is now the store artifact (phase=qa, name=solution, written via `agentalloy contract artifact-set`) rather than docs/solutions/<slug>.md; the gate reads the store first and still accepts a pre-migration docs/solutions/ file, so existing repos are not stranded. The prose invariant token likewise changed from docs/solutions/ to the solutions artifact: a pre-existing enabled profile override for this skill that lacks the new token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
 raw_prose: |
-  # SDD — QA (Verify and Review)
+
+  **Before writing any code, verify the preceding phase's deliverables exist**
+  (`src/**`, `docs/plan/*.md`).  # SDD — QA (Verify and Review)
 
   **Checkpoint first.** You MUST confirm the implementation (`src/`) and its tests (`tests/`) exist
   before reviewing — if they do not, you skipped build; STOP and go back. You MUST record the gate
