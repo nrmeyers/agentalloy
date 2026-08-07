@@ -410,6 +410,7 @@ def _query_phase_events(
     until: int | None,
     limit: int,
     repo: str | None = None,
+    include_delivery: bool = True,
 ) -> dict[str, Any]:
     """Run the three phase_events aggregations via ``DuckDBTelemetryStore.query``.
 
@@ -496,12 +497,92 @@ def _query_phase_events(
         for r in timeline_rows
     ]
 
-    return {"per_phase": per_phase, "llm_latency": latency, "timeline": timeline}
+    delivery = (
+        _query_delivery_rate(store, phase=phase, since=since, until=until, repo=repo)
+        if include_delivery
+        else []
+    )
+
+    return {
+        "per_phase": per_phase,
+        "llm_latency": latency,
+        "timeline": timeline,
+        "delivery": delivery,
+    }
 
 
 def _phase_events_table_exists(store: Any) -> bool:
     rows = store.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'phase_events'")
     return bool(rows)
+
+
+def _phase_events_has_workflow_delivered_column(store: Any) -> bool:
+    """True once the ``workflow_delivered`` column (#547 sub-4) exists on
+    ``phase_events``. Mirrors ``_phase_events_has_repo_column``: the writer's
+    migration only runs on the next *write*, and this CLI only ever reads
+    (``open_telemetry(..., read_only=True)``), so a pre-migration table on disk
+    is never touched here."""
+    rows = store.query(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'phase_events' AND column_name = 'workflow_delivered'"
+    )
+    return bool(rows)
+
+
+def _query_delivery_rate(
+    store: Any,
+    *,
+    phase: str | None,
+    since: int | None,
+    until: int | None,
+    repo: str | None,
+) -> list[dict[str, Any]]:
+    """Per-phase instruction-delivery rate among ``llm_sent`` events (#547 sub-4).
+
+    ``workflow_delivered`` is only meaningful on ``llm_sent`` rows (set from
+    ``signal.workflow_system_prose is not None`` at send time), so this always
+    scopes to that event type regardless of an ``--event-type`` filter.
+
+    CAVEAT — the denominator is not perfectly comparable across the three proxy
+    surfaces this table pools together: the OpenAI chat-completions path
+    (``proxy_router._emit_llm_sent``) writes unconditionally, pre-dispatch,
+    including forwards upstream later fails; the Anthropic passthrough and
+    Responses surfaces (``proxy_passthrough_router._make_on_status``) only
+    write on a confirmed 2xx forward. So a non-2xx upstream response counts
+    toward the OpenAI-path denominator but not the other two. Rates blended
+    across surfaces with very different error rates will skew accordingly;
+    there is no surface discriminator column to split on today.
+    """
+    where, params = _phase_events_where(
+        phase=phase, event_type="llm_sent", since=since, until=until, repo=repo
+    )
+    rows = store.query(
+        f"""
+        SELECT
+            phase,
+            SUM(CASE WHEN workflow_delivered THEN 1 ELSE 0 END) AS delivered,
+            SUM(CASE WHEN workflow_delivered = FALSE THEN 1 ELSE 0 END) AS not_delivered
+        FROM phase_events
+        {where}
+        GROUP BY phase
+        ORDER BY phase
+        """,
+        params,
+    )
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        delivered = int(r[1] or 0)
+        not_delivered = int(r[2] or 0)
+        total = delivered + not_delivered
+        result.append(
+            {
+                "phase": str(r[0]),
+                "delivered": delivered,
+                "not_delivered": not_delivered,
+                "delivery_rate": round(delivered / total, 3) if total else None,
+            }
+        )
+    return result
 
 
 def _phase_events_has_repo_column(store: Any) -> bool:
@@ -528,6 +609,7 @@ def _empty_phases_result() -> dict[str, Any]:
         "per_phase": [],
         "llm_latency": {"count": 0, "avg_latency_ms": None, "p95_latency_ms": None},
         "timeline": [],
+        "delivery": [],
     }
 
 
@@ -593,6 +675,7 @@ def _run_phases(args: argparse.Namespace) -> int:
                     until=until,
                     limit=limit,
                     repo=repo,
+                    include_delivery=_phase_events_has_workflow_delivered_column(ts),
                 )
         finally:
             ts.close()
@@ -609,6 +692,7 @@ def _render_phases(
     per_phase: list[dict[str, Any]] = list(result.get("per_phase") or [])
     latency: dict[str, Any] = result.get("llm_latency") or {}
     timeline: list[dict[str, Any]] = list(result.get("timeline") or [])
+    delivery: list[dict[str, Any]] = list(result.get("delivery") or [])
 
     print_rich("\n  [bold]Phase Events[/bold]")
     print_rich(f"  [dim]{_scope_label(repo)}[/dim]")
@@ -642,6 +726,20 @@ def _render_phases(
         print_rich(f"  P95 latency: {p95:.1f} ms" if p95 is not None else "  P95 latency: n/a")
     else:
         print_rich("  No latency samples for the current filter.")
+
+    print_rich()
+    print_rich("  [bold]Instruction delivery rate[/bold] (workflow_delivered on llm_sent)")
+    print_rich()
+    if not delivery:
+        print_rich("  No delivery data for the current filter.")
+    else:
+        for row in delivery:
+            rate = row["delivery_rate"]
+            rate_str = f"{rate * 100:.0f}%" if rate is not None else "n/a"
+            print_rich(
+                f"  {str(row['phase']):<12} {rate_str:>5}   "
+                f"[dim](delivered={row['delivered']}, suppressed={row['not_delivered']})[/dim]"
+            )
 
     print_rich()
     print_rich("  [bold]Timeline[/bold] (most recent first)")

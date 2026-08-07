@@ -18,6 +18,7 @@ proxy. Auth is transparent: this path holds no Anthropic credential.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -138,17 +139,52 @@ def _noop_status(_status: int) -> None:
     return None
 
 
+def _flatten_text_field(value: Any) -> str | None:
+    """Flatten a system/instructions field (plain string or list of Anthropic-style
+    text blocks) to plain text, mirroring ``proxy_router._extract_system_prompt``
+    for the chat-completions surface."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, list):
+        parts = [
+            cast("dict[str, Any]", b).get("text", "")
+            for b in cast("list[Any]", value)
+            if isinstance(b, dict) and cast("dict[str, Any]", b).get("type") == "text"
+        ]
+        joined = "".join(parts)
+        return joined or None
+    return None
+
+
+def _payload_system_prompt_sha(payload: dict[str, Any], field: str) -> str | None:
+    """sha256 fingerprint of ``payload[field]`` (Anthropic ``system`` or Responses
+    ``instructions``), mirroring ``proxy_router._system_prompt_sha`` so the
+    ``workflow_delivered`` telemetry column is comparable across all three proxy
+    surfaces."""
+    text = _flatten_text_field(payload.get(field))
+    if not text:
+        return None
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _make_on_status(
     project_dir: Path,
     outcome: InjectOutcome[dict[str, Any]] | None,
     vector_store: TelemetryStore | None,
     signal: SignalResult,
+    *,
+    phase_telemetry: PhaseTelemetryWriter | None = None,
+    model: str | None = None,
+    system_prompt_sha: str | None = None,
 ) -> Callable[[int], None]:
     """``on_status`` for the forward: on a 2xx response commit the deferred cadence
-    markers (iff a workflow block composed) AND write one consolidated proxy trace.
+    markers (iff a workflow block composed), write one consolidated proxy trace, AND
+    write a ``phase_events`` ``llm_sent`` row so instruction-delivery telemetry
+    (``workflow_delivered``) exists on this surface too, not just the OpenAI
+    chat-completions path (#547 sub-4).
 
-    Best-effort telemetry — the arg-construction is guarded and ``write_proxy_trace``
-    is internally soft-failing, so neither can break the forward. A non-2xx forward
+    Best-effort telemetry — the arg-construction is guarded and both writes are
+    internally soft-failing, so neither can break the forward. A non-2xx forward
     commits nothing and records nothing (the model never processed the turn).
     """
 
@@ -161,6 +197,20 @@ def _make_on_status(
                 _write_passthrough_trace(vector_store, signal, outcome)
             except Exception:  # noqa: BLE001 — telemetry never breaks the forward
                 logger.warning("passthrough telemetry write failed", exc_info=True)
+        if ok and phase_telemetry is not None:
+            try:
+                phase_telemetry.llm_sent(
+                    signal.trace_id or "",
+                    signal.phase or "unknown",
+                    model=model,
+                    direction="forward",
+                    workflow_skill_id=signal.workflow_skill_id,
+                    system_prompt_sha=system_prompt_sha,
+                    repo=signal.repo,
+                    workflow_delivered=signal.workflow_system_prose is not None,
+                )
+            except Exception:  # noqa: BLE001 — telemetry never breaks the forward
+                logger.debug("llm_sent telemetry write failed", exc_info=True)
 
     return on_status
 
@@ -466,7 +516,17 @@ async def passthrough_anthropic_messages(
             # (nothing-composed) case is recorded too — not just the committed-marker
             # case. A compose-path exception leaves on_status = _noop_status (no row;
             # error-path parity deferred).
-            on_status = _make_on_status(decode_proj_token(token), outcome, vector_store, signal)
+            final_payload = injected if injected is not None else payload
+            model = final_payload.get("model")
+            on_status = _make_on_status(
+                decode_proj_token(token),
+                outcome,
+                vector_store,
+                signal,
+                phase_telemetry=phase_telemetry,
+                model=model if isinstance(model, str) else None,
+                system_prompt_sha=_payload_system_prompt_sha(final_payload, "system"),
+            )
         except Exception:
             logger.warning("passthrough compose/inject failed; forwarding original", exc_info=True)
             body_to_send = raw_body

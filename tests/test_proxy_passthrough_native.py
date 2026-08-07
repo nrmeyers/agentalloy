@@ -23,6 +23,10 @@ from fastapi.testclient import TestClient
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.compose_models import ComposedResult, LatencyBreakdown
 from agentalloy.api.proxy_context import encode_proj_token
+from agentalloy.api.proxy_passthrough_router import (
+    _flatten_text_field,
+    _payload_system_prompt_sha,
+)
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
@@ -728,6 +732,167 @@ def test_tc_compose_exception_still_forwards_no_row(tmp_path: Path) -> None:
         assert resp.status_code == 200
         assert json.loads(captured["body"]) == _anthropic_body()
         assert store.query_traces(limit=10) == []
+
+
+# --------------------------------------------------------------------------- #
+# #547 sub-4: the native passthrough now also writes a phase_events `llm_sent`
+# row (workflow_delivered included), mirroring the OpenAI chat-completions
+# surface's `_emit_llm_sent`. Previously this surface wrote NO llm_sent row at
+# all — instruction-delivery telemetry existed only for the OpenAI path.
+# --------------------------------------------------------------------------- #
+
+
+def _query_llm_sent(store: DuckDBTelemetryStore) -> list[tuple[Any, ...]]:
+    # phase_events is created lazily on the first PhaseTelemetryWriter write, so
+    # a run that (correctly) writes nothing leaves the table absent entirely.
+    exists = store.query(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'phase_events'"
+    )
+    if not exists:
+        return []
+    return store.query(
+        "SELECT phase, model, workflow_skill_id, workflow_delivered, "
+        "system_prompt_sha, repo FROM phase_events WHERE event_type = 'llm_sent'"
+    )
+
+
+def test_llm_sent_row_written_on_2xx_with_workflow_delivered_true(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    signal = SignalResult(
+        should_compose=False,
+        phase="build",
+        workflow_skill_id="wf-build",
+        workflow_system_prose="operate like so",
+        repo=str(tmp_path),
+        session_key="sess-1",
+        session_source="header",
+        task="t",
+    )
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store)
+        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 200
+        rows = _query_llm_sent(store)
+        assert len(rows) == 1
+        phase, model, workflow_skill_id, workflow_delivered, system_prompt_sha, repo = rows[0]
+        assert phase == "build"
+        assert model == "claude-test"
+        assert workflow_skill_id == "wf-build"
+        assert workflow_delivered is True
+        assert system_prompt_sha is not None and system_prompt_sha.startswith("sha256:")
+        assert repo == str(tmp_path)
+
+
+def test_llm_sent_row_written_with_workflow_delivered_false_when_no_prose(
+    tmp_path: Path,
+) -> None:
+    """`_composed_signal` sets no `workflow_system_prose` -- the exact analogue of
+    a free-flow turn (#547 sub-1) where instructions are intentionally suppressed."""
+    captured: dict[str, Any] = {}
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
+        with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 200
+        rows = _query_llm_sent(store)
+        assert len(rows) == 1
+        assert rows[0][3] is False  # workflow_delivered
+
+
+def test_llm_sent_row_not_written_on_non_2xx(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    signal = SignalResult(
+        should_compose=False,
+        phase="build",
+        workflow_system_prose="operate like so",
+        repo=str(tmp_path),
+        task="t",
+    )
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store, status=529)
+        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 529
+        assert _query_llm_sent(store) == []
+
+
+def test_llm_sent_system_prompt_sha_none_when_no_system_field(tmp_path: Path) -> None:
+    """The Anthropic body in this suite always carries `system`; verify the sha
+    helper degrades to None rather than raising when a request has none."""
+    captured: dict[str, Any] = {}
+    signal = SignalResult(should_compose=False, phase="build", task="t")
+    body = {
+        "model": "claude-test",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": False,
+    }
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store)
+        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
+        assert resp.status_code == 200
+        rows = _query_llm_sent(store)
+        assert len(rows) == 1
+        assert rows[0][4] is None  # system_prompt_sha
+
+
+# --------------------------------------------------------------------------- #
+# #547 sub-4: unit coverage for the sha helpers themselves (both field shapes
+# each surface actually uses: Anthropic's str-or-list-of-blocks `system`,
+# Responses' plain-string `instructions`, and the missing/empty degrade path).
+# --------------------------------------------------------------------------- #
+
+
+class TestFlattenTextField:
+    def test_plain_string(self) -> None:
+        assert _flatten_text_field("hello") == "hello"
+
+    def test_empty_string_is_none(self) -> None:
+        assert _flatten_text_field("") is None
+
+    def test_list_of_text_blocks_joined(self) -> None:
+        blocks = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        assert _flatten_text_field(blocks) == "ab"
+
+    def test_list_ignores_non_text_blocks(self) -> None:
+        blocks = [{"type": "text", "text": "a"}, {"type": "image", "text": "ignored"}]
+        assert _flatten_text_field(blocks) == "a"
+
+    def test_empty_list_is_none(self) -> None:
+        assert _flatten_text_field([]) is None
+
+    def test_none_is_none(self) -> None:
+        assert _flatten_text_field(None) is None
+
+    def test_unexpected_shape_is_none(self) -> None:
+        assert _flatten_text_field(42) is None
+
+
+class TestPayloadSystemPromptSha:
+    def test_string_field_hashes(self) -> None:
+        sha = _payload_system_prompt_sha({"system": "SYSTEM TEXT"}, "system")
+        assert sha is not None and sha.startswith("sha256:")
+        assert sha == _payload_system_prompt_sha({"system": "SYSTEM TEXT"}, "system")
+
+    def test_different_text_different_hash(self) -> None:
+        a = _payload_system_prompt_sha({"system": "A"}, "system")
+        b = _payload_system_prompt_sha({"system": "B"}, "system")
+        assert a != b
+
+    def test_list_field_hashes(self) -> None:
+        payload = {"system": [{"type": "text", "text": "SYSTEM TEXT"}]}
+        assert _payload_system_prompt_sha(payload, "system") == _payload_system_prompt_sha(
+            {"system": "SYSTEM TEXT"}, "system"
+        )
+
+    def test_missing_field_is_none(self) -> None:
+        assert _payload_system_prompt_sha({}, "system") is None
+
+    def test_instructions_field_name(self) -> None:
+        sha = _payload_system_prompt_sha({"instructions": "INSTR"}, "instructions")
+        assert sha is not None and sha.startswith("sha256:")
 
 
 # --------------------------------------------------------------------------- #

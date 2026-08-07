@@ -43,6 +43,7 @@ from agentalloy.api.proxy_passthrough_router import (
     _forward_streaming,
     _make_on_status,
     _noop_status,
+    _payload_system_prompt_sha,
 )
 from agentalloy.api.proxy_router import (
     _get_phase_telemetry_writer,
@@ -257,7 +258,17 @@ async def passthrough_openai_responses(
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
-            on_status = _make_on_status(decode_proj_token(token), outcome, vector_store, signal)
+            final_payload = injected if injected is not None else payload
+            model = final_payload.get("model")
+            on_status = _make_on_status(
+                decode_proj_token(token),
+                outcome,
+                vector_store,
+                signal,
+                phase_telemetry=phase_telemetry,
+                model=model if isinstance(model, str) else None,
+                system_prompt_sha=_payload_system_prompt_sha(final_payload, "instructions"),
+            )
         except Exception:
             logger.warning(
                 "responses passthrough compose/inject failed; forwarding original", exc_info=True
