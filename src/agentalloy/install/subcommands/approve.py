@@ -24,13 +24,13 @@ from typing import Any
 from agentalloy.api.state_client import StateClientError
 
 _APPROVABLE = ("spec", "design", "plan", "sdd-fast", "add-skill")
-_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan"})
-# sdd-fast (docs/fast/*.md) and add-skill (a custom-skill YAML, not a phase
-# deliverable body at all) keep their packs' disk-glob exit gates for now —
-# spec/design (and plan, added with the design/plan split) are store-backed.
-# Extending the remaining two is a follow-up.
+_STORE_BACKED_PHASES = frozenset({"spec", "design", "plan", "sdd-fast"})
+# add-skill alone keeps a disk-glob exit gate: a custom-skill pack YAML is
+# tool-written configuration (`agentalloy new-skill-pack`), not a phase
+# deliverable body an agent hand-writes. Every lifecycle artifact is store-backed
+# — naming a disk path in agent-facing output is what taught agents to write
+# `docs/fast/*.md` (gitignored, and invisible to the store-backed exit gate).
 _DISK_EXIT_ARTIFACT_GLOB = {
-    "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 
@@ -136,7 +136,15 @@ def run_approve(
         if not rows:
             return {
                 "ok": False,
-                "error": f"no exit artifact recorded for phase '{phase}' to approve",
+                # Name the store verb, not a path. An error that says only
+                # "no exit artifact" invites the agent to create a file; the
+                # gate reads the store, so a file would satisfy nothing.
+                "error": (
+                    f"no exit artifact recorded for phase '{phase}' to approve — "
+                    f"record it with `agentalloy contract artifact-set --phase {phase} "
+                    f"--slug <slug> --name <name>.md` (the artifact lives in the "
+                    f"store, not on disk)"
+                ),
             }
         digest = _artifact_digest(rows)
         handle.set_approval(phase, digest, approver=approver)

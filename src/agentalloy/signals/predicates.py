@@ -16,6 +16,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -465,6 +466,48 @@ def _parse_markdown_headings(content: str) -> list[str]:
     return [line.lstrip("#").strip() for line in content.splitlines() if line.startswith("#")]
 
 
+@lru_cache(maxsize=256)
+def _section_completeness_cached(
+    path_glob: str,
+    sections_key: tuple[str, ...],
+    project_root: Path,
+    _mtime: float,
+) -> tuple[int, int, tuple[str, ...]]:
+    """Memoized core of :func:`section_completeness`, keyed including file mtime.
+
+    ``_mtime`` is not read — it is the cache key that makes the entry self-invalidate
+    when the artifact changes. ``evaluate_signal`` runs in-process, so this survives
+    for the worker's lifetime and spares the re-parse on turns where the banner is
+    built for a hash comparison and then suppressed (#587 §4).
+
+    Nothing clears this on a phase transition, and it does not need to: a phase
+    change alters ``path_glob``/``sections_key``, so the old phase's entries are
+    simply never hit again and age out by LRU. ``project_root`` is in the key, so
+    a worker serving several repos stays correct — they only compete for the 256
+    slots. The one stale case is delete-then-recreate at a previously seen mtime,
+    which requires a coarse-mtime filesystem or a checkout restoring old stamps.
+    """
+    present, total, missing = _section_completeness_uncached(
+        path_glob, list(sections_key), project_root
+    )
+    return present, total, tuple(missing)
+
+
+def _glob_first_mtime(project_root: Path, path_glob: str) -> float:
+    """mtime of the first file matching ``path_glob``, or ``-1.0`` when absent.
+
+    ``-1.0`` is a real cache key: it means "no artifact yet", and the entry is
+    invalidated the moment one appears with a genuine mtime.
+    """
+    try:
+        files = _glob_files(project_root, path_glob)
+        if not files:
+            return -1.0
+        return files[0].stat().st_mtime
+    except Exception:
+        return -1.0
+
+
 def section_completeness(
     path_glob: str,
     required_sections: list[str],
@@ -479,11 +522,33 @@ def section_completeness(
     :func:`_section_present` (case-insensitive, trailing-qualifier tolerant), the same
     rule the ``artifact_contains`` exit gate applies.
 
+    Results are memoized on ``(glob, sections, root, artifact mtime)`` so repeated
+    banner builds don't re-glob and re-parse an unchanged file; the mtime component
+    invalidates the entry as soon as the artifact is edited.
+
     File I/O is fully wrapped: a missing glob match or an unreadable file yields
     ``(0, total, required_sections)`` — i.e. no progress, every section "missing" —
     so the banner never raises and a not-yet-created artifact simply shows 0 present.
     Never raises.
     """
+    try:
+        present, total, missing = _section_completeness_cached(
+            path_glob,
+            tuple(required_sections),
+            project_root,
+            _glob_first_mtime(project_root, path_glob),
+        )
+        return present, total, list(missing)
+    except Exception:
+        return _section_completeness_uncached(path_glob, required_sections, project_root)
+
+
+def _section_completeness_uncached(
+    path_glob: str,
+    required_sections: list[str],
+    project_root: Path,
+) -> tuple[int, int, list[str]]:
+    """The real scan. See :func:`section_completeness` for the contract."""
     total = len(required_sections)
     if total == 0:
         return 0, 0, []
@@ -505,6 +570,59 @@ def section_completeness(
         return present_count, total, missing
     except Exception:
         return 0, total, list(required_sections)
+
+
+def store_section_completeness(
+    store: Any,
+    phase: str,
+    name_glob: str,
+    required_sections: list[str],
+    slug: str | None = None,
+) -> tuple[int, int, list[str]]:
+    """``section_completeness`` for a STORE-backed artifact.
+
+    Lifecycle artifacts (spec.md, approach.md, tasks.md, ...) live in the artifact
+    store, not on disk, so the filesystem scorer above reports zero progress for
+    them forever. This scores the same required headings against the recorded
+    artifact bodies instead.
+
+    Sections are scored against the UNION of headings across every row matching
+    ``name_glob`` — plan's gate declares one section list covering ``tasks.md``
+    *and* ``test-plan.md``, so scoring only the first row would permanently report
+    the other file's sections missing.
+
+    Returns ``(present, total, missing)``. Never raises: an unreachable store or a
+    malformed row yields ``(0, total, required_sections)``, i.e. no progress, which
+    the banner renders as "not yet recorded" rather than a false completion.
+    """
+    total = len(required_sections)
+    if total == 0:
+        return 0, 0, []
+    if store is None:
+        return 0, total, list(required_sections)
+    try:
+        rows = store.list_artifacts(phase, slug=slug, name_glob=name_glob)
+    except Exception:
+        return 0, total, list(required_sections)
+    if not rows:
+        return 0, total, list(required_sections)
+
+    headings: list[str] = []
+    for row in rows:
+        body = row.get("content") if isinstance(row, dict) else None
+        if isinstance(body, str):
+            headings.extend(_parse_markdown_headings(body))
+    if not headings:
+        return 0, total, list(required_sections)
+
+    present_count = 0
+    missing: list[str] = []
+    for section in required_sections:
+        if _section_present(section, headings):
+            present_count += 1
+        else:
+            missing.append(section)
+    return present_count, total, missing
 
 
 def eval_artifact_size_min(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:

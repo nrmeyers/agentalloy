@@ -210,6 +210,10 @@ def _seed_repo_metadata(root: Path) -> None:
     _git_exclude_agentalloy(root)
 
 
+# Marks a README as machine-written, so `_seed_agentalloy_readme` may refresh a
+# stale copy without clobbering a human-authored file of the same name.
+_AGENTALLOY_README_HEADING = "# .agentalloy/ — AgentAlloy per-repo state"
+
 _AGENTALLOY_README = """\
 # .agentalloy/ — AgentAlloy per-repo state
 
@@ -221,12 +225,23 @@ secret store, and git-excluded by `agentalloy add`.
 - `upstream` — where the proxy forwards LLM traffic for this repo
   (URL/model/key-env-name only; never a credential).
 - `config` — per-repo lifecycle mode.
-- `contracts/` — work-item contracts, when the lifecycle uses them.
+- `contracts/` — **legacy.** Work-item contracts and phase artifacts live in the
+  AgentAlloy state store, not here. A `contracts/` directory in this repo is a
+  pre-migration leftover, read for backward compatibility only.
 - `cursor` — the current work-item pointer (advanced by `agentalloy task`).
 - `announced` / `composed` / `banner-turns` — legacy locations of per-turn
   injection-cadence counters. Current releases keep these on the AgentAlloy
   data volume instead, precisely so nothing here changes mid-session; a
   leftover copy from an older release is stale and may be deleted.
+
+## Agents: do not hand-write lifecycle files
+
+Specs, approaches, task plans, contracts and phase artifacts are recorded through
+`agentalloy contract artifact-set` / `agentalloy contract init` and read back from
+the store. The **only** files you write to disk are runtime source code and its
+tests. A markdown file created under `docs/`, `.agentalloy/`, or the repo root to
+satisfy a phase gate satisfies nothing — the gate queries the store, so the file
+is invisible to it and the phase stays blocked.
 
 If an agent notices files here changing during a session, that is the
 AgentAlloy proxy recording ordinary cadence/phase state — expected behavior,
@@ -235,15 +250,29 @@ not an unknown background process.
 
 
 def _seed_agentalloy_readme(root: Path) -> None:
-    """Write ``.agentalloy/README.md`` (create-only) explaining the directory.
+    """Write ``.agentalloy/README.md`` explaining the directory, refreshing a stale one.
 
     Agents inspecting a wired repo (or noticing a phase transition mid-session)
     should find an explanation, not a mystery — an unexplained write from a
     proxy process reads as suspicious to harness file-watchers and users alike.
+
+    NOT create-only. This file is read by agents as authority on where lifecycle
+    state lives, so a stale copy actively misinforms: the pre-migration text
+    described ``contracts/`` as the contract location and taught agents to write
+    lifecycle artifacts to disk. Refreshing is gated on the file still carrying
+    the machine-written heading, so a human-authored README in this directory is
+    left untouched.
     """
     readme = root / ".agentalloy" / "README.md"
     if readme.exists():
-        return
+        try:
+            existing = readme.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if existing == _AGENTALLOY_README:
+            return
+        if not existing.startswith(_AGENTALLOY_README_HEADING):
+            return  # human-authored — do not clobber
     readme.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         readme.write_text(_AGENTALLOY_README, encoding="utf-8")

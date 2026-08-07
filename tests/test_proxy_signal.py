@@ -700,6 +700,135 @@ def _gates_with_sections() -> dict[str, Any]:
     }
 
 
+def _store_gates() -> dict[str, Any]:
+    """The post-migration shape: store-backed `phase`+`name`, no filesystem path."""
+    return {
+        "all_of": [
+            {"artifact_exists": {"phase": "design", "name": "approach.md"}},
+            {
+                "artifact_contains": {
+                    "phase": "design",
+                    "name": "approach.md",
+                    "sections": ["Approach", "Decisions"],
+                }
+            },
+        ]
+    }
+
+
+class _FakeStore:
+    """Minimal `list_artifacts` stand-in: `{(phase, name): body}`."""
+
+    def __init__(self, rows: dict[tuple[str, str], str] | None = None) -> None:
+        self._rows = rows or {}
+
+    def list_artifacts(
+        self, phase: str, *, slug: str | None = None, name_glob: str | None = None
+    ) -> list[dict[str, Any]]:
+        import fnmatch
+
+        out: list[dict[str, Any]] = []
+        for (p, name), body in self._rows.items():
+            if p != phase:
+                continue
+            if name_glob is not None and not fnmatch.fnmatch(name, name_glob):
+                continue
+            out.append({"phase": p, "slug": slug or "x", "name": name, "content": body})
+        return out
+
+
+class TestStoreBackedBanner:
+    """#587 §1 — the directive names the STORE artifact, declaratively."""
+
+    def test_names_the_unrecorded_store_artifact(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _store_gates(), tmp_path, store=_FakeStore())
+        assert banner.startswith("[agentalloy · design] approach.md not yet recorded")
+
+    def test_directive_names_no_filesystem_path(self, tmp_path: Path) -> None:
+        """The failure #587's draft table would have reintroduced."""
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _store_gates(), tmp_path, store=_FakeStore())
+        for token in ("docs/", ".agentalloy/", "/"):
+            assert token not in banner.split("]", 1)[1], f"{token!r} leaked into {banner!r}"
+
+    def test_directive_is_declarative_not_imperative(self, tmp_path: Path) -> None:
+        """Imperatives in the last USER message trip injected-content defenses."""
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _store_gates(), tmp_path, store=_FakeStore())
+        lowered = banner.lower()
+        for verb in ("produce ", "create ", "write ", "you must", "run `"):
+            assert verb not in lowered, f"imperative {verb!r} in {banner!r}"
+
+    def test_store_sections_scored_and_shown(self, tmp_path: Path) -> None:
+        """Progress against store rows — dead before this, since the synthesized
+        `docs/<phase>/<name>` glob never exists on disk."""
+        from agentalloy.api.proxy_signal import build_banner
+
+        store = _FakeStore({("design", "approach.md"): "# t\n## Approach\nx\n"})
+        banner = build_banner("design", _store_gates(), tmp_path, store=store)
+        assert "1/2 sections" in banner
+        assert "(missing: Decisions)" in banner
+        # Recorded → the directive drops back to the plain pointer.
+        assert "not yet recorded" not in banner
+
+    def test_no_store_degrades_to_plain_directive(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _store_gates(), tmp_path, store=None)
+        assert banner.startswith("[agentalloy · design] approach.md not yet recorded")
+
+    @pytest.mark.parametrize(
+        "gates",
+        [
+            {"all_of": [{"artifact_exists": {"path": ".agentalloy/contracts/build/*.md"}}]},
+            {"all_of": [{"artifact_exists": {"path": "docs/fast/*.md"}}]},
+            {"all_of": [{"artifact_exists": {"path": "docs/spec/<slug>/spec.md"}}]},
+            {
+                "all_of": [
+                    {"artifact_exists": {"path": "docs/design/**/tasks.md"}},
+                    {
+                        "artifact_contains": {
+                            "path": "docs/design/**/tasks.md",
+                            "sections": ["Tasks"],
+                        }
+                    },
+                ]
+            },
+        ],
+    )
+    @pytest.mark.parametrize("phase", ["design", "build", "sdd-fast", "mystery"])
+    def test_legacy_disk_gate_never_reaches_the_banner(
+        self, tmp_path: Path, phase: str, gates: dict[str, Any]
+    ) -> None:
+        """A legacy pack's disk-path gate must not surface a path, on any phase.
+
+        This is the real-repo case: a repo wired before the store migration still
+        carries `path:` gates. Both branches are covered — a KNOWN phase (plain
+        directive + filtered checkpoint) and an unknown one (gate-derived fallback).
+        The banner is the highest-frequency injection surface there is, so a path
+        here is a standing instruction to write lifecycle files to disk.
+        """
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner(phase, gates, tmp_path, slug="feat", store=_FakeStore())
+        body = banner.split("]", 1)[1]
+        for token in ("docs/", ".agentalloy", ".md", "contracts"):
+            assert token not in body, f"{token!r} leaked into {banner!r}"
+
+    def test_glob_name_is_not_rendered_as_a_filename(self, tmp_path: Path) -> None:
+        """`*.md not yet recorded` reads as a filename to create."""
+        from agentalloy.api.proxy_signal import build_banner
+
+        gates = {"all_of": [{"artifact_exists": {"phase": "sdd-fast", "name": "*.md"}}]}
+        banner = build_banner("sdd-fast", gates, tmp_path, store=_FakeStore())
+        assert "*.md" not in banner
+        assert "its artifact not yet recorded" in banner
+
+
 def _design_gates() -> dict[str, Any]:
     """Mirror the real design exit gate: three docs each in their OWN file (one section
     apiece) plus the section-less build-contract checkpoint."""
@@ -761,18 +890,29 @@ class TestBuildBanner:
         banner = build_banner("spec", _gates_with_sections(), tmp_path)
         assert banner == "[agentalloy · spec] phase instructions: system prompt"
 
-    def test_unknown_phase_falls_back_to_gate_path(self, tmp_path: Path) -> None:
+    def test_unknown_phase_does_not_name_a_disk_path(self, tmp_path: Path) -> None:
+        """An unknown phase's directive must NOT echo its gate's filesystem path.
+
+        It used to render "out.md not yet produced". An unrecognized phase is by
+        definition a custom pack, and a legacy one still carries disk-path gates like
+        `.agentalloy/contracts/build/*.md` — naming that path in the banner is a
+        standing instruction to write lifecycle artifacts to disk, at the highest
+        frequency injection point there is.
+        """
         from agentalloy.api.proxy_signal import build_banner
 
-        # An unrecognized phase derives the directive from the first gate path.
         banner = build_banner("mystery", {"artifact_exists": {"path": "out.md"}}, tmp_path)
-        assert banner == "[agentalloy · mystery] out.md not yet produced"
+        assert "out.md" not in banner
+        assert banner.startswith("[agentalloy · mystery] mystery exit gate not yet satisfied")
 
     def test_unknown_phase_no_path_falls_back_to_satisfy_gate(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
 
         banner = build_banner("mystery", {}, tmp_path)
-        assert banner == "[agentalloy · mystery] mystery exit gate not yet satisfied"
+        assert (
+            banner == "[agentalloy · mystery] mystery exit gate not yet satisfied · "
+            "phase instructions: system prompt"
+        )
 
     def test_progress_appended_when_artifact_exists(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
@@ -800,7 +940,8 @@ class TestBuildBanner:
         # Gate has a path but no `sections` → no progress suffix even if file exists.
         (tmp_path / "out.md").write_text("# T\n## Anything\n")
         banner = build_banner("mystery", {"artifact_exists": {"path": "out.md"}}, tmp_path)
-        assert banner == "[agentalloy · mystery] out.md not yet produced"
+        assert "sections" not in banner
+        assert banner.startswith("[agentalloy · mystery] mystery exit gate not yet satisfied")
 
     def _write_design_docs(self, tmp_path: Path, *, slug: str, which: set[str]) -> None:
         d = tmp_path / "docs" / "design" / slug
@@ -834,18 +975,30 @@ class TestBuildBanner:
         assert "1/3 sections" in banner
         assert "(missing: Tasks, Test Cases)" in banner
 
-    def test_build_contract_checkpoint_surfaced_then_cleared(self, tmp_path: Path) -> None:
+    def test_contract_disk_checkpoint_is_not_surfaced(self, tmp_path: Path) -> None:
+        """A `.agentalloy/contracts/**` checkpoint no longer reaches the banner.
+
+        Contracts are store-backed; the real design pack declares no such gate. A
+        legacy pack that still does must not get its disk location advertised on the
+        highest-frequency injection surface.
+        """
         from agentalloy.api.proxy_signal import build_banner
 
         self._write_design_docs(tmp_path, slug="feat", which={"approach", "tasks", "test-plan"})
         banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
-        assert "· 0 build contracts (need ≥1)" in banner
-        # Satisfied once any build contract exists → the checkpoint line disappears.
-        bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-        bc.mkdir(parents=True)
-        (bc / "01-task.md").write_text("x")
-        banner2 = build_banner("design", _design_gates(), tmp_path, slug="feat")
-        assert "build contracts" not in banner2
+        assert "build contracts" not in banner
+        assert ".agentalloy" not in banner
+
+    def test_code_checkpoint_surfaced_then_cleared(self, tmp_path: Path) -> None:
+        """`src/**` IS a real disk deliverable, so its checkpoint still surfaces."""
+        from agentalloy.api.proxy_signal import build_banner
+
+        gates = {"all_of": [{"artifact_exists": {"path": "src/**"}}]}
+        banner = build_banner("build", gates, tmp_path)
+        assert "· 0 src (need ≥1)" in banner
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "m.py").write_text("x = 1\n")
+        assert "need ≥1" not in build_banner("build", gates, tmp_path)
 
     def test_slug_resolved_in_directive(self, tmp_path: Path) -> None:
         from agentalloy.api.proxy_signal import build_banner
@@ -948,9 +1101,16 @@ class TestBannerCadence:
             "raw_prose": "p",
         }
 
-    def test_throttled_to_default_cadence_of_five(self, tmp_path: Path) -> None:
-        # Emits on the phase's first carrier turn (count 0) and again every 5th turn,
-        # not on every turn.
+    def test_static_banner_emits_once_per_phase(self, tmp_path: Path) -> None:
+        """Phase entry emits; identical repeats are suppressed by the content hash.
+
+        Two throttles compose (#587): the adaptive cadence decides which turns MAY
+        emit (spec = every 3rd), and the content hash decides whether the text
+        actually differs from what the agent already has. With nothing changing, the
+        net is one emission per phase — the issue's stated goal (~1-2 per 30 turns
+        vs 6). Progress landing in the store changes the text and re-emits; that is
+        covered by `test_store_progress_change_re_emits`.
+        """
         _set_phase(tmp_path, "spec")
         with (
             mock.patch(
@@ -964,7 +1124,84 @@ class TestBannerCadence:
                 is not None
                 for _ in range(6)
             ]
-        assert emitted == [True, False, False, False, False, True]
+        assert emitted == [True, False, False, False, False, False]
+
+    def test_disk_progress_change_re_emits(self, tmp_path: Path) -> None:
+        """A banner whose text changed is emitted on the next cadence tick.
+
+        The dedup must suppress *redundancy*, not *news*. This covers the legacy
+        filesystem scorer (`_gates_with_sections` is a `docs/spec/*.md` gate); the
+        store path is covered by `test_store_progress_change_re_emits`.
+        """
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._spec_skill(["spec"]),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            first = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+            assert first is not None
+            # Turns 2-3 are within cadence and identical → suppressed.
+            for _ in range(2):
+                assert (
+                    asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+                    is None
+                )
+            # Land a section: the rendered banner now differs.
+            spec_dir = tmp_path / "docs" / "spec"
+            spec_dir.mkdir(parents=True, exist_ok=True)
+            (spec_dir / "f.md").write_text("# T\n## Acceptance Criteria\nx\n")
+            later = [
+                asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+                for _ in range(3)
+            ]
+        changed = [b for b in later if b is not None]
+        assert changed, "content changed but the banner never re-emitted"
+        assert "sections" in changed[0]
+
+    def test_store_progress_change_re_emits(self, tmp_path: Path) -> None:
+        """An artifact landing via `artifact-set` re-emits, end to end.
+
+        This is the interaction that matters: spec/design/plan are all store-backed,
+        so if the hash dedup swallowed store progress the agent would see one banner
+        on phase entry and nothing thereafter — no matter how much it recorded.
+        """
+        _set_phase(tmp_path, "design")
+        store = _FakeStore()
+        skill = {
+            "signal_keywords": [],
+            "exit_gates": _store_gates(),
+            "applies_to_phases": ["design"],
+            "raw_prose": "p",
+        }
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase", return_value=skill
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+            mock.patch("agentalloy.api.proxy_signal._banner_store", return_value=store),
+        ):
+            first = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+            assert first is not None
+            assert "approach.md not yet recorded" in first
+            # Identical turns inside the cadence: suppressed.
+            for _ in range(3):
+                assert (
+                    asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+                    is None
+                )
+            # Record the artifact with one of its two sections.
+            store._rows[("design", "approach.md")] = "# t\n## Approach\nx\n"
+            later = [
+                asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+                for _ in range(5)
+            ]
+        changed = [b for b in later if b is not None]
+        assert changed, "store artifact recorded but the banner never re-emitted"
+        assert "not yet recorded" not in changed[0]
+        assert "sections" in changed[0]
 
     def test_re_emits_on_phase_change_within_cadence(self, tmp_path: Path) -> None:
         # A phase change resets the cadence so the banner re-fires on phase entry even
@@ -985,24 +1222,37 @@ class TestBannerCadence:
         assert b2 is None  # turn 2 (count 1) suppressed
         assert b3 is not None and b3.startswith("[agentalloy · design]")  # reset + emit
 
-    def test_env_override_restores_every_turn(
+    def test_env_override_restores_every_turn_cadence(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The env override still makes EVERY turn a cadence tick.
+
+        The content hash is a separate, later gate, so identical text is still
+        suppressed — the override controls throttling, not dedup. Asserted via
+        `_adaptive_banner_cadence` directly since the end-to-end banner is
+        additionally subject to the hash.
+        """
+        from agentalloy.api.proxy_signal import _adaptive_banner_cadence
+
         monkeypatch.setenv("AGENTALLOY_BANNER_TURN_CADENCE", "1")
-        _set_phase(tmp_path, "spec")
-        with (
-            mock.patch(
-                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                return_value=self._spec_skill(["spec"]),
-            ),
-            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
-        ):
-            emitted = [
-                asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
-                is not None
-                for _ in range(3)
-            ]
-        assert emitted == [True, True, True]
+        # Overrides the phase base (build would otherwise be 10) and the stretch.
+        assert _adaptive_banner_cadence("build", 0) == 1
+        assert _adaptive_banner_cadence("build", 100) == 1
+        assert _adaptive_banner_cadence("spec", 0) == 1
+
+    def test_adaptive_cadence_is_phase_aware_and_stretches(self) -> None:
+        """Build is wide (heads-down coding); intake/spec are tight (drift-prone)."""
+        from agentalloy.api.proxy_signal import _adaptive_banner_cadence
+
+        assert _adaptive_banner_cadence("build", 0) == 10
+        assert _adaptive_banner_cadence("intake", 0) == 2
+        assert _adaptive_banner_cadence("spec", 0) == 3
+        assert _adaptive_banner_cadence("nonesuch", 0) == 5
+        # Stretches as the phase's shape is internalized.
+        assert _adaptive_banner_cadence("spec", 25) == 4  # 3 * 1.5
+        assert _adaptive_banner_cadence("spec", 60) == 6  # 3 * 2
+        # Never suppressed entirely.
+        assert _adaptive_banner_cadence("intake", 999) >= 1
 
 
 class TestOrientationAnnounceCadence:

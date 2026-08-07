@@ -17,6 +17,7 @@ from __future__ import annotations
 # whole module rather than per call site.
 # pyright: reportPrivateUsage=false
 import asyncio
+import hashlib
 import logging
 import os
 import uuid
@@ -29,10 +30,12 @@ from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
-from agentalloy.signals.predicates import section_completeness
+from agentalloy.signals.predicates import section_completeness, store_section_completeness
 from agentalloy.signals.prefilter import (
     PreFilterMatch,
     _extract_artifact_contains_specs,  # type: ignore[reportPrivateUsage]
+    _extract_artifact_contains_store_specs,  # type: ignore[reportPrivateUsage]
+    _extract_artifact_exists_store_specs,  # type: ignore[reportPrivateUsage]
     _extract_exists_only_paths,  # type: ignore[reportPrivateUsage]
     _extract_gate_paths,  # type: ignore[reportPrivateUsage]
 )
@@ -272,12 +275,40 @@ _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
     "sdd-fast": "phase instructions: system prompt",
 }
 
+# Trailing clause on every directive: the banner is a recency anchor, not the
+# instructions themselves. Pointing at the system prompt keeps it short and keeps
+# the authority where it belongs.
+_BANNER_SUFFIX = "phase instructions: system prompt"
+
+
+# Per-phase base cadence, in carrier turns (#587 §2). Replaces the flat 5: build is
+# heads-down coding where a status line is pure distraction, while the short
+# front-of-lifecycle phases are where an agent actually drifts off-contract.
+_PHASE_BANNER_CADENCE: dict[str, int] = {
+    "intake": 2,
+    "spec": 3,
+    "design": 4,
+    "plan": 4,
+    "build": 10,
+    "qa": 6,
+    "ship": 4,
+    "sdd-fast": 8,
+}
+
+_DEFAULT_BANNER_CADENCE = 5
+
+# The only filesystem locations the banner may name: real code deliverables.
+# Everything else in the lifecycle is store-backed.
+_CODE_PATH_PREFIXES = ("src/", "tests/")
+
 
 def _banner_turn_cadence() -> int:
-    """Emit the per-turn banner once every N carrier turns (default 5, ``>=1``).
+    """The flat fallback cadence: ``AGENTALLOY_BANNER_TURN_CADENCE`` or 5.
 
-    Override with ``AGENTALLOY_BANNER_TURN_CADENCE``. A non-positive/invalid value falls
-    back to 1 (emit every turn), so the banner is never silently suppressed forever.
+    Retained as the hard override and the unknown-phase default;
+    :func:`_adaptive_banner_cadence` is what the live path calls. A
+    non-positive/invalid value falls back to 1 (emit every turn), so the banner is
+    never silently suppressed forever.
     """
     raw = os.environ.get("AGENTALLOY_BANNER_TURN_CADENCE")
     if raw:
@@ -287,7 +318,34 @@ def _banner_turn_cadence() -> int:
                 return n
         except ValueError:
             pass
-    return 5
+    return _DEFAULT_BANNER_CADENCE
+
+
+def _adaptive_banner_cadence(phase: str, turns_in_phase: int) -> int:
+    """Carrier turns between banner emissions for *phase* (#587 §2).
+
+    Phase base interval, stretched the longer the agent has been in the phase — by
+    turn 50 the phase's shape is internalized and the anchor has done its job.
+    Floors at 1 so the banner can never be suppressed entirely.
+
+    ``AGENTALLOY_BANNER_TURN_CADENCE`` is a hard override and replaces the whole
+    calculation, unchanged from before.
+
+    Note what is deliberately NOT modeled: the issue proposes a "progress changed →
+    emit immediately" rule and a "×1.5 while tool-using" damper. The first is
+    redundant with the content-hash dedup (§3), which already emits precisely when
+    the rendered banner differs and suppresses it when it doesn't — a strictly
+    better signal than a separate progress snapshot, and one less state row. The
+    second needs per-turn tool-use visibility the proxy does not have here.
+    """
+    if os.environ.get("AGENTALLOY_BANNER_TURN_CADENCE"):
+        return _banner_turn_cadence()
+    base = _PHASE_BANNER_CADENCE.get(phase, _DEFAULT_BANNER_CADENCE)
+    if turns_in_phase > 50:
+        base *= 2
+    elif turns_in_phase > 20:
+        base = int(base * 1.5)
+    return max(1, base)
 
 
 def _checkpoint_label(path_glob: str) -> str:
@@ -303,63 +361,142 @@ def _checkpoint_label(path_glob: str) -> str:
     return parent or path_glob
 
 
+def _store_artifact_status(
+    exit_gates: dict[str, Any],
+    store: Any,
+    slug: str | None,
+) -> tuple[list[str], int, int, list[str], bool]:
+    """Store-backed half of the banner: what's unrecorded, and section progress.
+
+    Returns ``(unrecorded_names, present, total, missing, any_recorded)``.
+
+    ``unrecorded_names`` are the artifact names the phase's gates require that the
+    store holds no row for — the concrete thing the directive names. Names are the
+    gate's ``name`` value with a bare ``*.md`` rendered as "its artifact", since
+    "``*.md`` not yet recorded" reads as a filename to write.
+
+    Never raises; an unreachable store degrades to "nothing known", which the caller
+    renders as the plain phase directive.
+    """
+    unrecorded: list[str] = []
+    present_total = 0
+    section_total = 0
+    missing: list[str] = []
+    any_recorded = False
+
+    for gate_phase, name in _extract_artifact_exists_store_specs(exit_gates):
+        try:
+            rows = store.list_artifacts(gate_phase, slug=slug, name_glob=name) if store else []
+        except Exception:
+            rows = []
+        if rows:
+            any_recorded = True
+        else:
+            label = "its artifact" if any(c in name for c in "*?[]") else name
+            if label not in unrecorded:
+                unrecorded.append(label)
+
+    for gate_phase, name, sections in _extract_artifact_contains_store_specs(exit_gates):
+        present, total, gate_missing = store_section_completeness(
+            store, gate_phase, name, sections, slug=slug
+        )
+        present_total += present
+        section_total += total
+        missing.extend(gate_missing)
+
+    return unrecorded, present_total, section_total, missing, any_recorded
+
+
 def build_banner(
     phase: str,
     exit_gates: dict[str, Any],
     project_root: Path,
     slug: str | None = None,
+    store: Any = None,
 ) -> str:
     """Build the compact phase banner for *phase*.
 
     Format: ``[agentalloy · {phase}] {directive}{progress}{checkpoint}``.
 
-    - **directive**: the hand-tuned :data:`_PHASE_BANNER_DIRECTIVE` entry for the phase,
-      phrased as a fact about state rather than a command (see the comment above that
-      table for why); for an unrecognized phase, the fallback ``{artifact} not yet
-      produced`` (first gate ``path`` via :func:`_extract_gate_paths`), or ``{phase} exit
-      gate not yet satisfied``. When *slug* is known, the literal ``<slug>`` placeholder
-      is resolved so the path is copy-paste-able.
-    - **progress**: appended once at least one target artifact exists —
-      `` · {present}/{total} sections (missing: a, b, c)``. Scored PER GATE
-      (:func:`_extract_artifact_contains_specs`): each required heading is checked against
-      ITS OWN file, not every section against the first path. ``missing`` is capped at three.
-    - **checkpoint**: a second line per unmet exists-only gate (e.g. the design phase's
-      ``.agentalloy/contracts/build/*.md`` build-contract requirement) that carries no
-      sections and is otherwise invisible until the gate fails.
+    - **directive** (#587 §1): names the specific store artifact the phase still owes,
+      e.g. ``approach.md not yet recorded · phase instructions: system prompt``. Falls
+      back to the bare :data:`_PHASE_BANNER_DIRECTIVE` entry when everything required is
+      already recorded or the store is out of reach, and to ``{phase} exit gate not yet
+      satisfied`` for an unrecognized phase. When *slug* is known, the literal ``<slug>``
+      placeholder is resolved.
 
-    Cheap and soft: all derivation is wrapped so a malformed gate or unreadable artifact
-    yields a best-effort banner rather than raising.
+      Two properties are load-bearing and deliberately diverge from #587's draft table:
+
+      * **Store names, never filesystem paths.** The draft specified
+        ``docs/design/<slug>/tasks.md``; lifecycle artifacts are store-backed, so a
+        path there is both unsatisfiable and an instruction to write a file the exit
+        gate cannot see. That is precisely the failure that taught agents to create
+        ``docs/fast/``. The draft's stated derivation (walk gates for ``path``) also
+        cannot produce that table — ``_extract_gate_paths`` returns nothing for a
+        store-backed gate.
+      * **Declarative voice, never imperative.** "not yet recorded", not "produce X".
+        See the comment on :data:`_PHASE_BANNER_DIRECTIVE`: this rides in the last
+        USER message, where an order from an unattributed third party is the exact
+        shape Claude's injected-content defenses refuse.
+
+    - **progress**: `` · {present}/{total} sections (missing: a, b, c)``, shown once at
+      least one target artifact exists. Scored PER GATE against ITS OWN artifact — store
+      rows via :func:`store_section_completeness`, files via
+      :func:`section_completeness`. ``missing`` is capped at three.
+    - **checkpoint**: a second line per unmet exists-only *filesystem* gate (``src/**``,
+      ``tests/**`` — the disk deliverables that are genuinely disk deliverables).
+
+    Cheap and soft: all derivation is wrapped so a malformed gate, unreadable artifact,
+    or unreachable store yields a best-effort banner rather than raising.
     """
-    directive = _PHASE_BANNER_DIRECTIVE.get(phase)
-    if directive is None:
-        try:
-            paths = _extract_gate_paths(exit_gates)
-        except Exception:
-            paths = []
-        directive = (
-            f"{paths[0]} not yet produced" if paths else f"{phase} exit gate not yet satisfied"
+    # Store-backed artifacts first: they carry the concrete directive noun.
+    unrecorded: list[str] = []
+    s_present = s_total = 0
+    s_missing: list[str] = []
+    any_recorded = False
+    try:
+        unrecorded, s_present, s_total, s_missing, any_recorded = _store_artifact_status(
+            exit_gates, store, slug
         )
+    except Exception:
+        logger.debug("banner store status failed for phase=%s", phase, exc_info=True)
+
+    base = _PHASE_BANNER_DIRECTIVE.get(phase)
+    if unrecorded:
+        directive = f"{', '.join(unrecorded[:2])} not yet recorded · {_BANNER_SUFFIX}"
+    elif base is not None:
+        directive = base
+    else:
+        directive = f"{phase} exit gate not yet satisfied · {_BANNER_SUFFIX}"
     if slug:
         directive = directive.replace("<slug>", slug)
 
     # progress: aggregate section completeness across EACH artifact_contains gate, scoring
-    # every required heading against ITS OWN file (not all sections against the first path).
+    # every required heading against ITS OWN artifact (not all sections against the first).
     progress = ""
     try:
-        present_total = 0
-        section_total = 0
-        missing: list[str] = []
-        any_artifact = False
+        present_total = s_present
+        section_total = s_total
+        missing: list[str] = list(s_missing)
+        any_artifact = any_recorded
+        # `_extract_artifact_contains_specs` SYNTHESIZES a `docs/<phase>/<name>` glob for
+        # store-backed gates so its filesystem-shaped signature has something to return.
+        # Nothing is ever written at those paths, so scoring them always reported zero and
+        # silently suppressed the progress suffix for every store-backed phase. Only score
+        # globs that came from a real `path:` key; the store gates are scored above.
+        real_paths = set(_extract_gate_paths(exit_gates))
         for path, gate_sections in _extract_artifact_contains_specs(exit_gates):
+            if path not in real_paths:
+                continue
             if _glob_first_exists(path, project_root):
                 any_artifact = True
             present, total, gate_missing = section_completeness(path, gate_sections, project_root)
             present_total += present
             section_total += total
             missing.extend(gate_missing)
-        # Only show progress once at least one artifact exists — section_completeness reports
-        # (0, n, all) for a missing file, which we suppress so the banner doesn't claim
-        # "0/N sections" before any artifact is created.
+        # Only show progress once at least one artifact exists — the scorers report
+        # (0, n, all) for a missing artifact, which we suppress so the banner doesn't
+        # claim "0/N sections" before anything is produced.
         if any_artifact and section_total:
             progress = f" · {present_total}/{section_total} sections"
             if missing:
@@ -368,11 +505,16 @@ def build_banner(
         progress = ""
 
     # checkpoint: surface unmet pure-existence gates (no sections) on a second line.
-    # Skip a gate already named in the directive (so the unknown-phase fallback, whose
-    # directive IS its lone gate path, doesn't repeat it) and gates already satisfied.
+    # Restricted to CODE paths (`src/`, `tests/`) — the only disk deliverables an agent
+    # legitimately writes. Any other exists-only glob is a lifecycle artifact, and
+    # `_checkpoint_label` falls back to echoing the glob's own segments, so a legacy
+    # pack's `.agentalloy/contracts/...` or a bare `out.md` would print a path here and
+    # re-teach exactly the disk-write habit the store migration removed.
     checkpoint = ""
     try:
         for path in _extract_exists_only_paths(exit_gates):
+            if not path.startswith(_CODE_PATH_PREFIXES):
+                continue
             if path not in directive and not _glob_first_exists(path, project_root):
                 checkpoint += f"\n · 0 {_checkpoint_label(path)} (need ≥1)"
     except Exception:
@@ -381,12 +523,31 @@ def build_banner(
     return f"[agentalloy · {phase}] {directive}{progress}{checkpoint}"
 
 
+def _banner_store(project_root: Path) -> Any:
+    """Artifact-store handle for the banner, or ``None`` when out of reach.
+
+    Soft by construction: the banner is a recency anchor, so a store outage must
+    degrade it to the plain per-phase directive, never raise.
+    """
+    try:
+        from agentalloy.signals.skill_loader import _state_view  # noqa: PLC0415
+
+        return _state_view(project_root)
+    except Exception:
+        logger.debug("banner store handle unavailable", exc_info=True)
+        return None
+
+
 def _banner_for_turn(
     should_emit: bool,
     phase: str,
     exit_gates: dict[str, Any],
     project_root: Path,
     slug: str | None = None,
+    store: Any = None,
+    *,
+    is_phase_entry: bool = False,
+    mutate: bool = True,
 ) -> str | None:
     """The per-turn banner string, or None.
 
@@ -397,14 +558,40 @@ def _banner_for_turn(
     ``evaluate_signal``. The caller has already established the active (``full``) lifecycle
     mode and a valid phase, and passes the resolved contract *slug* (when known) so the
     directive's ``<slug>`` is concrete.
+
+    Redundant-emission suppression (#587 §3): on a cadence tick whose rendered text is
+    byte-identical to the last emitted banner, returns ``None`` — re-sending a string the
+    agent already has costs tokens and teaches it to skim the anchor. The cadence counter
+    still advances in the caller, so throttle timing is unchanged.
+
+    *is_phase_entry* forces the emit past the dedup. This is load-bearing, not a nicety:
+    under the plain per-phase directives every phase renders nearly the same text, so a
+    naive hash compare would swallow the phase-entry banner — the one emission that most
+    needs to land.
     """
     if not should_emit:
         return None
     try:
-        return build_banner(phase, exit_gates, project_root, slug=slug)
+        text = build_banner(phase, exit_gates, project_root, slug=slug, store=store)
     except Exception:
         logger.debug("banner build failed for phase=%s", phase, exc_info=True)
         return None
+
+    try:
+        from agentalloy.signals.skill_loader import (  # noqa: PLC0415
+            _read_banner_hash,
+            _write_banner_hash_atomic,
+        )
+
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if not is_phase_entry and _read_banner_hash(project_root) == digest:
+            return None  # identical to what the agent already has — suppress
+        if mutate:
+            _write_banner_hash_atomic(project_root, digest)
+    except Exception:
+        logger.debug("banner dedup failed for phase=%s", phase, exc_info=True)
+
+    return text
 
 
 def _glob_first_exists(path_glob: str, project_root: Path) -> bool:
@@ -676,17 +863,27 @@ async def evaluate_signal(
     # block) and once for a new session. The counter is written EAGERLY here: the banner
     # is best-effort and the deferred commit seam is a no-op on quiet/banner-only turns,
     # so a one-off miscount on an upstream error is harmless.
+    #
+    # The interval is now phase-aware and stretches with time-in-phase
+    # (`_adaptive_banner_cadence`, #587 §2): build gets a wide 10 so a heads-down
+    # coding stretch isn't interrupted, intake/spec get 2-3 where drift is likeliest.
     emit_banner = False
+    banner_is_phase_entry = False
     if is_carrier:
         bt_phase, bt_session, bt_count = _read_banner_turn(cwd)
         if bt_phase != phase or bt_session != session_key:
             bt_count = 0  # phase/session changed -> fresh start, emit now
-        emit_banner = bt_count % _banner_turn_cadence() == 0
+            banner_is_phase_entry = True
+        emit_banner = bt_count % _adaptive_banner_cadence(phase, bt_count) == 0
         if mutate:
             try:
                 _write_banner_turn_atomic(cwd, phase, session_key, bt_count + 1)
             except OSError:
                 logger.debug("banner-turns write failed", exc_info=True)
+
+    # Store handle for the banner's store-backed artifact status (#587 §1). Read-only
+    # here; a None handle degrades the banner to its plain per-phase directive.
+    banner_store = _banner_store(cwd) if emit_banner else None
 
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
@@ -700,7 +897,16 @@ async def evaluate_signal(
             phase=phase,
             task=task,
             trace_id=trace_id,
-            banner=_banner_for_turn(emit_banner, phase, fallback_gates, cwd, slug=contract_slug),
+            banner=_banner_for_turn(
+                emit_banner,
+                phase,
+                fallback_gates,
+                cwd,
+                slug=contract_slug,
+                store=banner_store,
+                is_phase_entry=banner_is_phase_entry,
+                mutate=mutate,
+            ),
             repo=repo,
             session_key=session_key,
             session_source=session_source,
@@ -740,7 +946,16 @@ async def evaluate_signal(
     # tick (`emit_banner`) under the active lifecycle mode + a valid phase; independent of
     # should_compose / announce / cursor, so it threads onto every return below — quiet
     # passthrough, compose, or no-skill. Soft: never raises.
-    banner = _banner_for_turn(emit_banner, phase, exit_gates, cwd, slug=contract_slug)
+    banner = _banner_for_turn(
+        emit_banner,
+        phase,
+        exit_gates,
+        cwd,
+        slug=contract_slug,
+        store=banner_store,
+        is_phase_entry=banner_is_phase_entry,
+        mutate=mutate,
+    )
 
     # 3. Build predicate context
     ctx = _build_predicate_context(

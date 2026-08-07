@@ -169,9 +169,14 @@ def _build_skill_record(
         "[FILL IN] Describe what an agent must do during this phase: the "
         "order of operations, the commands to run, and the artifact(s) it "
         "must produce before advancing. Replace this placeholder with the "
-        "real phase guidance; keep any exact command strings or paths your "
-        "exit_gates reference so a later edit doesn't silently break the "
-        "phase-transition check."
+        "real phase guidance; keep any exact command strings your exit_gates "
+        "reference so a later edit doesn't silently break the phase-transition "
+        "check.\n\n"
+        "Phase artifacts are recorded to the AgentAlloy store with `agentalloy "
+        "contract artifact-set --phase <phase> --slug <slug> --name <name>.md`, "
+        "never written as files. Only runtime source code and its tests go to "
+        "disk — do not instruct the agent to create a spec, plan, or contract "
+        "file, because the exit gate queries the store and will not see it."
     )
     contract_template = (
         "---\n"
@@ -197,9 +202,14 @@ def _build_skill_record(
         "signal_keywords": ["[FILL IN] a phrase that signals this phase is done"],
         # A structurally-valid exit_gates leaf (see ingest._validate_gate_spec
         # and signals.predicates.eval_artifact_exists's args shape).
-        "exit_gates": {
-            "artifact_exists": {"path": f".agentalloy/contracts/build/{effective_skill_id}-*.md"}
-        },
+        #
+        # Store-backed (phase/name), NOT a filesystem `path`. A scaffolded
+        # `path: .agentalloy/contracts/...` gate is not inert: signals.invariants
+        # derives its literal directory token into a load-bearing prose invariant,
+        # which is a standing instruction to the agent to write lifecycle
+        # artifacts to disk. Phase artifacts live in the store; only runtime code
+        # and tests belong on disk.
+        "exit_gates": {"artifact_exists": {"phase": "build", "name": "*.md"}},
     }
 
 
