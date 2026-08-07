@@ -1428,8 +1428,14 @@ def _fallback_qwen_session_id(cwd: Path) -> str | None:
 
     Qwen Code does not transmit session IDs over HTTP. When no explicit
     session header is present, this function reads the most-recently-modified
-    ``runtime.json`` in the project's ``~/.qwen/projects/<encoded-cwd>/chats/``
+    ``runtime.json`` in the project's ``$QWEN_HOME/projects/<encoded-cwd>/chats/``
     directory and returns its ``session_id`` value.
+
+    The provider's ``env_builder`` (see ``agentalloy.providers.qwen_code``) sets
+    ``QWEN_HOME`` to ``<cwd>/.qwen`` so Qwen Code picks up a repo-local
+    settings.json — which means its session state is written under
+    ``<cwd>/.qwen/projects/``, not ``~/.qwen/projects/``. This must match that
+    same root or it silently reads stale/absent state from the home directory.
 
     Returns ``None`` when no runtime file exists or the session ID is empty,
     letting the proxy fall back to fingerprint-based resolution.
@@ -1438,7 +1444,7 @@ def _fallback_qwen_session_id(cwd: Path) -> str | None:
     # separated by "-", e.g. "/home/nmeyers/dev/agentalloy" →
     # "-home-nmeyers-dev-agentalloy".
     encoded = "-" + os.path.realpath(os.fspath(cwd)).lstrip("/").replace("/", "-")
-    chats_dir = Path.home() / ".qwen" / "projects" / encoded / "chats"
+    chats_dir = cwd / ".qwen" / "projects" / encoded / "chats"
     try:
         runtime_files = list(chats_dir.glob("*.runtime.json"))
     except OSError:
