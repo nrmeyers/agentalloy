@@ -37,7 +37,7 @@ from agentalloy.api.proxy_apply import (
     apply_signal,
     commit_outcome,
 )
-from agentalloy.api.proxy_context import decode_proj_token
+from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token
 from agentalloy.api.proxy_injection import (
     inject_into_anthropic_messages,
     inject_into_anthropic_system_prompt,
@@ -462,9 +462,31 @@ async def passthrough_anthropic_messages(
     except ValueError:
         project_dir = None
     if project_dir is not None:
-        client = resolve_passthrough_client(request.app, project_dir, client, _CLIENT_CACHE_ATTR)
+        resolved_client = resolve_passthrough_client(
+            request.app, project_dir, client, _CLIENT_CACHE_ATTR
+        )
+    else:
+        resolved_client = client
 
-    if client is None:
+    # Check for error (UpstreamFile) before the None check
+    if isinstance(resolved_client, UpstreamFile) and resolved_client.kind == "error":
+        assert resolved_client.detail is not None
+        return Response(
+            content=json.dumps(
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "code": "upstream_parse_error",
+                        "message": resolved_client.detail,
+                    },
+                }
+            ).encode(),
+            status_code=503,
+            media_type="application/json",
+        )
+
+    if resolved_client is None:
         return Response(
             content=json.dumps(
                 {
@@ -478,6 +500,8 @@ async def passthrough_anthropic_messages(
             status_code=503,
             media_type="application/json",
         )
+
+    assert isinstance(resolved_client, AnthropicPassthroughClient)
 
     # --- Pre-forward: compose + inject, soft-failing to the original body. ---
     body_to_send = raw_body
@@ -534,9 +558,11 @@ async def passthrough_anthropic_messages(
     # --- Forward. ---
     if stream_flag:
         return await _forward_streaming(
-            client, query_string, inbound_headers, body_to_send, on_status
+            resolved_client, query_string, inbound_headers, body_to_send, on_status
         )
-    return await _forward_once(client, query_string, inbound_headers, body_to_send, on_status)
+    return await _forward_once(
+        resolved_client, query_string, inbound_headers, body_to_send, on_status
+    )
 
 
 async def _forward_once(

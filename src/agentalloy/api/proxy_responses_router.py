@@ -32,7 +32,7 @@ from fastapi.responses import StreamingResponse
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import InjectOutcome, apply_signal
-from agentalloy.api.proxy_context import decode_proj_token
+from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token
 from agentalloy.api.proxy_injection import (
     inject_into_responses_input,
     inject_into_responses_instructions,
@@ -214,9 +214,30 @@ async def passthrough_openai_responses(
     except ValueError:
         project_dir = None
     if project_dir is not None:
-        client = resolve_passthrough_client(request.app, project_dir, client, _CLIENT_CACHE_ATTR)
+        resolved_client = resolve_passthrough_client(
+            request.app, project_dir, client, _CLIENT_CACHE_ATTR
+        )
+    else:
+        resolved_client = client
 
-    if client is None:
+    # Check for error (UpstreamFile) before the None check
+    if isinstance(resolved_client, UpstreamFile) and resolved_client.kind == "error":
+        assert resolved_client.detail is not None
+        return Response(
+            content=json.dumps(
+                {
+                    "error": {
+                        "type": "api_error",
+                        "code": "upstream_parse_error",
+                        "message": resolved_client.detail,
+                    },
+                }
+            ).encode(),
+            status_code=503,
+            media_type="application/json",
+        )
+
+    if resolved_client is None:
         return Response(
             content=json.dumps(
                 {
@@ -229,6 +250,8 @@ async def passthrough_openai_responses(
             status_code=503,
             media_type="application/json",
         )
+
+    assert isinstance(resolved_client, AnthropicPassthroughClient)
 
     # --- Pre-forward: compose + inject, soft-failing to the original body. ---
     body_to_send = raw_body
@@ -278,8 +301,13 @@ async def passthrough_openai_responses(
     # --- Forward (shared with the Anthropic passthrough; only the path differs). ---
     if stream_flag:
         return await _forward_streaming(
-            client, query_string, inbound_headers, body_to_send, on_status, path=_UPSTREAM_PATH
+            resolved_client,
+            query_string,
+            inbound_headers,
+            body_to_send,
+            on_status,
+            path=_UPSTREAM_PATH,
         )
     return await _forward_once(
-        client, query_string, inbound_headers, body_to_send, on_status, path=_UPSTREAM_PATH
+        resolved_client, query_string, inbound_headers, body_to_send, on_status, path=_UPSTREAM_PATH
     )
