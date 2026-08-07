@@ -1615,10 +1615,14 @@ class DuckDBStateStore:
         filename.  Those rows have exactly one plausible owner — the repo the
         service was deployed against — so they are re-keyed to it wholesale.
 
-        Where the target key already has a row for the same ``(kind,
-        session_key)`` or ``contract_id``, the target wins and the legacy row is
-        dropped: a row written deliberately under the real key is the better
-        record than one from a bucket shared by every caller.
+        Legacy rows predate stream isolation and always carry ``stream_id=''``.
+        Where the target repo already has a row for the same ``(stream_id,
+        kind, session_key)`` or ``(stream_id, contract_id)``, the target wins
+        and the legacy row is dropped: a row written deliberately under the
+        real key is the better record than one from a bucket shared by every
+        caller. A target that exists only under a different, non-empty
+        ``stream_id`` does not block the move — the legacy row is promoted
+        into the target repo's unscoped (``stream_id=''``) stream instead.
 
         Idempotent — it runs on every service start.  Returns rows moved.
         """
@@ -1636,6 +1640,7 @@ class DuckDBStateStore:
                    AND EXISTS (
                        SELECT 1 FROM sdd_state AS target
                         WHERE target.repo = ?
+                          AND target.stream_id IS NOT DISTINCT FROM legacy.stream_id
                           AND target.kind = legacy.kind
                           AND target.session_key IS NOT DISTINCT FROM legacy.session_key
                    )
@@ -1649,6 +1654,7 @@ class DuckDBStateStore:
                    AND EXISTS (
                        SELECT 1 FROM sdd_contract AS target
                         WHERE target.repo = ?
+                          AND target.stream_id IS NOT DISTINCT FROM legacy.stream_id
                           AND target.contract_id = legacy.contract_id
                    )
                 """,
