@@ -85,3 +85,37 @@ class TestCheckWorktreeWiring:
         assert check["severity"] == "warn"
         assert str(repo) in check["detail"]
         assert "auto-wire-worktree" in check["remediation"]
+
+    # Regression: `_main_checkout_root` resolves via `--git-common-dir`, which
+    # is the SAME path from every directory in the repo -- comparing it
+    # directly against an arbitrary cwd (rather than cwd's own toplevel) false
+    # -positives "this is an unwired worktree of itself" from any subdirectory
+    # of the main checkout, and the remediation it points at would then write
+    # a nested .agentalloy/ into that subdirectory.
+
+    def test_subdirectory_of_main_checkout_is_silent(self, repo: Path) -> None:
+        sub = repo / "src"
+        sub.mkdir()
+        check = _run(sub)
+        assert check["passed"] is True
+        assert "severity" not in check
+        assert check["detail"] == "not a linked worktree"
+
+    def test_subdirectory_of_wired_worktree_is_silent(self, repo: Path, worktree: Path) -> None:
+        (repo / ".agentalloy").mkdir()
+        (worktree / ".agentalloy").mkdir()
+        sub = worktree / "src"
+        sub.mkdir()
+        check = _run(sub)
+        assert check["passed"] is True
+        assert "severity" not in check
+
+    def test_subdirectory_of_unwired_worktree_still_warns(self, repo: Path, worktree: Path) -> None:
+        (repo / ".agentalloy").mkdir()
+        sub = worktree / "src"
+        sub.mkdir()
+        check = _run(sub)
+        assert check["passed"] is True
+        assert check["severity"] == "warn"
+        assert str(repo) in check["detail"]
+        assert str(worktree) in check["detail"]

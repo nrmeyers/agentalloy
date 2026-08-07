@@ -488,6 +488,33 @@ def _check_orphans() -> dict[str, Any]:
     }
 
 
+def _worktree_toplevel(cwd: Path) -> Path | None:
+    """Resolve *cwd*'s own checkout/worktree root, or ``None``.
+
+    ``git rev-parse --show-toplevel`` resolves to the CURRENT work tree's own
+    root regardless of how deep *cwd* is inside it — unlike
+    ``--git-common-dir`` (what ``_main_checkout_root`` uses), which resolves
+    to the same shared path from every directory in the repo, main checkout or
+    any worktree. ``_check_worktree_wiring`` needs the former: it must compare
+    *this* checkout's root against the main checkout, not compare an arbitrary
+    cwd against a path that's identical everywhere.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    val = out.stdout.strip()
+    return Path(val).resolve() if out.returncode == 0 and val else None
+
+
 def _check_worktree_wiring() -> dict[str, Any]:
     """Check 11: a linked worktree that isn't wired to its own /proj token (#549).
 
@@ -519,9 +546,26 @@ def _check_worktree_wiring() -> dict[str, Any]:
         }
 
     cwd = Path.cwd().resolve()
-    main_root = _main_checkout_root(cwd)
+    # `_main_checkout_root` resolves via `--git-common-dir`, which is the SAME
+    # path from every directory in the repo -- main checkout or any worktree,
+    # at any depth. Comparing it directly against `cwd` (as the post-checkout
+    # hook this helper was written for does) only works when `cwd` IS a repo
+    # root; doctor is invoked from wherever the user happens to be, so it must
+    # first resolve cwd's OWN checkout/worktree root via `--show-toplevel`
+    # before doing that comparison or touching `.agentalloy` existence.
+    worktree_root = _worktree_toplevel(cwd)
+    if worktree_root is None:
+        # Not a git work tree at all (or git unavailable) — nothing to check.
+        return {
+            "name": "worktree_wiring",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "not a git work tree",
+        }
+
+    main_root = _main_checkout_root(worktree_root)
     if main_root is None:
-        # Not a linked worktree (or not a git repo at all) — nothing to check.
+        # cwd's own checkout IS the main checkout — nothing to check.
         return {
             "name": "worktree_wiring",
             "passed": True,
@@ -538,7 +582,7 @@ def _check_worktree_wiring() -> dict[str, Any]:
             "detail": "main checkout is not wired",
         }
 
-    if (cwd / ".agentalloy").exists():
+    if (worktree_root / ".agentalloy").exists():
         return {
             "name": "worktree_wiring",
             "passed": True,
@@ -552,8 +596,8 @@ def _check_worktree_wiring() -> dict[str, Any]:
         "severity": "warn",
         "duration_ms": int((time.monotonic() - t0) * 1000),
         "detail": (
-            f"this is a linked worktree of {main_root} with no wiring of its own — "
-            "a session started here reports as the main checkout"
+            f"{worktree_root} is a linked worktree of {main_root} with no wiring "
+            "of its own — a session started here reports as the main checkout"
         ),
         "remediation": "run `agentalloy auto-wire-worktree` (or `agentalloy add <harness>`) here",
     }
