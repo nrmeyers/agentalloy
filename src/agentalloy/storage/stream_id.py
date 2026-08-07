@@ -19,7 +19,7 @@ import hashlib
 import os
 from pathlib import Path
 
-_STREAM_FILE = ".agentalloy" / ".stream"
+_STREAM_FILE = Path(".agentalloy") / ".stream"
 
 
 def resolve_stream_id(project_root: Path) -> str:
