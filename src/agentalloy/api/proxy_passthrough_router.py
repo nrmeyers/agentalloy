@@ -264,7 +264,7 @@ def _write_passthrough_trace(
         repo=signal.repo,
         session_key=signal.session_key,
         session_source=signal.session_source,
-        category="free-flow" if signal.paused_mode else None,
+        category="paused" if signal.paused_mode else None,
         contract_id=tel.contract_id if tel else None,
         contract_tags=tel.contract_tags if tel else None,
     )
@@ -409,14 +409,14 @@ async def _maybe_inject(
 
     # Filter tools for the current phase (harness-agnostic tool gating).
     # Applied to the final payload so it catches both injected and non-injected paths.
-    # When in free-flow mode, write gating is skipped regardless of phase.
+    # When in pause mode, write gating is skipped regardless of phase.
     if injected_payload is not None and signal.phase is not None:
         raw_tools = injected_payload.get("tools")
         if isinstance(raw_tools, list):
             filtered = filter_tools_for_phase(
                 cast("list[dict[str, Any]]", raw_tools),
                 signal.phase,
-                free_mode=signal.paused_mode,
+                pause_mode=signal.paused_mode,
             )
             if filtered is not raw_tools:
                 injected_payload = {**injected_payload, "tools": filtered}

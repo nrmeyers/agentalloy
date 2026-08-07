@@ -109,8 +109,8 @@ class PhaseAccess(Protocol):
     ) -> dict[str, Any] | None:
         """Write *phase*, carrying forward any field left as ``None``.
 
-        ``mode=""``/``free_since=""`` clear those fields; that asymmetry is the
-        store's, and it is what lets ``flow resume`` drop free-flow without
+        ``mode=""``/``paused_since=""`` clear those fields; that asymmetry is the
+        store's, and it is what lets ``workflow resume`` drop pause without
         touching the phase.  Returns the service response body (for gate verdict
         visibility) or ``None`` when the store has no return type.
         """

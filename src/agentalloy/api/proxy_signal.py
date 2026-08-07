@@ -627,7 +627,7 @@ async def evaluate_signal(
     # returns to it exactly. Because this branch never commits the announce /
     # composed / banner markers under their workflow keys, resuming re-orients
     # (and re-runs intake) as if this were the first request.
-    # Legacy alias: ``mode: free`` (old name) reads as paused.
+    # Legacy alias: ``mode: free`` (old name) reads as paused — kept indefinitely.
     paused_mode = phase_state is not None and (phase_state.mode or "").lower() in ("paused", "free")
     pause_since = phase_state.paused_since if (paused_mode and phase_state) else None
     if paused_mode:

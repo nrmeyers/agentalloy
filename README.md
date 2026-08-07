@@ -34,7 +34,7 @@ It attaches as a **local proxy**: your harness points its base URL at AgentAlloy
 
 Everything runs on your machine — one small embed model and a 0.6B reranker over embedded LanceDB + DuckDB. No cloud calls, and zero paid-LLM tokens spent deciding what to inject: routing is **deterministic by default**, and the one optional LM stage in the compose path is hardware-gated — on GPU presets it re-ranks fragments (`LM_ASSIST=arbitrate`); on CPU and the container it ships off, where it costs ~2.3x the latency budget for a lift our evals couldn't measure ([numbers here](BENCHMARKS.md)).
 
-The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `agentalloy add <harness> --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy flow free` pauses the workflow anytime without losing your place.
+The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `agentalloy add <harness> --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy workflow pause` pauses the workflow anytime without losing your place.
 
 Composed into the prompt without you pasting a thing:
 
@@ -154,7 +154,7 @@ Container inference is CPU-only on every host (GPU acceleration requires a nativ
 
 Three small artifacts drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
 
-**The phase store.** Phase lives in a per-repo DuckDB state store (not a disk file). Each phase tracks `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Legacy repos can migrate their `.agentalloy/phase` file via `POST /import` on the service. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
+**The phase store.** Phase lives in a per-repo DuckDB state store (not a disk file). Each phase tracks `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy workflow pause` pauses all workflow steering — domain skills keep composing — until `workflow resume`. Legacy repos can migrate their `.agentalloy/phase` file via `POST /import` on the service. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
 
 **Task contracts.** A short markdown file (`.agentalloy/contracts/<phase>/<task>.md`) the agent writes once at task start, declaring `domain_tags`, scope, and success criteria in its frontmatter. From then on, **`domain_tags` is the BM25 input for retrieval** — surgical, intent-aware, and stable across the conversation. Schema and a full example: [docs/operator.md](docs/operator.md#contracts).
 
@@ -244,7 +244,7 @@ agentalloy add <harness>                  # Adopt the harness's upstream + wire 
 agentalloy unwire [--harness <name>]      # Remove wiring (one harness in this repo; --all for every repo)
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
-agentalloy flow free|resume|status        # Pause/resume workflow steering (skills keep composing)
+agentalloy workflow pause|resume|status   # Pause/resume workflow steering (skills keep composing)
 agentalloy code <index|search|status|…>   # Code-index module CLI (see docs/code-index.md)
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy approve <phase>                # Record the human-in-the-loop approval marker (spec | design | add-skill)

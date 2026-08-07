@@ -350,6 +350,136 @@ class TestStoreSchema:
             row = store.scalar("SELECT COUNT(*) FROM sdd_artifact WHERE status = 'active'")
             assert row == 0
 
+    def test_migrate_rebuilds_sdd_contract_pk_for_stream_isolation(self, tmp_path: Path) -> None:
+        """#553 — upgrading a pre-stream_id DB must rebuild sdd_contract's PK.
+
+        Pre-#553, sdd_contract's PRIMARY KEY was (repo, contract_id). Since
+        contract_id is derived as f"{phase}/{slug}", two worktree streams on
+        the same repo/phase/slug now collide unless the PK gains stream_id.
+        DuckDB cannot ALTER a table's constraints in place, so migrate() must
+        rebuild the table — this reproduces that upgrade path end-to-end and
+        confirms existing rows survive and the new PK actually accepts a
+        second stream_id for the same contract_id.
+        """
+        db = tmp_path / "test.duck"
+        pre_553_ddl = """
+            CREATE TABLE sdd_state (
+                repo               TEXT NOT NULL,
+                kind               TEXT NOT NULL,
+                session_key        TEXT,
+                value              TEXT NOT NULL,
+                owner              TEXT,
+                updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                lease_expires_at   TIMESTAMP
+            );
+
+            CREATE TABLE sdd_contract (
+                repo               TEXT NOT NULL,
+                contract_id        TEXT NOT NULL,
+                phase              TEXT NOT NULL,
+                slug               TEXT NOT NULL,
+                work_item          TEXT,
+                route              TEXT,
+                domain_tags        TEXT,
+                scope_touches      TEXT,
+                scope_avoids       TEXT,
+                success_criteria   TEXT,
+                status             TEXT NOT NULL DEFAULT 'active',
+                supersedes         TEXT,
+                created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                body               TEXT,
+                PRIMARY KEY (repo, contract_id)
+            );
+
+            CREATE INDEX idx_sdd_contract_phase ON sdd_contract (phase);
+            CREATE INDEX idx_sdd_contract_slug ON sdd_contract (slug);
+            CREATE INDEX idx_sdd_contract_status ON sdd_contract (status);
+
+            CREATE TABLE sdd_artifact (
+                repo               TEXT NOT NULL,
+                phase              TEXT NOT NULL,
+                slug               TEXT NOT NULL,
+                name               TEXT NOT NULL,
+                content            TEXT,
+                updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                status             TEXT,
+                PRIMARY KEY (repo, phase, slug, name)
+            );
+        """
+        import duckdb
+
+        conn = duckdb.connect(str(db))
+        conn.execute(pre_553_ddl)
+        conn.execute(
+            "INSERT INTO sdd_contract (repo, contract_id, phase, slug, status) "
+            "VALUES ('repo-a', 'build/my-slug', 'build', 'my-slug', 'active')"
+        )
+        conn.close()
+
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+
+            # Existing row survives the rebuild with stream_id backfilled.
+            row = store.conn.execute(
+                "SELECT repo, stream_id, contract_id FROM sdd_contract WHERE repo = 'repo-a'"
+            ).fetchone()
+            assert row == ("repo-a", "", "build/my-slug")
+
+            # Cross-stream collision on the same contract_id must now
+            # succeed — this raised duckdb.ConstraintException pre-fix.
+            store.conn.execute(
+                "INSERT INTO sdd_contract (repo, stream_id, contract_id, phase, slug, status) "
+                "VALUES ('repo-a', 'stream-b', 'build/my-slug', 'build', 'my-slug', 'active')"
+            )
+
+            # idx_sdd_state_kind_owner must have been rebuilt with the new
+            # (repo, stream_id, kind, owner) definition, not silently left
+            # as the stale (repo, kind, owner) index under the same name.
+            idx = store.conn.execute(
+                "SELECT sql FROM duckdb_indexes() WHERE index_name = 'idx_sdd_state_kind_owner'"
+            ).fetchone()
+            assert idx is not None and "stream_id" in idx[0]
+
+            store.migrate()  # Should not raise on a second call.
+
+            rows = store.conn.execute(
+                "SELECT repo, stream_id, contract_id FROM sdd_contract "
+                "WHERE repo = 'repo-a' ORDER BY stream_id"
+            ).fetchall()
+            assert rows == [
+                ("repo-a", "", "build/my-slug"),
+                ("repo-a", "stream-b", "build/my-slug"),
+            ]
+
+    def test_migrate_skips_index_rebuild_when_already_current(self, tmp_path: Path) -> None:
+        """migrate() runs on every boot; a current DB must not pay to rebuild
+        idx_sdd_state_kind_owner every time — only a stale (pre-stream_id)
+        definition should trigger the drop/recreate.
+        """
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+
+            executed: list[str] = []
+            real_locked = store._locked
+
+            class _SpyConn:
+                def __getattr__(self, name: str) -> object:
+                    return getattr(real_locked, name)
+
+                def execute(self, sql: str, *args: object, **kwargs: object) -> object:
+                    executed.append(sql)
+                    return real_locked.execute(sql, *args, **kwargs)  # type: ignore[union-attr]
+
+            store._locked = _SpyConn()  # type: ignore[assignment]
+            store.migrate()
+
+            assert not any(
+                sql.startswith(("DROP INDEX", "CREATE INDEX")) and "idx_sdd_state_kind_owner" in sql
+                for sql in executed
+            )
+
 
 # ---------------------------------------------------------------------------
 # Artifact methods with status filtering

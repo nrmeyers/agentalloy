@@ -235,7 +235,7 @@ def _rewrite_posture(root: Path, phase: str, mode: str | None) -> list[str]:
     ``PhaseState.mode``, read off the same in-process store handle that did
     the write) rather than re-derived here — one evaluation point for the
     ``(phase, mode)`` pair, reachable identically from the service and the
-    CLI (see ``install.subcommands.flow``).
+    CLI (see ``install.subcommands.workflow``).
     """
     try:
         from agentalloy.install.subcommands.wire_harness import (
@@ -452,7 +452,7 @@ async def read_phase(
 
     ``value`` stays the bare name so that older callers keep working; the
     decoded fields ride alongside it because the CLI reads the whole row and,
-    without them, had no way to reach ``mode``/``free_since``/``transitioned_by``
+    without them, had no way to reach ``mode``/``paused_since``/``transitioned_by``
     except the file mirror this migration is removing.
 
     Note the deliberate asymmetry with writes: ``POST /state/phase`` is gated
@@ -693,7 +693,7 @@ async def write_phase(
 
     Both paths go through ``store.write_phase`` rather than a raw
     ``write("phase", ...)``: a raw write replaces the blob with a bare name and
-    so silently discards ``mode``, ``free_since``, ``started_at`` and
+    so silently discards ``mode``, ``paused_since``, ``started_at`` and
     ``transitioned_by``.  ``read_phase`` tolerates that shape, which is exactly
     why the loss was invisible.
     """

@@ -375,38 +375,38 @@ class TestTaskRouting:
 
 
 # ---------------------------------------------------------------------------
-# CLI routing: flow free / resume / status
+# CLI routing: workflow pause / resume / status
 # ---------------------------------------------------------------------------
 
 
 class TestFlowRouting:
-    def test_flow_free_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
-        from agentalloy.install.subcommands.flow import run_flow_free
+    def test_workflow_pause_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.phase import run_phase_set
+        from agentalloy.install.subcommands.workflow import run_workflow_pause
 
         run_phase_set("build", root=tmp_path, force=True)
-        result = run_flow_free(root=tmp_path)
+        result = run_workflow_pause(root=tmp_path)
         assert result["changed"] is True
-        assert result["mode"] == "free"
+        assert result["mode"] == "paused"
         assert result["phase"] == "build"
 
-    def test_flow_resume_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
-        from agentalloy.install.subcommands.flow import run_flow_free, run_flow_resume
+    def test_workflow_resume_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.phase import run_phase_set
+        from agentalloy.install.subcommands.workflow import run_workflow_pause, run_workflow_resume
 
         run_phase_set("build", root=tmp_path, force=True)
-        run_flow_free(root=tmp_path)
-        result = run_flow_resume(root=tmp_path)
+        run_workflow_pause(root=tmp_path)
+        result = run_workflow_resume(root=tmp_path)
         assert result["changed"] is True
         assert result["mode"] == "workflow"
         assert result["phase"] == "build"
 
-    def test_flow_status_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
-        from agentalloy.install.subcommands.flow import run_flow_status
+    def test_workflow_status_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.phase import run_phase_set
+        from agentalloy.install.subcommands.workflow import run_workflow_status
 
         run_phase_set("design", root=tmp_path, force=True)
-        result = run_flow_status(root=tmp_path)
+        result = run_workflow_status(root=tmp_path)
         assert result["mode"] == "workflow"
         assert result["phase"] == "design"
 

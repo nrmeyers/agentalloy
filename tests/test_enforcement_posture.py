@@ -234,8 +234,8 @@ class TestCLIPhaseWritesAreRepoScoped:
     """Every CLI phase write must land on the *calling repo's* row.
 
     This used to assert the shape of the HTTP body (``repo_root`` forwarded by
-    ``phase set``, deliberately withheld by ``flow``).  The withholding existed
-    only to protect a hack: ``flow`` encoded its mode into the phase *name*
+    ``phase set``, deliberately withheld by ``workflow``).  The withholding existed
+    only to protect a hack: ``workflow`` encoded its mode into the phase *name*
     (``"free-flow:design"``), and forwarding the repo would have handed that
     bogus name to the posture rewriter, which fails it open and clears a locked
     phase's deny rules.  Mode is a real field now, so there is no prefixed name
@@ -252,7 +252,7 @@ class TestCLIPhaseWritesAreRepoScoped:
         phase_mod.run_phase_set("build", root=tmp_path)
         assert self._row(tmp_path).phase == "build"
 
-    def test_flow_free_keeps_the_phase_name_unprefixed(self, tmp_path: Path) -> None:
+    def test_workflow_pause_keeps_the_phase_name_unprefixed(self, tmp_path: Path) -> None:
         phase_mod.run_phase_set("design", root=tmp_path)
         flow_mod.run_workflow_pause(root=tmp_path)
         row = self._row(tmp_path)
@@ -280,48 +280,48 @@ class TestCLIPhaseWritesAreRepoScoped:
 
 
 # ---------------------------------------------------------------------------
-# Free-flow bypass (TD10 — free-flow should allow writes in denied phases)
+# Pause mode bypass (TD10 — pause should allow writes in denied phases)
 # ---------------------------------------------------------------------------
 
 
-class TestTD10FreeFlowBypass:
-    """Free-flow mode should bypass write gating in all three layers."""
+class TestTD10PauseBypass:
+    """Pause mode should bypass write gating in all three layers."""
 
-    def test_filter_tools_free_flow_bypasses_deny(self) -> None:
-        """filter_tools_for_phase with free_mode=True should not strip tools."""
+    def test_filter_tools_pause_bypasses_deny(self) -> None:
+        """filter_tools_for_phase with pause_mode=True should not strip tools."""
         from agentalloy.providers.base import filter_tools_for_phase
 
         tools = [{"name": "write_file"}, {"name": "read_file"}, {"name": "edit"}]
-        # Without free_mode, tools are stripped in denied phases
-        stripped = filter_tools_for_phase(tools, "intake", free_mode=False)
+        # Without pause_mode, tools are stripped in denied phases
+        stripped = filter_tools_for_phase(tools, "intake", pause_mode=False)
         names = [t["name"] for t in stripped]
         assert "write_file" not in names
         assert "edit" not in names
         assert "read_file" in names
-        # With free_mode=True, all tools pass through
-        all_tools = filter_tools_for_phase(tools, "intake", free_mode=True)
+        # With pause_mode=True, all tools pass through
+        all_tools = filter_tools_for_phase(tools, "intake", pause_mode=True)
         all_names = [t["name"] for t in all_tools]
         assert "write_file" in all_names
         assert "edit" in all_names
 
-    def test_claude_code_permissions_free_flow(self) -> None:
-        """build_claude_code_permissions with free_mode=True should have empty deny."""
-        # Without free_mode, denied phases have deny rules
+    def test_claude_code_permissions_pause(self) -> None:
+        """build_claude_code_permissions with pause_mode=True should have empty deny."""
+        # Without pause_mode, denied phases have deny rules
         assert build_claude_code_permissions("intake")["deny"] != []
-        # With free_mode=True, deny is empty even in denied phases
-        assert build_claude_code_permissions("intake", free_mode=True)["deny"] == []
+        # With pause_mode=True, deny is empty even in denied phases
+        assert build_claude_code_permissions("intake", pause_mode=True)["deny"] == []
 
-    def test_codex_workspace_write_free_flow(self) -> None:
-        """build_codex_workspace_write with free_mode=True should have no restriction."""
-        # Without free_mode, denied phases narrow writable roots
+    def test_codex_workspace_write_pause(self) -> None:
+        """build_codex_workspace_write with pause_mode=True should have no restriction."""
+        # Without pause_mode, denied phases narrow writable roots
         assert build_codex_workspace_write("design")["writable_roots"] != []
-        # With free_mode=True, returns empty (no restriction)
-        assert build_codex_workspace_write("design", free_mode=True) == {}
+        # With pause_mode=True, returns empty (no restriction)
+        assert build_codex_workspace_write("design", pause_mode=True) == {}
 
-    def test_non_denied_phase_ignores_free_mode(self) -> None:
-        """Free mode is a no-op in non-denied phases (idempotent)."""
+    def test_non_denied_phase_ignores_pause_mode(self) -> None:
+        """Pause mode is a no-op in non-denied phases (idempotent)."""
         # build, qa, ship should be open regardless
         assert build_claude_code_permissions("build")["deny"] == []
-        assert build_claude_code_permissions("build", free_mode=True)["deny"] == []
+        assert build_claude_code_permissions("build", pause_mode=True)["deny"] == []
         assert build_codex_workspace_write("build") == {}
-        assert build_codex_workspace_write("build", free_mode=True) == {}
+        assert build_codex_workspace_write("build", pause_mode=True) == {}

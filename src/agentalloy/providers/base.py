@@ -287,7 +287,7 @@ def filter_tools_for_phase(
     tools: list[dict[str, Any]],
     phase: str,
     *,
-    free_mode: bool = False,
+    pause_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Return *tools* with code-writing tools removed during denied phases.
 
@@ -296,14 +296,14 @@ def filter_tools_for_phase(
     source or test code.  All other tools (read_file, glob, grep_search,
     shell, ask_user_question, etc.) remain available.
 
-    When *free_mode* is ``True`` (repo is in free-flow mode), write gating
+    When *pause_mode* is ``True`` (repo is in pause mode), write gating
     is skipped entirely so the LLM retains all tool access regardless of
     phase.
 
     Handles both Anthropic tool format (``name`` at top level) and OpenAI
     format (``function.name``).
     """
-    if free_mode:
+    if pause_mode:
         return tools
     if phase not in DENIED_PHASES:
         return tools
@@ -318,17 +318,17 @@ def is_tier_a_enforced(harness: str) -> bool:
 def build_claude_code_permissions(
     phase: str,
     *,
-    free_mode: bool = False,
+    pause_mode: bool = False,
 ) -> dict[str, object]:
     """Build the ``permissions`` block for ``.claude/settings.local.json``.
 
     During denied phases returns ``{"deny": [...patterns]}``; during all other
     phases returns ``{"deny": []}`` (posture present but unlocked).
 
-    When *free_mode* is ``True`` (repo is in free-flow mode), deny rules are
+    When *pause_mode* is ``True`` (repo is in pause mode), deny rules are
     skipped entirely so the LLM retains full write access regardless of phase.
     """
-    if free_mode or phase not in DENIED_PHASES:
+    if pause_mode or phase not in DENIED_PHASES:
         return {"deny": []}
     return {"deny": list(DENY_PATTERNS)}
 
@@ -336,17 +336,17 @@ def build_claude_code_permissions(
 def build_codex_workspace_write(
     phase: str,
     *,
-    free_mode: bool = False,
+    pause_mode: bool = False,
 ) -> dict[str, object]:
     """Build the ``workspace-write`` block for codex's ``config.toml``.
 
     During denied phases narrows ``writable_roots`` to docs/.agentalloy;
     during all other phases returns an empty dict (no restriction).
 
-    When *free_mode* is ``True`` (repo is in free-flow mode), writable
+    When *pause_mode* is ``True`` (repo is in pause mode), writable
     roots are unrestricted regardless of phase.
     """
-    if free_mode or phase not in DENIED_PHASES:
+    if pause_mode or phase not in DENIED_PHASES:
         return {}
     return {"writable_roots": list(CODEX_ALLOWED_ROOTS)}
 

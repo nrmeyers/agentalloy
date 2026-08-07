@@ -1,12 +1,12 @@
-"""Free-flow mode — pause workflow steering, keep skill composition.
+"""Pause mode — pause workflow steering, keep skill composition.
 
-Covers the phase-file ``mode``/``free_since`` round-trip (back/forward
+Covers the phase-row ``mode``/``paused_since`` round-trip (back/forward
 compatible with the workflow-mode format), the compose-only guard in
 ``evaluate_signal`` (no orientation / banner / gates / intake, domain compose
 kept, once-per-session cadence), and the hermetic proxy e2e on both surfaces
 (native Anthropic passthrough + OpenAI chat-completions): domain fragments are
 injected while every workflow-steering artifact is absent, and the consolidated
-telemetry row is tagged ``category='free-flow'``.
+telemetry row is tagged ``category='paused'``.
 """
 
 from __future__ import annotations
@@ -52,16 +52,16 @@ def _write_phase_file(
     tmp_path: Path,
     phase: str,
     *,
-    free: bool = False,
-    free_since: str | None = None,
+    paused: bool = False,
+    paused_since: str | None = None,
 ) -> None:
-    """Seed the phase row, optionally in free-flow. (Named for the file it replaced.)"""
-    if free:
+    """Seed the phase row, optionally in pause mode. (Named for the file it replaced.)"""
+    if paused:
         seed_phase(
             tmp_path,
             phase,
             mode="paused",
-            paused_since=free_since or _iso(datetime.now(UTC)),
+            paused_since=paused_since or _iso(datetime.now(UTC)),
         )
     else:
         seed_phase(tmp_path, phase)
@@ -79,10 +79,10 @@ def _req(*user_texts: str, tools: bool = True) -> ProxyRequest:
 
 def _eval(req: ProxyRequest, tmp_path: Path, session_id: str | None = None, *, mutate: bool = True):
     """Run the real ``evaluate_signal``; the workflow-skill loader is fenced so a
-    free-mode request that wrongly falls through to the workflow path fails loudly."""
+    pause-mode request that wrongly falls through to the workflow path fails loudly."""
 
     def _boom(*_a: object, **_k: object) -> None:
-        raise AssertionError("workflow skill loader must not run in free-flow mode")
+        raise AssertionError("workflow skill loader must not run in pause mode")
 
     with (
         mock.patch("agentalloy.api.proxy_signal._load_workflow_skill_for_phase", _boom),
@@ -114,11 +114,11 @@ def _orchestrator(output: str, captured_reqs: list[Any] | None = None) -> Compos
 
 
 # ---------------------------------------------------------------------------
-# Phase-row round-trip: mode / free_since / back-compat
+# Phase-row round-trip: mode / paused_since / back-compat
 # ---------------------------------------------------------------------------
 
 
-class TestPhaseRowFlowState:
+class TestPhaseRowPauseState:
     def test_row_without_mode_reads_workflow(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         assert read_pause_state(tmp_path) == ("workflow", None)
@@ -139,13 +139,13 @@ class TestPhaseRowFlowState:
         assert read_pause_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"
 
-    def test_free_row_round_trip(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "design", free=True, free_since="2026-07-01T00:00:00Z")
+    def test_pause_row_round_trip(self, tmp_path: Path) -> None:
+        _write_phase_file(tmp_path, "design", paused=True, paused_since="2026-07-01T00:00:00Z")
         assert read_pause_state(tmp_path) == ("paused", "2026-07-01T00:00:00Z")
         assert _read_phase(tmp_path) == "design"
 
-    def test_write_phase_atomic_preserves_free_flow_fields(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True, free_since="2026-07-01T00:00:00Z")
+    def test_write_phase_atomic_preserves_pause_fields(self, tmp_path: Path) -> None:
+        _write_phase_file(tmp_path, "build", paused=True, paused_since="2026-07-01T00:00:00Z")
         _write_phase_atomic(tmp_path, "qa")
         assert _read_phase(tmp_path) == "qa"
         assert read_pause_state(tmp_path) == ("paused", "2026-07-01T00:00:00Z")
@@ -170,13 +170,13 @@ class TestPhaseRowFlowState:
 
 
 # ---------------------------------------------------------------------------
-# Signal layer: compose-only handling in free mode
+# Signal layer: compose-only handling in pause mode
 # ---------------------------------------------------------------------------
 
 
-class TestEvaluateSignalFreeFlow:
-    def test_free_mode_composes_domain_only(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)
+class TestEvaluateSignalPause:
+    def test_pause_mode_composes_domain_only(self, tmp_path: Path) -> None:
+        _write_phase_file(tmp_path, "build", paused=True)
         r = _eval(_req("poke around the auth code"), tmp_path, session_id="s1")
         assert r.paused_mode is True
         assert r.should_compose is True
@@ -187,20 +187,20 @@ class TestEvaluateSignalFreeFlow:
         assert r.advisories == []
         assert r.gates_met == [] and r.gates_unmet == []
         assert r.current_contract is None and r.announce_cursor is False
-        # Phase preserved, cadence deferred under the free sentinel.
+        # Phase preserved, cadence deferred under the pause sentinel.
         assert r.phase == "build"
         assert r.pending_announce is not None and r.pending_announce[0] == "__paused__"
 
-    def test_no_banner_or_system_prose_on_any_free_return(self, tmp_path: Path) -> None:
-        """Free flow is silent on BOTH workflow-steering legs, on every return path.
+    def test_no_banner_or_system_prose_on_any_pause_return(self, tmp_path: Path) -> None:
+        """Pause mode is silent on BOTH workflow-steering legs, on every return path.
 
-        `_evaluate_free_flow` has three returns (anonymous, quiet, compose) and returns
+        `_evaluate_pause_mode` has three returns (anonymous, quiet, compose) and returns
         before the banner-cadence block, so neither leg can fire. This pins that down:
         the banner is a phase/gate recency anchor and `workflow_system_prose` is the
-        phase's operating instructions — in free flow there is no phase being driven,
+        phase's operating instructions — in pause mode there is no phase being driven,
         so steering the agent with either is wrong.
         """
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
 
         # 1. Anonymous -> not a carrier. Needs an empty message list: with any user
         #    text, `resolve_session_key` fingerprints one even when session_id is None,
@@ -221,7 +221,7 @@ class TestEvaluateSignalFreeFlow:
         assert quiet.should_compose is False
         assert quiet.banner is None and quiet.workflow_system_prose is None
 
-    def test_mode_absent_is_not_free(self, tmp_path: Path) -> None:
+    def test_mode_absent_is_not_paused(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         with (
             mock.patch(
@@ -233,15 +233,15 @@ class TestEvaluateSignalFreeFlow:
             r = asyncio.run(evaluate_signal(_req("task"), tmp_path, session_id="s1"))
         assert r.paused_mode is False
 
-    def test_toolless_carrier_composes_in_free_mode(self, tmp_path: Path) -> None:
+    def test_toolless_carrier_composes_in_pause_mode(self, tmp_path: Path) -> None:
         # Unified carrier gate: session_key presence is the sole carrier signal,
         # so a tool-less request with a session id still composes on first entry.
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
         r = _eval(_req("background ping", tools=False), tmp_path, session_id="s1")
         assert r.should_compose is True and r.paused_mode is True
 
     def test_once_per_session_cadence(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
         first = _eval(_req("task"), tmp_path, session_id="s1")
         assert first.should_compose
         commit_markers(tmp_path, first, announce_emitted=True, cursor_emitted=False)
@@ -252,21 +252,21 @@ class TestEvaluateSignalFreeFlow:
         assert third.should_compose is True
 
     def test_no_phase_transition_written(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
         _eval(_req("this is complete, ship it, all done"), tmp_path, session_id="s1")
         assert _read_phase(tmp_path) == "build"
 
     # -- intake ------------------------------------------------------------
 
-    def test_free_before_intake_skips_intake(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "intake", free=True)
+    def test_pause_before_intake_skips_intake(self, tmp_path: Path) -> None:
+        _write_phase_file(tmp_path, "intake", paused=True)
         r = _eval(_req("just exploring"), tmp_path, session_id="s1")
         # No intake orientation is composed; only the domain leg.
         assert r.paused_mode is True and r.workflow_prose is None
         commit_markers(tmp_path, r, announce_emitted=True, cursor_emitted=False)
 
     def test_resume_runs_intake_as_first_request(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "intake", free=True)
+        _write_phase_file(tmp_path, "intake", paused=True)
         r = _eval(_req("just exploring"), tmp_path, session_id="s1")
         commit_markers(tmp_path, r, announce_emitted=True, cursor_emitted=False)
         # Resume: mode cleared, phase untouched.
@@ -346,9 +346,9 @@ def _passthrough_app(
     return app
 
 
-class TestPassthroughSurfaceFreeFlow:
+class TestPassthroughSurfacePause:
     def test_domain_injected_without_steering(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
         captured: dict[str, Any] = {}
         reqs: list[Any] = []
         store = open_telemetry_store(tmp_path / "telemetry.duck")
@@ -368,21 +368,21 @@ class TestPassthroughSurfaceFreeFlow:
         # ...and no workflow steering of any kind.
         for needle in _STEERING_NEEDLES:
             assert needle not in forwarded
-        # Consolidated trace row: composed + tagged free-flow.
+        # Consolidated trace row: composed + tagged paused.
         rows = store.query_traces()
         store.close()
         assert len(rows) == 1
         assert rows[0].status == "proxy_composed"
-        assert rows[0].category == "free-flow"
+        assert rows[0].category == "paused"
         assert rows[0].phase == "build"
 
     def test_no_reminder_line_in_injection(self, tmp_path: Path) -> None:
-        """TC-01-2: free-flow produces no reminder, even after 24+ hours.
+        """TC-01-2: pause mode produces no reminder, even after 24+ hours.
 
-        TC-01-4: free-flow does not write pause-reminded state.
+        TC-01-4: pause mode does not write pause-reminded state.
         """
         since = _iso(datetime.now(UTC) - timedelta(hours=30))
-        _write_phase_file(tmp_path, "build", free=True, free_since=since)
+        _write_phase_file(tmp_path, "build", paused=True, paused_since=since)
         captured: dict[str, Any] = {}
         app = _passthrough_app(captured, _orchestrator("DOMAIN-SKILL-PROSE"))
         token = encode_proj_token(tmp_path)
@@ -392,12 +392,12 @@ class TestPassthroughSurfaceFreeFlow:
             # Second request, same session:
             client.post(f"/proj/{token}/v1/messages", json=_anthropic_body())
             forwarded_second = captured["body"].decode("utf-8")
-        assert "workflow paused (free-flow)" not in forwarded_first
-        assert "workflow paused (free-flow)" not in forwarded_second
+        assert "workflow paused (pause)" not in forwarded_first
+        assert "workflow paused (pause)" not in forwarded_second
         assert not (tmp_path / ".agentalloy" / "pause-reminded").exists()
 
     def test_workflow_mode_unchanged(self, tmp_path: Path) -> None:
-        """Guard: without ``mode: free`` the workflow path still orients."""
+        """Guard: without ``mode: paused`` the workflow path still orients."""
         _write_phase_file(tmp_path, "build")
         captured: dict[str, Any] = {}
         skill = {
@@ -453,9 +453,9 @@ def _openai_upstream(captured: dict[str, Any]) -> httpx.AsyncClient:
     )
 
 
-class TestOpenAISurfaceFreeFlow:
+class TestOpenAISurfacePause:
     def test_domain_injected_without_steering(self, tmp_path: Path) -> None:
-        _write_phase_file(tmp_path, "build", free=True)
+        _write_phase_file(tmp_path, "build", paused=True)
         captured: dict[str, Any] = {}
         store = open_telemetry_store(tmp_path / "telemetry.duck")
         app = create_app(use_default_lifespan=False)
@@ -489,4 +489,4 @@ class TestOpenAISurfaceFreeFlow:
         store.close()
         assert len(rows) == 1
         assert rows[0].status == "proxy_composed"
-        assert rows[0].category == "free-flow"
+        assert rows[0].category == "paused"

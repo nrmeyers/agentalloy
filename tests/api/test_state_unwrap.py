@@ -182,11 +182,11 @@ class TestPhaseWrite:
         assert body.status_code == 200
         assert body.json()["value"] == "design"
 
-    def test_free_flow_mode_survives_an_advance(self, wired, tmp_path: Path) -> None:
+    def test_pause_mode_survives_an_advance(self, wired, tmp_path: Path) -> None:
         """A raw ``write`` here replaced the blob with a bare name, dropping mode.
 
         ``read_phase`` tolerates that shape, so nothing failed — the repo just
-        quietly left free-flow on its next phase advance.
+        quietly left pause mode on its next phase advance.
         """
         store, client = wired
         repo = tmp_path / "repo"

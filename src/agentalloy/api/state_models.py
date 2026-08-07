@@ -120,8 +120,8 @@ class PhaseReadResponse(StateReadResponse):
     A superset of :class:`StateReadResponse`: ``value`` still carries the bare
     phase name, so a caller that only wants "which phase" is unchanged.  The
     remaining fields exist because ``phase`` is the one kind whose stored row is
-    a blob, and the CLI genuinely renders all of it — ``flow status`` needs
-    ``mode``/``free_since``, ``phase get`` prints the timestamps, and
+    a blob, and the CLI genuinely renders all of it — ``workflow status`` needs
+    ``mode``/``paused_since``, ``phase get`` prints the timestamps, and
     ``phase set`` needs the prior ``transitioned_by`` to decide whether a write
     is a real transition.  Serving only ``value`` forced every one of those back
     onto the file mirror.
@@ -169,13 +169,13 @@ class PhaseAdvanceRequest(BaseModel):
     mode: str | None = Field(
         default=None,
         description=(
-            "Flow mode ('free' or empty to clear).  Omit to carry the stored "
-            "value forward — only `agentalloy flow free/resume` sets it."
+            "Workflow mode ('paused' or empty to clear).  Omit to carry the stored "
+            "value forward — only `agentalloy workflow pause/resume` sets it."
         ),
     )
     paused_since: str | None = Field(
         default=None,
-        description="ISO timestamp free-flow was entered; empty string clears it.",
+        description="ISO timestamp pause was entered; empty string clears it.",
     )
     actor: str | None = Field(
         default=None,

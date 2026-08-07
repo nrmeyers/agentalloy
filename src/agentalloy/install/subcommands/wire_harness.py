@@ -2080,14 +2080,14 @@ def _has_any_wire_record(root: Path) -> bool:
     return any(entry.get("repo_root") == repo_str for entry in st.get("harness_files_written", []))
 
 
-def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = False) -> bool:
+def _apply_claude_code_posture(root: Path, phase: str, *, pause_mode: bool = False) -> bool:
     """Rewrite ``.claude/settings.local.json`` with the enforcement posture.
 
     Merges the ``permissions`` block into the existing settings, preserving
     all other keys (``env``, MCP toggles, etc.).  During denied phases the
     deny list is populated; during all other phases it is empty (unlocked).
 
-    When *free_mode* is ``True`` (repo is in free-flow mode), deny rules are
+    When *pause_mode* is ``True`` (repo is in pause mode), deny rules are
     skipped entirely so the LLM retains full write access regardless of phase.
 
     Returns True if the file was written, False if it did not exist.
@@ -2108,7 +2108,7 @@ def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = Fals
     if not isinstance(data, dict):
         return False
 
-    permissions = build_claude_code_permissions(phase, free_mode=free_mode)
+    permissions = build_claude_code_permissions(phase, pause_mode=pause_mode)
     data["permissions"] = permissions
 
     try:
@@ -2118,14 +2118,14 @@ def _apply_claude_code_posture(root: Path, phase: str, *, free_mode: bool = Fals
         return False
 
 
-def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> bool:
+def _apply_codex_posture(root: Path, phase: str, *, pause_mode: bool = False) -> bool:
     """Rewrite ``.codex/config.toml`` with the enforcement posture.
 
     Merges the ``workspace-write`` block into the existing TOML config.
     During denied phases narrows ``writable_roots`` to docs/.agentalloy;
     during all other phases removes the restriction.
 
-    When *free_mode* is ``True`` (repo is in free-flow mode), writable
+    When *pause_mode* is ``True`` (repo is in pause mode), writable
     roots are unrestricted regardless of phase.
 
     Returns True if the file was written, False if it did not exist.
@@ -2150,7 +2150,7 @@ def _apply_codex_posture(root: Path, phase: str, *, free_mode: bool = False) -> 
     if not isinstance(data, dict):
         return False
 
-    ww = build_codex_workspace_write(phase, free_mode=free_mode)
+    ww = build_codex_workspace_write(phase, pause_mode=pause_mode)
     if ww:
         data["workspace-write"] = ww
     elif "workspace-write" in data:
@@ -2167,7 +2167,7 @@ class _UnsetType:
     """Sentinel distinguishing "no mode passed" from an explicit ``None``.
 
     ``rewrite_enforcement_posture``'s ``mode`` parameter needs three distinct
-    inputs: a known mode string, an explicit "no free-flow" (``None``/``""``),
+    inputs: a known mode string, an explicit "no pause" (``None``/``""``),
     and "the caller doesn't know — derive it yourself". Only the sentinel can
     stand for the third without colliding with the second.
     """
@@ -2187,26 +2187,26 @@ def rewrite_enforcement_posture(
 ) -> list[str]:
     """Rewrite the enforcement posture files for all wired Tier A harnesses.
 
-    Called after a phase transition *or* a free-flow mode change to update
+    Called after a phase transition *or* a pause mode change to update
     deny rules — posture is a pure function of ``(phase, mode)``
     (``build_claude_code_permissions`` / ``build_codex_workspace_write``), and
     every transition that changes either input must recompute and persist it.
     Only touches repos that have a ``WireRecord`` — an unwired repo is never
     modified.
 
-    When the resolved mode is free-flow, deny rules are skipped entirely so
+    When the resolved mode is pause, deny rules are skipped entirely so
     the LLM retains full write access regardless of phase.
 
     Args:
         root: The repository root.
         phase: The new phase value.
-        mode: The already-known flow mode (``"free"``, or ``"workflow"``/
+        mode: The already-known workflow mode (``"paused"``, or ``"workflow"``/
             ``None``/``""`` for anything else), when the caller just wrote it
             and knows it authoritatively — pass this whenever possible.
-            ``run_flow_free``/``run_flow_resume`` always do, since they just
+            ``run_workflow_pause``/``run_workflow_resume`` always do, since they just
             wrote the mode themselves; the CLI process cannot reach the
             in-process store to re-derive it after the fact (see
-            ``read_flow_state``'s docstring — store-only, no HTTP fallback).
+            ``read_pause_state``'s docstring — store-only, no HTTP fallback).
 
             When omitted, the mode is derived from the phase row directly.
             That derivation is safe only in-process — the phase-advance and
@@ -2254,17 +2254,17 @@ def rewrite_enforcement_posture(
     else:
         flow_mode = mode or "workflow"
 
-    free_mode = (flow_mode or "").lower() in ("free", "paused")
+    pause_mode = (flow_mode or "").lower() in ("free", "paused")
 
     rewritten: list[str] = []
 
     if _has_wire_record_for_harness(root, "claude-code") and _apply_claude_code_posture(
-        root, phase, free_mode=free_mode
+        root, phase, pause_mode=pause_mode
     ):
         rewritten.append("claude-code")
 
     if _has_wire_record_for_harness(root, "codex") and _apply_codex_posture(
-        root, phase, free_mode=free_mode
+        root, phase, pause_mode=pause_mode
     ):
         rewritten.append("codex")
 
@@ -2284,21 +2284,21 @@ def verify_enforcement_posture(root: Path, phase: str, mode: str | None) -> list
     ``rewrite_enforcement_posture``'s return value only reports *write*
     success (the file existed and was written); it says nothing about whether
     the content it wrote was actually the posture the caller intended. This
-    is the read-back that closes that gap, used by ``flow free``/``flow
+    is the read-back that closes that gap, used by ``workflow pause``/``workflow
     resume`` so the CLI can warn loudly instead of trusting a rewrite that
-    silently computed the wrong ``free_mode``.
+    silently computed the wrong ``pause_mode``.
     """
     from agentalloy.providers.base import (
         build_claude_code_permissions,
         build_codex_workspace_write,
     )
 
-    free_mode = (mode or "").lower() in ("free", "paused")
+    pause_mode = (mode or "").lower() in ("free", "paused")
     mismatched: list[str] = []
 
     if _has_wire_record_for_harness(root, "claude-code"):
         settings_path = root / ".claude" / "settings.local.json"
-        expected = build_claude_code_permissions(phase, free_mode=free_mode)
+        expected = build_claude_code_permissions(phase, pause_mode=pause_mode)
         actual: Any = None
         try:
             data = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -2311,7 +2311,7 @@ def verify_enforcement_posture(root: Path, phase: str, mode: str | None) -> list
 
     if _has_wire_record_for_harness(root, "codex"):
         config_path = root / ".codex" / "config.toml"
-        expected_ww = build_codex_workspace_write(phase, free_mode=free_mode)
+        expected_ww = build_codex_workspace_write(phase, pause_mode=pause_mode)
         actual_ww: Any = None
         try:
             import tomllib as _tomllib

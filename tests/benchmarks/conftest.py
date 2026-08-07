@@ -55,14 +55,15 @@ def _build_store_repo(repo: Path) -> Path:
     try:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS sdd_state ("
-            "repo TEXT NOT NULL, kind TEXT NOT NULL, session_key TEXT, "
+            "repo TEXT NOT NULL, stream_id TEXT NOT NULL DEFAULT '', "
+            "kind TEXT NOT NULL, session_key TEXT, "
             "value TEXT NOT NULL, owner TEXT, "
             "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "lease_expires_at TIMESTAMP"
             ")"
         )
         conn.execute(
-            "INSERT INTO sdd_state (repo, kind, value) VALUES (?, 'phase', ?)",
+            "INSERT INTO sdd_state (repo, stream_id, kind, value) VALUES (?, '', 'phase', ?)",
             [repo.name, "build"],
         )
     finally:

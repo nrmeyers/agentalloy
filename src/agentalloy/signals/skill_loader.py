@@ -145,7 +145,8 @@ def read_pause_state(project_root: Path) -> tuple[str, str | None]:
     anything else (no row, absent field, unknown value) reads as ``"workflow"``
     — the historical behavior. ``paused_since`` is the ISO timestamp recorded
     when pause was entered (drives the daily reminder), or ``None``.
-    Legacy: ``mode: free`` (old name) reads as ``paused``.
+    Legacy: ``mode: free`` (old name) reads as ``paused`` — the alias is
+    kept indefinitely for backwards compatibility with existing phase rows.
     Never raises.
     """
     state = _phase_state(project_root)

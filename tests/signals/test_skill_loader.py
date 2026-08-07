@@ -247,26 +247,26 @@ class TestConcurrentTransition:
 # ---------------------------------------------------------------------------
 
 
-class TestFlowState:
-    """read_flow_state behaviour."""
+class TestPauseState:
+    """read_pause_state behaviour."""
 
     def test_workflow_default(self, fixture_repo: Path) -> None:
         """No phase row → workflow mode."""
-        mode, free_since = sl.read_pause_state(fixture_repo)
+        mode, paused_since = sl.read_pause_state(fixture_repo)
         assert mode == "workflow"
-        assert free_since is None
+        assert paused_since is None
 
     def test_free_mode(self, fixture_repo: Path) -> None:
-        """phase row with mode: free → free mode."""
+        """phase row with mode: free → paused mode."""
         seed_phase(fixture_repo, "spec", mode="free", paused_since="2026-07-01")
-        mode, free_since = sl.read_pause_state(fixture_repo)
+        mode, paused_since = sl.read_pause_state(fixture_repo)
         assert mode == "paused"
-        assert free_since == "2026-07-01"
+        assert paused_since == "2026-07-01"
 
     def test_unknown_mode_defaults_workflow(self, fixture_repo: Path) -> None:
         """Unknown mode value falls back to workflow."""
         seed_phase(fixture_repo, "spec", mode="unknown")
-        mode, free_since = sl.read_pause_state(fixture_repo)
+        mode, paused_since = sl.read_pause_state(fixture_repo)
         assert mode == "workflow"
 
 

@@ -53,7 +53,7 @@ _VALID_PHASES = (
 
 # Hardcoded orientation prose — fires BEFORE the workflow block, once per session.
 # This is the pre-script that orients the agent on its first request in a session:
-# it confirms current phase, checks mode (free-flow vs workflow), and presents
+# it confirms current phase, checks mode (pause vs workflow), and presents
 # three choices (continue / enable or resume workflow / start fresh).
 # The intake skill's raw_prose is trimmed of duplicate phase-get + resume logic
 # since this orientation handles that upfront.
@@ -72,9 +72,9 @@ at the start of every session and then disappears.
 """
 
 # Options text templates, dynamically selected based on mode.
-_OPTIONS_TEXT_FREE = (
-    "We're in free-flow mode — workflow instructions are paused. "
-    "Run ``agentalloy flow resume`` to turn workflow instructions back on."
+_OPTIONS_TEXT_PAUSED = (
+    "We're in pause mode — workflow instructions are paused. "
+    "Run ``agentalloy workflow resume`` to turn workflow instructions back on."
 )
 _OPTIONS_TEXT_WORKFLOW = "Workflow instructions are active."
 
@@ -251,12 +251,12 @@ async def _compose_block(
     when none has content) and whose flags tell the caller which cadence markers
     are safe to commit post-injection.
 
-    Free-flow (``signal.paused_mode``) takes the compose-only branch instead: no
+    Pause (``signal.paused_mode``) takes the compose-only branch instead: no
     advisory / Tier 1 / Tier 2, just the task-keyed domain leg plus the daily
-    reminder line (see :func:`_compose_free_block`).
+    reminder line (see :func:`_compose_pause_block`).
     """
     if signal.paused_mode:
-        return await _compose_free_block(signal, orchestrator)
+        return await _compose_pause_block(signal, orchestrator)
 
     phase = signal.phase
     compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
@@ -381,8 +381,8 @@ async def _compose_block(
     # once per session, then disappears.
     orientation_block = ""
     if signal.announce_orientation:
-        mode = "free-flow" if signal.paused_mode else "workflow"
-        options_text = _OPTIONS_TEXT_FREE if signal.paused_mode else _OPTIONS_TEXT_WORKFLOW
+        mode = "paused" if signal.paused_mode else "workflow"
+        options_text = _OPTIONS_TEXT_PAUSED if signal.paused_mode else _OPTIONS_TEXT_WORKFLOW
         orientation_block = _COMPOSE_ORIENTATION.format(
             phase=signal.phase, mode=mode, options_text=options_text
         )
@@ -396,24 +396,24 @@ async def _compose_block(
     )
 
 
-async def _compose_free_block(
+async def _compose_pause_block(
     signal: SignalResult, orchestrator: ComposeOrchestrator
 ) -> _ComposedBlock:
-    """Compose the free-flow (compose-only) block.
+    """Compose the pause (compose-only) block.
 
     Two parts, both riding the standard injection block:
 
     - **Domain leg** — the domain skills retrieved for the request's task text
       (``signal.task``), gated on ``signal.announce`` (once per session, on the
-      free sentinel cadence). No workflow prose, no system leg, no banner.
+      pause sentinel cadence). No workflow prose, no system leg, no banner.
     - **Reminder** — the once-per-24h "workflow paused" line (already
       cadence-stamped by the signal layer).
 
     Marker semantics: ``tier1_text`` is True on a *terminal* domain compose
     (delivered skills OR a clean empty result — mirrors the workflow-mode cursor
-    semantics), so the per-session free marker commits once the block is
+    semantics), so the per-session pause marker commits once the block is
     delivered and a transient compose error re-fires next turn. The Tier 2
-    cursor channel is never used in free mode.
+    cursor channel is never used in pause mode.
     """
     phase = signal.phase
     compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
@@ -439,7 +439,7 @@ async def _compose_free_block(
             domain = "" if isinstance(domain_result, EmptyResult) else domain_result.output
             domain_terminal = True
         except Exception:
-            logger.warning("free-flow domain compose failed -- passing through", exc_info=True)
+            logger.warning("pause domain compose failed -- passing through", exc_info=True)
 
     text = domain
     return _ComposedBlock(

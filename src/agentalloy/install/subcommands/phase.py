@@ -302,9 +302,9 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     from agentalloy.signals.skill_loader import cli_session_key  # noqa: PLC0415
 
     try:
-        # `mode`/`free_since` are deliberately not passed: omitting them carries
+        # `mode`/`paused_since` are deliberately not passed: omitting them carries
         # the stored pair forward, so a phase set never drops the repo out of
-        # free-flow. Only `agentalloy flow` sets them.
+        # pause. Only `agentalloy workflow` sets them.
         _write_result = access.write(phase, actor=cli_session_key() or None, override=force)
         # A service-backed store re-evaluates the gate and may decline even
         # though the CLI's local check passed (the two must agree on the scoped

@@ -615,7 +615,7 @@ def _build_payload(
     upstream_model: str | None = None,
     phase: str | None = None,
     *,
-    free_mode: bool = False,
+    pause_mode: bool = False,
 ) -> dict[str, Any]:
     """Build the JSON payload to forward to the upstream LLM.
 
@@ -624,7 +624,7 @@ def _build_payload(
     actual upstream model.
 
     If *phase* is set, tools are filtered through ``filter_tools_for_phase``
-    so code-writing tools are removed during denied phases.  When *free_mode*
+    so code-writing tools are removed during denied phases.  When *pause_mode*
     is ``True``, write gating is skipped regardless of phase.
 
     Raises ``ValueError`` if the resolved model is ``None`` (i.e., the
@@ -668,7 +668,7 @@ def _build_payload(
     if request.tools is not None:
         tools = request.tools
         if phase is not None:
-            tools = filter_tools_for_phase(tools, phase, free_mode=free_mode)
+            tools = filter_tools_for_phase(tools, phase, pause_mode=pause_mode)
         payload["tools"] = tools
     if request.tool_choice is not None:
         payload["tool_choice"] = request.tool_choice
@@ -1010,9 +1010,9 @@ async def proxy_chat_completions(
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).
     gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False
-    # Mode tag for every telemetry write of this request: "free-flow" rows are
-    # distinguishable so free→contract conversion is measurable later.
-    trace_category = "free-flow" if signal_result and signal_result.paused_mode else None
+    # Mode tag for every telemetry write of this request: "paused" rows are
+    # distinguishable so pause→contract conversion is measurable later.
+    trace_category = "paused" if signal_result and signal_result.paused_mode else None
 
     def _commit(status: int) -> None:
         """Commit the deferred cadence markers, 2xx-gated. No-op if nothing composed."""
@@ -1025,7 +1025,7 @@ async def proxy_chat_completions(
             modified_request,
             upstream_model,
             phase=phase,
-            free_mode=signal_result.paused_mode if signal_result else False,
+            pause_mode=signal_result.paused_mode if signal_result else False,
         )
     except ValueError as e:
         return JSONResponse(

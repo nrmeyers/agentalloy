@@ -54,17 +54,17 @@ class TestRoundTrip:
 
 
 class TestPreservation:
-    def test_free_flow_survives_a_transition(self, store: DuckDBStateStore) -> None:
-        """AC-3. The regression `flow.py`'s hardcoded workflow currently masks."""
+    def test_pause_mode_survives_a_transition(self, store: DuckDBStateStore) -> None:
+        """AC-3. The regression `workflow.py`'s hardcoded workflow currently masks."""
         store.write_phase("spec", mode="free", paused_since="2026-07-28T01:02:03Z")
-        store.write_phase("design")  # a transition that says nothing about flow
+        store.write_phase("design")  # a transition that says nothing about pause
         got = store.read_phase()
         assert got is not None
         assert got.mode == "free"
         assert got.paused_since == "2026-07-28T01:02:03Z"
 
     def test_empty_string_clears(self, store: DuckDBStateStore) -> None:
-        """`flow resume` drops free-flow; ``None`` means "leave it", ``""`` clears."""
+        """``workflow resume`` drops pause; ``None`` means "leave it", ``""`` clears."""
         store.write_phase("design", mode="free", paused_since="2026-07-28T01:02:03Z")
         store.write_phase("design", mode="", paused_since="")
         got = store.read_phase()

@@ -1,15 +1,15 @@
 """Issue #530 — permissions must be re-evaluated and written on every phase
-change AND every flow change; posture is a pure function of ``(phase, mode)``.
+change AND every workflow mode change; posture is a pure function of ``(phase, mode)``.
 
-``agentalloy flow free`` used to record ``mode: free`` correctly and then
+``agentalloy workflow pause`` used to record ``mode: paused`` correctly and then
 silently fail to clear the Tier A deny rules, because
-``rewrite_enforcement_posture`` re-derived the flow mode through
-``read_flow_state`` — a store-only, in-process-only read (see
+``rewrite_enforcement_posture`` re-derived the pause mode through
+``read_pause_state`` — a store-only, in-process-only read (see
 ``signals.skill_loader``'s docstrings). Called from the CLI, that read finds
 no bound store, silently falls back to its documented ``("workflow", None)``
 default, and the posture rewriter writes deny rules right back — while
-``flow free`` reports success, because the mode *write* (a different code
-path) succeeded fine. ``flow resume`` shared the same defect in the opposite,
+``workflow pause`` reports success, because the mode *write* (a different code
+path) succeeded fine. ``workflow resume`` shared the same defect in the opposite,
 more dangerous direction: gates failing to RE-ENGAGE.
 
 Two things are asserted here, deliberately kept separate:
@@ -22,7 +22,7 @@ Two things are asserted here, deliberately kept separate:
   manifests when the store is unreachable from the CLI process.
 * ``TestPostureSurvivesAnUnreachableStore`` — sabotages the exact seam the bug
   lived in (``_phase_view`` returning ``None``, simulating "no store bound in
-  this process") and proves ``flow free``/``flow resume`` still write the
+  this process") and proves ``workflow pause``/``workflow resume`` still write the
   correct posture, because the fix threads the already-known mode in rather
   than re-deriving it. This is the test that would have failed before the fix
   and is green after it — the CLI-process path, not just the posture builder.
@@ -76,7 +76,7 @@ def _wire_codex(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ``_apply_codex_posture`` for the same defect — Tier A includes codex.
     This exercises that path end to end (not just by reading the code), since
     ``build_claude_code_permissions``/``build_codex_workspace_write`` share
-    the exact same ``free_mode`` gate and both flow through
+    the exact same ``pause_mode`` gate and both flow through
     ``rewrite_enforcement_posture``.
     """
     config = root / ".codex" / "config.toml"
@@ -110,9 +110,9 @@ def _workspace_write(config_path: Path) -> Any:
 class TestPostureInvariantMatrix:
     """Drives ``rewrite_enforcement_posture`` directly — the single evaluation
     point every real call site (``state_router.py``, ``proxy_signal.py``,
-    ``flow.py``) now funnels through with an explicit ``mode``. Note the CLI
+    ``workflow.py``) now funnels through with an explicit ``mode``. Note the CLI
     ``phase set`` command itself never rewrote posture (only the HTTP
-    phase-advance route, the proxy auto-advance, and flow free/resume do) —
+    phase-advance route, the proxy auto-advance, and workflow pause/resume do) —
     that split is unchanged by this issue and out of its scope.
     """
 
@@ -124,7 +124,7 @@ class TestPostureInvariantMatrix:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
 
-        expected = build_claude_code_permissions(phase, free_mode=(mode in ("free", "paused")))
+        expected = build_claude_code_permissions(phase, pause_mode=(mode in ("free", "paused")))
         assert _permissions(settings) == expected
 
     def test_resume_direction_reengages_deny_rules_in_a_denied_phase(
@@ -137,7 +137,7 @@ class TestPostureInvariantMatrix:
         assert _permissions(settings) == {"deny": []}  # free: unlocked
 
         flow_mod.run_workflow_resume(root=tmp_path)
-        assert _permissions(settings) == build_claude_code_permissions("design", free_mode=False)
+        assert _permissions(settings) == build_claude_code_permissions("design", pause_mode=False)
         assert _permissions(settings)["deny"] != []
 
 
@@ -200,7 +200,7 @@ class TestPostureSurvivesAnUnreachableStore:
         # The dangerous polarity: gates must RE-ENGAGE here. Before the fix,
         # `flow resume` didn't call the posture rewrite at all.
         assert _permissions(settings)["deny"] != []
-        assert _permissions(settings) == build_claude_code_permissions("spec", free_mode=False)
+        assert _permissions(settings) == build_claude_code_permissions("spec", pause_mode=False)
 
 
 # ---------------------------------------------------------------------------
@@ -244,14 +244,14 @@ class TestRewriteEnforcementPostureExplicitMode:
         # Plant the exact old bug by hand: mode is free, but deny rules are
         # still on disk (as if the rewrite silently no-op'd).
         settings.write_text(
-            json.dumps({"permissions": build_claude_code_permissions("design", free_mode=False)})
+            json.dumps({"permissions": build_claude_code_permissions("design", pause_mode=False)})
         )
         assert wire_harness.verify_enforcement_posture(tmp_path, "design", "free") == [
             "claude-code"
         ]
         # A matching posture verifies clean.
         settings.write_text(
-            json.dumps({"permissions": build_claude_code_permissions("design", free_mode=True)})
+            json.dumps({"permissions": build_claude_code_permissions("design", pause_mode=True)})
         )
         assert wire_harness.verify_enforcement_posture(tmp_path, "design", "free") == []
 
@@ -263,7 +263,7 @@ class TestRewriteEnforcementPostureExplicitMode:
 
 
 # ---------------------------------------------------------------------------
-# Codex shares the exact same free_mode gate (build_codex_workspace_write)
+# Codex shares the exact same pause_mode gate (build_codex_workspace_write)
 # and the exact same rewrite_enforcement_posture call site — issue item 4
 # asks this be audited explicitly, not just inferred from the claude-code
 # case. build_codex_workspace_write returns {} for an open/free posture, and
@@ -281,7 +281,7 @@ class TestCodexPostureRoundTrip:
             for mode in ("workflow", "paused"):
                 wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
                 expected = build_codex_workspace_write(
-                    phase, free_mode=(mode in ("free", "paused"))
+                    phase, pause_mode=(mode in ("free", "paused"))
                 )
                 assert _workspace_write(config) == (expected or None)
 

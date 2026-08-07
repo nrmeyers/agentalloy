@@ -71,25 +71,13 @@ class _TxnFlag:
 # Schema
 # ---------------------------------------------------------------------------
 
-_SCHEMA_DDL = """
-CREATE TABLE IF NOT EXISTS sdd_state (
-    repo               TEXT NOT NULL,
-    stream_id          TEXT NOT NULL DEFAULT '',
-    kind               TEXT NOT NULL,
-    session_key        TEXT,
-    value              TEXT NOT NULL,
-    owner              TEXT,
-    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    lease_expires_at   TIMESTAMP
-);
+_SDD_CONTRACT_COLUMNS = (
+    "repo, stream_id, contract_id, phase, slug, work_item, route, "
+    "domain_tags, scope_touches, scope_avoids, success_criteria, "
+    "status, supersedes, created_at, updated_at, body"
+)
 
-CREATE INDEX IF NOT EXISTS idx_sdd_state_repo_stream_kind_session
-    ON sdd_state (repo, stream_id, kind, COALESCE(session_key, ''));
-
-CREATE INDEX IF NOT EXISTS idx_sdd_state_kind_owner
-    ON sdd_state (repo, stream_id, kind, COALESCE(owner, ''));
-
-CREATE TABLE IF NOT EXISTS sdd_contract (
+_SDD_CONTRACT_COLUMNS_DDL = """\
     repo               TEXT NOT NULL,
     stream_id          TEXT NOT NULL DEFAULT '',
     contract_id        TEXT NOT NULL,
@@ -107,7 +95,26 @@ CREATE TABLE IF NOT EXISTS sdd_contract (
     updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     body               TEXT,
     PRIMARY KEY (repo, stream_id, contract_id)
+"""
+
+# Used verbatim by migrate() to rebuild sdd_contract when its PRIMARY KEY is
+# stale (DuckDB has no ALTER TABLE for constraints, only a full rebuild).
+_SDD_CONTRACT_DDL = f"CREATE TABLE sdd_contract (\n{_SDD_CONTRACT_COLUMNS_DDL});"
+
+_SCHEMA_DDL = f"""
+CREATE TABLE IF NOT EXISTS sdd_state (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    kind               TEXT NOT NULL,
+    session_key        TEXT,
+    value              TEXT NOT NULL,
+    owner              TEXT,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_expires_at   TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS sdd_contract (
+{_SDD_CONTRACT_COLUMNS_DDL});
 
 CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase
     ON sdd_contract (phase);
@@ -427,6 +434,81 @@ class DuckDBStateStore:
             raise RuntimeError("cannot migrate a read-only StateStore")
         self.conn.execute(_SCHEMA_DDL)
         logger.debug("sdd_state and sdd_contract schema ensured")
+
+        # stream_id column on sdd_state / sdd_contract — added after DDL so it
+        # backfills any table created before per-worktree stream isolation
+        # existed. ``CREATE TABLE IF NOT EXISTS`` is a no-op against a table
+        # that already exists, so without this an upgrade-in-place keeps the
+        # old columns and every stream_id-qualified query fails to bind.
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'sdd_state' AND column_name = 'stream_id'",
+        ).fetchone()
+        if (row[0] if row else 0) == 0:
+            self.conn.execute("ALTER TABLE sdd_state ADD COLUMN stream_id TEXT DEFAULT ''")
+            self.conn.execute("UPDATE sdd_state SET stream_id = '' WHERE stream_id IS NULL")
+
+        # sdd_contract's PRIMARY KEY changed from (repo, contract_id) to
+        # (repo, stream_id, contract_id). DuckDB cannot ALTER a table's
+        # constraints in place, so a plain ADD COLUMN would leave the old
+        # 2-column PK on upgraded databases — the very first cross-stream
+        # contract_id collision would then raise ConstraintException. Rebuild
+        # the table instead: rename aside, recreate with the correct PK,
+        # copy the data back in, drop the old one.
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'sdd_contract' AND column_name = 'stream_id'",
+        ).fetchone()
+        if (row[0] if row else 0) == 0:
+            # Indexes depend on the table and block ALTER TABLE ... RENAME;
+            # drop them here, _SCHEMA_DDL recreates them on the new table.
+            for idx in (
+                "idx_sdd_contract_phase",
+                "idx_sdd_contract_slug",
+                "idx_sdd_contract_status",
+            ):
+                self.conn.execute(f"DROP INDEX IF EXISTS {idx}")
+            self.conn.execute("ALTER TABLE sdd_contract RENAME TO sdd_contract_pre_stream_id")
+            self.conn.execute(_SDD_CONTRACT_DDL)
+            self.conn.execute(
+                f"INSERT INTO sdd_contract ({_SDD_CONTRACT_COLUMNS}) "
+                f"SELECT repo, '', contract_id, phase, slug, work_item, route, "
+                f"domain_tags, scope_touches, scope_avoids, success_criteria, "
+                f"status, supersedes, created_at, updated_at, body "
+                f"FROM sdd_contract_pre_stream_id"
+            )
+            self.conn.execute("DROP TABLE sdd_contract_pre_stream_id")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase ON sdd_contract (phase)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_slug ON sdd_contract (slug)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_status ON sdd_contract (status)"
+            )
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sdd_state_repo_stream_kind_session "
+            "ON sdd_state (repo, stream_id, kind, COALESCE(session_key, ''))"
+        )
+        # Name unchanged from the pre-stream_id definition but the column
+        # list changed — CREATE INDEX IF NOT EXISTS matches by name, not
+        # definition, so without the DROP an upgraded database silently
+        # keeps the stale 3-column index forever. Only drop/recreate when the
+        # stored definition is actually stale: migrate() runs on every boot,
+        # and rebuilding this index unconditionally would mean paying a full
+        # sdd_state index rebuild on every startup once the table has data.
+        idx_row = self.conn.execute(
+            "SELECT sql FROM duckdb_indexes() WHERE index_name = 'idx_sdd_state_kind_owner'"
+        ).fetchone()
+        if idx_row is None or "stream_id" not in idx_row[0]:
+            self.conn.execute("DROP INDEX IF EXISTS idx_sdd_state_kind_owner")
+            self.conn.execute(
+                "CREATE INDEX idx_sdd_state_kind_owner "
+                "ON sdd_state (repo, stream_id, kind, COALESCE(owner, ''))"
+            )
+        logger.debug("sdd_state/sdd_contract stream_id column ensured")
 
         # Lifecycle column on sdd_artifact — added after DDL so it runs on
         # first boot after this change, and is idempotent for subsequent boots.
@@ -773,8 +855,8 @@ class DuckDBStateStore:
         if not blob.get("phase"):
             return None
         phase = str(blob["phase"])
-        # Legacy: ``free_since`` was the old key; read it for backward compat,
-        # falling through to the new ``paused_since`` key.
+        # Legacy: ``free_since`` was the old key name (renamed to ``paused_since``);
+        # read it for backwards compatibility with existing rows.
         paused = _opt_str(blob.get("paused_since")) or _opt_str(blob.get("free_since"))
         return PhaseState(
             phase=phase,
@@ -828,9 +910,9 @@ class DuckDBStateStore:
         observe a half-updated blob. This is the store-side replacement for
         ``signals.skill_loader._write_phase_atomic``'s file semantics:
 
-        * ``mode`` / ``free_since`` are **carried forward** when not passed. An
+        * ``mode`` / ``paused_since`` are **carried forward** when not passed. An
           auto-transition must never silently drop a repo out of (or into)
-          free-flow — only ``agentalloy flow free/resume`` sets them.
+          pause — only ``agentalloy workflow pause/resume`` sets them.
         * ``transitioned_by`` is set to ``actor`` only on a *real* transition
           (``prev != phase``). An idempotent same-phase write preserves the prior
           actor, so a different session can still tell the phase moved and that
@@ -843,13 +925,13 @@ class DuckDBStateStore:
         * ``workflow`` is **derived** here as ``sdd-<phase>`` and is never taken
           from a caller — a caller cannot poison the row with a bogus workflow.
 
-        Passing ``mode=""`` (or ``free_since=""``) explicitly clears the field,
-        which is how ``flow resume`` drops free-flow; ``None`` means "leave it".
+        Passing ``mode=""`` (or ``paused_since=""``) explicitly clears the field,
+        which is how ``workflow resume`` drops pause; ``None`` means "leave it".
 
         Callers already inside a :meth:`transaction` reuse it rather than
         nesting (which is rejected outright).  ``POST /state/phase`` writes the
         phase and a contract in one BEGIN/COMMIT, and it must get blob
-        semantics too — a phase advance that dropped free-flow mode purely
+        semantics too — a phase advance that dropped pause mode purely
         because a contract rode along would be a silent, phase-shaped bug.
         """
         if self._read_only:
