@@ -692,6 +692,41 @@ def _write_banner_turn_atomic(
         logger.warning("banner-turns write failed for %s", project_root, exc_info=True)
 
 
+def _read_banner_hash(project_root: Path) -> str | None:
+    """The content hash of the last-emitted banner, or ``None``.
+
+    Backs the redundant-emission suppression (#587 §3): the cadence counter says
+    *when* the banner may fire, this says whether the text would differ from what
+    the agent already has. ``None`` (absent / unreadable / store unreachable) means
+    "nothing known" and always permits an emit — the banner must fail toward being
+    shown, never toward silence.
+    """
+    view = _state_view(project_root)
+    if view is None:
+        return None
+    try:
+        raw = view.read("banner-hash")
+    except Exception:
+        logger.warning("banner-hash read failed for %s", project_root, exc_info=True)
+        return None
+    return raw or None
+
+
+def _write_banner_hash_atomic(project_root: Path, digest: str) -> None:
+    """Record the content hash of the banner just emitted.
+
+    Best-effort, same contract as ``banner-turns``: a dropped write costs one
+    redundant banner, never a wedged phase.
+    """
+    view = _state_view(project_root)
+    if view is None:
+        return
+    try:
+        view.write("banner-hash", digest)
+    except Exception:
+        logger.warning("banner-hash write failed for %s", project_root, exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle mode helpers (per-repo deferral)
 # ---------------------------------------------------------------------------

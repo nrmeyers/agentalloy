@@ -146,6 +146,68 @@ def _extract_artifact_contains_specs(gate_spec: Any) -> list[tuple[str, list[str
     return specs
 
 
+def _extract_artifact_contains_store_specs(gate_spec: Any) -> list[tuple[str, str, list[str]]]:
+    """Pair EACH store-backed ``artifact_contains`` gate with its own sections.
+
+    Returns ``(phase, name, sections)`` in declaration order — the store-backed
+    sibling of :func:`_extract_artifact_contains_specs`, which can only express a
+    filesystem glob.
+
+    Why this exists: that function synthesizes a fake ``docs/<phase>/<name>`` glob
+    for store-backed gates so the banner's progress machinery has *something* to
+    hold. Nothing is ever written at that path (lifecycle artifacts live in the
+    store), so scoring against it always reported "no sections present" and the
+    banner suppressed its progress suffix for every store-backed phase. Scoring has
+    to query the store, which needs the ``(phase, name)`` pair unsynthesized.
+
+    Unlike the synthesizing walker there is no phase allow-list here: spec, design
+    and plan are store-backed too and their progress is exactly as useful.
+    """
+    specs: list[tuple[str, str, list[str]]] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        contains = gate_d.get("artifact_contains")
+        if isinstance(contains, dict):
+            c = cast(dict[str, Any], contains)
+            raw_sections = c.get("sections")
+            if isinstance(raw_sections, list) and "phase" in c and "name" in c:
+                sections = [s for s in cast(list[Any], raw_sections) if isinstance(s, str)]
+                if sections:
+                    specs.append((str(c["phase"]), str(c["name"]), sections))
+        for k, v in gate_d.items():
+            if k != "artifact_contains":
+                specs.extend(_extract_artifact_contains_store_specs(v))
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            specs.extend(_extract_artifact_contains_store_specs(item))
+    return specs
+
+
+def _extract_artifact_exists_store_specs(gate_spec: Any) -> list[tuple[str, str]]:
+    """``(phase, name)`` for every store-backed ``artifact_exists`` gate.
+
+    The store-backed counterpart of :func:`_extract_artifact_exists_paths`, used by
+    the banner to name which artifact is not yet recorded.
+    """
+    specs: list[tuple[str, str]] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        exists = gate_d.get("artifact_exists")
+        if isinstance(exists, dict):
+            e = cast(dict[str, Any], exists)
+            if "phase" in e and "name" in e:
+                specs.append((str(e["phase"]), str(e["name"])))
+        for k, v in gate_d.items():
+            if k != "artifact_exists":
+                specs.extend(_extract_artifact_exists_store_specs(v))
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            specs.extend(_extract_artifact_exists_store_specs(item))
+    return specs
+
+
 def _extract_artifact_exists_paths(gate_spec: Any) -> list[str]:
     """Walk gate_spec recursively and collect the ``path`` of every ``artifact_exists`` gate."""
     paths: list[str] = []

@@ -480,11 +480,14 @@ def decide_transition(
 # These are globs for the phase's exit artifacts — the approval marker
 # (.agentalloy/approved/<phase>) must be newer than any matching file.
 #
-# spec/design moved to the artifact store (specs/final_migration.md); their
-# staleness check is a store-side name_glob (_APPROVAL_STORE_NAME_GLOB), not a
-# filesystem glob. sdd-fast/add-skill are unmigrated and keep the disk glob.
+# spec/design/plan/sdd-fast moved to the artifact store (specs/final_migration.md);
+# their staleness check is a store-side name_glob (_APPROVAL_STORE_NAME_GLOB), not
+# a filesystem glob.
+#
+# add-skill is the ONE remaining disk entry and stays deliberately: its deliverable
+# is a custom-skill pack YAML authored by `agentalloy new-skill-pack`, which is
+# tool-written configuration, not a lifecycle artifact an agent hand-writes.
 _APPROVAL_SINCE: dict[str, str] = {
-    "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 # MUST mirror each pack's `approval_recorded: since_name_glob`. This map and the
@@ -500,6 +503,8 @@ _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
     "design": "approach.md",
     # plan produces tasks.md + test-plan.md, so "*.md" covers both.
     "plan": "*.md",
+    # sdd-fast's one collapsed artifact; matches the pack's artifact_exists leaf.
+    "sdd-fast": "*.md",
 }
 
 

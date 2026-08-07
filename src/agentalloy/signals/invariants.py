@@ -2,16 +2,24 @@
 """Load-bearing invariants for customized system/workflow skills.
 
 A user may customize a system/workflow skill's *language* (``raw_prose``), but
-parts of that prose are **load-bearing**: the file/contract paths and the
-command strings the SDD machine depends on (e.g. ``agentalloy phase set build``,
-``.agentalloy/contracts/build/``). If a customization drops them, the phase
-machine silently stops working.
+parts of that prose are **load-bearing**: the artifact names and the command
+strings the SDD machine depends on (e.g. ``agentalloy phase set build``,
+``agentalloy contract artifact-set``, ``approach.md``). If a customization drops
+them, the phase machine silently stops working.
+
+Note what a derived *path* token means now that lifecycle artifacts are
+store-backed: only ``add-skill`` still declares a filesystem ``path`` gate (a
+tool-written pack YAML). A shipped lifecycle skill must NOT declare one — its
+literal directory prefix becomes a required prose token, i.e. a standing
+instruction to the agent to write phase artifacts to disk, which the store-backed
+exit gates cannot see. Runtime code (``src/``) and tests are the only disk gates
+a lifecycle pack should carry.
 
 The invariant set for a skill is:
 
   (a) literal path tokens **derived** from the shipped skill's ``exit_gates``
-      (the deterministic mechanics — a gate that checks ``.agentalloy/contracts/
-      build/*.md`` implies the prose must still tell the agent to write there),
+      (the deterministic mechanics — a gate that checks ``.agentalloy/
+      custom-skills/**/*.yaml`` implies the prose must still name that location),
       PLUS
   (b) an authored ``prose_invariants`` list on the shipped skill for command
       strings that are not derivable from any gate path.

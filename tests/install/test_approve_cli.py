@@ -181,3 +181,36 @@ def test_plan_is_approvable(repo_root: Path) -> None:
 
     assert result["ok"] is True
     assert phase_access(repo_root).contracts_handle().get_approval("plan") is not None
+
+
+def test_sdd_fast_is_approvable(repo_root: Path) -> None:
+    """`agentalloy approve sdd-fast` must work against the STORE, not disk.
+
+    sdd-fast's approval was disk-backed (`docs/fast/*.md`) long after its exit gate
+    became store-backed. The disk glob leaked into `run_approve`'s error text as a
+    path, which is how agents learned to hand-write a gitignored `docs/fast/` file
+    that the gate could never see. This pins the store branch as the live one:
+    an artifact recorded only in the store is sufficient to approve, with no file
+    written anywhere.
+
+    `SDD_FAST_REQUIRE_APPROVAL` is off by default, so nothing else exercises this
+    path — without this test the branch switch is unverified.
+    """
+    from agentalloy.install.subcommands._state import phase_access
+
+    run_phase_set("sdd-fast", root=repo_root, force=True)
+    handle = phase_access(repo_root).contracts_handle()
+    handle.set_artifact(
+        "sdd-fast",
+        "x",
+        "fast.md",
+        "# x\n\n## Acceptance Criteria\n- a\n\n## Approach\n- b\n\n## Test Cases\n- c\n",
+    )
+
+    result = run_approve("sdd-fast", root=repo_root, approver="alice")
+
+    assert result["ok"] is True, result.get("error")
+    assert result["marker"] == "state store (approved/sdd-fast)"
+    assert phase_access(repo_root).contracts_handle().get_approval("sdd-fast") is not None
+    # Nothing was written to the old disk location.
+    assert not (repo_root / "docs" / "fast").exists()

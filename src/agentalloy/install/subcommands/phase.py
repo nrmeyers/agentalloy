@@ -48,18 +48,19 @@ SCHEMA_VERSION = 1
 # after the marker was written). Shared in spirit with approve.py's map. Phases
 # absent here are existence-only / not approval-gated.
 #
-# spec/design moved to the artifact store (see specs/final_migration.md) — their
-# staleness check is a store-side name_glob, not a filesystem glob, matched by
-# ``_APPROVAL_STORE_NAME_GLOB`` below. sdd-fast/add-skill are unmigrated and keep
-# the disk glob.
+# spec/design/plan/sdd-fast moved to the artifact store (see
+# specs/final_migration.md) — their staleness check is a store-side name_glob, not
+# a filesystem glob, matched by ``_APPROVAL_STORE_NAME_GLOB`` below. add-skill
+# alone keeps a disk glob: its deliverable is a tool-written pack YAML, not a
+# lifecycle artifact an agent hand-writes.
 _APPROVAL_SINCE = {
-    "sdd-fast": "docs/fast/*.md",
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 _APPROVAL_STORE_NAME_GLOB = {
     "spec": "*.md",
     "design": "*.md",
     "plan": "*.md",  # tasks.md + test-plan.md
+    "sdd-fast": "*.md",
 }
 
 

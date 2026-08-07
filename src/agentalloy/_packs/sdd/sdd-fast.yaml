@@ -12,10 +12,18 @@ requires: []
 always_apply: false
 applies_to_phases:
   - sdd-fast
-# Load-bearing command token not derivable from exit_gates: the fast-lane advance
-# to qa. A customization may reword the prose but must keep it verbatim.
+# Load-bearing command tokens not derivable from exit_gates: the fast-lane advance
+# to qa, and the store verb that records the exit artifact. A customization may
+# reword the prose but must keep both verbatim.
+#
+# The artifact-set token is the fix for the "agent writes to disk" failure: the
+# exit gate is store-backed (artifact_exists phase/name), so prose that says
+# "write the sdd-fast artifact" without naming the store command leaves the agent
+# to invent a filesystem path (historically docs/fast/*.md, which is gitignored).
+# Every sibling pack names its store verb; this one must too.
 prose_invariants:
   - "agentalloy phase set qa"
+  - "agentalloy contract artifact-set --phase sdd-fast"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -31,11 +39,17 @@ exit_gates:
     # Human-in-the-loop checkpoint (#10, D8): sdd-fast→qa approval is INERT
     # by default (`SDD_FAST_REQUIRE_APPROVAL=off`). When the flag is on, the
     # `approval_recorded` predicate gates the transition; `agentalloy approve
-    # sdd-fast` writes the marker. CLI enforcement
+    # sdd-fast` records the approval. CLI enforcement
     # (`phase.py::_approval_gate_blocks`) honors the flag too; this exit_gate
     # node surfaces the composed advisory in-proxy under the same flag.
+    #
+    # Store-backed (`since_name_glob`), matching the artifact_exists leaf above:
+    # the old `since: docs/fast/*.md` disk glob was the last lifecycle artifact
+    # on the filesystem in this pack, and it leaked into `approve`'s error text
+    # as a path for the agent to write. MUST equal _APPROVAL_STORE_NAME_GLOB
+    # ["sdd-fast"] — test_approval_globs_match_packs pins it.
     - approval_recorded:
-        since: docs/fast/*.md
+        since_name_glob: "*.md"
     - artifact_exists:
         path: "src/**"
     # Stack-aware: pytest, or JS/TS (Vitest/Jest) when package.json is present.
@@ -78,14 +92,28 @@ raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
   **Checkpoint first.** The fast lane compresses spec + design + build into one pass, but you MUST
-  still write the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) before
-  coding, and you MUST prove the work with tests under `tests/` before ship. You MUST NOT skip the
-  acceptance and test cases just because the lane is fast — fast is not unspecified.
+  still record the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) to the
+  store — via `agentalloy contract artifact-set --phase sdd-fast` — before coding, and you MUST
+  prove the work with tests under `tests/` before ship. You MUST NOT skip the acceptance and test
+  cases just because the lane is fast — fast is not unspecified.
 
   You're on the fast lane: one compressed pass — spec → design → build → test —
   for a single, clearly-bounded task. It's the full lifecycle's spec + design +
   build collapsed into one pass (no build loop — one task, done once), then it
   merges into the **standard** `qa → ship`. Keep the rigor; drop the ceremony.
+
+  ## Where the artifact goes
+
+  **The sdd-fast artifact is not a file.** It lives in the AgentAlloy store, and
+  the only way to record it is:
+
+      agentalloy contract artifact-set --phase sdd-fast --slug <slug> --name fast.md --body-file -
+
+  Do **NOT** create `docs/fast/`, a spec markdown file, or any other file on disk
+  for it. The exit gate reads the store, so a file written anywhere on disk does
+  not satisfy it and does not exist as far as the lifecycle is concerned. The only
+  things you write to disk on this lane are **runtime code under `src/` and tests
+  under `tests/`**.
 
   ## One pass
 
@@ -102,7 +130,8 @@ raw_prose: |
      `scope.touches`. No build loop — if it fragments into multiple tasks or
      spreads wider than scoped, bail.
   4. **Test Cases.** Write the tests that prove the acceptance, and run them green.
-  5. **Hand to QA.** Once the sdd-fast artifact carries the three sections, code
+  5. **Hand to QA.** Once the sdd-fast artifact carries the three sections *in the
+     store*, code
      exists under `src/`, and a test under `tests/`, advance yourself —
      `agentalloy phase set qa` — into the **standard** verification + ship. Don't
      wait to be told. The phase guard refuses the jump until those exist, so a
