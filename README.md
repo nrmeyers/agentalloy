@@ -22,10 +22,6 @@
   <img src="https://img.shields.io/badge/v7.6-Knowledge%20module-brightgreen" alt="v7.6: Knowledge module" />
 </p>
 
-> 🆕 **v7.0 — the Knowledge module is live.** AgentAlloy now has a third context leg: the decisions behind your code, and *why* they were made. Ask on demand (`agentalloy knowledge why <symbol>`), or let it push — when a task touches code governed by a past decision, the rationale lands in context automatically, no query needed. Jump to [Knowledge module (decisions)](#knowledge-module-decisions).
-
-> **v7.1–v7.6 — what's new since v7.0:** [Contracts tree migration](#contracts-tree-layout) · [version bump automation](#automatic-version-bumps) · [archive management](#contracts-tree-layout) · [qwen-code harness](#harness-support) · [related decisions search](#knowledge-module-decisions). See [full release history](https://github.com/nrmeyers/agentalloy/releases) for all 18 releases (v7.0.0–v7.6.0).
-
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
 **AgentAlloy** is a **just-in-time context engine**: one local service, three context modules.
