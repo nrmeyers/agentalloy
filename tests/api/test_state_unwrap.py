@@ -23,6 +23,7 @@ from agentalloy.api.state_router import (
     _repo_key_for,
     default_repo_root,
     get_state_store,
+    scoped_state_store,
 )
 from agentalloy.api.state_router import (
     router as state_router,
@@ -44,7 +45,7 @@ def wired(tmp_path: Path):
 
 def _seed(store: DuckDBStateStore, repo_root: Path, *, phase: str = "build") -> DuckDBStateStore:
     """Give *repo_root* a phase blob with metadata, and return its store view."""
-    view = store.for_repo(_repo_key_for(str(repo_root)))
+    view = scoped_state_store(store, repo_root)
     view.write_phase(phase, actor="proxy", mode="workflow")
     return view
 
@@ -102,7 +103,7 @@ class TestReadAll:
         """Only phase is a blob; unwrapping must not touch anything else."""
         store, client = wired
         repo = tmp_path / "repo"
-        store.for_repo(_repo_key_for(str(repo))).write("cursor", '{"looks": "like json"}')
+        scoped_state_store(store, repo).write("cursor", '{"looks": "like json"}')
 
         state = client.get("/state", params={"repo_root": str(repo)}).json()["state"]
 
@@ -190,7 +191,7 @@ class TestPhaseWrite:
         """
         store, client = wired
         repo = tmp_path / "repo"
-        view = store.for_repo(_repo_key_for(str(repo)))
+        view = scoped_state_store(store, repo)
         view.write_phase("design", actor="cli", mode="free", paused_since="2026-07-28T00:00:00Z")
 
         client.post(
@@ -208,7 +209,7 @@ class TestPhaseWrite:
         """The transactional path shares the caller's BEGIN rather than nesting."""
         store, client = wired
         repo = tmp_path / "repo"
-        view = store.for_repo(_repo_key_for(str(repo)))
+        view = scoped_state_store(store, repo)
         view.write_phase("design", actor="cli", mode="free")
 
         resp = client.post(
@@ -237,7 +238,7 @@ class TestGenericKindRoute:
     def test_a_repo_scoped_kind_reads_verbatim(self, wired, tmp_path: Path) -> None:
         store, client = wired
         repo = tmp_path / "repo"
-        store.for_repo(_repo_key_for(str(repo))).write("cursor", "active/build/04.md")
+        scoped_state_store(store, repo).write("cursor", "active/build/04.md")
 
         resp = client.get("/state/cursor", params={"repo_root": str(repo)})
 

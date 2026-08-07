@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.api.state_router import (
     _repo_key_for,
+    _stream_key_for,
     contract_router,
     default_repo_root,
     get_state_store,
@@ -43,9 +44,10 @@ def state_store(tmp_path: Path) -> DuckDBStateStore:
     """A fresh, migrated StateStore at a tmp path."""
     db = tmp_path / "state.duck"
     # Seeded through the bare handle but read back through the routes, which
-    # scope to the repo they resolve from the request — so the fixture has to
-    # be opened under that same key or every seeded row is invisible.
-    store = open_state_store(db, repo=_repo_key_for(str(default_repo_root())))
+    # scope to (repo, stream_id) resolved from the request — so the fixture
+    # has to be opened under that same pair or every seeded row is invisible.
+    root_s = str(default_repo_root())
+    store = open_state_store(db, repo=_repo_key_for(root_s), stream_id=_stream_key_for(root_s))
     try:
         yield store
     finally:
@@ -267,11 +269,12 @@ class TestLeaseConflict:
         future = (now + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
         repo = state_store._repo()
+        stream_id = state_store._sid()
         state_store.conn.execute(
             "INSERT INTO sdd_state "
-            "(repo, kind, session_key, value, owner, updated_at, lease_expires_at) "
-            "VALUES (?, ?, '', 'spec', ?, ?, ?)",
-            (repo, "phase", "s1", ts, future),
+            "(repo, stream_id, kind, session_key, value, owner, updated_at, lease_expires_at) "
+            "VALUES (?, ?, ?, '', 'spec', ?, ?, ?)",
+            (repo, stream_id, "phase", "s1", ts, future),
         )
         resp = state_client.post("/state/phase", json={"value": "build", "owner": "s2"})
         assert resp.status_code == 409
@@ -1047,6 +1050,21 @@ class TestArchiveAll:
         # Verify they are now archived
         all_contracts = state_store.list_contracts(status="active")
         assert len(all_contracts) == 0
+
+    def test_archive_all_does_not_cross_streams(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """A sibling worktree's contracts are untouched by this stream's archive-all."""
+        sibling = state_store.for_repo(state_store._repo(), stream_id="sibling-stream")
+        sibling.put_contract("ctr-sibling", phase="build", slug="s")
+        state_store.put_contract("ctr-mine", phase="build", slug="m")
+
+        resp = state_client.post("/state/archive-all")
+        assert resp.status_code == 200
+        assert resp.json()["contracts_archived"] == 1
+
+        assert sibling.get_contract("ctr-sibling")["status"] == "active"
+        assert state_store.get_contract("ctr-mine")["status"] == "archived"
 
     def test_archive_all_nothing_to_archive(
         self, state_client: TestClient, state_store: DuckDBStateStore

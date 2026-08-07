@@ -88,9 +88,9 @@ def _state_view(project_root: Path) -> DuckDBStateStore | None:
     store = process_store()
     if store is None:
         return None
-    from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+    from agentalloy.api.state_router import scoped_state_store  # noqa: PLC0415
 
-    return store.for_repo(_repo_key_for(str(project_root)))
+    return scoped_state_store(store, project_root)
 
 
 def _phase_view(project_root: Path) -> DuckDBStateStore | None:

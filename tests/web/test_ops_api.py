@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.state_router import (
     _repo_key_for,
+    _stream_key_for,
     default_repo_root,
     get_state_store,
 )
@@ -59,9 +60,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_app(use_default_lifespan=False)
     # Wire a state store so contract-counting routes work (store-backed, not filesystem).
     state_db = tmp_path / "state.duck"
-    # Routes scope to the repo they resolve from the request; the fixture has
-    # to be opened under that same key or seeded rows are invisible to them.
-    store = open_state_store(state_db, repo=_repo_key_for(str(default_repo_root())))
+    # Routes scope to (repo, stream_id) resolved from the request; the fixture
+    # has to be opened under that same pair or seeded rows are invisible to them.
+    root_s = str(default_repo_root())
+    store = open_state_store(
+        state_db, repo=_repo_key_for(root_s), stream_id=_stream_key_for(root_s)
+    )
     app.state.store = store
     app.dependency_overrides[get_state_store] = lambda: store
     with TestClient(app) as c:

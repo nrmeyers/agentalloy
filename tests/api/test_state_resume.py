@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.state_router import (
     _repo_key_for,
+    _stream_key_for,
     default_repo_root,
     get_state_store,
 )
@@ -31,9 +32,10 @@ def state_store(tmp_path: Path) -> DuckDBStateStore:
     """A fresh, migrated StateStore at a tmp path."""
     db = tmp_path / "state.duck"
     # Seeded through the bare handle but read back through the routes, which
-    # scope to the repo they resolve from the request — so the fixture has to
-    # be opened under that same key or every seeded row is invisible.
-    store = open_state_store(db, repo=_repo_key_for(str(default_repo_root())))
+    # scope to (repo, stream_id) resolved from the request — so the fixture
+    # has to be opened under that same pair or every seeded row is invisible.
+    root_s = str(default_repo_root())
+    store = open_state_store(db, repo=_repo_key_for(root_s), stream_id=_stream_key_for(root_s))
     try:
         yield store
     finally:

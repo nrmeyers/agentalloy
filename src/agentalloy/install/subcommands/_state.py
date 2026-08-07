@@ -223,9 +223,9 @@ def phase_access(root: Path, *, autostart: bool = True) -> PhaseAccess:
 
     store = process_store()
     if store is not None:
-        from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+        from agentalloy.api.state_router import scoped_state_store  # noqa: PLC0415
 
-        return _StoreAccess(store.for_repo(_repo_key_for(str(root))))
+        return _StoreAccess(scoped_state_store(store, root))
     return _ServiceAccess(require_service(autostart=autostart), root)
 
 

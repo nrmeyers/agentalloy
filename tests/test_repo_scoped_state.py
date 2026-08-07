@@ -167,6 +167,34 @@ class TestRekeyMigration:
         )
         s.close()
 
+    def test_rekey_promotes_legacy_row_when_target_only_has_a_named_stream(
+        self, tmp_path: Path
+    ) -> None:
+        """A target row under a *different* stream must not block the move.
+
+        Legacy rows always carry ``stream_id=''``. If the target repo's only
+        row for this (kind, session_key) lives under a non-empty stream, that
+        row is not "the same slot" as the legacy one — the legacy row should
+        still be promoted into the target repo's unscoped stream.
+        """
+        db = tmp_path / "state.duck"
+        s = DuckDBStateStore(db, repo="agentalloy").open()
+        s.migrate()
+        s.for_repo(LEGACY_REPO_KEY).write_phase("design")
+        s.for_repo("agentalloy", stream_id="worktree-a").write_phase("ship")
+
+        assert s.rekey_legacy_rows("agentalloy") == 1
+
+        promoted = s.read_phase()
+        assert promoted is not None and promoted.phase == "design"
+        other_stream = s.for_repo("agentalloy", stream_id="worktree-a").read_phase()
+        assert other_stream is not None and other_stream.phase == "ship"
+        assert (
+            s.execute("SELECT count(*) FROM sdd_state WHERE repo = ?", (LEGACY_REPO_KEY,))[0][0]
+            == 0
+        )
+        s.close()
+
     def test_read_only_store_refuses_to_rekey(self, tmp_path: Path) -> None:
         db = tmp_path / "state.duck"
         DuckDBStateStore(db).open().migrate()

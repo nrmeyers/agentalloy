@@ -314,7 +314,7 @@ class DuckDBStateStore:
         # Post-commit callback registry: kind -> list of callables.
         # Fired after every write to the store (outside the lease).
         # Harness-agnostic — knows only kinds and callables.
-        self._on_write_callbacks: dict[str, list[Callable[[str, Any, str], None]]] = {}
+        self._on_write_callbacks: dict[str, list[Callable[[str, Any, str, str], None]]] = {}
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -757,15 +757,18 @@ class DuckDBStateStore:
 
     # -- post-commit callbacks -----------------------------------------------
 
-    def on_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
+    def on_write(self, kind: str, fn: Callable[[str, Any, str, str], None]) -> None:
         """Register *fn* to be called after every write to *kind*, post-commit.
 
-        The callback receives ``(kind, value, repo)`` where *value* is the stored
-        string (JSON for the phase blob, raw text for other kinds) and *repo* is
-        the key of the handle that performed the write.  One store serves every
-        repo on the machine via :meth:`for_repo` views, so without *repo* a
-        callback cannot tell whose row changed — and a phase advance in one repo
-        would regenerate every other repo's rules file.  Callbacks
+        The callback receives ``(kind, value, repo, stream)`` where *value* is
+        the stored string (JSON for the phase blob, raw text for other kinds),
+        *repo* is the key of the handle that performed the write, and *stream*
+        is that handle's stream id.  One store serves every repo — and every
+        worktree of a repo, via a shared ``repo`` key (see ``_repo_key_for``) —
+        on the machine via :meth:`for_repo` views, so without *repo* a callback
+        cannot tell whose row changed, and without *stream* it cannot tell
+        which worktree of that repo changed.  Missing either would regenerate
+        the wrong repo's, or the wrong worktree's, rules file.  Callbacks
         fire **outside** the lease — the write is already durable.  A callback
         that raises does **not** roll back the write or kill the writer; errors
         are logged and the next callback in the list still runs.
@@ -776,7 +779,7 @@ class DuckDBStateStore:
         """
         self._on_write_callbacks.setdefault(kind, []).append(fn)
 
-    def off_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
+    def off_write(self, kind: str, fn: Callable[[str, Any, str, str], None]) -> None:
         """Unregister a previously registered callback."""
         if kind in self._on_write_callbacks:
             with suppress(ValueError):
@@ -785,12 +788,13 @@ class DuckDBStateStore:
     def _fire_callbacks(self, kind: str, value: str) -> None:
         """Invoke all registered callbacks for *kind*, logging any errors.
 
-        ``self`` may be a :meth:`for_repo` view, so ``_repo()`` is the repo that
-        actually changed rather than the handle the callback was registered on.
+        ``self`` may be a :meth:`for_repo` view, so ``_repo()``/``_sid()`` are
+        the repo and stream that actually changed rather than the handle the
+        callback was registered on.
         """
         for fn in list(self._on_write_callbacks.get(kind, [])):
             try:
-                fn(kind, value, self._repo())
+                fn(kind, value, self._repo(), self._sid())
             except Exception:
                 logger.exception("on_write callback for %r raised", kind)
 
@@ -1535,14 +1539,15 @@ class DuckDBStateStore:
             raise RuntimeError("cannot write in read-only mode")
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         repo = self._repo_key
+        stream_id = self._sid()
         conn = self.conn
 
         conn.execute("BEGIN")
         try:
             contracts_result = conn.execute(
                 "UPDATE sdd_contract SET status='archived', updated_at=? "
-                "WHERE repo=? AND status != 'archived'",
-                (ts, repo),
+                "WHERE repo=? AND stream_id=? AND status != 'archived'",
+                (ts, repo, stream_id),
             )
             contracts_count = contracts_result.fetchall()
             contracts_count = contracts_count[0][0] if contracts_count else 0
@@ -1615,10 +1620,14 @@ class DuckDBStateStore:
         filename.  Those rows have exactly one plausible owner — the repo the
         service was deployed against — so they are re-keyed to it wholesale.
 
-        Where the target key already has a row for the same ``(kind,
-        session_key)`` or ``contract_id``, the target wins and the legacy row is
-        dropped: a row written deliberately under the real key is the better
-        record than one from a bucket shared by every caller.
+        Legacy rows predate stream isolation and always carry ``stream_id=''``.
+        Where the target repo already has a row for the same ``(stream_id,
+        kind, session_key)`` or ``(stream_id, contract_id)``, the target wins
+        and the legacy row is dropped: a row written deliberately under the
+        real key is the better record than one from a bucket shared by every
+        caller. A target that exists only under a different, non-empty
+        ``stream_id`` does not block the move — the legacy row is promoted
+        into the target repo's unscoped (``stream_id=''``) stream instead.
 
         Idempotent — it runs on every service start.  Returns rows moved.
         """
@@ -1636,6 +1645,7 @@ class DuckDBStateStore:
                    AND EXISTS (
                        SELECT 1 FROM sdd_state AS target
                         WHERE target.repo = ?
+                          AND target.stream_id IS NOT DISTINCT FROM legacy.stream_id
                           AND target.kind = legacy.kind
                           AND target.session_key IS NOT DISTINCT FROM legacy.session_key
                    )
@@ -1649,6 +1659,7 @@ class DuckDBStateStore:
                    AND EXISTS (
                        SELECT 1 FROM sdd_contract AS target
                         WHERE target.repo = ?
+                          AND target.stream_id IS NOT DISTINCT FROM legacy.stream_id
                           AND target.contract_id = legacy.contract_id
                    )
                 """,
@@ -1699,14 +1710,16 @@ def open_state_store(
     *,
     read_only: bool = False,
     repo: str | None = None,
+    stream_id: str = "",
 ) -> DuckDBStateStore:
     """Open (and, in writer mode, migrate) the state store at ``db_path``.
 
-    ``repo`` is the default key for handles that are not re-scoped with
-    :meth:`DuckDBStateStore.for_repo`.  The service passes its own repo and then
-    scopes per request; single-repo callers can rely on the default.
+    ``repo`` and ``stream_id`` are the default keys for handles that are not
+    re-scoped with :meth:`DuckDBStateStore.for_repo`.  The service passes its
+    own repo and then scopes per request; single-repo, single-worktree callers
+    can rely on the default.
     """
-    store = DuckDBStateStore(db_path, read_only=read_only, repo=repo).open()
+    store = DuckDBStateStore(db_path, read_only=read_only, repo=repo, stream_id=stream_id).open()
     if not read_only:
         store.migrate()
     return store
