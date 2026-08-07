@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,7 @@ from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.api.proxy_injection import inject_into_responses_input
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
+from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 from tests.harness_e2e.upstream_stub import start_upstream_stub
 
 _SIGNAL = "agentalloy.api.proxy_responses_router.evaluate_signal"
@@ -409,6 +411,63 @@ def test_no_anthropic_cache_keys_on_the_responses_wire(tmp_path: Path) -> None:
     assert "cache_control" not in body
     assert '"ttl"' not in body
     assert "ephemeral" not in body
+
+
+# --------------------------------------------------------------------------- #
+# #547 sub-4: this surface now also writes a phase_events `llm_sent` row
+# (workflow_delivered included), via the same `_make_on_status` the Anthropic
+# passthrough uses — see test_proxy_passthrough_native.py for the full branch
+# coverage (2xx/non-2xx, delivered True/False, missing-field sha). This is a
+# single wiring check confirming the Responses surface actually reaches it.
+# --------------------------------------------------------------------------- #
+
+
+def _make_app_with_store(
+    captured: dict[str, Any],
+    store: DuckDBTelemetryStore,
+    *,
+    sse: bytes | None = None,
+    status: int = 200,
+) -> Any:
+    app = _make_app(captured, sse=sse, status=status)
+    app.state.telemetry_store = store
+    return app
+
+
+def _query_llm_sent(store: DuckDBTelemetryStore) -> list[tuple[Any, ...]]:
+    exists = store.query(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'phase_events'"
+    )
+    if not exists:
+        return []
+    return store.query(
+        "SELECT phase, model, workflow_delivered, system_prompt_sha "
+        "FROM phase_events WHERE event_type = 'llm_sent'"
+    )
+
+
+def test_llm_sent_row_written_via_responses_surface(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store)
+        resp = _post(app, tmp_path, _prose_signal(), _responses_body())
+        assert resp.status_code == 200
+        rows = _query_llm_sent(store)
+        assert len(rows) == 1
+        phase, model, workflow_delivered, system_prompt_sha = rows[0]
+        assert phase == "build"
+        assert model == "gpt-test"
+        assert workflow_delivered is True
+        assert system_prompt_sha is not None and system_prompt_sha.startswith("sha256:")
+
+
+def test_llm_sent_row_not_written_on_non_2xx_via_responses_surface(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
+        app = _make_app_with_store(captured, store, status=529)
+        resp = _post(app, tmp_path, _prose_signal(), _responses_body())
+        assert resp.status_code == 529
+        assert _query_llm_sent(store) == []
 
 
 # --------------------------------------------------------------------------- #

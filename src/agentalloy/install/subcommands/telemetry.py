@@ -542,6 +542,16 @@ def _query_delivery_rate(
     ``workflow_delivered`` is only meaningful on ``llm_sent`` rows (set from
     ``signal.workflow_system_prose is not None`` at send time), so this always
     scopes to that event type regardless of an ``--event-type`` filter.
+
+    CAVEAT — the denominator is not perfectly comparable across the three proxy
+    surfaces this table pools together: the OpenAI chat-completions path
+    (``proxy_router._emit_llm_sent``) writes unconditionally, pre-dispatch,
+    including forwards upstream later fails; the Anthropic passthrough and
+    Responses surfaces (``proxy_passthrough_router._make_on_status``) only
+    write on a confirmed 2xx forward. So a non-2xx upstream response counts
+    toward the OpenAI-path denominator but not the other two. Rates blended
+    across surfaces with very different error rates will skew accordingly;
+    there is no surface discriminator column to split on today.
     """
     where, params = _phase_events_where(
         phase=phase, event_type="llm_sent", since=since, until=until, repo=repo
