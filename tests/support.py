@@ -64,7 +64,7 @@ def seed_phase(root: Path, phase: str, **fields: str | None) -> None:
     """Put *root* in *phase* in the bound process store.
 
     The test-side counterpart of ``_write_phase_atomic`` — ``mode``,
-    ``free_since`` and ``actor`` ride the same blob. Replaces the
+    ``paused_since`` and ``actor`` ride the same blob. Replaces the
     ``.agentalloy/phase`` file writes the suite used before the store became
     the only source.
     """

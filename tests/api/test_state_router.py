@@ -685,11 +685,6 @@ class TestTB5:
         resp = client.post("/contracts", json=payload)
         assert resp.status_code == 200, resp.text
 
-        # Give the background task a moment to run
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
-
         mock_orchestrator.compose.assert_called_once()
         call_args = mock_orchestrator.compose.call_args[0][0]
         assert call_args.phase == "build"
@@ -716,10 +711,6 @@ class TestTB5:
         }
         resp = client.post("/state/phase", json=payload)
         assert resp.status_code == 200, resp.text
-
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
 
         mock_orchestrator.compose.assert_called_once()
         call_args = mock_orchestrator.compose.call_args[0][0]
@@ -748,7 +739,7 @@ class TestTA2:
             "agentalloy.install.subcommands.phase",
             "agentalloy.install.subcommands.approve",
             "agentalloy.install.subcommands.task",
-            "agentalloy.install.subcommands.flow",
+            "agentalloy.install.subcommands.workflow",
         ]
         for mod_name in state_modules:
             mod = importlib.import_module(mod_name)

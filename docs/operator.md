@@ -110,23 +110,23 @@ In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.cl
 
 On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. The **add-skill lane** is always approval-gated — `agentalloy approve add-skill` is the only way forward and no setting disables it, because installing a skill changes what gets composed into every future session in that repo. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`.
 
-### Free-flow mode
+### Pause mode
 
-For sessions where you have **no specific task in mind** — exploring, poking, reading — free-flow pauses the workflow without giving up skill composition:
+For sessions where you have **no specific task in mind** — exploring, poking, reading — pause pauses the workflow without giving up skill composition:
 
 ```
-agentalloy flow free      # pause workflow steering; prior phase preserved
-agentalloy flow resume    # pick up at exactly the phase you left
-agentalloy flow status    # current mode, phase, and since-when
+agentalloy workflow pause   # pause workflow steering; prior phase preserved
+agentalloy workflow resume  # pick up at exactly the phase you left
+agentalloy workflow status  # current mode, phase, and since-when
 ```
 
-While free-flow is active, the proxy suppresses **all workflow steering** — the intake front-door, orientation scaffold, phase banners, exit-gate evaluation, phase transitions, and drift corpus — but **keeps composing domain skills** for whatever you're touching. The `phase` value in the store is never changed; `flow resume` returns to it exactly, and the next request re-runs orientation (and intake, if it never ran) as a fresh session.
+While pause is active, the proxy suppresses **all workflow steering** — the intake front-door, orientation scaffold, phase banners, exit-gate evaluation, phase transitions, and drift corpus — but **keeps composing domain skills** for whatever you're touching. The `phase` value in the store is never changed; `workflow resume` returns to it exactly, and the next request re-runs orientation (and intake, if it never ran) as a fresh session.
 
-How it differs from `lifecycle_mode: off`: `off` is a standing per-repo deployment posture (full passthrough, nothing composes); free-flow is a temporary state of mind — skills still compose, the pause is visible, and resume is one command.
+How it differs from `lifecycle_mode: off`: `off` is a standing per-repo deployment posture (full passthrough, nothing composes); pause is a temporary state of mind — skills still compose, the pause is visible, and resume is one command.
 
-So a paused repo is never silently forgotten: the status line shows a `⏸FREE` badge the whole time, and at most once per 24 hours the proxy injects a single reminder line ("workflow paused since <date> — `agentalloy flow resume` when ready"). There is no auto-expiry — re-enabling gates mid-exploration would be worse than the reminder.
+So a paused repo is never silently forgotten: the status line shows a `⏸PAUSED` badge the whole time, and at most once per 24 hours the proxy injects a single reminder line ("workflow paused since <date> — `agentalloy workflow resume` when ready"). There is no auto-expiry — re-enabling gates mid-exploration would be worse than the reminder.
 
-Free-flow state lives in the shared per-repo phase file, so `flow free`/`flow resume` affects **every session in that repo**, same as `phase set`. Free-mode composes still write telemetry rows tagged `category=free-flow`, so free→contract conversion is measurable.
+Pause state lives in the shared per-repo phase file, so `workflow pause`/`workflow resume` affects **every session in that repo**, same as `phase set`. Pause-mode composes still write telemetry rows tagged `category=paused`, so pause→contract conversion is measurable.
 
 ### Contracts
 

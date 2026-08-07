@@ -71,10 +71,10 @@ class TestSurfacesRefuse:
         _assert_refused(e, capsys)
 
     def test_flow(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        from agentalloy.install.subcommands.flow import run_flow_free
+        from agentalloy.install.subcommands.workflow import run_workflow_pause
 
         with pytest.raises(SystemExit) as e:
-            run_flow_free(root=repo)
+            run_workflow_pause(root=repo)
         _assert_refused(e, capsys)
 
     def test_task(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -78,8 +78,8 @@ def write_proxy_trace(
         repo: Resolved project root (the request's cwd) this trace belongs to, so
             telemetry can be scoped per-repo. None leaves the row unattributed.
         category: Mode tag reusing the existing free-text ``category`` column —
-            ``"free-flow"`` for a request handled in free-flow mode, else None
-            (workflow mode). Lets free→contract conversion be measured later.
+            ``"paused"`` for a request handled in pause mode, else None
+            (workflow mode). Lets pause→contract conversion be measured later.
         contract_id: ID of the work-item contract a Tier-2 contract-scoped
             compose was built from; None on free-text rows — the populated/null
             split is what makes injection mode auditable in production.

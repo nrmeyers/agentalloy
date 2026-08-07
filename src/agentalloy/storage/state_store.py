@@ -1,9 +1,9 @@
 """DuckDB-backed SDD state store — replaces per-repo files with a session-aware store.
 
 Holds the SDD lifecycle's runtime state (phase, cursor, announced, composed,
-approved, banner-turns, free-reminded) as rows in a single ``sdd_state`` table
+approved, banner-turns, pause-reminded) as rows in a single ``sdd_state`` table
 keyed by ``(repo, kind, session_key)``.  Session-scoped kinds (announced,
-composed, banner-turns, free-reminded) carry a non-null ``session_key``;
+composed, banner-turns, pause-reminded) carry a non-null ``session_key``;
 repo-scoped kinds (phase, cursor, approved) have ``session_key IS NULL``.
 
 The store is owned by the running per-repo service (single-writer DuckDB
@@ -71,25 +71,15 @@ class _TxnFlag:
 # Schema
 # ---------------------------------------------------------------------------
 
-_SCHEMA_DDL = """
-CREATE TABLE IF NOT EXISTS sdd_state (
+_SDD_CONTRACT_COLUMNS = (
+    "repo, stream_id, contract_id, phase, slug, work_item, route, "
+    "domain_tags, scope_touches, scope_avoids, success_criteria, "
+    "status, supersedes, created_at, updated_at, body"
+)
+
+_SDD_CONTRACT_COLUMNS_DDL = """\
     repo               TEXT NOT NULL,
-    kind               TEXT NOT NULL,
-    session_key        TEXT,
-    value              TEXT NOT NULL,
-    owner              TEXT,
-    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    lease_expires_at   TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_sdd_state_repo_kind_session
-    ON sdd_state (repo, kind, COALESCE(session_key, ''));
-
-CREATE INDEX IF NOT EXISTS idx_sdd_state_kind_owner
-    ON sdd_state (repo, kind, COALESCE(owner, ''));
-
-CREATE TABLE IF NOT EXISTS sdd_contract (
-    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
     contract_id        TEXT NOT NULL,
     phase              TEXT NOT NULL,
     slug               TEXT NOT NULL,
@@ -104,8 +94,27 @@ CREATE TABLE IF NOT EXISTS sdd_contract (
     created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     body               TEXT,
-    PRIMARY KEY (repo, contract_id)
+    PRIMARY KEY (repo, stream_id, contract_id)
+"""
+
+# Used verbatim by migrate() to rebuild sdd_contract when its PRIMARY KEY is
+# stale (DuckDB has no ALTER TABLE for constraints, only a full rebuild).
+_SDD_CONTRACT_DDL = f"CREATE TABLE sdd_contract (\n{_SDD_CONTRACT_COLUMNS_DDL});"
+
+_SCHEMA_DDL = f"""
+CREATE TABLE IF NOT EXISTS sdd_state (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    kind               TEXT NOT NULL,
+    session_key        TEXT,
+    value              TEXT NOT NULL,
+    owner              TEXT,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_expires_at   TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS sdd_contract (
+{_SDD_CONTRACT_COLUMNS_DDL});
 
 CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase
     ON sdd_contract (phase);
@@ -133,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_sdd_artifact_phase
 # State kinds and their properties
 REPO_SCOPED_KINDS: frozenset[str] = frozenset({"phase", "cursor", "approved"})
 SESSION_SCOPED_KINDS: frozenset[str] = frozenset(
-    {"announced", "composed", "banner-turns", "free-reminded"}
+    {"announced", "composed", "banner-turns", "pause-reminded"}
 )
 LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
@@ -170,7 +179,7 @@ class PhaseState:
 
     phase: str
     mode: str | None = None
-    free_since: str | None = None
+    paused_since: str | None = None
     transitioned_by: str | None = None
     started_at: str | None = None
     phase_start_ref: str | None = None
@@ -287,10 +296,12 @@ class DuckDBStateStore:
         *,
         read_only: bool = False,
         repo: str | None = None,
+        stream_id: str = "",
     ) -> None:
         self._db_path = str(db_path)
         self._read_only = read_only
         self._repo_key = repo or LEGACY_REPO_KEY
+        self._stream_id = stream_id
         self._conn: duckdb.DuckDBPyConnection | None = None
         # Built once at open() so scoped views share one façade object: views
         # are shallow copies, and `view.conn is store.conn` is the check that
@@ -369,22 +380,43 @@ class DuckDBStateStore:
         """The repo key every row read or written through this handle is under."""
         return self._repo_key
 
-    def for_repo(self, repo: str) -> DuckDBStateStore:
-        """Return a view of this store scoped to ``repo``.
+    def for_repo(
+        self,
+        repo: str,
+        *,
+        stream_id: str = "",
+    ) -> DuckDBStateStore:
+        """Return a view of this store scoped to ``(repo, stream_id)``.
 
         The service opens exactly one ``state.duck`` and serves every repo from
         it, so the repo key cannot be a property of the handle's lifetime — it
         has to be per-request.  A view shares the connection and the transaction
         flag; only the key differs.  Views must not be closed: closing one would
         close the connection out from under the store that produced it.
+
+        ``stream_id`` isolates workflow state between concurrent worktrees of
+        the same repo.  When empty (the default) the view uses the store's
+        stored ``_stream_id`` (set on construction or via ``bind_stream``).
         """
         view = copy.copy(self)
         view._repo_key = repo
+        if stream_id:
+            view._stream_id = stream_id
+        return view
+
+    def bind_stream(self, stream_id: str) -> DuckDBStateStore:
+        """Return a view that also carries the given ``stream_id``."""
+        view = copy.copy(self)
+        view._stream_id = stream_id
         return view
 
     def _repo(self) -> str:
         """Return the repo key for the current handle."""
         return self._repo_key
+
+    def _sid(self) -> str:
+        """Return the stream id for the current handle."""
+        return getattr(self, "_stream_id", "")
 
     @property
     def _in_transaction(self) -> bool:
@@ -402,6 +434,81 @@ class DuckDBStateStore:
             raise RuntimeError("cannot migrate a read-only StateStore")
         self.conn.execute(_SCHEMA_DDL)
         logger.debug("sdd_state and sdd_contract schema ensured")
+
+        # stream_id column on sdd_state / sdd_contract — added after DDL so it
+        # backfills any table created before per-worktree stream isolation
+        # existed. ``CREATE TABLE IF NOT EXISTS`` is a no-op against a table
+        # that already exists, so without this an upgrade-in-place keeps the
+        # old columns and every stream_id-qualified query fails to bind.
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'sdd_state' AND column_name = 'stream_id'",
+        ).fetchone()
+        if (row[0] if row else 0) == 0:
+            self.conn.execute("ALTER TABLE sdd_state ADD COLUMN stream_id TEXT DEFAULT ''")
+            self.conn.execute("UPDATE sdd_state SET stream_id = '' WHERE stream_id IS NULL")
+
+        # sdd_contract's PRIMARY KEY changed from (repo, contract_id) to
+        # (repo, stream_id, contract_id). DuckDB cannot ALTER a table's
+        # constraints in place, so a plain ADD COLUMN would leave the old
+        # 2-column PK on upgraded databases — the very first cross-stream
+        # contract_id collision would then raise ConstraintException. Rebuild
+        # the table instead: rename aside, recreate with the correct PK,
+        # copy the data back in, drop the old one.
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_name = 'sdd_contract' AND column_name = 'stream_id'",
+        ).fetchone()
+        if (row[0] if row else 0) == 0:
+            # Indexes depend on the table and block ALTER TABLE ... RENAME;
+            # drop them here, _SCHEMA_DDL recreates them on the new table.
+            for idx in (
+                "idx_sdd_contract_phase",
+                "idx_sdd_contract_slug",
+                "idx_sdd_contract_status",
+            ):
+                self.conn.execute(f"DROP INDEX IF EXISTS {idx}")
+            self.conn.execute("ALTER TABLE sdd_contract RENAME TO sdd_contract_pre_stream_id")
+            self.conn.execute(_SDD_CONTRACT_DDL)
+            self.conn.execute(
+                f"INSERT INTO sdd_contract ({_SDD_CONTRACT_COLUMNS}) "
+                f"SELECT repo, '', contract_id, phase, slug, work_item, route, "
+                f"domain_tags, scope_touches, scope_avoids, success_criteria, "
+                f"status, supersedes, created_at, updated_at, body "
+                f"FROM sdd_contract_pre_stream_id"
+            )
+            self.conn.execute("DROP TABLE sdd_contract_pre_stream_id")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase ON sdd_contract (phase)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_slug ON sdd_contract (slug)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_status ON sdd_contract (status)"
+            )
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sdd_state_repo_stream_kind_session "
+            "ON sdd_state (repo, stream_id, kind, COALESCE(session_key, ''))"
+        )
+        # Name unchanged from the pre-stream_id definition but the column
+        # list changed — CREATE INDEX IF NOT EXISTS matches by name, not
+        # definition, so without the DROP an upgraded database silently
+        # keeps the stale 3-column index forever. Only drop/recreate when the
+        # stored definition is actually stale: migrate() runs on every boot,
+        # and rebuilding this index unconditionally would mean paying a full
+        # sdd_state index rebuild on every startup once the table has data.
+        idx_row = self.conn.execute(
+            "SELECT sql FROM duckdb_indexes() WHERE index_name = 'idx_sdd_state_kind_owner'"
+        ).fetchone()
+        if idx_row is None or "stream_id" not in idx_row[0]:
+            self.conn.execute("DROP INDEX IF EXISTS idx_sdd_state_kind_owner")
+            self.conn.execute(
+                "CREATE INDEX idx_sdd_state_kind_owner "
+                "ON sdd_state (repo, stream_id, kind, COALESCE(owner, ''))"
+            )
+        logger.debug("sdd_state/sdd_contract stream_id column ensured")
 
         # Lifecycle column on sdd_artifact — added after DDL so it runs on
         # first boot after this change, and is idempotent for subsequent boots.
@@ -433,12 +540,14 @@ class DuckDBStateStore:
         ``session_key=None`` for repo-scoped kinds; a session key for
         session-scoped kinds.
         """
+        repo = self._repo()
+        sid = self._sid()
         key_part = session_key or ""
         row = self.conn.execute(
             "SELECT value FROM sdd_state "
-            "WHERE repo=? AND kind=? AND COALESCE(session_key, '')=? "
+            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=? "
             "ORDER BY updated_at DESC LIMIT 1",
-            (self._repo(), kind, key_part),
+            (repo, sid, kind, key_part),
         ).fetchone()
         return row[0] if row else None
 
@@ -455,6 +564,7 @@ class DuckDBStateStore:
             raise RuntimeError("cannot write in read-only mode")
 
         repo = self._repo()
+        sid = self._sid()
         key_part = session_key or ""
         now = datetime.now()
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -462,8 +572,8 @@ class DuckDBStateStore:
         # Check for lease conflict
         existing = self.conn.execute(
             "SELECT owner, lease_expires_at FROM sdd_state "
-            "WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?",
-            (repo, kind, key_part),
+            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
+            (repo, sid, kind, key_part),
         ).fetchone()
 
         conflict = None
@@ -485,16 +595,16 @@ class DuckDBStateStore:
         if existing:
             self.conn.execute(
                 "UPDATE sdd_state SET value=?, owner=?, updated_at=?, lease_expires_at=? "
-                "WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?",
-                (value, owner, ts, None, repo, kind, key_part),
+                "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
+                (value, owner, ts, None, repo, sid, kind, key_part),
             )
         else:
             lease_expires = ts if owner else None
             self.conn.execute(
                 "INSERT INTO sdd_state "
-                "(repo, kind, session_key, value, owner, updated_at, lease_expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (repo, kind, session_key, value, owner, ts, lease_expires),
+                "(repo, stream_id, kind, session_key, value, owner, updated_at, lease_expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (repo, sid, kind, session_key, value, owner, ts, lease_expires),
             )
 
         return StateWriteResult(
@@ -539,12 +649,13 @@ class DuckDBStateStore:
             raise ValueError("clear(all_sessions=True) cannot take a session_key")
 
         repo = self._repo()
+        sid = self._sid()
         if all_sessions:
-            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=?"
-            params: tuple[Any, ...] = (repo, kind)
+            sql = "DELETE FROM sdd_state WHERE repo=? AND stream_id=? AND kind=?"
+            params: tuple[Any, ...] = (repo, sid, kind)
         else:
-            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?"
-            params = (repo, kind, session_key or "")
+            sql = "DELETE FROM sdd_state WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?"
+            params = (repo, sid, kind, session_key or "")
 
         before = self.conn.execute(
             sql.replace("DELETE FROM", "SELECT COUNT(*) FROM"), params
@@ -560,7 +671,7 @@ class DuckDBStateStore:
         session_key: str,
         duration: timedelta = timedelta(minutes=5),
     ) -> LeaseResult:
-        """Acquire or refresh a lease on a repo-scoped row.
+        """Acquire or refresh a lease on a stream-scoped row.
 
         Returns a :class:`LeaseResult` indicating whether the lease was
         acquired or if there is a conflict with another session.
@@ -571,14 +682,15 @@ class DuckDBStateStore:
             raise ValueError(f"cannot acquire lease on non-leased kind: {kind}")
 
         repo = self._repo()
+        sid = self._sid()
         now = datetime.now()
         expires_ts = (now + duration).strftime("%Y-%m-%d %H:%M:%S")
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
 
         row = self.conn.execute(
             "SELECT owner, lease_expires_at FROM sdd_state "
-            "WHERE repo=? AND kind=? AND session_key IS NULL",
-            (repo, kind),
+            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
+            (repo, sid, kind, ""),
         ).fetchone()
 
         if not row:
@@ -619,8 +731,8 @@ class DuckDBStateStore:
         # Acquire or refresh lease
         self.conn.execute(
             "UPDATE sdd_state SET owner=?, lease_expires_at=?, updated_at=? "
-            "WHERE repo=? AND kind=? AND session_key IS NULL",
-            (session_key, expires_ts, ts, repo, kind),
+            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
+            (session_key, expires_ts, ts, repo, sid, kind, ""),
         )
         if expires_dt is not None and expires_dt > now:
             new_expires = expires_dt
@@ -634,13 +746,13 @@ class DuckDBStateStore:
         )
 
     def release_lease(self, kind: str, session_key: str) -> None:
-        """Release a lease on a repo-scoped row."""
+        """Release a lease on a stream-scoped row."""
         if self._read_only:
             raise RuntimeError("cannot release lease in read-only mode")
         self.conn.execute(
             "UPDATE sdd_state SET owner=NULL, lease_expires_at=NULL "
-            "WHERE repo=? AND kind=? AND COALESCE(session_key, '')='' AND owner=?",
-            (self._repo(), kind, session_key),
+            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')='' AND owner=?",
+            (self._repo(), self._sid(), kind, session_key),
         )
 
     # -- post-commit callbacks -----------------------------------------------
@@ -743,10 +855,13 @@ class DuckDBStateStore:
         if not blob.get("phase"):
             return None
         phase = str(blob["phase"])
+        # Legacy: ``free_since`` was the old key name (renamed to ``paused_since``);
+        # read it for backwards compatibility with existing rows.
+        paused = _opt_str(blob.get("paused_since")) or _opt_str(blob.get("free_since"))
         return PhaseState(
             phase=phase,
             mode=_opt_str(blob.get("mode")),
-            free_since=_opt_str(blob.get("free_since")),
+            paused_since=paused,
             transitioned_by=_opt_str(blob.get("transitioned_by")),
             started_at=_opt_str(blob.get("started_at")),
             phase_start_ref=_opt_str(blob.get("phase_start_ref")),
@@ -785,7 +900,7 @@ class DuckDBStateStore:
         *,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         owner: str | None = None,
         phase_start_ref: str | None = None,
     ) -> StateWriteResult:
@@ -795,9 +910,9 @@ class DuckDBStateStore:
         observe a half-updated blob. This is the store-side replacement for
         ``signals.skill_loader._write_phase_atomic``'s file semantics:
 
-        * ``mode`` / ``free_since`` are **carried forward** when not passed. An
+        * ``mode`` / ``paused_since`` are **carried forward** when not passed. An
           auto-transition must never silently drop a repo out of (or into)
-          free-flow — only ``agentalloy flow free/resume`` sets them.
+          pause — only ``agentalloy workflow pause/resume`` sets them.
         * ``transitioned_by`` is set to ``actor`` only on a *real* transition
           (``prev != phase``). An idempotent same-phase write preserves the prior
           actor, so a different session can still tell the phase moved and that
@@ -810,13 +925,13 @@ class DuckDBStateStore:
         * ``workflow`` is **derived** here as ``sdd-<phase>`` and is never taken
           from a caller — a caller cannot poison the row with a bogus workflow.
 
-        Passing ``mode=""`` (or ``free_since=""``) explicitly clears the field,
-        which is how ``flow resume`` drops free-flow; ``None`` means "leave it".
+        Passing ``mode=""`` (or ``paused_since=""``) explicitly clears the field,
+        which is how ``workflow resume`` drops pause; ``None`` means "leave it".
 
         Callers already inside a :meth:`transaction` reuse it rather than
         nesting (which is rejected outright).  ``POST /state/phase`` writes the
         phase and a contract in one BEGIN/COMMIT, and it must get blob
-        semantics too — a phase advance that dropped free-flow mode purely
+        semantics too — a phase advance that dropped pause mode purely
         because a contract rode along would be a silent, phase-shaped bug.
         """
         if self._read_only:
@@ -830,7 +945,7 @@ class DuckDBStateStore:
             now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
             resolved_mode = prev.mode if (mode is None and prev) else mode
-            resolved_since = prev.free_since if (free_since is None and prev) else free_since
+            resolved_since = prev.paused_since if (paused_since is None and prev) else paused_since
             is_transition = prev is None or prev.phase != phase
             resolved_actor = actor if is_transition else prev.transitioned_by  # type: ignore[union-attr]
             # ``phase_start_ref`` is carried forward on an idempotent same-phase
@@ -846,7 +961,7 @@ class DuckDBStateStore:
             blob: dict[str, Any] = {
                 "phase": phase,
                 "mode": resolved_mode or None,
-                "free_since": resolved_since or None,
+                "paused_since": resolved_since or None,
                 "transitioned_by": resolved_actor or None,
                 "started_at": (prev.started_at if prev and prev.started_at else now),
                 "phase_start_ref": resolved_phase_start_ref,
@@ -937,7 +1052,7 @@ class DuckDBStateStore:
                 phase,
                 actor=_opt_str(data.get("transitioned_by")),
                 mode=_opt_str(data.get("mode")),
-                free_since=_opt_str(data.get("free_since")),
+                paused_since=_opt_str(data.get("free_since")),
             )
             filepath.unlink()
             return phase
@@ -985,6 +1100,7 @@ class DuckDBStateStore:
             "created_at": row[11],
             "updated_at": row[12],
             "body": row[13],
+            "stream_id": row[14],
         }
 
     # -- contract CRUD -------------------------------------------------------
@@ -1026,8 +1142,9 @@ class DuckDBStateStore:
 
         # Check if the contract already exists (for upsert logic)
         existing = self.conn.execute(
-            "SELECT created_at, supersedes FROM sdd_contract WHERE repo=? AND contract_id=?",
-            (repo, contract_id),
+            "SELECT created_at, supersedes FROM sdd_contract "
+            "WHERE repo=? AND stream_id=? AND contract_id=?",
+            (repo, self._stream_id, contract_id),
         ).fetchone()
 
         if existing:
@@ -1036,7 +1153,7 @@ class DuckDBStateStore:
                 "phase=?, slug=?, work_item=?, route=?, "
                 "domain_tags=?, scope_touches=?, scope_avoids=?, success_criteria=?, "
                 "status=?, body=?, updated_at=? "
-                "WHERE repo=? AND contract_id=?",
+                "WHERE repo=? AND stream_id=? AND contract_id=?",
                 (
                     phase,
                     slug,
@@ -1050,18 +1167,20 @@ class DuckDBStateStore:
                     body,
                     ts,
                     repo,
+                    self._stream_id,
                     contract_id,
                 ),
             )
         else:
             self.conn.execute(
                 "INSERT INTO sdd_contract "
-                "(repo, contract_id, phase, slug, work_item, route, "
+                "(repo, stream_id, contract_id, phase, slug, work_item, route, "
                 "domain_tags, scope_touches, scope_avoids, success_criteria, "
                 "status, supersedes, created_at, updated_at, body) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     repo,
+                    self._stream_id,
                     contract_id,
                     phase,
                     slug,
@@ -1086,9 +1205,9 @@ class DuckDBStateStore:
         row = self.conn.execute(
             "SELECT contract_id, phase, slug, work_item, route, "
             "domain_tags, scope_touches, scope_avoids, success_criteria, "
-            "status, supersedes, created_at, updated_at, body "
-            "FROM sdd_contract WHERE repo=? AND contract_id=?",
-            (self._repo(), contract_id),
+            "status, supersedes, created_at, updated_at, body, stream_id "
+            "FROM sdd_contract WHERE repo=? AND stream_id=? AND contract_id=?",
+            (self._repo(), self._stream_id, contract_id),
         ).fetchone()
         if row is None:
             return None
@@ -1103,8 +1222,8 @@ class DuckDBStateStore:
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         """List contracts with optional filters."""
-        conditions: list[str] = ["repo=?"]
-        params: list[Any] = [self._repo()]
+        conditions: list[str] = ["repo=? AND stream_id=?"]
+        params: list[Any] = [self._repo(), self._stream_id]
 
         if phase is not None:
             conditions.append("phase=?")
@@ -1124,7 +1243,7 @@ class DuckDBStateStore:
         sql = (
             "SELECT contract_id, phase, slug, work_item, route, "
             "domain_tags, scope_touches, scope_avoids, success_criteria, "
-            "status, supersedes, created_at, updated_at, body "
+            "status, supersedes, created_at, updated_at, body, stream_id "
             f"FROM sdd_contract {where} "
             "ORDER BY created_at DESC"
         )
@@ -1143,8 +1262,13 @@ class DuckDBStateStore:
 
         result = self.conn.execute(
             "UPDATE sdd_contract SET status='archived', updated_at=? "
-            "WHERE repo=? AND contract_id=? AND status != 'archived'",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self._repo(), contract_id),
+            "WHERE repo=? AND stream_id=? AND contract_id=? AND status != 'archived'",
+            (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                self._repo(),
+                self._stream_id,
+                contract_id,
+            ),
         )
         count = result.fetchall()
         return bool(count) and count[0][0] > 0
@@ -1177,8 +1301,8 @@ class DuckDBStateStore:
 
         # Verify the old contract exists and is active
         old_row = self.conn.execute(
-            "SELECT status FROM sdd_contract WHERE repo=? AND contract_id=?",
-            (repo, old_contract_id),
+            "SELECT status FROM sdd_contract WHERE repo=? AND stream_id=? AND contract_id=?",
+            (repo, self._stream_id, old_contract_id),
         ).fetchone()
         if old_row is None:
             raise StateStoreError(f"Contract {old_contract_id!r} not found")
@@ -1188,8 +1312,8 @@ class DuckDBStateStore:
         # Flip the old contract to superseded
         self.conn.execute(
             "UPDATE sdd_contract SET status='superseded', updated_at=? "
-            "WHERE repo=? AND contract_id=?",
-            (ts, repo, old_contract_id),
+            "WHERE repo=? AND stream_id=? AND contract_id=?",
+            (ts, repo, self._stream_id, old_contract_id),
         )
 
         # Write the new contract with supersedes set
@@ -1245,9 +1369,12 @@ class DuckDBStateStore:
             sets.append("success_criteria=?")
             params.append(self._to_json(success_criteria))
 
-        params.extend([self._repo(), contract_id])
+        params.extend([self._repo(), self._stream_id, contract_id])
 
-        sql = f"UPDATE sdd_contract SET {', '.join(sets)} WHERE repo=? AND contract_id=?"
+        sql = (
+            f"UPDATE sdd_contract SET {', '.join(sets)} "
+            "WHERE repo=? AND stream_id=? AND contract_id=?"
+        )
         result = self.conn.execute(sql, params)
         count = result.fetchall()
         return bool(count) and count[0][0] > 0

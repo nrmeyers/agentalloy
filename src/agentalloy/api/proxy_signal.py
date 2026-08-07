@@ -180,12 +180,12 @@ class SignalResult:
     announce_orientation: bool = False
     pending_orientation: tuple[str, list[str]] | None = None
 
-    # Free-flow mode (``mode: free`` in the store's phase row): ALL workflow
+    # Workflow pause mode (``mode: paused`` in the store's phase row): ALL workflow
     # steering is paused (orientation, banner, exit gates, transitions, intake)
     # but domain-skill composition keyed on the request's task text is kept.
     # When True the compose path takes the compose-only branch
-    # (``_compose_free_block``) instead of the 3-tier workflow block.
-    free_mode: bool = False
+    # (``_compose_pause_block``) instead of the 3-tier workflow block.
+    paused_mode: bool = False
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
@@ -421,32 +421,32 @@ def _glob_first_exists(path_glob: str, project_root: Path) -> bool:
         return False
 
 
-# Sentinel recorded in `.agentalloy/announced` while free-flow is active. It can
-# never equal a real phase name, so (a) the free-mode domain compose gets its own
+# Sentinel recorded in `.agentalloy/announced` while workflow pause is active. It can
+# never equal a real phase name, so (a) the pause-mode domain compose gets its own
 # once-per-session cadence on the existing announced machinery, and (b) on resume
 # the recorded "phase" mismatches the real one, guaranteeing a fresh orientation
 # (intake included) as if it were the first request.
-_FREE_ANNOUNCED = "__free__"
+_PAUSE_ANNOUNCED = "__paused__"
 
 
-def _evaluate_free_flow(
+def _evaluate_pause_mode(
     request: ProxyRequest,
     cwd: Path,
     phase: str,
-    free_since: str | None,
+    paused_since: str | None,
     session_id: str | None,
     *,
     mutate: bool,
 ) -> SignalResult:
-    """Evaluate a proxy request for a repo in free-flow mode (compose-only).
+    """Evaluate a proxy request for a repo in workflow pause mode (compose-only).
 
-    Free-flow is fully silent: no Tier 1 orientation, no banner, no daily
+    Pause mode is fully silent: no Tier 1 orientation, no banner, no daily
     reminder, no exit-gate evaluation, no phase transition, no intake compose,
     no advisories. What remains:
 
     - **Domain compose**, once per (carrier) session, keyed on the request's task
       text rather than a work-item contract. Cadence rides the existing announced
-      machinery under the :data:`_FREE_ANNOUNCED` sentinel; the marker is
+      machinery under the :data:`_PAUSE_ANNOUNCED` sentinel; the marker is
       committed by the injection path only after delivery (``pending_announce``),
       exactly like the workflow-mode Tier 1.
 
@@ -466,19 +466,19 @@ def _evaluate_free_flow(
             should_compose=False,
             phase=phase,
             task=task,
-            free_mode=True,
+            paused_mode=True,
             repo=repo,
             session_key=session_key,
             session_source=session_source,
         )
 
     # Once-per-session domain compose cadence, on the announced machinery under
-    # the free sentinel. Without a session key, fall back to once-per-entry.
+    # the pause sentinel. Without a session key, fall back to once-per-entry.
     last_phase, last_sessions = _read_announced_state(cwd)
     announce = (
-        (last_phase != _FREE_ANNOUNCED or session_key not in last_sessions)
+        (last_phase != _PAUSE_ANNOUNCED or session_key not in last_sessions)
         if session_key
-        else last_phase != _FREE_ANNOUNCED
+        else last_phase != _PAUSE_ANNOUNCED
     )
     announce = announce and bool(task)
 
@@ -487,7 +487,7 @@ def _evaluate_free_flow(
             should_compose=False,
             phase=phase,
             task=task,
-            free_mode=True,
+            paused_mode=True,
             repo=repo,
             session_key=session_key,
             session_source=session_source,
@@ -495,20 +495,20 @@ def _evaluate_free_flow(
 
     pending_announce: tuple[str, list[str]] | None = None
     if announce:
-        if last_phase != _FREE_ANNOUNCED:
+        if last_phase != _PAUSE_ANNOUNCED:
             new_sessions = [session_key] if session_key else []
         elif session_key:
             new_sessions = [*last_sessions, session_key][-_MAX_ANNOUNCED_SESSIONS:]
         else:
             new_sessions = last_sessions
-        pending_announce = (_FREE_ANNOUNCED, new_sessions)
+        pending_announce = (_PAUSE_ANNOUNCED, new_sessions)
 
     return SignalResult(
         should_compose=True,
         announce=announce,
         phase=phase,
         task=task,
-        free_mode=True,
+        paused_mode=True,
         repo=repo,
         session_key=session_key,
         session_source=session_source,
@@ -619,19 +619,19 @@ async def evaluate_signal(
             phase_state = _phase_state(cwd)
             transitioned_by = phase_state.transitioned_by if phase_state else None
 
-    # 1b. Free-flow guard (single guard point). ``mode: free`` in the phase row
+    # 1b. Pause guard (single guard point). ``mode: paused`` in the phase row
     # flips the whole request into compose-only handling: no orientation, no
     # banner, no gate eval, no phase transition, no intake compose — but domain
-    # skills for the task content still compose (via SignalResult.free_mode →
-    # `_compose_free_block`). The phase value itself is untouched; resume
+    # skills for the task content still compose (via SignalResult.paused_mode →
+    # `_compose_pause_block`). The phase value itself is untouched; resume
     # returns to it exactly. Because this branch never commits the announce /
     # composed / banner markers under their workflow keys, resuming re-orients
     # (and re-runs intake) as if this were the first request.
-    free_mode = phase_state is not None and (phase_state.mode or "").lower() == "free"
-    flow_mode = "free" if free_mode else "workflow"
-    free_since = phase_state.free_since if (free_mode and phase_state) else None
-    if flow_mode == "free":
-        return _evaluate_free_flow(request, cwd, phase, free_since, session_id, mutate=mutate)
+    # Legacy alias: ``mode: free`` (old name) reads as paused — kept indefinitely.
+    paused_mode = phase_state is not None and (phase_state.mode or "").lower() in ("paused", "free")
+    pause_since = phase_state.paused_since if (paused_mode and phase_state) else None
+    if paused_mode:
+        return _evaluate_pause_mode(request, cwd, phase, pause_since, session_id, mutate=mutate)
 
     task = _extract_task_from_messages(request)
 
@@ -837,9 +837,9 @@ async def evaluate_signal(
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
                     # mode="workflow" is not a guess: this whole branch is only
-                    # reached past the free-flow guard above (1b), which returns
-                    # early on `mode: free` — an auto-advance never fires while
-                    # the repo is in free-flow, so the mode here is always
+                    # reached past the pause guard above (1b), which returns
+                    # early on `mode: paused` — an auto-advance never fires while
+                    # the repo is in pause, so the mode here is always
                     # "workflow".
                     try:
                         from agentalloy.install.subcommands.wire_harness import (

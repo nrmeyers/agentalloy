@@ -61,10 +61,10 @@ class TestSingleOwnerWrites:
 
     def test_write_phase_atomic_preserves_mode(self, fixture_repo: Path) -> None:
         """AC-4: an idempotent rewrite must not drop the repo out of free-flow."""
-        seed_phase(fixture_repo, "spec", mode="free", free_since="2026-07-01")
+        seed_phase(fixture_repo, "spec", mode="free", paused_since="2026-07-01")
 
         sl._write_phase_atomic(fixture_repo, "spec")  # idempotent rewrite
-        assert sl.read_flow_state(fixture_repo) == ("free", "2026-07-01")
+        assert sl.read_pause_state(fixture_repo) == ("paused", "2026-07-01")
 
     def test_write_lifecycle_mode_guard(self) -> None:
         """_write_lifecycle_mode rejects invalid modes (code-level guard)."""
@@ -247,26 +247,26 @@ class TestConcurrentTransition:
 # ---------------------------------------------------------------------------
 
 
-class TestFlowState:
-    """read_flow_state behaviour."""
+class TestPauseState:
+    """read_pause_state behaviour."""
 
     def test_workflow_default(self, fixture_repo: Path) -> None:
         """No phase row → workflow mode."""
-        mode, free_since = sl.read_flow_state(fixture_repo)
+        mode, paused_since = sl.read_pause_state(fixture_repo)
         assert mode == "workflow"
-        assert free_since is None
+        assert paused_since is None
 
     def test_free_mode(self, fixture_repo: Path) -> None:
-        """phase row with mode: free → free mode."""
-        seed_phase(fixture_repo, "spec", mode="free", free_since="2026-07-01")
-        mode, free_since = sl.read_flow_state(fixture_repo)
-        assert mode == "free"
-        assert free_since == "2026-07-01"
+        """phase row with mode: free → paused mode."""
+        seed_phase(fixture_repo, "spec", mode="free", paused_since="2026-07-01")
+        mode, paused_since = sl.read_pause_state(fixture_repo)
+        assert mode == "paused"
+        assert paused_since == "2026-07-01"
 
     def test_unknown_mode_defaults_workflow(self, fixture_repo: Path) -> None:
         """Unknown mode value falls back to workflow."""
         seed_phase(fixture_repo, "spec", mode="unknown")
-        mode, free_since = sl.read_flow_state(fixture_repo)
+        mode, paused_since = sl.read_pause_state(fixture_repo)
         assert mode == "workflow"
 
 

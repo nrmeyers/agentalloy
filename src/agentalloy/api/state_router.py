@@ -99,19 +99,15 @@ def resolve_repo_root(repo_root: str | None = _REPO_ROOT_QUERY) -> Path:
 
 @lru_cache(maxsize=256)
 def _repo_key_for(root: str) -> str:
-    """Slug a repo root, memoised — ``repo_slug`` shells out to git.
+    """Hash a repo root path into a unique key.
 
-    Imported from ``code_index.slug`` deliberately: that module is the canonical
-    worktree-aware implementation and is pure stdlib, so importing it does not
-    drag in the ``[code-index]`` extra.
+    Unlike ``repo_slug``, this does NOT resolve through git. Each distinct
+    path (including worktree roots) gets its own key, which is exactly what
+    the multi-worktree state isolation requires.
     """
-    from agentalloy.code_index.slug import repo_slug
+    import hashlib
 
-    try:
-        return repo_slug(Path(root))
-    except Exception:
-        logger.debug("repo_slug failed for %s — falling back to basename", root, exc_info=True)
-        return Path(root).name
+    return hashlib.sha256(root.encode()).hexdigest()[:16]
 
 
 def get_repo_store(
@@ -239,7 +235,7 @@ def _rewrite_posture(root: Path, phase: str, mode: str | None) -> list[str]:
     ``PhaseState.mode``, read off the same in-process store handle that did
     the write) rather than re-derived here — one evaluation point for the
     ``(phase, mode)`` pair, reachable identically from the service and the
-    CLI (see ``install.subcommands.flow``).
+    CLI (see ``install.subcommands.workflow``).
     """
     try:
         from agentalloy.install.subcommands.wire_harness import (
@@ -456,7 +452,7 @@ async def read_phase(
 
     ``value`` stays the bare name so that older callers keep working; the
     decoded fields ride alongside it because the CLI reads the whole row and,
-    without them, had no way to reach ``mode``/``free_since``/``transitioned_by``
+    without them, had no way to reach ``mode``/``paused_since``/``transitioned_by``
     except the file mirror this migration is removing.
 
     Note the deliberate asymmetry with writes: ``POST /state/phase`` is gated
@@ -469,7 +465,7 @@ async def read_phase(
         kind="phase",
         value=phase.phase,
         mode=phase.mode,
-        free_since=phase.free_since,
+        paused_since=phase.paused_since,
         transitioned_by=phase.transitioned_by,
         started_at=phase.started_at,
         last_updated=phase.last_updated,
@@ -697,7 +693,7 @@ async def write_phase(
 
     Both paths go through ``store.write_phase`` rather than a raw
     ``write("phase", ...)``: a raw write replaces the blob with a bare name and
-    so silently discards ``mode``, ``free_since``, ``started_at`` and
+    so silently discards ``mode``, ``paused_since``, ``started_at`` and
     ``transitioned_by``.  ``read_phase`` tolerates that shape, which is exactly
     why the loss was invisible.
     """
@@ -730,7 +726,7 @@ async def write_phase(
             actor=actor,
             owner=req.owner,
             mode=req.mode,
-            free_since=req.free_since,
+            paused_since=req.paused_since,
         )
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
@@ -772,7 +768,7 @@ async def write_phase(
                 actor=actor,
                 owner=req.owner,
                 mode=req.mode,
-                free_since=req.free_since,
+                paused_since=req.paused_since,
             )
             # conflict.owner is None when no row exists yet — non-blocking
             if result.conflict is not None and result.conflict.owner is not None:

@@ -102,7 +102,7 @@ class StateClient:
         repo_root: str | None = None,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         override: bool = False,
     ) -> dict[str, Any]:
         """Set the current phase via the service.
@@ -111,10 +111,10 @@ class StateClient:
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
 
-        ``mode``/``free_since`` are the free-flow pair.  Omitting them carries
+        ``mode``/``paused_since`` are the pause pair.  Omitting them carries
         the stored values forward; passing ``""`` clears them, which is how
-        ``flow resume`` leaves free-flow.  They are real fields rather than
-        something smuggled inside *value*: ``flow free`` used to POST
+        ``workflow resume`` leaves pause.  They are real fields rather than
+        something smuggled inside *value*: ``workflow pause`` used to POST
         ``"free-flow:<phase>"`` as the phase name, which wrote a phase nothing
         recognises and had to skip the posture rewrite to avoid clearing the
         deny rules.
@@ -126,8 +126,8 @@ class StateClient:
             body["mode"] = mode
         if override:
             body["override"] = True
-        if free_since is not None:
-            body["free_since"] = free_since
+        if paused_since is not None:
+            body["paused_since"] = paused_since
         return self._post("/state/phase", body, repo_root=repo_root)
 
     def set_phase_with_contract(
@@ -194,7 +194,7 @@ class StateClient:
         """Read the decoded phase row, or ``None`` when no phase is recorded.
 
         Distinct from ``get_state("phase")``, which returns only the bare name:
-        the CLI renders ``mode``, ``free_since`` and the timestamps too, and
+        the CLI renders ``mode``, ``paused_since`` and the timestamps too, and
         reaching them was the last thing keeping the file mirror alive.
 
         Raises ``StateClientError`` when the service is unreachable.  A down

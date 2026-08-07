@@ -788,7 +788,7 @@ def test_llm_sent_row_written_with_workflow_delivered_false_when_no_prose(
     tmp_path: Path,
 ) -> None:
     """`_composed_signal` sets no `workflow_system_prose` -- the exact analogue of
-    a free-flow turn (#547 sub-1) where instructions are intentionally suppressed."""
+    a pause turn (#547 sub-1) where instructions are intentionally suppressed."""
     captured: dict[str, Any] = {}
     with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))

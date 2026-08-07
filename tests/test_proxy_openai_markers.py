@@ -517,8 +517,8 @@ def test_prose_leg_does_not_burn_the_announce_marker(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_free_flow_and_non_carrier_turns_stay_silent(tmp_path: Path) -> None:
-    """D1/D2: no phase (free-flow) and no prose (non-carrier) → nothing injected.
+def test_pause_mode_and_non_carrier_turns_stay_silent(tmp_path: Path) -> None:
+    """D1/D2: no phase (pause mode) and no prose (non-carrier) → nothing injected.
 
     `workflow_system_prose` is populated upstream in `evaluate_signal`, which leaves it
     None outside a governed phase. Leg 3's guard must respect BOTH halves of that:
@@ -526,7 +526,7 @@ def test_free_flow_and_non_carrier_turns_stay_silent(tmp_path: Path) -> None:
     """
     (tmp_path / ".agentalloy").mkdir()
     for signal in (
-        SignalResult(should_compose=False),  # free-flow: no phase, no prose
+        SignalResult(should_compose=False),  # pause mode: no phase, no prose
         SignalResult(should_compose=False, phase="build", task="t"),  # carrier, no prose
         SignalResult(should_compose=False, phase=None, workflow_system_prose=_PROSE),
     ):

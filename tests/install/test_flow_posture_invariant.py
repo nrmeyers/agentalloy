@@ -1,15 +1,15 @@
 """Issue #530 — permissions must be re-evaluated and written on every phase
-change AND every flow change; posture is a pure function of ``(phase, mode)``.
+change AND every workflow mode change; posture is a pure function of ``(phase, mode)``.
 
-``agentalloy flow free`` used to record ``mode: free`` correctly and then
+``agentalloy workflow pause`` used to record ``mode: paused`` correctly and then
 silently fail to clear the Tier A deny rules, because
-``rewrite_enforcement_posture`` re-derived the flow mode through
-``read_flow_state`` — a store-only, in-process-only read (see
+``rewrite_enforcement_posture`` re-derived the pause mode through
+``read_pause_state`` — a store-only, in-process-only read (see
 ``signals.skill_loader``'s docstrings). Called from the CLI, that read finds
 no bound store, silently falls back to its documented ``("workflow", None)``
 default, and the posture rewriter writes deny rules right back — while
-``flow free`` reports success, because the mode *write* (a different code
-path) succeeded fine. ``flow resume`` shared the same defect in the opposite,
+``workflow pause`` reports success, because the mode *write* (a different code
+path) succeeded fine. ``workflow resume`` shared the same defect in the opposite,
 more dangerous direction: gates failing to RE-ENGAGE.
 
 Two things are asserted here, deliberately kept separate:
@@ -22,7 +22,7 @@ Two things are asserted here, deliberately kept separate:
   manifests when the store is unreachable from the CLI process.
 * ``TestPostureSurvivesAnUnreachableStore`` — sabotages the exact seam the bug
   lived in (``_phase_view`` returning ``None``, simulating "no store bound in
-  this process") and proves ``flow free``/``flow resume`` still write the
+  this process") and proves ``workflow pause``/``workflow resume`` still write the
   correct posture, because the fix threads the already-known mode in rather
   than re-deriving it. This is the test that would have failed before the fix
   and is green after it — the CLI-process path, not just the posture builder.
@@ -36,9 +36,9 @@ from typing import Any
 
 import pytest
 
-from agentalloy.install.subcommands import flow as flow_mod
 from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
+from agentalloy.install.subcommands import workflow as flow_mod
 from agentalloy.providers.base import (
     DENIED_PHASES,
     build_claude_code_permissions,
@@ -76,7 +76,7 @@ def _wire_codex(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ``_apply_codex_posture`` for the same defect — Tier A includes codex.
     This exercises that path end to end (not just by reading the code), since
     ``build_claude_code_permissions``/``build_codex_workspace_write`` share
-    the exact same ``free_mode`` gate and both flow through
+    the exact same ``pause_mode`` gate and both flow through
     ``rewrite_enforcement_posture``.
     """
     config = root / ".codex" / "config.toml"
@@ -110,21 +110,21 @@ def _workspace_write(config_path: Path) -> Any:
 class TestPostureInvariantMatrix:
     """Drives ``rewrite_enforcement_posture`` directly — the single evaluation
     point every real call site (``state_router.py``, ``proxy_signal.py``,
-    ``flow.py``) now funnels through with an explicit ``mode``. Note the CLI
+    ``workflow.py``) now funnels through with an explicit ``mode``. Note the CLI
     ``phase set`` command itself never rewrote posture (only the HTTP
-    phase-advance route, the proxy auto-advance, and flow free/resume do) —
+    phase-advance route, the proxy auto-advance, and workflow pause/resume do) —
     that split is unchanged by this issue and out of its scope.
     """
 
     @pytest.mark.parametrize("phase", ALL_PHASES)
-    @pytest.mark.parametrize("mode", ["workflow", "free"])
+    @pytest.mark.parametrize("mode", ["workflow", "paused"])
     def test_written_posture_matches_builder(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, mode: str
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
 
-        expected = build_claude_code_permissions(phase, free_mode=(mode == "free"))
+        expected = build_claude_code_permissions(phase, pause_mode=(mode in ("free", "paused")))
         assert _permissions(settings) == expected
 
     def test_resume_direction_reengages_deny_rules_in_a_denied_phase(
@@ -133,11 +133,11 @@ class TestPostureInvariantMatrix:
         """free -> workflow, landing back in a denied phase, must restore deny rules."""
         settings = _wire_claude_code(tmp_path, monkeypatch)
         phase_mod.run_phase_set("design", root=tmp_path, force=True)
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         assert _permissions(settings) == {"deny": []}  # free: unlocked
 
-        flow_mod.run_flow_resume(root=tmp_path)
-        assert _permissions(settings) == build_claude_code_permissions("design", free_mode=False)
+        flow_mod.run_workflow_resume(root=tmp_path)
+        assert _permissions(settings) == build_claude_code_permissions("design", pause_mode=False)
         assert _permissions(settings)["deny"] != []
 
 
@@ -178,12 +178,12 @@ class TestPostureSurvivesAnUnreachableStore:
         wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="workflow")
         assert _permissions(settings)["deny"] != []  # sanity: denied before free
 
-        result = flow_mod.run_flow_free(root=tmp_path)
+        result = flow_mod.run_workflow_pause(root=tmp_path)
         assert result["changed"] is True
 
         # The old bug: this would still show deny rules here, because the
         # posture rewrite silently fell back to "workflow" through the dead
-        # read. The fix passes mode="free" in directly, bypassing that read.
+        # read. The fix passes mode="paused" in directly, bypassing that read.
         assert _permissions(settings) == {"deny": []}
 
     def test_flow_resume_reengages_deny_rules_even_though_the_store_read_is_dead(
@@ -191,16 +191,16 @@ class TestPostureSurvivesAnUnreachableStore:
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         phase_mod.run_phase_set("spec", root=tmp_path, force=True)
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         assert _permissions(settings) == {"deny": []}
 
-        result = flow_mod.run_flow_resume(root=tmp_path)
+        result = flow_mod.run_workflow_resume(root=tmp_path)
         assert result["changed"] is True
 
         # The dangerous polarity: gates must RE-ENGAGE here. Before the fix,
         # `flow resume` didn't call the posture rewrite at all.
         assert _permissions(settings)["deny"] != []
-        assert _permissions(settings) == build_claude_code_permissions("spec", free_mode=False)
+        assert _permissions(settings) == build_claude_code_permissions("spec", pause_mode=False)
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +216,8 @@ class TestRewriteEnforcementPostureExplicitMode:
     ) -> None:
         settings = _wire_claude_code(tmp_path, monkeypatch)
         # No phase row exists at all, so any re-derivation of mode would find
-        # nothing. Passing mode="free" explicitly must still clear deny rules.
-        rewritten = wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="free")
+        # nothing. Passing mode="paused" explicitly must still clear deny rules.
+        rewritten = wire_harness.rewrite_enforcement_posture(tmp_path, "design", mode="paused")
         assert rewritten == ["claude-code"]
         assert _permissions(settings) == {"deny": []}
 
@@ -244,14 +244,14 @@ class TestRewriteEnforcementPostureExplicitMode:
         # Plant the exact old bug by hand: mode is free, but deny rules are
         # still on disk (as if the rewrite silently no-op'd).
         settings.write_text(
-            json.dumps({"permissions": build_claude_code_permissions("design", free_mode=False)})
+            json.dumps({"permissions": build_claude_code_permissions("design", pause_mode=False)})
         )
         assert wire_harness.verify_enforcement_posture(tmp_path, "design", "free") == [
             "claude-code"
         ]
         # A matching posture verifies clean.
         settings.write_text(
-            json.dumps({"permissions": build_claude_code_permissions("design", free_mode=True)})
+            json.dumps({"permissions": build_claude_code_permissions("design", pause_mode=True)})
         )
         assert wire_harness.verify_enforcement_posture(tmp_path, "design", "free") == []
 
@@ -263,7 +263,7 @@ class TestRewriteEnforcementPostureExplicitMode:
 
 
 # ---------------------------------------------------------------------------
-# Codex shares the exact same free_mode gate (build_codex_workspace_write)
+# Codex shares the exact same pause_mode gate (build_codex_workspace_write)
 # and the exact same rewrite_enforcement_posture call site — issue item 4
 # asks this be audited explicitly, not just inferred from the claude-code
 # case. build_codex_workspace_write returns {} for an open/free posture, and
@@ -278,9 +278,11 @@ class TestCodexPostureRoundTrip:
     def test_matrix_matches_builder(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config = _wire_codex(tmp_path, monkeypatch)
         for phase in ALL_PHASES:
-            for mode in ("workflow", "free"):
+            for mode in ("workflow", "paused"):
                 wire_harness.rewrite_enforcement_posture(tmp_path, phase, mode=mode)
-                expected = build_codex_workspace_write(phase, free_mode=(mode == "free"))
+                expected = build_codex_workspace_write(
+                    phase, pause_mode=(mode in ("free", "paused"))
+                )
                 assert _workspace_write(config) == (expected or None)
 
     def test_free_then_resume_in_a_denied_phase(
@@ -295,11 +297,11 @@ class TestCodexPostureRoundTrip:
         assert ww is not None
         assert ww["writable_roots"] == build_codex_workspace_write("design")["writable_roots"]
 
-        flow_mod.run_flow_free(root=tmp_path)
+        flow_mod.run_workflow_pause(root=tmp_path)
         # Key is absent entirely under free mode — not an empty table.
         assert _workspace_write(config) is None
 
-        flow_mod.run_flow_resume(root=tmp_path)
+        flow_mod.run_workflow_resume(root=tmp_path)
         ww = _workspace_write(config)
         assert ww is not None
         assert ww["writable_roots"] == build_codex_workspace_write("design")["writable_roots"]

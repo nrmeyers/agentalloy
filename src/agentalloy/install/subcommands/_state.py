@@ -104,13 +104,13 @@ class PhaseAccess(Protocol):
         *,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         override: bool = False,
     ) -> dict[str, Any] | None:
         """Write *phase*, carrying forward any field left as ``None``.
 
-        ``mode=""``/``free_since=""`` clear those fields; that asymmetry is the
-        store's, and it is what lets ``flow resume`` drop free-flow without
+        ``mode=""``/``paused_since=""`` clear those fields; that asymmetry is the
+        store's, and it is what lets ``workflow resume`` drop pause without
         touching the phase.  Returns the service response body (for gate verdict
         visibility) or ``None`` when the store has no return type.
         """
@@ -149,10 +149,10 @@ class _StoreAccess:
         *,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         override: bool = False,
     ) -> None:
-        self.store.write_phase(phase, actor=actor, mode=mode, free_since=free_since)
+        self.store.write_phase(phase, actor=actor, mode=mode, paused_since=paused_since)
 
     def clear(self) -> None:
         self.store.clear("phase")
@@ -176,7 +176,7 @@ class _ServiceAccess:
         return PhaseState(
             phase=phase,
             mode=body.get("mode"),
-            free_since=body.get("free_since"),
+            paused_since=body.get("paused_since"),
             transitioned_by=body.get("transitioned_by"),
             started_at=body.get("started_at"),
             last_updated=body.get("last_updated"),
@@ -191,7 +191,7 @@ class _ServiceAccess:
         *,
         actor: str | None = None,
         mode: str | None = None,
-        free_since: str | None = None,
+        paused_since: str | None = None,
         override: bool = False,
     ) -> dict[str, Any] | None:
         """Advance the phase over HTTP and return the service's response body.
@@ -206,7 +206,7 @@ class _ServiceAccess:
             repo_root=str(self.root),
             actor=actor,
             mode=mode,
-            free_since=free_since,
+            paused_since=paused_since,
             override=override,
         )
 

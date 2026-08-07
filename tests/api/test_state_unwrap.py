@@ -182,16 +182,16 @@ class TestPhaseWrite:
         assert body.status_code == 200
         assert body.json()["value"] == "design"
 
-    def test_free_flow_mode_survives_an_advance(self, wired, tmp_path: Path) -> None:
+    def test_pause_mode_survives_an_advance(self, wired, tmp_path: Path) -> None:
         """A raw ``write`` here replaced the blob with a bare name, dropping mode.
 
         ``read_phase`` tolerates that shape, so nothing failed — the repo just
-        quietly left free-flow on its next phase advance.
+        quietly left pause mode on its next phase advance.
         """
         store, client = wired
         repo = tmp_path / "repo"
         view = store.for_repo(_repo_key_for(str(repo)))
-        view.write_phase("design", actor="cli", mode="free", free_since="2026-07-28T00:00:00Z")
+        view.write_phase("design", actor="cli", mode="free", paused_since="2026-07-28T00:00:00Z")
 
         client.post(
             "/state/phase",
@@ -202,7 +202,7 @@ class TestPhaseWrite:
         after = view.read_phase()
         assert after is not None
         assert (after.phase, after.mode) == ("build", "free")
-        assert after.free_since == "2026-07-28T00:00:00Z"
+        assert after.paused_since == "2026-07-28T00:00:00Z"
 
     def test_a_contract_advance_keeps_blob_semantics_too(self, wired, tmp_path: Path) -> None:
         """The transactional path shares the caller's BEGIN rather than nesting."""
