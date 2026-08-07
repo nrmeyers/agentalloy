@@ -129,12 +129,12 @@ class TestPhaseRowPauseState:
 
     def test_bare_phase_row_reads_workflow(self, tmp_path: Path) -> None:
         """A pre-blob row is a bare string; the store normalizes it."""
-        from agentalloy.api.state_router import _repo_key_for
+        from agentalloy.api.state_router import scoped_state_store
         from agentalloy.storage.state_store import process_store
 
         store = process_store()
         assert store is not None
-        store.for_repo(_repo_key_for(str(tmp_path))).write("phase", "build")
+        scoped_state_store(store, tmp_path).write("phase", "build")
 
         assert read_pause_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"

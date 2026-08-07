@@ -231,7 +231,7 @@ def register_watcher(
         _log.warning("No regenerator for harness '%s'; skipping store hook", harness)
         return
 
-    def _on_phase_write(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+    def _on_phase_write(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         new_phase = _phase_from_blob(value)
         if new_phase is not None:
             _regenerate(regen, harness, project_root, profile_name, new_phase)
@@ -280,17 +280,19 @@ def register_wired_repos_watcher(store: Any, *, profile_name: str = "default") -
     rules file silently stops tracking it, and only a restart fixes it. Reading
     the wiring records on each fire keeps late wiring covered.
 
-    Scoped by repo — only the repo whose row changed is regenerated. One store
-    serves every repo on the machine, so an unscoped hook would rewrite every
-    wired repo's rules file on any repo's phase advance.
+    Scoped by repo and stream — only the worktree whose row changed is
+    regenerated. One store serves every repo (and, via a shared repo key, every
+    worktree of a repo) on the machine, so an unscoped hook would rewrite every
+    wired repo's rules file on any repo's phase advance, and a repo-only scope
+    would still cross-contaminate sibling worktrees of the same repo.
     """
 
-    def _on_phase_write(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+    def _on_phase_write(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         new_phase = _phase_from_blob(value)
         if new_phase is None:
             return
 
-        from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+        from agentalloy.api.state_router import _repo_key_for, _stream_key_for  # noqa: PLC0415
         from agentalloy.install import state as install_state  # noqa: PLC0415
         from agentalloy.watch.regenerators import REGENERATORS  # noqa: PLC0415
 
@@ -301,7 +303,7 @@ def register_wired_repos_watcher(store: Any, *, profile_name: str = "default") -
             if not harness or not root or (harness, root) in seen:
                 continue
             seen.add((harness, root))
-            if _repo_key_for(root) != repo:
+            if _repo_key_for(root) != repo or _stream_key_for(root) != stream:
                 continue
             regen = REGENERATORS.get(harness)
             if regen is None:

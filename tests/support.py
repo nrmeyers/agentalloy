@@ -68,12 +68,12 @@ def seed_phase(root: Path, phase: str, **fields: str | None) -> None:
     ``.agentalloy/phase`` file writes the suite used before the store became
     the only source.
     """
-    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None, "no state store bound — is _bound_state_store active?"
-    store.for_repo(_repo_key_for(str(root))).write_phase(phase, **fields)  # pyright: ignore[reportArgumentType]
+    scoped_state_store(store, root).write_phase(phase, **fields)  # pyright: ignore[reportArgumentType]
 
 
 def seed_announced(root: Path, phase: str, keys: list[str] | None = None) -> None:
@@ -84,26 +84,26 @@ def seed_announced(root: Path, phase: str, keys: list[str] | None = None) -> Non
     the only source. Value shape: ``"<phase>\\t<key1>,<key2>,..."``, or a bare
     ``phase`` when no keys (matches ``_write_announced_atomic``'s encoding).
     """
-    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None, "no state store bound — is _bound_state_store active?"
     ks = [k for k in (keys or []) if k]
     value = f"{phase}\t{','.join(ks)}" if ks else phase
-    store.for_repo(_repo_key_for(str(root))).write("announced", value)
+    scoped_state_store(store, root).write("announced", value)
 
 
 def read_announced_raw(root: Path) -> str | None:
     """Read the raw ``announced`` store value (``"<phase>\\t<keys>"`` or bare
     ``phase``), or ``None`` if absent. Test-side counterpart of the file read the
     suite used before the store became the only source."""
-    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None, "no state store bound — is _bound_state_store active?"
-    return store.for_repo(_repo_key_for(str(root))).read("announced")
+    return scoped_state_store(store, root).read("announced")
 
 
 def seed_banner_turns(root: Path, phase: str, session_key: str | None, count: int) -> None:
@@ -113,13 +113,13 @@ def seed_banner_turns(root: Path, phase: str, session_key: str | None, count: in
     ``.agentalloy/banner-turns`` file writes the suite used before the store
     became the only source.
     """
-    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None, "no state store bound — is _bound_state_store active?"
     value = f"{phase}\t{session_key or ''}\t{count}"
-    store.for_repo(_repo_key_for(str(root))).write("banner-turns", value)
+    scoped_state_store(store, root).write("banner-turns", value)
 
 
 def seed_orientation(root: Path, phase: str, keys: list[str] | None = None) -> None:
@@ -129,11 +129,11 @@ def seed_orientation(root: Path, phase: str, keys: list[str] | None = None) -> N
     writes the ``orientation`` store row. Value shape:
     ``"<phase>\\t<key1>,<key2>,..."``, or a bare ``phase`` when no keys.
     """
-    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None, "no state store bound — is _bound_state_store active?"
     ks = [k for k in (keys or []) if k]
     value = f"{phase}\t{','.join(ks)}" if ks else phase
-    store.for_repo(_repo_key_for(str(root))).write("orientation", value)
+    scoped_state_store(store, root).write("orientation", value)

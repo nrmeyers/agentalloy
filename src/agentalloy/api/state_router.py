@@ -47,8 +47,10 @@ from agentalloy.api.state_models import (
     StateWriteRequest,
     StateWriteResponse,
 )
+from agentalloy.code_index.slug import repo_slug
 from agentalloy.providers.base import end_session_instruction
 from agentalloy.storage.state_store import DuckDBStateStore, StateStoreError
+from agentalloy.storage.stream_id import resolve_stream_id
 
 logger = logging.getLogger(__name__)
 
@@ -99,28 +101,52 @@ def resolve_repo_root(repo_root: str | None = _REPO_ROOT_QUERY) -> Path:
 
 @lru_cache(maxsize=256)
 def _repo_key_for(root: str) -> str:
-    """Hash a repo root path into a unique key.
+    """Slug a repo root path via git origin remote.
 
-    Unlike ``repo_slug``, this does NOT resolve through git. Each distinct
-    path (including worktree roots) gets its own key, which is exactly what
-    the multi-worktree state isolation requires.
+    Deliberately worktree-collapsing (see ``repo_slug``) — code-index lookups
+    and phase/state rows share this key, so every worktree of a repo resolves
+    to the same ``repo``. Worktree isolation lives in ``stream_id`` instead.
     """
-    import hashlib
+    return repo_slug(Path(root))
 
-    return hashlib.sha256(root.encode()).hexdigest()[:16]
+
+def _stream_key_for(root: str) -> str:
+    """Resolve the per-worktree stream key for a repo root path.
+
+    Distinguishes concurrent worktrees of the same repo, which ``repo_slug``
+    deliberately does not (issue #548). Not cached, unlike ``_repo_key_for``:
+    ``resolve_stream_id`` is a cheap file read/hash (no external process), and
+    ``.agentalloy/.stream`` is meant to be rebindable at runtime via
+    ``agentalloy stream use`` — caching it would freeze the old binding until
+    process restart.
+    """
+    return resolve_stream_id(Path(root))
+
+
+def scoped_state_store(store: DuckDBStateStore, root: Path) -> DuckDBStateStore:
+    """The store view for *root*'s workflow state: ``(repo_slug, stream_id)``.
+
+    Use for phase/workflow reads and writes — anywhere a worktree's own phase
+    must not be visible to (or clobbered by) a sibling worktree of the same
+    repo. Code-index-adjacent artifact storage (design docs, lessons, ingest
+    bookkeeping) is deliberately repo-only: it does not call this helper.
+    """
+    root_s = str(root)
+    return store.for_repo(_repo_key_for(root_s), stream_id=_stream_key_for(root_s))
 
 
 def get_repo_store(
     root: Path = Depends(resolve_repo_root),
     store: DuckDBStateStore = Depends(get_state_store),
 ) -> DuckDBStateStore:
-    """The lifespan store, scoped to the repo this request is about.
+    """The lifespan store, scoped to the repo and stream this request is about.
 
     One service serves every repo from one ``state.duck``; without this scoping
     they all share a single bucket and a phase set in one repo is read by the
-    next.  Repo-scoped stores isolate each repo's phase row behind a key namespace.
+    next.  ``repo`` collapses worktrees (matches the code index); ``stream_id``
+    re-splits them so concurrent worktrees of the same repo don't cross phases.
     """
-    return store.for_repo(_repo_key_for(str(root)))
+    return scoped_state_store(store, root)
 
 
 # ---------------------------------------------------------------------------

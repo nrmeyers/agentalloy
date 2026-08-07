@@ -35,13 +35,13 @@ def test_read_phase_reads_the_store_row(tmp_path: Path) -> None:
 
 def test_read_phase_reads_a_bare_string_row(tmp_path: Path) -> None:
     """Pre-blob rows hold a bare phase string; they must still read."""
-    from agentalloy.api.state_router import _repo_key_for
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.signals.skill_loader import _read_phase
     from agentalloy.storage.state_store import process_store
 
     store = process_store()
     assert store is not None
-    store.for_repo(_repo_key_for(str(tmp_path))).write("phase", "spec")
+    scoped_state_store(store, tmp_path).write("phase", "spec")
     assert _read_phase(tmp_path) == "spec"
 
 

@@ -193,7 +193,7 @@ def test_callback_fires_once_per_write_phase(tmp_path: Path) -> None:
 
     calls: list[tuple[str, str, str]] = []
 
-    def _fn(kind: str, value: str, repo: str) -> None:
+    def _fn(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         calls.append((kind, value, repo))
 
     store.on_write("phase", _fn)
@@ -226,12 +226,12 @@ def test_callback_raise_does_not_kill_writer(tmp_path: Path) -> None:
 
     call_count = 0
 
-    def _bad_fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+    def _bad_fn(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         nonlocal call_count
         call_count += 1
         raise RuntimeError("callback exploded")
 
-    def _good_fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+    def _good_fn(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         pass
 
     store.on_write("phase", _bad_fn)
@@ -253,7 +253,7 @@ def test_callback_unregistered_no_longer_fires(tmp_path: Path) -> None:
 
     calls: list[int] = []
 
-    def _fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+    def _fn(kind: str, value: str, repo: str, stream: str) -> None:  # noqa: ARG001
         calls.append(1)
 
     store.on_write("phase", _fn)
@@ -322,6 +322,7 @@ class TestWiredReposWatcher:
             lambda: {"harness_files_written": [{"harness": "cursor", "repo_root": str(late)}]},
         )
         monkeypatch.setattr("agentalloy.api.state_router._repo_key_for", lambda root: "late-repo")
+        monkeypatch.setattr("agentalloy.api.state_router._stream_key_for", lambda root: "")
 
         store.write_phase("design")
 
@@ -351,12 +352,56 @@ class TestWiredReposWatcher:
         monkeypatch.setattr(
             "agentalloy.api.state_router._repo_key_for", lambda root: Path(root).name
         )
+        monkeypatch.setattr("agentalloy.api.state_router._stream_key_for", lambda root: "")
 
         store.write_phase("design")
 
         assert (mine / ".cursor" / "rules" / "agentalloy.mdc").exists()
         assert not (theirs / ".cursor" / "rules" / "agentalloy.mdc").exists(), (
             "another repo's phase advance rewrote this repo's rules file"
+        )
+
+    def test_sibling_worktree_of_same_repo_is_not_regenerated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same repo key, different stream — the hook must scope by stream too.
+
+        ``_repo_key_for`` deliberately collapses worktrees of the same repo
+        (issue #548), so two worktrees can share a repo key while being
+        distinct streams. Without the stream comparison, a phase advance in
+        one worktree would regenerate a sibling worktree's rules file.
+        """
+        mine, theirs = tmp_path / "mine", tmp_path / "theirs"
+        (mine / ".cursor").mkdir(parents=True)
+        (theirs / ".cursor").mkdir(parents=True)
+
+        # The store's own row is scoped to stream "stream-mine", matching `mine`.
+        store = self._arm(tmp_path, monkeypatch, "shared-repo").for_repo(
+            "shared-repo", stream_id="stream-mine"
+        )
+
+        monkeypatch.setattr(
+            "agentalloy.install.state.load_state",
+            lambda: {
+                "harness_files_written": [
+                    {"harness": "cursor", "repo_root": str(mine)},
+                    {"harness": "cursor", "repo_root": str(theirs)},
+                ]
+            },
+        )
+        monkeypatch.setattr("agentalloy.api.state_router._repo_key_for", lambda root: "shared-repo")
+        monkeypatch.setattr(
+            "agentalloy.api.state_router._stream_key_for",
+            lambda root: "stream-mine" if str(root) == str(mine) else "stream-theirs",
+        )
+
+        store.write_phase("design")
+
+        assert (mine / ".cursor" / "rules" / "agentalloy.mdc").exists(), (
+            "the worktree matching the store's own stream was not regenerated"
+        )
+        assert not (theirs / ".cursor" / "rules" / "agentalloy.mdc").exists(), (
+            "a sibling worktree of the same repo (different stream) was regenerated"
         )
 
 

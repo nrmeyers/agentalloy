@@ -19,6 +19,7 @@ from agentalloy.api.state_router import (
     _repo_key_for,
     default_repo_root,
     get_state_store,
+    scoped_state_store,
 )
 from agentalloy.api.state_router import (
     router as state_router,
@@ -191,7 +192,7 @@ class TestImportRoute:
         assert resp.status_code == 200
         assert resp.json() == {"imported": {"phase": "build"}}
         assert not (repo / ".agentalloy" / "phase").exists()
-        assert store.for_repo(_repo_key_for(str(repo))).read_phase() is not None
+        assert scoped_state_store(store, repo).read_phase() is not None
 
     def test_route_on_a_repo_with_no_mirror(self, wired, tmp_path: Path) -> None:
         _store, client = wired
