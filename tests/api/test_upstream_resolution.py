@@ -168,3 +168,80 @@ class TestResolvePassthroughClient:
         resolved = resolve_passthrough_client(app, tmp_path, None, "test_client_cache")
         assert resolved is not None
         assert resolved.upstream_base_url == "http://h:9000"
+
+    def test_error_returns_upstream_file(self, tmp_path: Path) -> None:
+        """Malformed upstream yields UpstreamFile(kind="error"), not default_client."""
+        from agentalloy.api.proxy_context import UpstreamFile
+
+        _write_upstream(tmp_path, "url: [unclosed\n")
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        assert isinstance(resolved, UpstreamFile)
+        assert resolved.kind == "error"
+        assert resolved.detail is not None
+        # Crucially: the default client is NOT returned
+        assert resolved is not default
+
+
+class TestAnthropicPassthroughError:
+    """End-to-end error handling for Anthropic Messages passthrough.
+
+    The router routes are already ``/proj/{token}/v1/messages`` — we include
+    the router without a prefix so the token is extracted by the route itself,
+    not doubled by a prefix.
+    """
+
+    def test_malformed_upstream_returns_503(self, tmp_path: Path):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from agentalloy.api.proxy_context import encode_proj_token
+        from agentalloy.api.proxy_passthrough_router import router as passthrough_router
+
+        _write_upstream(tmp_path, "url: [unclosed\n")
+
+        app = FastAPI()
+        app.include_router(passthrough_router)
+
+        token = encode_proj_token(tmp_path)
+        client = TestClient(app)
+        response = client.post(
+            f"/proj/{token}/v1/messages",
+            json={"model": "claude-sonnet-4-20250514", "messages": []},
+        )
+        assert response.status_code == 503
+        body = response.json()
+        assert body["type"] == "error"
+        assert body["error"]["code"] == "upstream_parse_error"
+
+
+class TestResponsesPassthroughError:
+    """End-to-end error handling for OpenAI Responses passthrough.
+
+    Same prefix fix as the Anthropic test above — the router already owns the
+    ``/proj/{token}`` segment.
+    """
+
+    def test_malformed_upstream_returns_503(self, tmp_path: Path):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from agentalloy.api.proxy_context import encode_proj_token
+        from agentalloy.api.proxy_responses_router import router as responses_router
+
+        _write_upstream(tmp_path, "url: [unclosed\n")
+
+        app = FastAPI()
+        app.include_router(responses_router)
+
+        token = encode_proj_token(tmp_path)
+        client = TestClient(app)
+        response = client.post(
+            f"/proj/{token}/v1/responses",
+            json={"model": "o3"},
+        )
+        assert response.status_code == 503
+        body = response.json()
+        assert "error" in body
+        assert body["error"]["code"] == "upstream_parse_error"

@@ -218,7 +218,7 @@ def resolve_passthrough_client(
     cwd: Path,
     default_client: AnthropicPassthroughClient | None,
     cache_attr: str,
-) -> AnthropicPassthroughClient | None:
+) -> AnthropicPassthroughClient | UpstreamFile | None:
     """Resolve the ``AnthropicPassthroughClient`` for this request (Anthropic
     Messages and OpenAI Responses passthrough surfaces).
 
@@ -257,6 +257,8 @@ def resolve_passthrough_client(
             client = AnthropicPassthroughClient(upstream_base_url=base_url)
             cache[base_url] = client
         return client
+    if result.kind == "error":
+        return result
     return default_client
 
 
