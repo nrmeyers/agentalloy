@@ -121,7 +121,7 @@ raw_prose: |
       agentalloy phase set add-skill   # custom-skill authoring
       agentalloy phase set sdd-flow    # flow lane (exploration)
 
-  Phase advance ends intake for this session. Stop here only if the route itself is genuinely unclear — surface that and let the user make the call.
+  Phase advance ends intake for this session. The next phase begins in a fresh one; `agentalloy resume` rebuilds context. Stop here only if the route itself is genuinely unclear — surface that and let the user make the call.
 
   ## Not this
 

@@ -51,6 +51,13 @@ contract_template: |
   ## Possible next steps
 
   <ideas for how to proceed — not commitments, just options>
+exit_gates:
+  # The flow lane is exploratory — no acceptance criteria, no exit barrier.
+  # The only gate is that a contract exists (the agent creates one on entry
+  # to record what it's exploring). This is the minimal store-backed gate.
+  contract_exists:
+    phase: sdd-flow
+
 phase_scope: []
 category_scope: [process]
 author: agentalloy
