@@ -42,6 +42,8 @@ _PHASE_GRAPH: dict[str, str] = {
     "add-skill": "intake",  # custom-skill authoring lane: deliverable is a locally
     #                         installed corpus skill, not a shippable change — return
     #                         to intake for whatever comes next
+    "sdd-flow": "intake",  # flow lane: deliberately unguided exploration — return
+    #                         to intake when done so the next phase can be decided
     "ship": "ship",  # terminal
 }
 

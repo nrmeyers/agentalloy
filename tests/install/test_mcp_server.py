@@ -48,6 +48,7 @@ class TestToolsList:
             "ship",
             "sdd-fast",
             "add-skill",
+            "sdd-flow",
         ]
         assert tool["inputSchema"]["required"] == ["task"]
 

@@ -49,6 +49,7 @@ _VALID_PHASES = (
     "ship",
     "sdd-fast",
     "add-skill",
+    "sdd-flow",
 )
 
 # Hardcoded orientation prose — fires BEFORE the workflow block, once per session.

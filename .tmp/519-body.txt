@@ -1,0 +1,474 @@
+Execution index for the open backlog. Written to be picked up cold.
+
+**How to use this:** work top to bottom within a track. Tracks are independent.
+Each entry gives the blocking relation and the *first concrete action*.
+
+**Order is enforced by native GitHub issue dependencies**, not just by this
+document. Each blocked issue lists its blockers in its own sidebar, and GitHub
+will not let you close one out of order without telling you. To ask the repo
+what is actionable right now — no reading required:
+
+```bash
+for n in $(gh issue list --state open --limit 50 --json number --jq '.[].number'); do
+  b=$(gh api repos/nrmeyers/agentalloy/issues/$n/dependencies/blocked_by --jq '[.[].number]|join(",")')
+  [ -z "$b" ] && echo "#$n actionable" || echo "#$n blocked by $b"
+done
+```
+
+If this document and the dependency graph ever disagree, **the graph wins** —
+it is the thing that can't go stale silently.
+
+**Labels:** exactly one `status:` per issue — `status:ready` (start now) ·
+`status:needs-verification` (confirm the repro before writing code) ·
+`status:blocked` (a listed issue must land first) · `status:deferred` (parked).
+
+> ⚠️ The earlier standing hazard about `agentalloy code index` is **withdrawn**.
+> That premise was wrong; routine indexing was never destructive. See the
+> correction on #526.
+
+---
+
+## Open PRs
+
+None.
+
+## Landed since the last revision
+
+**#590 (`31b40af`) — fix(527 D): re-derive GOVERNS on symbol change, not only doc change.** Closes the deferred-loss mode (#527 failure mode 2); A14's D item is done, E is the sole remainder.
+
+- `decision_docs_governing(fqns)` on the graph store reads `edges` **alone**, deliberately with no join to `symbols` — `decisions_for_files` and `governing_decisions` both join through `symbols` on the edge's `dst`, which makes a renamed-away FQN invisible to them
+- `_index_decisions` gains `code_changed_qns`, unioning matching docs into `affected`, filtered to docs that still have chunks
+- Caller passes `changed_qns | removed_code`, `None` on a full rebuild
+- Two outcomes, both now **at the rename**: sole span unresolvable → A's guard keeps the stale edge and reports suspicious (detection, not deletion); some spans still resolve → guard silent, stale edge dropped and counted — the partial-loss case A structurally cannot see
+- Failure mode 4 does not apply at this seam: `_parse_full` clears the sidecar caches before every parse to guarantee a full symbol set
+- Full suite: 5343 passed, 3 skipped
+
+**#589 (`1b41f5f`) — fix(guard): pack version bump guard is worktree-aware, not HEAD-anchored.** The guard diffed `base...HEAD` and read versions via `git show HEAD`, so an uncommitted pack edit was invisible to it — **structurally incapable of failing before the commit that introduces the problem.** It could only ever fail in CI. #588 hit exactly this: green four-gate local run, then CI red on a missing sdd bump.
+
+- Two-dot diff against the resolved merge-base reaches the worktree (committed + staged + unstaged)
+- Untracked pack files unioned in via `git ls-files --others` — a new skill YAML in an existing pack is the un-bumped case `git diff` cannot see
+- Version read from `pack.yaml` on disk, no `git show` fallback (a pack mid-deletion must read as absent)
+- `PACK_GUARD_BASE_REF` is merge-based now, not raw
+- **Consequence:** the suite goes red the moment you edit a pack and stays red until you bump its version. Bump the pack version as the *first* edit of a pack change, not the last.
+
+**#588 (`7cf51f7`) — fix: lifecycle artifacts are store-backed; adaptive per-turn banner.** Closes #587. Agents kept writing `docs/fast/` specs and `.agentalloy` contracts to disk because four agent-facing surfaces still told them to. **Root cause is architectural:** `signals.invariants` derives a gate's `path` prefix into a required prose token, so any lifecycle `path:` gate *is* a standing instruction to write there. Only `sdd-add-skill` legitimately declares one.
+
+- Fixed in `sdd-fast.yaml`, `gates.py`/`phase.py` approval maps, `approve.py` error text, the seeded `.agentalloy/README.md` (now refreshes stale machine-written copies), and `new_skill_pack.py` — **the live generator**, which was minting a `.agentalloy/contracts/build/*.md` path gate into every scaffolded pack
+- `tests/test_lifecycle_artifacts_are_store_backed.py` fences the class shut across all packs, the scaffold, and the banner
+- #587: store-backed declarative directives, adaptive per-phase cadence, content-hash dedup, section-completeness cache. Two §2 sub-rules deliberately dropped ("progress changed → emit" is redundant with the §3 hash; "×1.5 while tool-using" is unobservable)
+- **Behavior change:** a phase where nothing moves now emits exactly one banner. That is §3's goal, but it makes the banner a phase-entry notice rather than a recency anchor on quiet phases
+- Latent bug fixed: the banner's progress suffix was dead for every store-backed phase, because `_extract_artifact_contains_specs` synthesizes `docs/<phase>/<name>` globs nothing ever writes to
+- SDD pack bumped to 2.9.0
+
+**#583 (`2e90124`) — feat(intake): gate advisory + intake confirmation + predecessor self-check.** Closes #581. What it carried:
+
+- `_build_contract_exists_advisory()` in `signals/gates.py` — actionable advisory when intake's `contract_exists` gate is NOT_MET (run contract init, present contract, STOP)
+- Intake confirmation directive in `api/proxy_signal.py` — new sessions resuming on intake get a deterministic confirm directive to run `agentalloy contract init` before drafting solutions
+- Predecessor self-check preambles added to 5 phase YAML files (spec, design, plan, build, qa) — each phase skill instructs the agent to verify predecessor deliverables before adopting the phase
+- Updated `test_new_session_on_intake_is_silent` → `test_new_session_on_intake_confirms`
+- SDD pack version bumped to 2.8.0
+
+**#577 (`70c2f63`) — fix(type-quality): eliminate 578 pyright warnings and restore proxy session support.** Closes #563. Reduces 578 pyright warnings to 0 (119 files) and registers `session_header` in qwen_code harness spec so the proxy can propagate Qwen Code session context upstream. Full suite: 5220 passed, 1 skipped, 0 failures.
+
+**#574 (`bd3c5e7`) — feat(orientation): once-per-session session orientation marker.** Closes #574. What it carried:
+
+- New `ORIENTATION_MARKER_BEGIN/END` marker family in `proxy_injection.py` (Anthropic, OpenAI, Responses surfaces)
+- Store-backed cadence functions `_read_orientation_announced()` / `_write_orientation_announced_atomic()` in `skill_loader.py`
+- `announce_orientation` / `pending_orientation` fields in `SignalResult`, cadence check in `evaluate_signal()`, `orientation_emitted` in `commit_markers()` (proxy_signal.py)
+- Hardcoded `_COMPOSE_ORIENTATION` prose with dynamic mode options, wired through `_compose_block()` → `InjectOutcome` → `commit_outcome()` (proxy_apply.py)
+- Trimmed sdd-intake.yaml of duplicate "Resume or new?" logic
+- SDD pack version bumped to 2.7.0
+- Full suite: 5216 passed, 1 skipped, 0 failures
+
+**#571 (`749ae3d`) — fix(embed): remove invalid --threads-embed flag from llama-server command.** Closes #568. Removed `--threads-embed 4` from all 6 locations where it was causing nightly CI failures (the llama-server binary does not accept this flag).
+
+**#569 (`522df57`) — feat(traceability): gate feedback — AC completeness check for phase gates.** Closes #518, #501, #516, #514. What it carried:
+
+- Gate feedback: evaluates a work-item's success criteria against its phase artifacts and injects unmet-AC feedback into the proxy signal advisory stream
+- `success_criteria` migrated from `list[str]` to `list[str | dict[str, Any]]` with `{id, text}` structured format
+- `parse_ac_headings()` — regex extracts `AC-N: text` from markdown headings
+- `_gate_trigger_enabled()`, `_ac_is_met()`, `_evaluate_ac_feedback()` predicates
+- `gate_feedback` artifact stored after compose, read during proxy signal evaluation
+- `AGENTALLOY_GATE_TRIGGER_ENABLED` feature flag (shared `_gate_trigger_enabled()`)
+- Integration tests covering the full flow
+- CI fix: `ruff format --check .` → `ruff format .` (auto-format) to match pre-commit
+- Version bump: 8.8.14 → 8.9.0
+
+**#567 (`c4e1f7f`) — fix(gates): scope store queries to the active work item by default.** Closes #518, #501, #516, #514. What it carried:
+
+- Core #518 — `PredicateContext.resolve_active_slug(phase)` as the single resolution point; `_list_store_artifacts` scopes to active work item by default; `_query_store_contracts` gains `work_item` filter
+- #501 — `_resolve_workitem_slug_for` unifies slug resolution for `eval_approval_recorded` and `run_approve`; `PhaseAdvanceResponse.success` is a real bool; service-side `gate_verdict` replaces echo-on-2xx
+- #516 — approval gate no longer skipped on empty artifact set; empty rows + `--force` now block on Tier 2 approval checkpoint
+- #514 — `_resolve_workitem_slug_for` reads cursor from the store first, falling back to `.agentalloy/cursor`
+- Store/client surface: `list_contracts` gains `work_item` filter on DuckDBStateStore, StateClient, and GET /contracts
+- Tests: regression tests for prior-work-item artifact isolation, store cursor resolution, sole-contract fallback. Full suite: 5176 passed, 1 skipped.
+
+---
+
+## Track A — store, gates, knowledge
+
+**Order after the #588–#590 cycle:** A16 (#548) ← **START HERE**. In parallel (unchanged): A8 (#535) → A9 (#531). A13 (#515) is genuinely actionable but ranks behind #548 — its first action is a design question ("settle criterion identity") with no forcing function, and it unblocks nothing on the critical path.
+
+**Why #548 first.** It is a live correctness bug, not a latent one: phase state is keyed by `repo_slug`, which slugs by git *origin remote* and is deliberately path-independent, so **every git worktree of a repo shares one phase row** (confirmed on this repo — 5 distinct sessions, one row). It is also the only actionable item on the LangGraph critical path: #552 is blocked by #548/#550/#551, of which #550 has landed and #551 is blocked. And the groundwork is already in main — `317c0f5` landed the stream_id isolation prereqs and `c20775a` fixed the stream_id-scoped fixtures — so the split is a half-finished migration, the worst state to leave it in.
+
+**Graph hygiene, 2026-08-07.** Two dependency edges pointed at *closed* issues and were detached: #515 ← #514 and #538 ← #557. #515's `status:blocked` label was corrected to `status:ready` to match. Both now report actionable. This document says the graph wins because it cannot go stale silently — it had, so check it rather than trusting this line.
+
+### A1. ~~#557~~ — **CLOSED** by #561 (`9aaf63e` inside #561)
+Pack version bump guard now defaults to `merge-base(HEAD, origin/main)` and CI
+no longer feeds `base.sha`. Both sides ask the same question.
+
+### A2. ~~#541~~, ~~#520~~, ~~#556~~, ~~#525~~ — all CLOSED
+`#541` by #542, `#520` by #545, `#556` and `#525` by #555. The old front of the
+queue is empty; A12 was the live entry, now A13.
+
+### A3. ~~#512~~ — CLOSED, landed in `e98fa1a` (#546)
+`contract artifact-show` exists on `main`. Nothing to do.
+
+### A4. ~~#503~~ — **CLOSED** (already fixed)
+Both defects already fixed. Defect 1 (qa→ship write doesn't persist) no longer
+reproduces — the qa exit gate migrated from filesystem glob to store-backed
+`lessons_recorded` and the write path is solid. Defect 2 (CLI reports requested
+phase not stored) fixed at `phase.py:394` — `phase_actual = state.phase if
+state and state.phase else phase`. The `gate_verdict` response from the service
+also surfaces any write-side rejections (#501 fix). Likely fixed as collateral
+from #567.
+
+### A5. ~~#518~~ — **CLOSED** by #567
+`PredicateContext.resolve_active_slug(phase)` is the single resolution point;
+`_list_store_artifacts` scopes to active work item by default.
+
+### A6. ~~#501~~ — **CLOSED** by #567
+Slug-blind artifact gate + `--force` false-success resolved. Both `eval_approval_recorded` and `run_approve` now use the same slug resolver; `PhaseAdvanceResponse.success` is a real bool; service-side `gate_verdict` replaces echo-on-2xx.
+
+### A7. ~~#516~~ — **CLOSED** by #567
+Approval gate no longer skipped on empty artifacts. Empty rows + `--force` now block on the Tier 2 approval checkpoint.
+
+### A8. #535 — `phase set` never rewrites posture `ready`
+Fourth call site violating #530's invariant. Masked today because `phase set`
+posts to the service and the HTTP route rewrites on the way through — correct by
+accident of transport, not design.
+
+**First action:** prefer one seam that writes phase/flow state and posture
+together over a fourth independent call. Extend `TestPostureInvariantMatrix`.
+
+### A9. #531 — the absent-vs-unavailable convention `ready`
+All three instances have point fixes (#537, #533, #534). The convention does not
+exist: a shared `StateUnavailable`, the rule stated once, and an *unreachable*
+test alongside every *absent* test. That is what stops the fourth instance.
+
+### A10. ~~#525~~ — CLOSED by #555
+The lesson is now the store artifact `(phase=qa, name=solution)`. A follow-up on
+the `.md` naming and glob-based gate selection is recorded on **#514** (A12).
+
+### A11. ~~#513~~ — **CLOSED** by #561 (`f970dad`)
+`phase_start_ref` migrated to store, wired through HTTP API. The vacuous
+`artifact_exists{path:"src/**"}` gate is no longer the entry point — A12 was
+the next step, now A13.
+
+### A12. ~~#514~~ — **CLOSED** by #567
+Cursor reads from the store: `_resolve_workitem_slug_for` reads the work-item
+cursor from the store (handle.read("cursor")) first, falling back to the
+pre-migration `.agentalloy/cursor` file.
+
+### A13. #515 — traceability predicates `ready`
+Actionable, but ranks behind A16 (#548). Closed-#512 was detached earlier; a
+second stale edge (closed-#514) was detached 2026-08-07 and the `status:blocked`
+label corrected — the issue had been reporting blocked while this document
+claimed it was the front of the queue.
+**First action:** settle criterion identity — acceptance criteria need a stable
+join key and are currently free prose bullets. This is a design question with no
+forcing function, which is why it yields to #548.
+
+### A14. #527 — GOVERNS E only `deferred`
+A, B and C landed in #534; **D landed in #590** (`31b40af`) — `affected` now
+includes decision docs whose governed symbols appear in the code diff, so
+deferred rename loss is detected at the rename. **E** (decay) is all that
+remains and stays conditional on decay proving to matter. Nothing to start here.
+
+Worth knowing before touching this phase: `test_index_decisions_takes_no_network_handle`
+is an **exact-match** allow-list on `_index_decisions`' parameters, so adding one
+is necessarily a deliberate edit and a paid-LLM handle cannot arrive unnoticed.
+
+### A15. #517 — factory-mode gate policy `deferred`
+**Do not start.** Fail-closed today would wedge every interactive session during
+an embed-server outage. #536 is blocked on it.
+
+### A16. #548 — stream-scoped workflow state `ready`
+Phase state is keyed by the code-index repo slug (`api/state_router.py:100` →
+`code_index/slug.py`), which slugs by git origin and is deliberately
+path-independent — so every worktree of a repo shares one phase row. The fix
+splits the repo key from the stream key: `thread_id = (repo_slug, stream_id)`.
+Big-ticket and on the LangGraph critical path (#552 depends on it — see Track E).
+
+### A17. #564 — deterministic entity extraction for the knowledge graph `ready`
+Add a deterministic (regex + heuristics, zero LLM calls) entity extraction
+pipeline to the knowledge graph. Extracts file paths, command tokens, technical
+terms, constraints from raw text sources and writes `kind='Entity'` symbols +
+`RELATED_TO` edges into the same DuckDB tables. Closes the gap between
+SDD-artifact entities and everything mentioned in passing. Blocked #573 on this
+since the knowledge graph instructions would need rewriting after this lands.
+
+### A18. #573 — conditional Code Index and KG instructions `blocked` on A17
+Add conditional workflow instructions for code-index and knowledge graph checks
+across Planning, Build, and QA stages. Blocked on A17 (#564) since the knowledge
+graph would substantially change — adding raw-text entity extraction,
+`RELATED_TO` edges, and a new ingestion pipeline. If #564 lands, #573's KG
+instructions would need rewriting.
+
+---
+
+## Track D — session orientation and instruction compliance
+
+New track, opened 2026-08-02 after watching a model receive an unambiguous
+system-leg directive and reach for the write tool anyway. The write was refused by
+the Tier A gate, so nothing escaped — but prose alone did not produce compliance.
+
+**Established:** the affirming-language rewrite in `d2b27cd` (#490) was scoped to
+`build_banner` only — the status line riding in the *user* message leg — and its
+rationale was refusal-avoidance, not compliance. Pack prose on the system leg was
+never touched; 8 `MUST NOT` instances remain in `_packs/sdd/*.yaml`. The corpus is
+**not** stale: qwen quoted `sdd-intake.yaml:70` verbatim and disk says the same
+thing. There is nothing un-ingested. Do not spend another round on prose voice —
+the phrasing is not what failed.
+
+**Landed:** #574 (`bd3c5e7`) — orientation marker. Added a new once-per-session
+marker family that fires BEFORE SDD workflow instructions. It checks both mode
+(free-flow or workflow) and phase, presents three choices to the user, and burns
+after delivery. Trimmed sdd-intake.yaml of duplicate "Resume or new?" logic.
+
+### D1. #538 — wire `agentalloy resume` into the per-harness memory files `ready`
+Ceiling-raiser: it fires at session start, *before* the model commits to a plan —
+the one thing the per-turn banner structurally cannot do.
+
+Both halves already exist. `agentalloy resume` is a shipped verb ("Reconstruct a
+cold session: phase, work item, scope, artifacts, decisions"), and
+`install/code_index_wiring.py` already carries the harness-aware target table
+(`QWEN.md`, `GEMINI.md`, `AGENTS.md`, `.cursor/rules/*.mdc`, `.windsurf/rules/*`,
+`.github/copilot-instructions.md`) with sentinel-delimited blocks and an unwire
+sweep. The work is a second marked block plus a resume-or-new fork in the verb's
+output — `resume` currently emits a state dump with no fork.
+
+**Blockers cleared.** Both #520 (cycle-end sweep) and #557 (pack version bump
+guard) are closed. The graph still carried the closed-#557 edge until 2026-08-07,
+so this issue reported *blocked* while this document said `ready`; the edge is
+now detached and the two agree. #574 (orientation marker) also landed and
+addresses the cold-start orientation problem at a higher level — the memory-file
+instruction is now a *ceiling-raiser* on top of the orientation marker rather
+than the primary mechanism. Scope remains; revisit priority to see if #574's
+marker reduces the need.
+
+**Ceiling, stated honestly:** a memory-file instruction is strictly weaker than
+what already failed — static, loaded once, competing with everything else in
+context, no per-turn refresh. It will raise compliance. It will not make it
+reliable.
+
+### D2. #536 — `shell` is not in `GATED_TOOL_NAMES` `blocked` on #517 (deferred)
+Floor-raiser, and the only mechanism here with a demonstrated success record.
+`GATED_TOOL_NAMES` covers `write_file`/`edit`/`notebook_edit` but not `shell`;
+`DENY_PATTERNS` covers `Write`/`Edit` but not `Bash(...)`. **No bypass has been
+observed** — latent, and it stays latent only as long as a human is watching.
+Revisit with A11/#517. (Earlier tagged `ready` here — corrected; the issue is
+`status:blocked` on deferred #517, see A15.)
+
+### D3. #547 — free-flow silence, separate system message, instruction-telemetry `ready`
+The direct follow-on to this track's premise (a model ignored an unambiguous
+system-leg directive). Three independent problems: (1) free-flow mode still
+fires the per-turn banner pointing at a system prompt that was suppressed —
+free-flow must be silent; (2) workflow prose is appended to the harness's own
+system message instead of riding a separate trailing system leg, so
+AgentAlloy's constraints get diluted under the harness's primary authority;
+(3) no telemetry on whether instructions were actually delivered. The
+separate-system-message half is the load-bearing piece; the telemetry half
+overlaps Track B / #521.
+
+### D4. #549 — per-worktree harness wiring `ready`
+A session started in a git worktree reports as the main checkout: the `/proj`
+token (baked once per repo at wire time into `.agentalloy/claude-code-env.sh`,
+`api/proxy_context.py:57`) outranks `metadata.cwd`, and `proxy_models.py:48`
+types `metadata` as a generic dict with no cwd channel for Claude Code.
+Companion to A16/#548: #548 is the state-key side (shared phase row), #549 is
+the proxy attribution side. Independent fixes, same worktree-attribution root.
+
+---
+
+## Track B — observability and diagnostics, any time
+
+- **#521** — `llm_*` telemetry absent from the Anthropic passthrough and
+  Responses surfaces. Claude Code runs through the passthrough, so a dashboard
+  shows phase activity for all three surfaces but token/latency for one. #532
+  added per-repo client resolution to both, so the seam is fresh.
+- **#522** — no `/telemetry/phases` API route, so the CLI needs the service
+  stopped. (Part 1, the `repo` column, shipped in #524.)
+- **#529** — `doctor` warns when a harness is wired but the service has never
+  seen traffic from that repo. Detectable: `composition_traces` carries `repo`.
+- **#523** — `doctor` warns when `.pre-commit-config.yaml` exists but
+  `.git/hooks/pre-commit` does not. The hook is per-checkout and never cloned.
+
+#529 and #523 are the same shape and should probably share a
+"configured but not active" doctor section.
+
+- **#570** — docs discovery: searchable docs page + RAG chatbot + CLI shorthand.
+  Build a multi-stage docs discovery system: `aa` CLI shorthand, searchable HTML
+  docs page with auto-generated CLI help JSON, and a RAG chatbot widget. New API
+  endpoints (`/api/docs/chunks`, `/api/chat`), new frontend pages, and a
+  `docs/recipes/` directory.
+- **#572** — LLMs don't use the agentalloy CLI commands correctly `ready`.
+  LLMs produce incorrect agentalloy CLI invocations. Proposed mitigations:
+  machine-readable CLI help endpoint, agent-friendly CLI shim/wrapper,
+  copy-pasteable examples. **Partial overlap with #570** — #570's auto-generated
+  CLI help JSON delivers the core solution. After #570 lands, #572's remaining
+  scope is the agent-friendly shim. Consider prioritizing #570 first.
+
+## Track C — corpus prose
+
+- **#511** — intake instructions: `uv run` as the execution rule, plus explicit
+  `phase set` commands. Pack YAML only.
+
+---
+
+## Track E — LangGraph migration (the #553 cluster)
+
+Design home: `~/docs/agentalloy/specs/langgraph-integration-review.md`. The graph
+is **reactive, not driving** — no node calls a model; an inbound proxy request
+pumps it, gate predicates on conditional edges route. AgentAlloy never
+originates a model call; LangGraph is a durable state machine with declarative
+routing and per-node prose binding. The umbrella #553 stays `deferred` until the
+prerequisites prove out.
+
+### E0. #553 — LangGraph as the instruction methodology `deferred`
+The umbrella/index issue. Do not implement the full reactive graph until E1–E3
+land and the routing-latency / dependency-cost questions are answered.
+
+### E1. #550 — rename free-flow to workflow pause `ready`
+Independent of the graph — lands on the current phase machine, mechanism
+unchanged (a flag on the phase row). 13 source modules + 10 test files + docs.
+Persisted-state migration: existing `mode: free` rows read as an alias for
+`paused` or migrate once. First, and a #552 unblocker.
+
+### E2. #548 — stream-scoped workflow state `ready` (see A16)
+`thread_id = (repo_slug, stream_id)` so concurrent sessions stop sharing one
+phase row. #552 depends on it.
+
+### E3. #551 — the `flow` lane (brainstorming) `blocked`
+A real phase state, peer of sdd-full/sdd-fast/add-skill, with a fixed
+`flow → intake` edge. Blocked on `_packs/sdd/sdd-flow.yaml` prose authoring — an
+untracked workstream, so the block is not graph-enforceable.
+
+### E4. #552 — LangGraph graph core `blocked` on #548, #550, #551
+Replace `_PHASE_GRAPH` + `decide_transition` branching with a `StateGraph`;
+lanes become subgraphs off a conditional edge out of intake;
+`evaluate_phase_gate` becomes the edge predicate. **Missing graph dependencies
+added this revision** — #552's body said "blocked on #548, #550, #551" but the
+graph carried none.
+
+---
+
+## Track F — embed server ops (any time)
+
+- ~~**#559**~~ — **CLOSED** by #562 (`fix/embed-server-threads-ubatch`)
+  Added `--threads 4 --threads-embed 4` to all three embed llama-server config sites.
+- ~~**#560**~~ — **CLOSED** by #562 (`fix/embed-server-threads-ubatch`)
+  Bumped `--ubatch-size` from 2048 to 4096 in all three embed llama-server config sites.
+- ~~**#568**~~ — **CLOSED** by #571 (`749ae3d`)
+  Removed invalid `--threads-embed` flag from all llama-server config sites — the
+  binary does not accept this flag, causing nightly CI failures.
+
+---
+
+## Cross-cutting theme worth one convention
+
+Three issues are the same defect: **a best-effort fallback that is correct for an
+absent resource and destructive for an unreachable one**, failing silently in the
+harmful direction.
+
+| | Returns | On unreachable |
+|---|---|---|
+| `read_upstream` (#531) | `None` — **fixed in #537** | routed to the wrong upstream |
+| `read_flow_state` (#530) | `"workflow"` — **fixed in #533** | failed closed on write access |
+| `_collect_store_design_chunks` (#526) | `[]` — **guarded in #534** | deleted decision edges |
+
+All three now have point fixes. **The convention does not exist yet** — a shared
+`StateUnavailable`, the absent-vs-unavailable rule as a stated rule, and an
+*unreachable* test alongside every *absent* test. That is what stops the fourth
+instance being written, and it is the residual scope on #531. Same root as the
+merged lesson in `docs/solutions/add-telemetry.md`: a degraded path that returns
+the shape of success.
+
+A *related but distinct* family, do not conflate: derived state that fails to
+follow its source — #535 (posture does not follow `phase set`) and #520 (the
+cycle-end sweep does not archive store contracts). Different mechanism, different
+fix.
+
+---
+
+## Notes
+
+- `status:blocked` entries name their blocker here, not in the issue body.
+- A3's two verifications are one command each and should be run as A1's preflight.
+- File/line references were last verified at `0428e43`; `main` is now at
+  `2e90124` (#583 intake advisory + intake confirmation + predecessor self-check), so re-verify line numbers before relying on them.
+- **Graph reconciliation this revision:** detached closed-issue phantom blockers
+  (#520 from #518/#501/#538; #512 from #515), added #552's missing blockers
+  (#548/#550/#551), and removed #557 (CLOSED by #577) from #538's blockers. #518 relabeled `status:ready`.
+- **Filed since last revision:** #547, #548, #549, #550, #551, #552, #553, #559,
+  #560, #568 — triaged into Tracks D (D3/D4), A (A16), E, and F.
+  #564 (A — entity extraction), #565
+  (CLOSED as superseded by #569), #570 (B — docs discovery), #572 (B — CLI
+  usage), #573 (A — blocked on A17).
+- **#577** (Track A — pyright warnings + proxy session support, closes #563, replaces #576).
+
+Merged since last revision: #567 (Track A gates/store sweep, closes #518/#501/#516/#514), #562 (F-track embed server ops, closes #559/#560), #569 (gate feedback — AC completeness check, closes #518/#501/#516/#514), #571 (F-track embed server ops fix, closes #568), #574 (Track D orientation marker), #577 (Track A pyright warnings + proxy session support, closes #563), #583 (Track D intake investigation — gate advisory + intake confirmation + predecessor self-check, closes #581), #528 (lesson doc — add-telemetry).
+
+---
+
+## Prioritization: stability first, features after
+
+The open backlog has a lot of exciting feature work (entity extraction, docs
+discovery, LangGraph migration, flow lane). **Don't start feature work until
+these stability issues are cleared.** They are the things that will break
+feature work or make it unreliable to ship:
+
+### 🔴 Block all feature work (fix these first)
+
+1. **#544** — flaky pipx-smoke test ('FAIL [aider]: wire exit 1').
+   *Why first:* Flaky tests destroy confidence. If the test suite can't
+   distinguish green from green, you can't safely land any feature.
+
+### 🟡 Fix before shipping features (reduce hidden breakage)
+
+2. **#535** — `phase set` never rewrites enforcement posture.
+   *Why:* Fourth call site violating the posture invariant. Silent posture
+   corruption is a merge-blocker for any gate-related feature work.
+
+3. **#531** — absent-vs-unavailable convention.
+   *Why:* The pattern has already produced three point fixes and a fourth
+   independent defect. Without the shared convention, every feature that reads
+   external state risks the same silent-fail pattern.
+
+4. **#547** — free-flow silence, separate system message.
+   *Why:* This is a *bug*, not a feature. Free-flow mode is not actually
+   silent, and workflow prose is diluted under the harness's system message.
+   Affects every session.
+
+5. **#521** — `llm_*` telemetry missing on passthrough/Responses surfaces.
+   *Why:* You can't debug feature work in production without telemetry.
+   #532 already wired per-repo client resolution — the seam is fresh.
+
+### 🟢 Feature work (safe to start after 🔴 + 🟡)
+
+- **#564** — entity extraction (Track A17). Cool feature, but requires a
+  stable codebase to test against.
+- **#570** — docs discovery / RAG chatbot (Track B). Low risk, no core
+  system changes.
+- **#572** — CLI usage for LLMs. Partially overlapped by #570.
+- **#550** — rename free-flow → workflow pause. Independent of the graph,
+  but should wait until #547 is fixed (same code area).
+- **#548** — stream-scoped workflow state. LangGraph prerequisite, big
+  change, needs a stable base.
+- **#551/#552/#553** — LangGraph migration. The big one. Defer until the
+  foundation is solid.
+- **#538** — resume wiring. Now unblocked but a ceiling-raiser, not
+  foundation.
+- **#529/#523/#522/#511/#527** — doctor, telemetry, corpus. Nice-to-have
+  enhancements, not stability blockers.
+

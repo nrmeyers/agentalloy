@@ -1,8 +1,14 @@
 name: sdd
-version: 2.9.0
+version: 2.10.0
 tier: workflow
-description: |
-  Spec-Driven Development pipeline phase patterns — sdd-spec (scoping a fuzzy ask into a precise spec), sdd-design (technical approach and decisions), sdd-plan (task breakdown, test cases, build contracts), sdd-build (implementation with TDD), sdd-verify (test/lint/typecheck/review gate before delivery), and sdd-deliver (PR composition, changelogs, rollouts). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology skills per R1 tier-3 internal procedure.
+description: 'Spec-Driven Development pipeline phase patterns — sdd-spec (scoping
+  a fuzzy ask into a precise spec), sdd-design (technical approach and decisions),
+  sdd-plan (task breakdown, test cases, build contracts), sdd-build (implementation
+  with TDD), sdd-verify (test/lint/typecheck/review gate before delivery), and sdd-deliver
+  (PR composition, changelogs, rollouts). Precision-favored workflow tier; sourced
+  from agent-skills/ canonical methodology skills per R1 tier-3 internal procedure.
+
+  '
 author: agentalloy
 embed_model: nomic-embed-text-v1.5
 embedding_dim: 768
@@ -39,6 +45,9 @@ skills:
   fragment_count: 0
 - skill_id: sdd-add-skill
   file: sdd-add-skill.yaml
+  fragment_count: 0
+- skill_id: sdd-flow
+  file: sdd-flow.yaml
   fragment_count: 0
 - skill_id: sys-skill-authoring-rules
   file: sys-skill-authoring-rules.yaml

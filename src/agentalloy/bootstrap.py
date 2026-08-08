@@ -46,6 +46,7 @@ _VALID_PHASES = {
     "ship",
     "sdd-fast",
     "add-skill",
+    "sdd-flow",
 }
 _VALID_CATEGORIES = {"governance", "operational", "tooling", "safety", "quality", "observability"}
 

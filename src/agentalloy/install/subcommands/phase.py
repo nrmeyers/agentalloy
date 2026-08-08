@@ -40,6 +40,7 @@ VALID_PHASES = (
     "ship",
     "sdd-fast",
     "add-skill",
+    "sdd-flow",
 )
 
 SCHEMA_VERSION = 1
@@ -418,7 +419,7 @@ def add_parser(
     p_set.add_argument(
         "phase",
         choices=VALID_PHASES,
-        help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast, add-skill",
+        help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast, add-skill, sdd-flow",
     )
     p_set.add_argument(
         "--force",
