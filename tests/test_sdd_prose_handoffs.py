@@ -29,6 +29,7 @@ _FORWARD: dict[str, list[str]] = {
     "sdd-verify-and-review.yaml": ["phase set ship"],
     "sdd-fast.yaml": ["phase set qa"],  # fast merges into the standard qa → ship
     "sdd-deliver-and-ship.yaml": ["phase set intake"],  # the user-confirmed reset
+    "sdd-flow.yaml": ["phase set intake"],  # flow returns to intake when done
     # add-skill's forward route is `agentalloy approve add-skill` (approve
     # auto-advances back to intake) — no self phase-set; see the dedicated test.
     "sdd-add-skill.yaml": [],
@@ -46,6 +47,7 @@ _BACKWARD: dict[str, list[str]] = {
     "sdd-fast.yaml": ["phase set spec"],
     "sdd-deliver-and-ship.yaml": ["phase set build"],
     "sdd-add-skill.yaml": ["phase set intake"],  # bail: the ask was a code change
+    "sdd-flow.yaml": [],  # no backward routes — flow is a terminal exploration lane
 }
 
 

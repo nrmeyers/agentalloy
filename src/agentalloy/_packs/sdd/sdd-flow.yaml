@@ -1,0 +1,127 @@
+skill_id: sdd-flow
+canonical_name: SDD — Flow (sdd-flow)
+description: "A deliberately unguided lane for brainstorming, exploratory Q&A, and open-ended thinking. No build loop, no acceptance criteria, no exit barrier — just explore, then return to intake for whatever comes next."
+category: operational
+skill_class: workflow
+domain_tags:
+  - spec-driven-development
+  - flow
+  - brainstorming
+  - exploration
+requires: []
+always_apply: false
+applies_to_phases:
+  - sdd-flow
+# Load-bearing command token not derivable from exit_gates: the advance
+# back to intake. The flow lane has no exit gates (it is deliberately unguided),
+# so the only way to leave it is to advance — and the only destination is intake.
+# A customization may reword the prose but must keep this verbatim.
+prose_invariants:
+  - "agentalloy phase set intake"
+signal_keywords:
+  - enough exploring
+  - ready to scope
+  - back to intake
+  - what we should do
+  - next phase
+contract_template: |
+  ---
+  phase: sdd-flow
+  task_slug: {{task_slug}}
+  route: flow
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## Exploration notes
+
+  <what you learned, thought about, or surfaced during the flow>
+
+  ## Questions that remain
+
+  <what you still need to know>
+
+  ## Possible next steps
+
+  <ideas for how to proceed — not commitments, just options>
+exit_gates:
+  # The flow lane is exploratory — no acceptance criteria, no exit barrier.
+  # The only gate is that a contract exists (the agent creates one on entry
+  # to record what it's exploring). This is the minimal store-backed gate.
+  contract_exists:
+    phase: sdd-flow
+
+phase_scope: []
+category_scope: [process]
+author: agentalloy
+change_summary: flow lane — deliberately unguided exploration (brainstorming, exploratory Q&A) with a return edge to intake; no exit gates, no acceptance criteria, no build loop. The prose says "explore" without emptying into "do nothing."
+raw_prose: |
+  # SDD — Flow
+
+  **This lane is for thinking, not doing.** The flow lane is your space to explore,
+  question, brainstorm, and learn — without the pressure of producing something
+  specific. There are no acceptance criteria here, no exit gate, no deadline.
+
+  You do not need to design, plan, or code in this lane. You do not need to produce
+  a contract, a spec, or a deliverable of any kind.
+
+  ## What you can do
+
+  Think freely. Query the codebase. Trace data flows. Read documentation. Write
+  notes to yourself. Ask the user questions. Explore alternatives. Build mental
+  models. Take apart assumptions. Map dependencies. Sketch ideas — not code, just
+  ideas.
+
+  There is no wrong move in this lane. The only rule is: **don't mistake exploration
+  for production**. If you start building, you've left the lane.
+
+  ## How this lane works
+
+  1. **Start wherever you like.** You don't need a contract, checkpoint, or a
+     pre-written task. Just begin.
+  2. **Follow what interests you.** If you're tracing a feature's data flow, do that.
+     If you're reading tests to understand how something works, do that. If you're
+     sketching architecture in your notes, do that. There are no prescribed steps.
+  3. **Notice what you learn.** As you explore, pay attention to what becomes clear,
+     what gets murkier, and what questions keep coming up. These observations
+     matter — they shape what comes next.
+  4. **Return to intake.** When the exploration has run its course — when you've
+     learned enough to have a clearer sense of direction, or when you simply want
+     to pause — advance back to intake:
+
+         agentalloy phase set intake
+
+     Intake will help you decide whether the exploration points toward the full
+     SDD lane, the fast lane, or a fresh round of flow.
+
+  ## This is not
+
+  This lane is not a substitute for spec or design. If you find yourself defining
+  acceptance criteria, writing a design document, or planning tasks, you've left
+  the flow lane — go back.
+
+  This lane is not a code-writing lane. No `src/`, no `tests/`, no `agentalloy
+  contract artifact-set`. The output of flow is clarity, not code.
+
+  This lane is not a decision lane. You may surface options, compare approaches,
+  or build a case — but you don't need to commit to anything. Decisions happen in
+  spec and design. Flow is the space before commitment.
+
+  ## Why this lane exists
+
+  Some problems can't be solved by jumping straight into building. They need
+  exploration first — a period of open-ended inquiry where the goal is understanding,
+  not output. The flow lane makes that a first-class part of the lifecycle, instead
+  of an untracked afterthought that the graph can never tell you is overdue.
+
+  It is the lane you use when you're unsure what to do next, when the ask is fuzzy
+  and you need to think before you scope, when you're investigating a bug but don't
+  yet know what's broken, or when you simply want a space to think without the
+  pressure of delivering something specific.
