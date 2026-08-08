@@ -29,8 +29,7 @@ from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
-from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
-from agentalloy.signals.graph import route_from_decision
+from agentalloy.signals.gates import INTAKE_PHASE
 from agentalloy.signals.predicates import section_completeness, store_section_completeness
 from agentalloy.signals.prefilter import (
     PreFilterMatch,
@@ -1025,21 +1024,14 @@ async def evaluate_signal(
             # Leaving intake branches on the contract route: fast → sdd-fast, else
             # the linear intake → spec.
             route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
-            decision = decide_transition(
-                current_phase=phase,
-                gate_spec=exit_gates,
-                ctx=ctx,
-                lm_client=embed_client,
-                next_phase_hint=route_hint,
-            )
-            # Route the transition through the graph's routing surface (task 06):
-            # the graph adapter consumes the rich PhaseTransitionDecision and maps
-            # it onto a routing key; the phase write below is driven by that key.
-            # decide_transition stays the deterministic evaluation core — this is
-            # the single decision point, not a second one.
             lane = route_hint if route_hint else "sdd-full"
-            outcome = route_from_decision(decision, phase, lane)
-            to_phase = outcome.to_phase if outcome.should_transition else None
+            # Execute the graph to route the transition (task 07).
+            # The graph's ``route_step`` wraps ``evaluate_phase_gate`` —
+            # this is the single decision point, not a second one.
+            from agentalloy.signals.graph import route_step  # noqa: PLC0415
+
+            out = route_step(phase, lane, ctx.store)
+            to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
                 # test-plan.md into plan so the plan gate is satisfied on first
@@ -1059,21 +1051,6 @@ async def evaluate_signal(
                 try:
                     _write_phase_atomic(cwd, to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, to_phase)
-                    # Persist the graph checkpoint for the stream (task 05/06).
-                    try:
-                        from agentalloy.signals.graph import (
-                            make_thread_key,
-                            save_graph_state,
-                        )
-
-                        if ctx.store is not None:
-                            save_graph_state(
-                                ctx.store,
-                                make_thread_key(cwd),
-                                {"phase": to_phase, "lane": lane},
-                            )
-                    except Exception:
-                        logger.debug("graph-state persistence failed", exc_info=True)
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
                     # mode="workflow" is not a guess: this whole branch is only
                     # reached past the pause guard above (1b), which returns
@@ -1095,10 +1072,10 @@ async def evaluate_signal(
                 except OSError as e:
                     logger.warning("Failed to write phase file: %s", e)
 
-            advisories = list(decision.advisories)
-            gates_met = [g.gate_name for g in decision.gates_met]
-            gates_unmet = [g.gate_name for g in decision.gates_unmet]
-            qwen_calls = decision.qwen_calls
+            advisories = list(out.advisories)
+            gates_met = [g.gate_name for g in out.gates_met]
+            gates_unmet = [g.gate_name for g in out.gates_unmet]
+            qwen_calls = out.qwen_calls
 
         await asyncio.to_thread(_run_gates)
 
