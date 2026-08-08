@@ -13,6 +13,7 @@ decide routing. AgentAlloy never originates a model call.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
@@ -22,7 +23,11 @@ from langgraph.graph import END, START, StateGraph
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.signals.gates import _PHASE_GRAPH, evaluate_phase_gate
 from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase
-from agentalloy.storage.state_store import LEASED_KINDS, PhaseState
+from agentalloy.storage.state_store import (
+    LEASED_KINDS,
+    DuckDBStateStore,
+    PhaseState,
+)
 from agentalloy.storage.stream_id import resolve_stream_id
 
 # Session-scoped delivery bookkeeping that is explicitly NOT graph state
@@ -134,6 +139,41 @@ def to_phase_graph_state(phase_state: PhaseState | None) -> PhaseGraphState:
         paused=paused,
         paused_since=phase_state.paused_since if phase_state else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 05 — checkpoint persistence on the existing store
+# ---------------------------------------------------------------------------
+
+# The store kind that carries graph checkpoints, keyed by (repo, stream_id)
+# via a scoped view. Independent of the session-scoped delivery kinds.
+GRAPH_CHECKPOINT_KIND = "graph_checkpoint"
+
+
+def save_graph_state(store: DuckDBStateStore, key: ThreadKey, state: PhaseGraphState) -> None:
+    """Persist ``state`` for stream ``key`` on the existing store (approach.md §4).
+
+    Writes a ``graph_checkpoint`` row into a ``(repo, stream_id)``-scoped view,
+    so distinct streams never share a checkpoint row (#548) and the lease is
+    scoped per stream.
+    """
+    view = store.for_repo(key.repo_slug, stream_id=key.stream_id)
+    view.write(GRAPH_CHECKPOINT_KIND, json.dumps(dict(state)))
+
+
+def load_graph_state(store: DuckDBStateStore, key: ThreadKey) -> PhaseGraphState | None:
+    """Load the persisted graph state for stream ``key``, or ``None`` (fresh)."""
+    view = store.for_repo(key.repo_slug, stream_id=key.stream_id)
+    raw = view.read(GRAPH_CHECKPOINT_KIND)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return PhaseGraphState(**{k: data[k] for k in PhaseGraphState.__annotations__ if k in data})
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +289,9 @@ __all__ = [
     "PhaseGraphState",
     "ThreadKey",
     "RoutingOutcome",
+    "GRAPH_CHECKPOINT_KIND",
+    "save_graph_state",
+    "load_graph_state",
     "make_thread_key",
     "leased_graph_kinds",
     "initial_phase_graph_state",
