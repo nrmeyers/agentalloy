@@ -142,3 +142,29 @@ def test_graph_topology_inspectable(monkeypatch: pytest.MonkeyPatch) -> None:
     nodes = set(compiled.get_graph().nodes.keys())
     for phase in _PHASE_GRAPH:
         assert phase in nodes, f"node {phase} missing from topology"
+
+
+def test_route_from_decision_forwards() -> None:
+    from agentalloy.signals.graph import route_from_decision
+
+    class _D:
+        should_transition = True
+        to_phase = "design"
+        advisories = []
+
+    out = route_from_decision(_D(), "spec", "sdd-full")
+    assert out.should_transition is True
+    assert out.to_phase == "design"
+
+
+def test_route_from_decision_self_loops_when_blocked() -> None:
+    from agentalloy.signals.graph import route_from_decision
+
+    class _D:
+        should_transition = False
+        to_phase = "design"
+        advisories = ["not done"]
+
+    out = route_from_decision(_D(), "spec", "sdd-full")
+    assert out.should_transition is False
+    assert "not done" in out.advisories

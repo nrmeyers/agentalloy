@@ -245,6 +245,26 @@ def route_step(
     return RoutingOutcome(True, current_phase, to_phase, lane, [])
 
 
+def route_from_decision(
+    decision: Any, current_phase: str, lane: str = "sdd-full"
+) -> RoutingOutcome:
+    """Adapt an already-computed ``PhaseTransitionDecision`` to a routing key.
+
+    Task 06 ("adapt PhaseTransitionDecision to a routing key; no rewrite"). The
+    proxy's evaluation core is ``decide_transition`` (rich result — gates_met /
+    gates_unmet / qwen_calls / advisories); this maps that result onto the
+    graph's routing surface so the phase write is driven by one decision point
+    without re-running the gate or duplicating ``_PHASE_GRAPH`` branching.
+    """
+    if lane not in _LANES:
+        lane = "sdd-full"
+    if not decision.should_transition or not decision.to_phase:
+        return RoutingOutcome(
+            False, current_phase, decision.to_phase, lane, list(decision.advisories)
+        )
+    return RoutingOutcome(True, current_phase, decision.to_phase, lane, list(decision.advisories))
+
+
 def _node(phase: str):
     """A StateGraph node for ``phase``: resolve prose, yield unchanged state."""
 
@@ -298,6 +318,7 @@ __all__ = [
     "to_phase_graph_state",
     "phase_node",
     "route_step",
+    "route_from_decision",
     "build_phase_graph",
     "_LANES",
     "_LANE_ENTRY",
