@@ -200,6 +200,42 @@ def _stamp_phase_start_ref(store: DuckDBStateStore, project_root: Path | None) -
         pass
 
 
+def _persist_graph_phase(
+    store: DuckDBStateStore,
+    project_root: Path | None,
+    phase: str,
+    *,
+    mode: str | None = None,
+    lane: str | None = None,
+) -> None:
+    """Persist the authoritative graph checkpoint for *phase* (task 07).
+
+    The graph checkpoint (kind ``graph_checkpoint``, keyed repo_slug ×
+    stream_id) is the authoritative phase source; the ``phase`` row write the
+    router does alongside is the read-compat shim so every existing reader
+    keeps working. Soft — a persistence failure must not fail the phase
+    advance (mirrors the proxy's graph-state write).
+    """
+    try:
+        from agentalloy.signals.graph import (
+            make_thread_key,
+            save_graph_state,
+            to_phase_graph_state,
+        )
+
+        if project_root is None:
+            return
+        state = to_phase_graph_state(store.read_phase())
+        state["phase"] = phase
+        if lane is not None:
+            state["lane"] = lane
+        if mode is not None:
+            state["paused"] = mode == "paused"
+        save_graph_state(store, make_thread_key(project_root), state)
+    except Exception:  # noqa: BLE001 — soft, mirrors proxy graph write
+        logger.debug("graph-state persistence failed after phase write", exc_info=True)
+
+
 def _owed_artifacts(gates: dict[str, Any]) -> list[str]:
     """The distinct artifact paths a phase's exit gates require.
 
@@ -746,6 +782,13 @@ async def write_phase(
 
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
+        # Route the write through the graph (task 07): the graph checkpoint
+        # (kind ``graph_checkpoint``, keyed repo_slug × stream_id) is the
+        # authoritative phase source; the ``phase`` row write below is kept as
+        # the read-compat shim so every existing reader (``read_phase``,
+        # predicates, posture, cursor-clear) keeps working unchanged. The
+        # decision point is the gate verdict computed above — this is the single
+        # decision point, not a second one.
         result = await asyncio.to_thread(
             store.write_phase,
             phase_value,
@@ -760,6 +803,11 @@ async def write_phase(
                 status_code=409,
                 detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
             )
+        # Persist the authoritative graph checkpoint (task 07); the ``phase``
+        # row above remains the read-compat shim for existing readers.
+        await asyncio.to_thread(
+            _persist_graph_phase, store, project_root, phase_value, mode=req.mode
+        )
         # Posture rewrite after successful phase advance. Read the row back
         # off the same in-process store handle that just wrote it, rather
         # than re-deriving mode from ``req.mode`` (usually ``None`` — a phase
@@ -828,7 +876,12 @@ async def write_phase(
                 success_criteria=contract.success_criteria,
                 body=contract.body,
             )
-        # Transaction committed — posture rewrite + in-process compose
+        # Transaction committed — persist the authoritative graph checkpoint
+        # (task 07; the ``phase`` row remains the read-compat shim), then
+        # posture rewrite + in-process compose.
+        await asyncio.to_thread(
+            _persist_graph_phase, store, project_root, phase_value, mode=written_mode
+        )
         if repo_root is not None:
             await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value, written_mode)
         asyncio.create_task(_trigger_compose_in_process(store, contract_id, request))

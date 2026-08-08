@@ -208,6 +208,33 @@ class TestPostPhase:
         resp = state_client.post("/state/phase", json={"value": ""})
         assert resp.status_code == 422
 
+    def test_write_phase_persists_graph_checkpoint(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """T21 — HTTP write routes through the graph (authoritative checkpoint).
+
+        A phase advance over ``repo_root`` must persist the ``graph_checkpoint``
+        kind keyed (repo_slug, stream_id) — the graph is the source of truth, the
+        ``phase`` row the read-compat shim. This is the only seam that proves a
+        request actually routed through the graph rather than a bare row write.
+        """
+        from agentalloy.api.state_router import default_repo_root
+        from agentalloy.signals.graph import load_graph_state, make_thread_key
+
+        root = Path(str(default_repo_root()))
+        resp = state_client.post(
+            "/state/phase",
+            params={"repo_root": str(root)},
+            json={"value": "spec"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == "spec"
+
+        # Graph checkpoint is authoritative, keyed by (repo_slug, stream_id).
+        loaded = load_graph_state(state_store, make_thread_key(root))
+        assert loaded is not None
+        assert loaded["phase"] == "spec"
+
 
 class TestPostCursor:
     """POST /state/cursor."""

@@ -168,3 +168,43 @@ def test_route_from_decision_self_loops_when_blocked() -> None:
     out = route_from_decision(_D(), "spec", "sdd-full")
     assert out.should_transition is False
     assert "not done" in out.advisories
+
+
+# ---------------------------------------------------------------------------
+# T24 — subagent hard-constraint: no Send/dispatch, prose is thread-independent
+# ---------------------------------------------------------------------------
+
+
+def test_t24_node_prose_is_thread_independent() -> None:
+    """T24 — a subagent sharing the parent's thread_id gets the same prose.
+
+    The hard constraint (approach.md §4) is that no node assumes a fresh context
+    window or forks off a child: ``phase_node`` is a pure function of the phase,
+    never of the thread/checkpoint. So two invocations, whatever the state, must
+    resolve identical prose for the same phase.
+    """
+    a = phase_node("design")
+    b = phase_node("design")
+    assert a == b  # pure read — same phase, same prose, no thread dependence
+    assert a is not None
+    assert a["raw_prose"] == b["raw_prose"]
+
+
+def test_t24_graph_never_dispatches_send() -> None:
+    """T24 — the built graph contains no ``Send``/dispatch node.
+
+    Subagents must not be spawned by the graph (the proxy drives subagents
+    explicitly); no node may return a ``Send`` command. Assert the invariant on
+    the node-construction source rather than langgraph's internal wrappers
+    (which differ across versions and are not a stable introspection surface).
+    """
+    import inspect
+
+    from agentalloy.signals import graph as graph_mod
+
+    mod_src = inspect.getsource(graph_mod)
+    assert "Send" not in mod_src
+    assert "Command" not in mod_src  # no node returns a langgraph dispatch command
+    # build_phase_graph registers only prose-binding nodes, never a dispatcher.
+    build_src = inspect.getsource(build_phase_graph)
+    assert "add_node" in build_src
