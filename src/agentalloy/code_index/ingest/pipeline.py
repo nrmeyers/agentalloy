@@ -340,6 +340,7 @@ def _index_decisions(
     removed: list[str],
     chunks: list[MarkdownChunk],
     prune_decisions: bool = False,
+    code_changed_qns: set[str] | None = None,
 ) -> DecisionIndexResult:
     """Overlay ``GOVERNS`` edges from decision chunks to the code they govern.
 
@@ -358,6 +359,16 @@ def _index_decisions(
     protected instead by the derive-first/swap-second guard below (#527 A):
     zero derived edges for a doc that still has chunks (and had edges before)
     is reported suspicious and the prior edges are kept, never dropped.
+
+    ``code_changed_qns`` (#527 D) closes the deferred-loss mode: docs are also
+    re-derived when the *code* they govern changed, not only when their own
+    prose changed. Rename a governed symbol and leave the doc untouched, and
+    the pre-D pipeline re-derived nothing — the edge survived pointing at an
+    FQN that no longer exists, and the loss surfaced later, at whatever
+    unrelated prose edit happened to trigger re-derivation. Detection now
+    happens at the rename, where the context to fix it still exists. Pass None
+    on a full rebuild: every doc is already in ``changed`` there, and
+    ``changed_qns`` is the entire symbol table.
     """
     doc_has_chunks = {c.file_path for c in chunks}
     affected: set[str] = {c.file_path for c in changed if _is_decision_source(c.file_path)}
@@ -368,6 +379,13 @@ def _index_decisions(
         if doc not in doc_has_chunks and not prune_decisions:
             continue  # doc wholesale gone; escape hatch not engaged -> leave edges alone
         affected.add(doc)
+    if code_changed_qns:
+        for doc in graph.decision_docs_governing(sorted(code_changed_qns)):
+            # Only docs that still have chunks: one with none would derive zero
+            # edges, trip the #527 A suspicious guard, and raise a false alarm
+            # on every unrelated code change.
+            if _is_decision_source(doc) and doc in doc_has_chunks:
+                affected.add(doc)
     if not affected:
         return DecisionIndexResult()
 
@@ -679,6 +697,9 @@ async def run_index_job(
                 removed=md.removed,
                 chunks=md.chunks,
                 prune_decisions=prune_decisions,
+                # None on a full rebuild: `changed_qns` is then the whole symbol
+                # table, and every decision doc is already in `md.changed`.
+                code_changed_qns=None if full_rebuild else (changed_qns | removed_code),
             )
             jobs.update_governs_result(
                 job_id,

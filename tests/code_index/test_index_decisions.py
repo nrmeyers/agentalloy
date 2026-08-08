@@ -276,3 +276,164 @@ def test_wholesale_removed_doc_dropped_with_prune_flag(store: DuckDBCodeGraphSto
     assert result.written == 0
     assert result.dropped == 1
     assert store.governing_decisions("pkg.foo") == []  # actually removed
+
+
+# -- #527 D: re-derive on symbol change, not only doc change --------------------
+
+
+def test_rename_of_governed_symbol_re_derives_untouched_doc(
+    store: DuckDBCodeGraphStore,
+) -> None:
+    """The deferred-loss mode (#527 failure mode 2), detected at the rename.
+
+    A governed symbol is renamed and the decision doc is NOT edited. Pre-D,
+    `affected` was doc-only, so nothing re-derived at all: no drop, no report,
+    a dead edge left in the graph, and the loss deferred to whatever unrelated
+    prose edit next touched the doc.
+
+    Post-D the doc re-derives here. Its only span no longer resolves, so #527
+    A's guard correctly keeps the stale edge rather than silently dropping it —
+    and reports the doc suspicious, at the rename, where the context to fix it
+    exists. Detection, not deletion, is the win.
+    """
+    store.upsert_symbols([sym("pkg.old_name", name="old_name")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "We chose `pkg.old_name`.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+    assert {d.qualified_name for d in store.governing_decisions("pkg.old_name")} == {f"{doc}::a"}
+
+    # The rename: old symbol gone, new one in its place. The doc is untouched,
+    # so it appears in neither `changed` nor `removed`.
+    store.delete_for_files(["pkg/x.py"])
+    store.upsert_symbols([sym("pkg.new_name", name="new_name")])
+
+    # Pre-D control: with no code delta the doc is not reached at all.
+    assert _index_decisions(store, changed=[], removed=[], chunks=[c]).suspicious_docs == []
+
+    result = _index_decisions(
+        store,
+        changed=[],
+        removed=[],
+        chunks=[c],
+        code_changed_qns={"pkg.old_name", "pkg.new_name"},
+    )
+    assert result.suspicious_docs == [doc]
+
+
+def test_rename_drops_only_the_stale_edge_when_others_resolve(
+    store: DuckDBCodeGraphStore,
+) -> None:
+    """Partial loss: the case #527 A's zero-edge guard cannot see.
+
+    One of two governed symbols is renamed away. Re-derivation yields a
+    non-empty edge set, so the suspicious guard does not fire — the stale edge
+    is dropped and counted. Pre-D that drop happened at an unrelated later
+    prose edit, far from its cause; now it happens at the rename.
+    """
+    store.upsert_symbols([sym("pkg.kept"), sym("pkg.renamed")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "We chose `pkg.kept` over `pkg.renamed`.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+    assert {d.qualified_name for d in store.governing_decisions("pkg.renamed")} == {f"{doc}::a"}
+
+    store.delete_for_files(["pkg/x.py"])
+    store.upsert_symbols([sym("pkg.kept")])  # `pkg.renamed` is gone
+
+    result = _index_decisions(
+        store, changed=[], removed=[], chunks=[c], code_changed_qns={"pkg.renamed"}
+    )
+    assert result.suspicious_docs == []  # non-empty derivation: guard silent
+    assert result.dropped == 1
+    assert store.governing_decisions("pkg.renamed") == []  # stale edge gone
+    assert {d.qualified_name for d in store.governing_decisions("pkg.kept")} == {f"{doc}::a"}
+
+
+def test_rename_relinks_when_the_span_still_resolves(store: DuckDBCodeGraphStore) -> None:
+    """A tier-2 short-name span follows a move instead of being lost.
+
+    The span text is unchanged prose; only the symbol's module moved. Tier 2
+    resolves it again at the new FQN, so the edge is re-pointed rather than
+    dropped — the outcome D exists to make possible. (`_handler` carries a
+    leading underscore because tier 2 only resolves code-SHAPED spans; a plain
+    word like `handler` is deliberately ignored.)
+    """
+    store.upsert_symbols([sym("pkg.a._handler", name="_handler")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "The `_handler` owns this.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+    assert {d.qualified_name for d in store.governing_decisions("pkg.a._handler")} == {f"{doc}::a"}
+
+    # Same short name, moved to another module — the span still resolves.
+    store.delete_for_files(["pkg/x.py"])
+    store.upsert_symbols([sym("pkg.b._handler", name="_handler")])
+    _index_decisions(
+        store,
+        changed=[],
+        removed=[],
+        chunks=[c],
+        code_changed_qns={"pkg.a._handler", "pkg.b._handler"},
+    )
+
+    assert store.governing_decisions("pkg.a._handler") == []
+    assert {d.qualified_name for d in store.governing_decisions("pkg.b._handler")} == {f"{doc}::a"}
+
+
+def test_unrelated_code_change_does_not_touch_decision_docs(
+    store: DuckDBCodeGraphStore,
+) -> None:
+    """Only docs that actually govern the changed symbols are re-derived."""
+    store.upsert_symbols([sym("pkg.foo"), sym("pkg.unrelated")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "We chose `pkg.foo`.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+
+    result = _index_decisions(
+        store, changed=[], removed=[], chunks=[c], code_changed_qns={"pkg.unrelated"}
+    )
+    assert result.written == 0
+    assert result.dropped == 0
+    assert result.suspicious_docs == []
+    assert {d.qualified_name for d in store.governing_decisions("pkg.foo")} == {f"{doc}::a"}
+
+
+def test_symbol_affected_doc_with_no_chunks_is_not_re_derived(
+    store: DuckDBCodeGraphStore,
+) -> None:
+    """A doc with no current chunks must not be dragged in by a code change.
+
+    It would derive zero edges, trip the #527 A suspicious guard, and raise a
+    false alarm on every unrelated code change — degrading B's signal quality.
+    """
+    store.upsert_symbols([sym("pkg.foo")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "We chose `pkg.foo`.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+
+    result = _index_decisions(
+        store, changed=[], removed=[], chunks=[], code_changed_qns={"pkg.foo"}
+    )
+    assert result.suspicious_docs == []
+    assert result.dropped == 0
+    assert {d.qualified_name for d in store.governing_decisions("pkg.foo")} == {f"{doc}::a"}
+
+
+def test_decision_docs_governing_finds_renamed_away_fqn(store: DuckDBCodeGraphStore) -> None:
+    """The store query must not join through `symbols`.
+
+    `decisions_for_files` and `governing_decisions` both join `symbols` on the
+    edge's dst, so a renamed-away FQN is invisible to them — precisely the row
+    D needs. This pins the no-join contract.
+    """
+    store.upsert_symbols([sym("pkg.gone")])
+    doc = "docs/design/x/approach.md"
+    c = chunk(f"{doc}::a", "We chose `pkg.gone`.")
+    _index_decisions(store, changed=[c], removed=[], chunks=[c])
+
+    store.delete_for_files(["pkg/x.py"])  # symbol row deleted; GOVERNS edge kept
+    assert store.symbol("pkg.gone") is None
+    assert store.decisions_for_files(["pkg/x.py"]) == []  # join-based: blind to it
+    assert store.decision_docs_governing(["pkg.gone"]) == [doc]
+
+
+def test_decision_docs_governing_empty_input(store: DuckDBCodeGraphStore) -> None:
+    assert store.decision_docs_governing([]) == []

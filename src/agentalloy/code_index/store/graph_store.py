@@ -465,6 +465,35 @@ class DuckDBCodeGraphStore:
             for r in rows
         ]
 
+    def decision_docs_governing(self, fqns: Sequence[str]) -> list[str]:
+        """Decision doc paths with a ``GOVERNS`` edge pointing at any of ``fqns``.
+
+        Reads ``edges`` alone — deliberately NO join to ``symbols`` (#527 D).
+        The case this exists to catch is a symbol that was renamed away: its old
+        FQN is gone from ``symbols``, so :meth:`decisions_for_files` and
+        :meth:`governing_decisions` (both of which join through ``symbols``)
+        cannot see it, while the stale edge still records the old ``dst``.
+        Joining here would silently exclude exactly the rows that matter.
+
+        ``edges.file_path`` is the decision doc (see ``_index_decisions``), so
+        this returns doc paths ready to union into that function's ``affected``.
+        """
+        qns = list(fqns)
+        if not qns:
+            return []
+        placeholders = ", ".join("?" for _ in qns)
+        rows = self.conn.execute(
+            f"""
+            SELECT DISTINCT file_path
+            FROM edges
+            WHERE kind = 'GOVERNS' AND dst IN ({placeholders})
+              AND file_path IS NOT NULL
+            ORDER BY file_path
+            """,
+            qns,
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
     def delete_govern_edges_for_doc(self, doc_path: str) -> int:
         """Drop every ``GOVERNS`` edge rooted at ``doc_path`` (edges carry
         ``file_path`` = the decision doc). Doc-granular, so re-derivation matches
