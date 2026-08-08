@@ -36,6 +36,13 @@ dependencies = [
     "defusedxml>=0.7.1",
     # docstring_format.py structured-docstring extraction.
     "docstring-parser>=0.16",
+    # LangGraph reactive phase graph (#552/#553). LangGraph is the *topology &
+    # routing* engine (StateGraph + conditional edges + checkpointer), not an
+    # execution engine — AgentAlloy never originates a model call. It pulls
+    # langchain-core + langgraph-checkpoint. It is a core (request-path)
+    # dependency; the rerank optional-extra precedent does NOT apply here
+    # (see docs/design/langgraph-graph-core/approach.md §6).
+    "langgraph>=1.2",
 ]
 
 [project.optional-dependencies]
