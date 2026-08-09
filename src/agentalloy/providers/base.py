@@ -228,7 +228,17 @@ def sdd_instructions_markdown(port: int) -> str:
         "  -H 'Content-Type: application/json' \\\n"
         '  -d \'{"task": "<task>", "phase": "<phase>"}\'\n'
         "```\n\n"
-        "Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (`sdd-fast` = the fast lane).\n"
+        "Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (`sdd-fast` = the fast lane).\n\n"
+        "## code-index and knowledge-graph (conditional)\n\n"
+        "When the local code-index service is running, a\n"
+        "`<!-- BEGIN agentalloy code-index -->` block is injected into your\n"
+        "harness config files.  It tells you to prefer the service for intent-\n"
+        "based code search, call-graph tracing, and budgeted context assembly\n"
+        "over grepping or reading files one at a time.\n\n"
+        "The knowledge-graph CLI (`agentalloy knowledge why <fqn>` and\n"
+        '`agentalloy knowledge related "<query>"`) rides on top of the code-\n'
+        "index graph to surface design decisions behind symbols.  It is only\n"
+        "useful when the code-index service is running.\n"
     )
 
 

@@ -272,15 +272,15 @@ def _bundled_active_skill() -> ActiveSkill:
     )
 
 
-@pytest.mark.parametrize("phase", ["design", "build", "qa"])
+@pytest.mark.parametrize("phase", ["spec", "design", "build", "qa"])
 def test_bundled_skill_applies_in_scoped_phases(phase: str) -> None:
     skill = _bundled_active_skill()
     assert filter_applicable_system_skills([skill], phase=phase, category=None) == [skill]
 
 
-@pytest.mark.parametrize("phase", ["intake", "spec", "ship", None])
+@pytest.mark.parametrize("phase", ["intake", "ship", None])
 def test_bundled_skill_absent_outside_scope(phase: str | None) -> None:
-    # Even an indexed repo never sees the prose at intake/spec/ship — the
+    # Even an indexed repo never sees the prose at intake/ship — the
     # applicability predicate excludes it before the availability gate runs.
     skill = _bundled_active_skill()
     assert filter_applicable_system_skills([skill], phase=phase, category=None) == []

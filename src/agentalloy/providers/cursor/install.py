@@ -7,6 +7,7 @@ Writes .cursor/rules/agentalloy.mdc (modern, dedicated file) or
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 from agentalloy.install.sentinel_utils import replace_marked_block
@@ -80,7 +81,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     if dedicated:
         # Dedicated file — we own it entirely
         target_path.write_text(instruction_content, encoding="utf-8")
-        return [
+        records = [
             WireRecord(
                 path=str(target_path),
                 action="wrote_new_file",
@@ -94,7 +95,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         existing = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         result_content = _inject_sentinel_block(existing, instruction_content)
         target_path.write_text(result_content, encoding="utf-8")
-        return [
+        records = [
             WireRecord(
                 path=str(target_path),
                 action="injected_block",
@@ -103,3 +104,13 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
                 marker_key="cursor.rules.sentinel",
             ),
         ]
+
+    # Wire the code-index block (runtime-gated: only when service is enabled).
+    try:
+        from agentalloy.install.code_index_wiring import maybe_wire
+
+        maybe_wire(root, port, harness="cursor")
+    except (OSError, ValueError) as exc:  # noqa: BLE001
+        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
+
+    return records
