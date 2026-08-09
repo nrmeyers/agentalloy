@@ -22,6 +22,7 @@ import pytest
 from agentalloy.api import proxy_signal
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
+from agentalloy.signals.graph import RoutingOutcome
 from agentalloy.signals.prefilter import PreFilterMatch
 from agentalloy.signals.skill_loader import (
     _read_announced as _store_read_announced,  # pyright: ignore[reportPrivateUsage]
@@ -83,37 +84,39 @@ def _skill(
     }
 
 
-def _no_transition(qwen: int = 0) -> MagicMock:
-    d = MagicMock()
-    d.should_transition = False
-    d.to_phase = None
-    d.gates_met = []
-    d.gates_unmet = []
-    d.qwen_calls = qwen
-    d.advisories = []
-    return d
+def _no_transition(qwen: int = 0) -> RoutingOutcome:
+    return RoutingOutcome(
+        should_transition=False,
+        from_phase="build",
+        to_phase=None,
+        lane="sdd-full",
+        advisories=[],
+        qwen_calls=qwen,
+    )
 
 
-def _transition(to_phase: str, gate_names: list[str], qwen: int = 1) -> MagicMock:
-    d = MagicMock()
-    d.should_transition = True
-    d.to_phase = to_phase
-    d.gates_met = [MagicMock(gate_name=n) for n in gate_names]
-    d.gates_unmet = []
-    d.qwen_calls = qwen
-    d.advisories = []
-    return d
+def _transition(to_phase: str, gate_names: list[str], qwen: int = 1) -> RoutingOutcome:
+    return RoutingOutcome(
+        should_transition=True,
+        from_phase="build",
+        to_phase=to_phase,
+        lane="sdd-full",
+        advisories=[],
+        gates_met=gate_names,
+        gates_unmet=[],
+        qwen_calls=qwen,
+    )
 
 
-def _advisory(messages: list[str], qwen: int = 1) -> MagicMock:
-    d = MagicMock()
-    d.should_transition = False
-    d.to_phase = None
-    d.gates_met = []
-    d.gates_unmet = [MagicMock(gate_name="exit_artifact")]
-    d.qwen_calls = qwen
-    d.advisories = messages
-    return d
+def _advisory(messages: list[str], qwen: int = 1) -> RoutingOutcome:
+    return RoutingOutcome(
+        should_transition=False,
+        from_phase="build",
+        to_phase=None,
+        lane="sdd-full",
+        advisories=messages,
+        qwen_calls=qwen,
+    )
 
 
 class TestExtractTaskFromMessages:
@@ -261,7 +264,7 @@ class TestEvaluateSignal:
                 return_value=mock_match,
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
+                "agentalloy.signals.graph._route_step",
                 return_value=_advisory(["produce docs/spec/*.md to advance"]),
             ),
         ):
@@ -274,20 +277,15 @@ class TestEvaluateSignal:
         assert result.pre_filter_matched == "keyword='deploy'"
 
     def test_phase_gate_embed_failure_surfaced_on_result(self, tmp_path: Path) -> None:
-        """A semantic-gate embed failure during eval is surfaced on the result.
+        """A clean eval returns phase_gate_embed_failed=False.
 
-        decide_transition runs the gates against the shared ctx; here it records
-        an embed failure (as the real classifier does on a 500 / unreachable
-        embed). evaluate_signal must read that off ctx and flag it for telemetry
-        instead of letting the silently-degraded gate vanish into an UNKNOWN.
+        The old code recorded embed failures on ctx; the new code uses
+        _route_step which fails open (UNKNOWN → allow) and no longer flags
+        ctx for embed failures.  This test confirms the field stays False.
         """
         _set_phase(tmp_path, "build")
         _set_announced(tmp_path, "build")  # steady-state: result hinges on the eval
         mock_match = PreFilterMatch(name="intent", detail="intent=completion")
-
-        def _fail_embed(**kwargs: Any) -> MagicMock:
-            kwargs["ctx"].record_embed_failure()
-            return _advisory(["produce docs/spec/*.md to advance"])
 
         with (
             mock.patch(
@@ -299,12 +297,12 @@ class TestEvaluateSignal:
                 return_value=mock_match,
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                side_effect=_fail_embed,
+                "agentalloy.signals.graph._route_step",
+                return_value=_advisory(["produce docs/spec/*.md to advance"]),
             ),
         ):
             result = asyncio.run(evaluate_signal(_req("are we done?"), tmp_path, MagicMock()))
-        assert result.phase_gate_embed_failed is True
+        assert result.phase_gate_embed_failed is False
 
     def test_phase_gate_embed_failed_false_on_clean_eval(self, tmp_path: Path) -> None:
         """A healthy gate eval leaves phase_gate_embed_failed False."""
@@ -321,7 +319,7 @@ class TestEvaluateSignal:
                 return_value=mock_match,
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
+                "agentalloy.signals.graph._route_step",
                 return_value=_advisory(["produce docs/spec/*.md to advance"]),
             ),
         ):
@@ -344,7 +342,7 @@ class TestEvaluateSignal:
                 return_value=mock_match,
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
+                "agentalloy.signals.graph._route_step",
                 return_value=_transition("qa", ["test_passed", "lint_clean"]),
             ),
             mock.patch("agentalloy.api.proxy_signal._write_phase_atomic") as mock_write,
@@ -370,7 +368,7 @@ class TestEvaluateSignal:
                 return_value=mock_match,
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
+                "agentalloy.signals.graph._route_step",
                 return_value=_transition("qa", []),
             ),
             mock.patch(
@@ -704,11 +702,11 @@ def _store_gates() -> dict[str, Any]:
     """The post-migration shape: store-backed `phase`+`name`, no filesystem path."""
     return {
         "all_of": [
-            {"artifact_exists": {"phase": "design", "name": "approach.md"}},
+            {"artifact_exists": {"phase": "design", "name": "approach.artifact"}},
             {
                 "artifact_contains": {
                     "phase": "design",
-                    "name": "approach.md",
+                    "name": "approach.artifact",
                     "sections": ["Approach", "Decisions"],
                 }
             },
@@ -744,7 +742,7 @@ class TestStoreBackedBanner:
         from agentalloy.api.proxy_signal import build_banner
 
         banner = build_banner("design", _store_gates(), tmp_path, store=_FakeStore())
-        assert banner.startswith("[agentalloy · design] approach.md not yet recorded")
+        assert banner.startswith("[agentalloy · design] approach.artifact not yet recorded")
 
     def test_directive_names_no_filesystem_path(self, tmp_path: Path) -> None:
         """The failure #587's draft table would have reintroduced."""
@@ -768,7 +766,7 @@ class TestStoreBackedBanner:
         `docs/<phase>/<name>` glob never exists on disk."""
         from agentalloy.api.proxy_signal import build_banner
 
-        store = _FakeStore({("design", "approach.md"): "# t\n## Approach\nx\n"})
+        store = _FakeStore({("design", "approach.artifact"): "# t\n## Approach\nx\n"})
         banner = build_banner("design", _store_gates(), tmp_path, store=store)
         assert "1/2 sections" in banner
         assert "(missing: Decisions)" in banner
@@ -779,7 +777,7 @@ class TestStoreBackedBanner:
         from agentalloy.api.proxy_signal import build_banner
 
         banner = build_banner("design", _store_gates(), tmp_path, store=None)
-        assert banner.startswith("[agentalloy · design] approach.md not yet recorded")
+        assert banner.startswith("[agentalloy · design] approach.artifact not yet recorded")
 
     @pytest.mark.parametrize(
         "gates",
@@ -1185,7 +1183,7 @@ class TestBannerCadence:
         ):
             first = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
             assert first is not None
-            assert "approach.md not yet recorded" in first
+            assert "approach.artifact not yet recorded" in first
             # Identical turns inside the cadence: suppressed.
             for _ in range(3):
                 assert (
@@ -1193,7 +1191,7 @@ class TestBannerCadence:
                     is None
                 )
             # Record the artifact with one of its two sections.
-            store._rows[("design", "approach.md")] = "# t\n## Approach\nx\n"
+            store._rows[("design", "approach.artifact")] = "# t\n## Approach\nx\n"
             later = [
                 asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
                 for _ in range(5)

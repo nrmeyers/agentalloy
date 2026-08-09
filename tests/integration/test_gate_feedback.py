@@ -91,7 +91,7 @@ class TestGateFeedbackDeletedWhenAllMet:
                 store.set_artifact(
                     "spec",
                     "test-integration",
-                    "spec.md",
+                    "spec.artifact",
                     "## AC-1: login works\n## AC-2: logout works",
                 )
 
@@ -205,7 +205,7 @@ class TestLegacyACsIgnored:
                 store.set_artifact(
                     "spec",
                     "test-integration",
-                    "spec.md",
+                    "spec.artifact",
                     "Tests pass\nLogin works",
                 )
 
@@ -240,7 +240,7 @@ class TestLegacyACsIgnored:
                 store.set_artifact(
                     "spec",
                     "test-integration",
-                    "spec.md",
+                    "spec.artifact",
                     "Tests pass",
                 )
 

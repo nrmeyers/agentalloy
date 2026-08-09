@@ -196,17 +196,17 @@ class TestScaffoldPhaseDocs:
         assert not (tmp_path / "docs" / "design").exists()
 
     def test_qa_scaffolds_slug_named_doc_with_headings(self, tmp_path: Path) -> None:
-        # Regression for B4: the qa gate glob `docs/qa/*.md` (bare `*`) previously
-        # concretized to None and scaffolded nothing. It must seed docs/qa/<slug>.md.
-        # qa is unmigrated (still disk-glob-based) — unaffected by the artifact-store
-        # migration, so this scaffolding path still applies here.
+        # Regression for B4: the qa gate glob `docs/qa/*.artifact` (bare `*`) previously
+        # concretized to None and scaffolded nothing. It must seed docs/qa/<slug>.artifact.
+        # qa is now store-backed (migrated from *.md to *.artifact), so scaffolding
+        # produces a .artifact file with the expected headings.
         created = _scaffold_phase_docs("qa", "big-calendar-ui", tmp_path)
-        doc = tmp_path / "docs" / "qa" / "big-calendar-ui.md"
+        doc = tmp_path / "docs" / "qa" / "big-calendar-ui.artifact"
         assert doc.exists()
         text = doc.read_text()
         assert "## Checks" in text
         assert "## Review" in text
-        assert created == ["docs/qa/big-calendar-ui.md"]
+        assert created == ["docs/qa/big-calendar-ui.artifact"]
 
     def test_spec_scaffolds_nothing_post_migration(self, tmp_path: Path) -> None:
         # Same reasoning as design above — spec's exit gate is store-backed now.

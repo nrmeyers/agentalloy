@@ -47,20 +47,20 @@ class TestNormalizeGatePath:
 
 class TestDeriveInvariants:
     def test_real_sdd_skill_derives_path_tokens(self) -> None:
-        # Post-split: design produces approach.md; plan produces tasks.md,
-        # test-plan.md and build contracts via the store API.
+        # Post-split: design produces approach.artifact; plan produces tasks.artifact,
+        # test-plan.artifact and build contracts via the store API.
         design = (
             Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-design-and-architecture.yaml"
         )
         data: dict[str, Any] = yaml.safe_load(design.read_text(encoding="utf-8"))
         inv = derive_invariants(data)
-        assert "approach.md" in inv
+        assert "approach.artifact" in inv
 
         plan = Path(agentalloy.__file__).parent / "_packs" / "sdd" / "sdd-plan-and-contracts.yaml"
         data: dict[str, Any] = yaml.safe_load(plan.read_text(encoding="utf-8"))
         inv = derive_invariants(data)
-        assert "tasks.md" in inv
-        assert "test-plan.md" in inv
+        assert "tasks.artifact" in inv
+        assert "test-plan.artifact" in inv
         assert "agentalloy phase set build" in inv
         assert "agentalloy task next" in inv
 

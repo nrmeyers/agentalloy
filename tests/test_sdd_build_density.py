@@ -92,4 +92,4 @@ def test_plan_approval_node_keys_on_plan_docs() -> None:
     appr = next(
         n["approval_recorded"] for n in all_of if isinstance(n, dict) and "approval_recorded" in n
     )
-    assert appr["since_name_glob"] == "*.md"
+    assert appr["since_name_glob"] == "*.artifact"

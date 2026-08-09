@@ -256,7 +256,7 @@ def _write_spec_doc(repo_root: Path) -> None:
 
     handle = phase_access(repo_root).contracts_handle()
     handle.set_artifact(
-        "spec", "x", "spec.md", "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+        "spec", "x", "spec.artifact", "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
     )
 
 
@@ -264,7 +264,7 @@ def _approve(repo_root: Path, phase: str, since_glob: str) -> None:
     """Record a fresh approval for `phase`, matching its current artifact digest.
 
     `since_glob` is retained as a param for call-site parity with the pre-migration
-    signature; store-backed phases (spec/design) ignore it and digest all `*.md`
+    signature; store-backed phases (spec/design) ignore it and digest all `*.artifact`
     artifacts instead.
     """
     from agentalloy.install.subcommands._state import phase_access
@@ -273,7 +273,7 @@ def _approve(repo_root: Path, phase: str, since_glob: str) -> None:
     )
 
     handle = phase_access(repo_root).contracts_handle()
-    rows = handle.list_artifacts(phase, name_glob="*.md")
+    rows = handle.list_artifacts(phase, name_glob="*.artifact")
     handle.set_approval(phase, _artifact_digest(rows))
 
 
@@ -416,7 +416,7 @@ class TestApprovalGate:
 
         run_phase_set("spec", root=repo_root)
         handle = phase_access(repo_root).contracts_handle()
-        handle.set_artifact("spec", "x", "spec.md", "# spec only, no required sections\n")
+        handle.set_artifact("spec", "x", "spec.artifact", "# spec only, no required sections\n")
         _approve(repo_root, "spec", "docs/spec/*.md")
         result = run_phase_set("design", root=repo_root, force=True)
         assert result["blocked"] is False
@@ -585,20 +585,20 @@ class TestIssue503OverrideForwarding:
 
 
 def _write_design_tasks(repo_root: Path, slug: str = "01-auth") -> None:
-    """Record design artifacts (tasks.md, test-plan.md) the way a pre-split repo would."""
+    """Record design artifacts (tasks.artifact, test-plan.artifact) the way a pre-split repo would."""
     from agentalloy.install.subcommands._state import phase_access
 
     handle = phase_access(repo_root).contracts_handle()
     handle.set_artifact(
         "design",
         slug,
-        "tasks.md",
+        "tasks.artifact",
         "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
     )
     handle.set_artifact(
         "design",
         slug,
-        "test-plan.md",
+        "test-plan.artifact",
         "# Test Cases\n\n- When user logs in, return auth token\n",
     )
 
@@ -607,7 +607,7 @@ def _approve_design_matching_gate(handle: object) -> None:
     """Record a design approval over exactly the set the gate re-digests.
 
     Derived from ``_APPROVAL_STORE_NAME_GLOB`` rather than hardcoded: the split
-    narrowed design from ``"*.md"`` to ``"approach.md"``, and approving over a
+    narrowed design from ``"*.md"`` to ``"approach.artifact"``, and approving over a
     wider set records a digest the gate can never reproduce — approve reports
     success and the phase stays blocked, silently.
     """
@@ -623,28 +623,28 @@ def _approve_design_matching_gate(handle: object) -> None:
 
 
 def _design_artifacts_in_plan(repo_root: Path, slug: str = "01-auth") -> bool:
-    """Return True if tasks.md and test-plan.md exist under phase=plan for *slug*."""
+    """Return True if tasks.artifact and test-plan.artifact exist under phase=plan for *slug*."""
     from agentalloy.install.subcommands._state import phase_access
 
     handle = phase_access(repo_root).contracts_handle()
     plan_rows = handle.list_artifacts("plan", slug=slug)
     names = {r["name"] for r in plan_rows}
-    return "tasks.md" in names and "test-plan.md" in names
+    return "tasks.artifact" in names and "test-plan.artifact" in names
 
 
 def _design_approach_exists(repo_root: Path) -> bool:
-    """Return True if approach.md still exists under design."""
+    """Return True if approach.artifact still exists under design."""
     from agentalloy.install.subcommands._state import phase_access
 
     handle = phase_access(repo_root).contracts_handle()
-    rows = handle.list_artifacts("design", name_glob="approach.md")
+    rows = handle.list_artifacts("design", name_glob="approach.artifact")
     return len(rows) > 0
 
 
 class TestDesignToPlanMigration:
     """#556 — design→plan artifact migration.
 
-    Auto-migrate tasks.md / test-plan.md from design→plan on first entry to
+    Auto-migrate tasks.artifact / test-plan.artifact from design→plan on first entry to
     plan.  Design rows are left untouched.
     """
 
@@ -675,11 +675,11 @@ class TestDesignToPlanMigration:
         )
 
     def test_migration_copies_artifacts_on_enter_plan(self, repo_root: Path) -> None:
-        """A repo with design tasks.md / test-plan.md gets them copied into plan."""
+        """A repo with design tasks.artifact / test-plan.artifact gets them copied into plan."""
         self._purge_stale(repo_root)
         run_phase_set("design", root=repo_root)
         # Write ALL design artifacts first, then approve — the digest must
-        # match _APPROVAL_STORE_NAME_GLOB["design"] = "*.md" because
+        # match _APPROVAL_STORE_NAME_GLOB["design"] = "approach.artifact" because
         # evaluate_phase_gate pre-check recomputes the digest with that glob.
         from agentalloy.install.subcommands._state import phase_access
 
@@ -687,19 +687,19 @@ class TestDesignToPlanMigration:
         handle.set_artifact(
             "design",
             "01-auth",
-            "approach.md",
+            "approach.artifact",
             "# Approach\n## Approach\nSome approach\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "tasks.md",
+            "tasks.artifact",
             "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "test-plan.md",
+            "test-plan.artifact",
             "# Test Cases\n\n- When user logs in, return auth token\n",
         )
         _approve_design_matching_gate(handle)
@@ -718,19 +718,19 @@ class TestDesignToPlanMigration:
         handle.set_artifact(
             "design",
             "01-auth",
-            "approach.md",
+            "approach.artifact",
             "# Approach\n## Approach\nSome approach\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "tasks.md",
+            "tasks.artifact",
             "# Tasks\n\n1. Implement auth endpoint\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "test-plan.md",
+            "test-plan.artifact",
             "# Test Cases\n\n- When user logs in, return auth token\n",
         )
         _approve_design_matching_gate(handle)
@@ -742,12 +742,12 @@ class TestDesignToPlanMigration:
         # when nothing happened at all.
         assert _design_artifacts_in_plan(repo_root), "migration did not run"
 
-        # Design keeps every row, not just approach.md: its recorded approval is
+        # Design keeps every row, not just approach.artifact: its recorded approval is
         # a digest over them, so a copy that moved rather than copied would
         # invalidate an approval the user already gave — silently.
         assert _design_approach_exists(repo_root)
         design_names = {r["name"] for r in handle.list_artifacts("design", slug="01-auth")}
-        assert {"approach.md", "tasks.md", "test-plan.md"} <= design_names
+        assert {"approach.artifact", "tasks.artifact", "test-plan.artifact"} <= design_names
 
         # And the approval still verifies against what the gate re-digests.
         from agentalloy.signals.gates import (
@@ -773,19 +773,19 @@ class TestDesignToPlanMigration:
         handle.set_artifact(
             "design",
             "01-auth",
-            "approach.md",
+            "approach.artifact",
             "# Approach\n## Approach\nSome approach\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "tasks.md",
+            "tasks.artifact",
             "# Tasks\n\n1. Implement auth endpoint\n2. Add token refresh\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "test-plan.md",
+            "test-plan.artifact",
             "# Test Cases\n\n- When user logs in, return auth token\n",
         )
         _approve_design_matching_gate(handle)
@@ -799,7 +799,7 @@ class TestDesignToPlanMigration:
         assert _design_artifacts_in_plan(repo_root)
 
         # The plan artifact must still be exactly what was migrated.
-        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.md")
+        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.artifact")
         assert plan_tasks is not None
         assert plan_tasks["content"] is not None
         # Content is what was in design — unchanged by re-entry.
@@ -816,32 +816,32 @@ class TestDesignToPlanMigration:
         handle.set_artifact(
             "design",
             "01-auth",
-            "approach.md",
+            "approach.artifact",
             "# Approach\n## Approach\nSome approach\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "tasks.md",
+            "tasks.artifact",
             "# Design Tasks\n\n1. Design task\n",
         )
         handle.set_artifact(
             "design",
             "01-auth",
-            "test-plan.md",
+            "test-plan.artifact",
             "# Test Cases\n\n- Design test\n",
         )
         # Pre-populate plan for the SAME slug — user already produced plan artifacts.
         handle.set_artifact(
             "plan",
             "01-auth",
-            "tasks.md",
+            "tasks.artifact",
             "# Custom Tasks\n\n1. Custom task\n",
         )
         handle.set_artifact(
             "plan",
             "01-auth",
-            "test-plan.md",
+            "test-plan.artifact",
             "# Custom Test Cases\n\n- Custom test\n",
         )
         _approve_design_matching_gate(handle)
@@ -849,22 +849,22 @@ class TestDesignToPlanMigration:
         run_phase_set("plan", root=repo_root)
 
         # The plan artifact must NOT have been overwritten by migration.
-        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.md")
+        plan_tasks = handle.get_artifact("plan", "01-auth", "tasks.artifact")
         assert plan_tasks["content"] == "# Custom Tasks\n\n1. Custom task\n"
-        plan_tests = handle.get_artifact("plan", "01-auth", "test-plan.md")
+        plan_tests = handle.get_artifact("plan", "01-auth", "test-plan.artifact")
         assert plan_tests["content"] == "# Custom Test Cases\n\n- Custom test\n"
 
     def test_migration_requires_design_artifacts(self, repo_root: Path) -> None:
-        """No design tasks.md / test-plan.md → nothing to migrate."""
+        """No design tasks.artifact / test-plan.artifact → nothing to migrate."""
         run_phase_set("design", root=repo_root)
-        # Design exit gate requires approach.md with ## Approach section.
+        # Design exit gate requires approach.artifact with ## Approach section.
         from agentalloy.install.subcommands._state import phase_access
 
         handle = phase_access(repo_root).contracts_handle()
         handle.set_artifact(
             "design",
             "01-auth",
-            "approach.md",
+            "approach.artifact",
             "# Approach\n## Approach\nSome approach\n",
         )
         _approve_design_matching_gate(handle)

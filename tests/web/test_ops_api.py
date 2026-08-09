@@ -48,8 +48,8 @@ def _write_spec_doc(store: DuckDBStateStore, root: Path) -> None:
     from agentalloy.install.subcommands._state import phase_access
 
     content = "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
-    store.set_artifact("spec", "x", "spec.md", content)
-    phase_access(root).contracts_handle().set_artifact("spec", "x", "spec.md", content)
+    store.set_artifact("spec", "x", "spec.artifact", content)
+    phase_access(root).contracts_handle().set_artifact("spec", "x", "spec.artifact", content)
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def test_approvals_pending_then_approve_advances(
     assert entry["phase"] == "spec"
     assert entry["next_phase"] == "design"
     assert entry["stale"] is False  # never approved, not stale
-    assert entry["artifacts"] == ["spec/x/spec.md"]
+    assert entry["artifacts"] == ["spec/x/spec.artifact"]
 
     r = client.post("/api/repos/approve", json={"repo": str(repo), "phase": "spec"})
     assert r.status_code == 403  # CSRF required
@@ -158,7 +158,7 @@ def test_approvals_stale_marker_reappears(client, tmp_path: Path, monkeypatch: p
     # recorded digest no longer matches the current artifact content.
     _set_phase(repo, "spec")
     client.store.set_artifact(
-        "spec", "x", "spec.md", "# x (reworked)\n## Acceptance Criteria\n- a\n"
+        "spec", "x", "spec.artifact", "# x (reworked)\n## Acceptance Criteria\n- a\n"
     )
 
     pending = client.get("/api/approvals").json()

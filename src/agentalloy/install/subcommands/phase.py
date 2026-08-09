@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.api.state_client import StateClientError
+from agentalloy.api.state_router import _route_phase
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
-from agentalloy.signals.gates import evaluate_phase_gate as _evaluate_phase_gate
+from agentalloy.storage.artifact_naming import ARTIFACT_EXT
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +59,10 @@ _APPROVAL_SINCE = {
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 _APPROVAL_STORE_NAME_GLOB = {
-    "spec": "*.md",
-    "design": "*.md",
-    "plan": "*.md",  # tasks.md + test-plan.md
-    "sdd-fast": "*.md",
+    "spec": "*.artifact",
+    "design": "*.artifact",
+    "plan": "*.artifact",  # tasks.artifact + test-plan.artifact
+    "sdd-fast": "*.artifact",
 }
 
 
@@ -95,31 +96,40 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
 
 
 def _migrate_design_to_plan(store: Any) -> None:
-    """Copy a pre-split repo's ``tasks.md``/``test-plan.md`` from design to plan.
+    """Copy a pre-split repo's ``tasks``/``test-plan`` from design to plan.
 
-    Repos that entered ``design`` before the design/plan split hold those two
-    artifacts under ``phase=design``. The plan→build gate looks for them under
-    ``phase=plan`` (rows are keyed ``(repo, phase, slug, name)``), so without
-    this the repo advances into plan and then cannot leave without ``--force``.
+        Repos that entered ``design`` before the design/plan split hold those two
+        artifacts under ``phase=design``. The plan→build gate looks for them under
+        ``phase=plan`` (rows are keyed ``(repo, phase, slug, name)``), so without
+        this the repo advances into plan and then cannot leave without ``--force``.
 
-    Three properties, each load-bearing:
+        Three properties, each load-bearing:
 
-    - **Idempotent**, guarded on plan already holding rows for the slug rather
-      than on a marker — re-entering plan must not clobber an edit the user made
-      after the migration.
-    - **Slug-scoped**: only slugs that appear in design, not a phase-wide copy.
-    - **Design rows are left alone.** Design's recorded approval is a digest over
-      its own artifacts; deleting or moving them would invalidate an approval the
-      user already gave, and the failure is silent — approve reports success and
-      the gate stays blocked.
+        - **Idempotent**, guarded on plan already holding rows for the slug rather
+          than on a marker — re-entering plan must not clobber an edit the user made
+          after the migration.
+        - **Slug-scoped**: only slugs that appear in design, not a phase-wide copy.
+        - **Design rows are left alone.** Design's recorded approval is a digest over
+          its own artifacts; deleting or moving them would invalidate an approval the
+          user already gave, and the failure is silent — approve reports success and
+          the gate stays blocked.
 
-    Approval deliberately does NOT carry over: ``plan`` is in
-    ``_ALWAYS_APPROVAL_PHASES`` and must be approved on its own, since no human
-    ever approved a plan phase that did not exist.
+        Approval deliberately does NOT carry over: ``plan`` is in
+        ``_ALWAYS_APPROVAL_PHASES`` and must be approved on its own, since no human
+        ever approved a plan phase that did not exist.
+
+    Naming (store-only, post #552 06a): the canonical artifact name ends with
+        ``ARTIFACT_EXT`` (``.artifact``). This reads design rows by that canonical
+        name; rows written by post-migration code are already ``.artifact``-named
+        because ``set_artifact`` and the pack-injected templates use it. Legacy
+        pre-migration databases whose rows still carry the old ``.md`` suffix are
+        renamed at store open by the ``state_store.migrate`` step, so by the time
+        we reach here the design rows are already ``.artifact``-named. We write the
+        copies into plan under the same canonical name.
     """
     if store is None:
         return
-    wanted = ("tasks.md", "test-plan.md")
+    wanted = (f"tasks{ARTIFACT_EXT}", f"test-plan{ARTIFACT_EXT}")
     design_by_slug: dict[str, list[str]] = {}
     for row in store.list_artifacts("design"):
         if row["name"] in wanted:
@@ -155,9 +165,11 @@ def _forward_gate_blocks(
     required sections) and stays out of the way of everything it can't be sure of.
     """
     from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,
         decide_transition,
         evaluate_node,
+    )
+    from agentalloy.signals.graph import (  # noqa: PLC0415
+        _NEXT as _PHASE_GRAPH,
     )
     from agentalloy.signals.predicates import PredicateContext, PredicateResult  # noqa: PLC0415
     from agentalloy.signals.skill_loader import exit_gates_for_phase  # noqa: PLC0415
@@ -197,8 +209,8 @@ def _approval_gate_blocks(
     where ``approval_recorded`` sits *after* ``artifact_exists`` in the ``all_of``
     and is only reached once the artifact is on disk.
     """
-    from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,
+    from agentalloy.signals.graph import (  # noqa: PLC0415
+        _NEXT as _PHASE_GRAPH,
     )
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         PredicateContext,
@@ -274,17 +286,24 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     gate_store = access.contracts_handle()
 
     # Unified gate evaluation (slice 09: route evaluates, CLI delegates).
-    # evaluate_phase_gate checks: always-approval phases, approval gate,
-    # forward gate (artifact completeness).  --force maps to override=True
-    # which bypasses the forward gate but NOT the approval gate.
-    verdict = _evaluate_phase_gate(current, phase, root, force, gate_store)
-    if verdict is not None:
+    # _route_phase wraps the graph's route_step which calls evaluate_phase_gate —
+    # the single decision point for all routing (proxy, CLI, API).
+    # --force maps to override=True which bypasses the forward gate but NOT the approval gate.
+    verdict = _route_phase(
+        gate_store,
+        current,
+        lane="sdd-full",
+        target_phase=phase,
+        override=force,
+        project_root=Path(root) if root else None,
+    )
+    if verdict is not None and not verdict.get("should_transition", True):
         return {
             "phase": current or phase,
             "blocked": True,
             "target": phase,
             "advisories": verdict.get("advisories", []),
-            "reason": verdict.get("result", "not_met"),
+            "reason": verdict.get("reason", "not_met"),
         }
 
     # Pre-split repos keep tasks.md/test-plan.md under design; move them into

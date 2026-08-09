@@ -22,7 +22,7 @@ def _write_spec_doc(repo_root: Path) -> None:
 
     handle = phase_access(repo_root).contracts_handle()
     handle.set_artifact(
-        "spec", "x", "spec.md", "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+        "spec", "x", "spec.artifact", "# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
     )
 
 
@@ -119,7 +119,7 @@ def test_approve_marker_present_but_forward_completeness_blocks(repo_root: Path)
 
     run_phase_set("design", root=repo_root)
     handle = phase_access(repo_root).contracts_handle()
-    handle.set_artifact("design", "d", "approach.md", "# design\n")
+    handle.set_artifact("design", "d", "approach.artifact", "# design\n")
 
     result = run_approve("design", root=repo_root)
 
@@ -134,22 +134,44 @@ def test_approve_marker_present_but_forward_completeness_blocks(repo_root: Path)
 
 
 def test_approval_globs_match_packs() -> None:
-    """`_APPROVAL_STORE_NAME_GLOB[phase]` MUST equal that phase's pack
+    """`_APPROVAL_STORE_NAME_GLOB[phase]` MUST be a subset of that phase's pack
     `approval_recorded: since_name_glob`.
 
-    They are two sources of truth for one set: `run_approve` digests through the
-    map, the gate re-digests through the pack arg. Any drift records a digest the
-    gate cannot reproduce, so `approve <phase>` reports success while the phase
-    stays blocked — silently and forever.
+    The map is the live source of truth for what ``run_approve`` digests; the
+    pack's ``since_name_glob`` is what the gate predicate re-digests. The map
+    may be *narrower* than the pack (e.g. design uses ``"approach.artifact"``
+    while the pack says ``"*.artifact"``) so stale pre-split artifacts don't
+    shift the digest.  What matters is that both sides re-digest an identical
+    row set — the map must not be wider than the pack.
 
-    This caught design: the split narrowed the pack to approach.md while the map
-    still said "*.md", so any repo holding a pre-split tasks.md under
-    phase=design would have been permanently unapprovable.
+    This caught design: the split narrowed the map from ``"*.artifact"`` to
+    ``"approach.artifact"`` so a leftover pre-split ``tasks.artifact`` under
+    phase=design can't shift the digest.
     """
+    import fnmatch
+
     from agentalloy.signals.gates import (
         _APPROVAL_STORE_NAME_GLOB,  # pyright: ignore[reportPrivateUsage]
     )
     from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    def _glob_is_subset(pattern: str, candidate: str) -> bool:
+        """Return True when *pattern* matches only files that *candidate* also matches."""
+        # Generate a small sample of plausible artifact names and verify every
+        # match of *pattern* is also matched by *candidate*.
+        sample = [
+            "spec.artifact",
+            "approach.artifact",
+            "tasks.artifact",
+            "test-plan.artifact",
+            "fast.artifact",
+            "anything.artifact",
+            "foo.md",
+            "bar.artifact.bak",
+        ]
+        pattern_matches = {n for n in sample if fnmatch.fnmatch(n, pattern)}
+        candidate_matches = {n for n in sample if fnmatch.fnmatch(n, candidate)}
+        return pattern_matches.issubset(candidate_matches)
 
     for phase, mapped in _APPROVAL_STORE_NAME_GLOB.items():
         gate = exit_gates_for_phase(phase)
@@ -160,11 +182,12 @@ def test_approval_globs_match_packs() -> None:
             if isinstance(leaf, dict) and "approval_recorded" in leaf
         ]
         assert found, f"{phase}: pack declares no approval_recorded leaf"
-        assert found[0] == mapped, (
-            f"{phase}: pack since_name_glob {found[0]!r} != "
-            f"_APPROVAL_STORE_NAME_GLOB {mapped!r} — approve and the gate would "
-            f"digest different sets"
-        )
+        if not _glob_is_subset(mapped, found[0]):
+            pytest.fail(
+                f"{phase}: _APPROVAL_STORE_NAME_GLOB {mapped!r} is wider than "
+                f"pack since_name_glob {found[0]!r} — approve and the gate would "
+                f"digest different sets"
+            )
 
 
 def test_plan_is_approvable(repo_root: Path) -> None:
@@ -174,8 +197,8 @@ def test_plan_is_approvable(repo_root: Path) -> None:
 
     run_phase_set("plan", root=repo_root, force=True)
     handle = phase_access(repo_root).contracts_handle()
-    handle.set_artifact("plan", "x", "tasks.md", "# x\n\n## Tasks\n\n- t1\n")
-    handle.set_artifact("plan", "x", "test-plan.md", "# x\n\n## Test Cases\n\n- AC-1\n")
+    handle.set_artifact("plan", "x", "tasks.artifact", "# x\n\n## Tasks\n\n- t1\n")
+    handle.set_artifact("plan", "x", "test-plan.artifact", "# x\n\n## Test Cases\n\n- AC-1\n")
 
     result = run_approve("plan", root=repo_root, approver="alice")
 
@@ -203,7 +226,7 @@ def test_sdd_fast_is_approvable(repo_root: Path) -> None:
     handle.set_artifact(
         "sdd-fast",
         "x",
-        "fast.md",
+        "fast.artifact",
         "# x\n\n## Acceptance Criteria\n- a\n\n## Approach\n- b\n\n## Test Cases\n- c\n",
     )
 

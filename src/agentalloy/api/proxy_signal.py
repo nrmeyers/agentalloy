@@ -1028,9 +1028,11 @@ async def evaluate_signal(
             # Execute the graph to route the transition (task 07).
             # The graph's ``route_step`` wraps ``evaluate_phase_gate`` —
             # this is the single decision point, not a second one.
-            from agentalloy.signals.graph import route_step  # noqa: PLC0415
+            from agentalloy.signals.graph import (  # noqa: PLC0415
+                _route_step,
+            )
 
-            out = route_step(phase, lane, ctx.store)
+            out = _route_step(phase, lane, store=ctx.store)
             to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
@@ -1073,8 +1075,8 @@ async def evaluate_signal(
                     logger.warning("Failed to write phase file: %s", e)
 
             advisories = list(out.advisories)
-            gates_met = [g.gate_name for g in out.gates_met]
-            gates_unmet = [g.gate_name for g in out.gates_unmet]
+            gates_met = list(out.gates_met)
+            gates_unmet = list(out.gates_unmet)
             qwen_calls = out.qwen_calls
 
         await asyncio.to_thread(_run_gates)

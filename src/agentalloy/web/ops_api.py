@@ -238,7 +238,7 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
         from agentalloy.install.subcommands.status import (
             _repo_phase,
         )
-        from agentalloy.signals.gates import _PHASE_GRAPH
+        from agentalloy.signals.graph import _NEXT as _PHASE_GRAPH
         from agentalloy.signals.predicates import approval_marker_path
 
         phase = _repo_phase(repo)
@@ -311,7 +311,7 @@ async def list_approvals(store: DuckDBStateStore = Depends(get_state_store)) -> 
         from agentalloy.install.subcommands.status import (
             _repo_phase,
         )
-        from agentalloy.signals.gates import _PHASE_GRAPH
+        from agentalloy.signals.graph import _NEXT as _PHASE_GRAPH
         from agentalloy.signals.predicates import approval_marker_path
 
         pending: list[PendingApproval] = []

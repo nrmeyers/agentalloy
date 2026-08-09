@@ -14,14 +14,19 @@ decide routing. AgentAlloy never originates a model call.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict
 
+from langgraph.checkpoint.memory import SimpleCheckpointer
 from langgraph.graph import END, START, StateGraph
 
+# Re-export the compiled graph type for downstream imports.
+from langgraph.graph.graph import Graph  # noqa: F401
+
 from agentalloy.code_index.slug import repo_slug
-from agentalloy.signals.gates import _PHASE_GRAPH, evaluate_phase_gate
+from agentalloy.signals.gates import evaluate_phase_gate
 from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase
 from agentalloy.storage.state_store import (
     LEASED_KINDS,
@@ -29,6 +34,28 @@ from agentalloy.storage.state_store import (
     PhaseState,
 )
 from agentalloy.storage.stream_id import resolve_stream_id
+
+# Canonical SDD phase map: phase → next phase (approach.md §1 / §7).
+# Re-exported as ``_PHASE_GRAPH`` so callers that import from here get the
+# same dict object — no copy, no stale reference.
+_NEXT: dict[str, str] = {
+    "intake": "spec",  # default (full) route; fast / add-skill / flow use lane hints
+    "spec": "design",
+    "design": "plan",
+    "plan": "build",
+    "build": "qa",
+    "qa": "ship",
+    "sdd-fast": "qa",  # compressed spec+design+build → merge into qa → ship
+    "add-skill": "intake",  # deliverable is a locally installed skill, not shippable
+    "sdd-flow": "intake",  # deliberately unguided exploration — return to intake
+    "ship": "ship",  # terminal
+}
+# Legacy alias — imported by web/ops_api, install/subcommands/phase, and
+# the LangGraph topology via route_step.  Both point to the SAME dict.
+_PHASE_GRAPH = _NEXT
+
+_log = logging.getLogger(__name__)
+
 
 # Session-scoped delivery bookkeeping that is explicitly NOT graph state
 # (approach.md §1; state_store.SESSION_SCOPED_KINDS). Pulling these into graph
@@ -206,42 +233,109 @@ class RoutingOutcome:
     to_phase: str | None
     lane: str
     advisories: list[str]
+    reason: str = ""
+    gates_met: list[str] = field(default_factory=list)
+    gates_unmet: list[str] = field(default_factory=list)
+    qwen_calls: int = 0
 
 
-def route_step(
+def _route_step(
     current_phase: str,
     lane: str,
     *,
     next_phase_hint: str | None = None,
+    target_phase: str | None = None,
+    override: bool = False,
     project_root: Path | None = None,
     store: Any = None,
 ) -> RoutingOutcome:
     """Decide the next phase for ``current_phase`` — the graph's routing key.
 
-    Wraps ``evaluate_phase_gate`` (the deterministic core) + the post-#551
-    ``_PHASE_GRAPH``/``next_phase_hint`` for lane selection. From ``intake`` the
-    lane (or ``next_phase_hint``) selects the lane entry; elsewhere forward
-    edges mirror ``_PHASE_GRAPH`` guarded by the gate — on ``should_transition``
+    Wraps ``evaluate_phase_gate`` (the deterministic core) + lane selection.
+    From ``intake`` the lane (or ``next_phase_hint``) selects the lane entry;
+    elsewhere forward edges are guarded by the gate — on ``should_transition``
     advance, else self-loop re-emit with advisories carried through. Declared
     non-linear edges (``flow → intake``, ``add-skill → intake``) route directly.
+
+    When ``target_phase`` is provided, it overrides the automatic lookup
+    (``_PHASE_GRAPH`` / lane entry) so callers can evaluate a specific
+    transition — used by the HTTP / CLI path which receives the user's
+    requested phase directly.
+
+    When ``override`` is ``True``, the forward (completeness) gate is
+    skipped but the approval gate (for phases in ``_ALWAYS_APPROVAL_PHASES``)
+    is still enforced.
     """
     if lane not in _LANES:
         lane = "sdd-full"
-    if current_phase == "intake":
+    if target_phase is not None:
+        to_phase = target_phase
+    elif current_phase == "intake":
         to_phase = next_phase_hint or _LANE_ENTRY.get(lane)
     else:
         to_phase = _PHASE_GRAPH.get(current_phase)
 
     if to_phase is None:  # terminal (ship) or unknown → stay put
-        return RoutingOutcome(False, current_phase, None, lane, [])
-    if to_phase == current_phase:  # self-loop (ship = terminal) → no transition
+        return RoutingOutcome(False, current_phase, current_phase, lane, [])
+    if to_phase == current_phase:  # same-phase no-op → skip gate entirely
         return RoutingOutcome(False, current_phase, current_phase, lane, [])
 
     verdict = evaluate_phase_gate(
-        current_phase, to_phase, project_root, override=False, store=store
+        current_phase, to_phase, project_root, override=override, store=store
     )
     if verdict is not None:
-        return RoutingOutcome(False, current_phase, to_phase, lane, verdict.get("advisories") or [])
+        # Gate blocked — pull gates_met/gates_unmet/qwen_calls via decide_transition
+        # (evaluate_phase_gate already calls it but discards those fields).
+        gates_met: list[str] = []
+        gates_unmet: list[str] = []
+        qwen_calls = 0
+        if project_root:
+            try:
+                from agentalloy.signals.gates import (  # noqa: PLC0415
+                    decide_transition,
+                )
+                from agentalloy.signals.predicates import (  # noqa: PLC0415
+                    PredicateContext,
+                )
+                from agentalloy.signals.skill_loader import (  # noqa: PLC0415
+                    exit_gates_for_phase,
+                )
+
+                gate_spec = exit_gates_for_phase(current_phase)
+                if gate_spec:
+                    decision_ctx = PredicateContext(
+                        project_root=project_root,
+                        current_phase=current_phase,
+                        store=store,
+                    )
+                    decision = decide_transition(
+                        current_phase,
+                        gate_spec,
+                        decision_ctx,
+                        lm_client=None,
+                        target_phase=to_phase,
+                    )
+                    gates_met = [e.gate_name for e in decision.gates_met]
+                    gates_unmet = [e.gate_name for e in decision.gates_unmet]
+                    qwen_calls = decision.qwen_calls
+            except Exception:
+                _log.debug(
+                    "failed to resolve gate details for %s → %s",
+                    current_phase,
+                    to_phase,
+                    exc_info=True,
+                )
+        return RoutingOutcome(
+            False,
+            current_phase,
+            to_phase,
+            lane,
+            verdict.get("advisories") or [],
+            verdict.get("result", "not_met"),
+            gates_met=gates_met,
+            gates_unmet=gates_unmet,
+            qwen_calls=qwen_calls,
+        )
     return RoutingOutcome(True, current_phase, to_phase, lane, [])
 
 
@@ -260,9 +354,25 @@ def route_from_decision(
         lane = "sdd-full"
     if not decision.should_transition or not decision.to_phase:
         return RoutingOutcome(
-            False, current_phase, decision.to_phase, lane, list(decision.advisories)
+            False,
+            current_phase,
+            decision.to_phase,
+            lane,
+            list(decision.advisories),
+            gates_met=[e.gate_name for e in decision.gates_met],
+            gates_unmet=[e.gate_name for e in decision.gates_unmet],
+            qwen_calls=decision.qwen_calls,
         )
-    return RoutingOutcome(True, current_phase, decision.to_phase, lane, list(decision.advisories))
+    return RoutingOutcome(
+        True,
+        current_phase,
+        decision.to_phase,
+        lane,
+        list(decision.advisories),
+        gates_met=[e.gate_name for e in decision.gates_met],
+        gates_unmet=[e.gate_name for e in decision.gates_unmet],
+        qwen_calls=decision.qwen_calls,
+    )
 
 
 def _node(phase: str):
@@ -289,7 +399,7 @@ def build_phase_graph() -> StateGraph:
     g.add_edge(START, "intake")  # entrypoint — intake is the front door
 
     def _advance(state: PhaseGraphState) -> str:
-        out = route_step(state["phase"], state.get("lane", "sdd-full"), store=None)
+        out = _route_step(state["phase"], state.get("lane", "sdd-full"), store=None)
         return out.to_phase if (out.should_transition and out.to_phase) else state["phase"]
 
     g.add_conditional_edges(
@@ -305,6 +415,35 @@ def build_phase_graph() -> StateGraph:
     return g
 
 
+# ---------------------------------------------------------------------------
+# Compiled-graph helper (module-level singleton)
+# ---------------------------------------------------------------------------
+
+_graph_compilation: Graph | None = None
+_graph_phases: list[str] | None = None
+
+
+def phase_graph() -> Graph:
+    """Return a compiled LangGraph ``StateGraph`` with checkpointer.
+
+    The graph is compiled once per Python process so that every caller
+    shares the same ``threading.Lock`` inside ``SimpleCheckpointer`` and
+    checkpoint writes/reads are mutually consistent.
+    """
+    global _graph_compilation
+    if _graph_compilation is None:
+        _graph_compilation = build_phase_graph().compile(checkpointer=SimpleCheckpointer())
+    return _graph_compilation
+
+
+def all_phases() -> list[str]:
+    """Return every phase node in the graph (intake, spec, design, …, sdd-flow)."""
+    global _graph_phases
+    if _graph_phases is None:
+        _graph_phases = list(phase_graph().graph_nodes.keys())
+    return _graph_phases
+
+
 __all__ = [
     "PhaseGraphState",
     "ThreadKey",
@@ -317,9 +456,11 @@ __all__ = [
     "initial_phase_graph_state",
     "to_phase_graph_state",
     "phase_node",
-    "route_step",
+    "_route_step",
     "route_from_decision",
     "build_phase_graph",
+    "phase_graph",
+    "all_phases",
     "_LANES",
     "_LANE_ENTRY",
     "_NON_GRAPH_SESSION_KINDS",

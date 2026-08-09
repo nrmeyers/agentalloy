@@ -111,6 +111,10 @@ def validate_pack_skills(
         # with a glob targeting a store-backed docs/ phase.
         gate_errs = _validate_gate_path_stores(record)
         errs = [*errs, *gate_errs]
+        # 06a: reject store-backed artifact names still carrying the legacy
+        # ".md" suffix — store artifacts are named "*.artifact", never ".md".
+        name_errs = _validate_gate_store_names(record)
+        errs = [*errs, *name_errs]
         if strict:
             errs = [*errs, *_lint(record, yaml_path)]
         if errs:
@@ -196,6 +200,82 @@ def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
                 f"use phase: {phase}, name: <pattern> instead"
             )
             return  # one error per leaf is enough
+
+
+# ---------------------------------------------------------------------------
+
+
+def _validate_gate_store_names(record: Any) -> list[str]:
+    """Reject ``artifact_exists`` / ``artifact_contains`` leaves that target a
+    store-backed phase with a ``name`` carrying the legacy ``.md`` suffix.
+
+    Store artifacts are canonical ``.artifact`` now (#552 06a): a ``.md`` name
+    in a store-backed phase (``phase:`` set, not ``path:``) is a leftover that
+    the ``state_store.migrate`` rename step would rewrite, but it is also a
+    latent footgun — a hand-written pack YAML with ``name: "spec.md"`` would
+    write rows the ``*.artifact`` gate glob never matches, silently blocking a
+    transition. Reject it at ingest/validation time so the invariant is
+    enforced structurally rather than trusted.
+    """
+    from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+        LEGACY_ARTIFACT_EXT,
+        STORE_BACKED_PHASES,
+    )
+
+    errors: list[str] = []
+    exit_gates = getattr(record, "exit_gates", None)
+    if not isinstance(exit_gates, dict):
+        return errors
+    _walk_gate_store_names(exit_gates, errors, LEGACY_ARTIFACT_EXT, STORE_BACKED_PHASES)
+    return errors
+
+
+def _walk_gate_store_names(
+    spec: Any,
+    errors: list[str],
+    legacy_ext: str,
+    store_phases: frozenset[str],
+) -> None:
+    """Recursively walk an exit_gates tree, flagging store names with ``.md``."""
+    if not isinstance(spec, dict):
+        return
+    spec_d: dict[str, Any] = spec
+    composites: list[str] = [k for k in ("all_of", "any_of", "not") if k in spec_d]
+    leaves: list[str] = [k for k in spec_d if k not in ("all_of", "any_of", "not")]
+
+    if composites and leaves or len(composites) > 1:
+        return  # malformed; upstream _validate_gate_spec catches this
+
+    if "all_of" in spec_d:
+        for child in spec_d["all_of"]:  # type: ignore[arg-type]
+            _walk_gate_store_names(child, errors, legacy_ext, store_phases)
+        return
+    if "any_of" in spec_d:
+        for child in spec_d["any_of"]:  # type: ignore[arg-type]
+            _walk_gate_store_names(child, errors, legacy_ext, store_phases)
+        return
+    if "not" in spec_d:
+        _walk_gate_store_names(spec_d["not"], errors, legacy_ext, store_phases)
+        return
+
+    if len(leaves) != 1:
+        return
+    name = leaves[0]
+    if name not in ("artifact_exists", "artifact_contains"):
+        return
+    args: dict[str, Any] = spec_d[name]  # type: ignore[assignment]
+    # Only store-targeting leaves carry ``phase:``; ``path:`` leaves are
+    # filesystem (and handled by _validate_gate_path_stores).
+    phase = args.get("phase")
+    if phase not in store_phases:
+        return
+    store_name = str(args.get("name", ""))
+    if store_name.endswith(legacy_ext):
+        errors.append(
+            f"exit_gates: store artifact name {store_name!r} for phase={phase!r} "
+            f"uses the legacy '{legacy_ext}' suffix; store artifacts are named "
+            f"with '.artifact' (e.g. {store_name[: -len(legacy_ext)]}.artifact)"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -28,10 +28,10 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: qa
-        name: "*.md"
+        name: "*.artifact"
     - artifact_contains:
         phase: qa
-        name: "*.md"
+        name: "*.artifact"
         sections:
           - Checks
           - Review
@@ -173,7 +173,7 @@ raw_prose: |
   agentalloy contract artifact-set --phase qa --slug <slug> --name solution --body-file -
   ```
 
-  The name is `solution` with no `.md` — the qa artifact gate globs `*.md` and
+  The name is `solution` with no `.artifact` — the qa artifact gate globs `*.artifact` and
   would otherwise demand `## Checks`/`## Review` of your lesson too.
 
   Once a lesson proves it recurs, promote it into the corpus with

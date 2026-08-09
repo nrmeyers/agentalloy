@@ -1,6 +1,6 @@
 skill_id: sdd-design-and-architecture
 canonical_name: SDD — Design (sdd-design)
-description: "Turn the spec into a technical approach with decisions and rationale — recorded as approach.md via agentalloy contract artifact-set --phase design --slug <slug>. Task decomposition, test cases, and build contracts are plan's job."
+description: "Turn the spec into a technical approach with decisions and rationale — recorded as approach.artifact via agentalloy contract artifact-set --phase design --slug <slug>. Task decomposition, test cases, and build contracts are plan's job."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -21,17 +21,17 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: design
-        name: approach.md
+        name: approach.artifact
     - artifact_contains:
         phase: design
-        name: approach.md
+        name: approach.artifact
         sections:
           - Approach
     # Human-in-the-loop checkpoint (#10): design→plan requires a recorded approval.
     # `since_name_glob` covers the design artifact so editing it after approval
     # invalidates the marker. --force never bypasses this.
     - approval_recorded:
-        since_name_glob: "approach.md"
+        since_name_glob: "approach.artifact"
 signal_keywords:
   - done with design
   - ready to plan
@@ -59,7 +59,7 @@ contract_template: |
   ## Design
 
   The approach is recorded as a design artifact
-  (approach.md) via
+  (approach.artifact) via
   `agentalloy contract artifact-set --phase design --slug {{task_slug}}`.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
@@ -69,8 +69,7 @@ author: agentalloy
 change_summary: "split from sdd-design-and-planning: design focuses on approach, decisions, and rationale only; task decomposition, test cases, and build contracts moved to sdd-plan-and-contracts"
 raw_prose: |
 
-  **Before writing any code, verify the preceding phase's deliverables exist**
-  (`docs/spec/*.md` for spec; `docs/design/*/approach.md` for design→plan).  # SDD — Design
+  **Before writing any code, verify the preceding phase's deliverables exist.**  # SDD — Design
 
   **Checkpoint first.** You MUST confirm the spec artifact exists by running:
 
@@ -79,7 +78,7 @@ raw_prose: |
   and verifying it carries **Acceptance Criteria**. If it does not, you skipped spec;
   STOP and record it. You MUST NOT write any `src/` code in this phase: design
   produces artifacts only, recorded via `agentalloy contract artifact-set
-  --phase design --slug <slug> --name approach.md`. There is no file to write —
+  --phase design --slug <slug> --name approach.artifact`. There is no file to write —
   if you are editing source, you are in the wrong phase.
 
   Spec settled *what* and *done*. Design settles *how* — the approach, the
@@ -116,7 +115,7 @@ raw_prose: |
   The **design artifact** is the deliverable and the single source of truth
   for approach — record it with:
 
-      agentalloy contract artifact-set --phase design --slug <slug> --name approach.md
+      agentalloy contract artifact-set --phase design --slug <slug> --name approach.artifact
 
   The body MUST include `## Approach`. That completes design.
 
@@ -128,7 +127,7 @@ raw_prose: |
   begins in a fresh one, and `agentalloy resume` rebuilds context. If anything's
   still unresolved — an approach you haven't committed to, an alternative you
   can't evaluate — **stop and surface it** instead of presenting it as done.
-  The phase guard refuses the jump until `approach.md` exists with its required
+  The phase guard refuses the jump until `approach.artifact` exists with its required
   section AND a human approval is recorded, so a premature `phase set` just
   names what's missing.
 

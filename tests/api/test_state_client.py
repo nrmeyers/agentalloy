@@ -277,7 +277,10 @@ class TestApproveRouting:
         run_phase_set("spec", root=tmp_path)
         handle = phase_access(tmp_path).contracts_handle()
         handle.set_artifact(
-            "spec", "x", "spec.md", "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+            "spec",
+            "x",
+            "spec.artifact",
+            "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n",
         )
         result = run_approve("spec", root=tmp_path, approver="test")
         assert result["ok"] is True
@@ -300,7 +303,10 @@ class TestApproveRouting:
         run_phase_set("spec", root=tmp_path)
         handle = phase_access(tmp_path).contracts_handle()
         handle.set_artifact(
-            "spec", "x", "spec.md", "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n"
+            "spec",
+            "x",
+            "spec.artifact",
+            "# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n",
         )
 
         result = run_approve("spec", root=tmp_path, approver="test")

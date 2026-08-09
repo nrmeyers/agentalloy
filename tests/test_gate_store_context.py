@@ -33,7 +33,7 @@ def design_repo(tmp_path: Path) -> Path:
     """A repo whose design artifacts satisfy every non-contract design exit gate."""
     d = tmp_path / "docs" / "design" / SLUG
     d.mkdir(parents=True)
-    (d / "approach.md").write_text("# x\n\n## Approach\n\nprose\n")
+    (d / "approach.artifact").write_text("# x\n\n## Approach\n\nprose\n")
     (d / "test-plan.md").write_text("# x\n\n## Test Cases\n\n- a test\n")
     (d / "tasks.md").write_text("# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n")
 
@@ -80,24 +80,31 @@ def _store_with(tmp_path: Path, n_build: int, build_tags: str = '["state"]') -> 
         "(repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at) "
         "VALUES " + ", ".join(rows) + ";"
     )
-    store.set_artifact("design", SLUG, "approach.md", "# x\n\n## Approach\n\nprose\n")
+    store.set_artifact("design", SLUG, "approach.artifact", "# x\n\n## Approach\n\nprose\n")
     store.set_artifact("design", SLUG, "test-plan.md", "# x\n\n## Test Cases\n\n- a test\n")
     store.set_artifact(
         "design", SLUG, "tasks.md", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
     )
-    # Matches the design gate's `since_name_glob`, tightened to "approach.md" by
+    # Matches the design gate's `since_name_glob`, tightened to "approach.artifact" by
     # the design/plan split. A wider digest never equals the one the gate
     # recomputes, so approval_recorded would block regardless of contract coverage
     # — and this class exists to test coverage, not to be masked by approval.
-    artifact_rows = store.list_artifacts("design", name_glob="approach.md")
+    artifact_rows = store.list_artifacts("design", name_glob="approach.artifact")
     store.set_approval("design", _artifact_digest(artifact_rows))
 
     # plan's own deliverables + approval — the plan→build gate reads these.
+    # deliverables (gate checks)
+    store.set_artifact(
+        "plan", SLUG, "tasks.artifact", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
+    )
+    store.set_artifact("plan", SLUG, "test-plan.artifact", "# x\n\n## Test Cases\n\n- a test\n")
+    # coverage gate reads tasks.md from store (predicate still reads .md, not .artifact)
     store.set_artifact(
         "plan", SLUG, "tasks.md", "# x\n\n## Tasks\n\n- 01 alpha\n- 02 beta\n- 03 gamma\n"
     )
-    store.set_artifact("plan", SLUG, "test-plan.md", "# x\n\n## Test Cases\n\n- a test\n")
-    store.set_approval("plan", _artifact_digest(store.list_artifacts("plan", name_glob="*.md")))
+    store.set_approval(
+        "plan", _artifact_digest(store.list_artifacts("plan", name_glob="*.artifact"))
+    )
     return store
 
 

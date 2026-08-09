@@ -581,7 +581,7 @@ def store_section_completeness(
 ) -> tuple[int, int, list[str]]:
     """``section_completeness`` for a STORE-backed artifact.
 
-    Lifecycle artifacts (spec.md, approach.md, tasks.md, ...) live in the artifact
+    Lifecycle artifacts (spec.artifact, approach.artifact, tasks.artifact, ...) live in the artifact
     store, not on disk, so the filesystem scorer above reports zero progress for
     them forever. This scores the same required headings against the recorded
     artifact bodies instead.

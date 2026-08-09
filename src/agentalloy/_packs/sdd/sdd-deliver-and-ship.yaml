@@ -22,10 +22,10 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: ship
-        name: "*.md"
+        name: "*.artifact"
     - artifact_contains:
         phase: ship
-        name: "*.md"
+        name: "*.artifact"
         sections:
           - Summary
           - Rollback

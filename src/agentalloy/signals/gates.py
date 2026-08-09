@@ -20,32 +20,37 @@ from agentalloy.signals.predicates import (
     evaluate_predicate,
 )
 
+# Lazy import alias — imported by evaluate_node / decide_transition /
+# evaluate_phase_gate.  Kept here to avoid a circular import with graph.py
+# (graph.py imports evaluate_phase_gate from this module at module level).
+_NEXT: dict[str, str] | None = None
+# Legacy alias — gates.py used to own _PHASE_GRAPH; tests and other modules
+# still import it from here.  Resolved via __getattr__ (no module-level
+# assignment — __getattr__ fires only for missing names).
+
+
+def __getattr__(name: str):
+    """Lazily resolve _PHASE_GRAPH when any module-level name is accessed."""
+    if name in ("_PHASE_GRAPH", "_NEXT"):
+        return _get_next()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _get_next() -> dict[str, str]:
+    """Return the next-phase map, lazily loaded from graph on first call."""
+    global _NEXT
+    if _NEXT is None:
+        # __getattr__ should have populated this, but guard for direct imports.
+        from agentalloy.signals.graph import _NEXT as _next_map  # noqa: N811
+
+        _NEXT = _next_map
+    return _NEXT
+
+
 # The entry phase. A freshly-wired repo starts here so the intake (intent
 # interview) workflow composes on the first prompt; it bypasses the
-# signal-keyword pre-filter (see api/proxy_signal) and hands off to "spec"
-# via _PHASE_GRAPH.
+# signal-keyword pre-filter (see api/proxy_signal) and hands off to "spec".
 INTAKE_PHASE = "intake"
-
-# Linear SDD phase graph: phase → next phase
-_PHASE_GRAPH: dict[str, str] = {
-    "intake": "spec",  # entry phase: default (full) route. The fast route
-    #                    overrides this with a next_phase_hint of "sdd-fast".
-    "spec": "design",
-    "design": "plan",  # design settles approach/decisions/rationale only; plan
-    #                    decomposes it into tasks, test cases, and one build
-    #                    contract per task (the density floor lives on plan→build)
-    "plan": "build",
-    "build": "qa",
-    "qa": "ship",
-    "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
-    #                    the standard qa → ship verification + delivery
-    "add-skill": "intake",  # custom-skill authoring lane: deliverable is a locally
-    #                         installed corpus skill, not a shippable change — return
-    #                         to intake for whatever comes next
-    "sdd-flow": "intake",  # flow lane: deliberately unguided exploration — return
-    #                         to intake when done so the next phase can be decided
-    "ship": "ship",  # terminal
-}
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,7 @@ def _build_contract_exists_advisory(args: dict[str, Any], ctx: PredicateContext)
     instead of echoing the posture silently.
     """
     target_phase = str(args.get("phase", "spec"))
-    to_phase = _PHASE_GRAPH.get(target_phase, target_phase)
+    to_phase = _get_next().get(target_phase, target_phase)
     return (
         f"You are in intake, but no contracts exist for phase '{target_phase}'. "
         f"Run ``agentalloy contract init --phase {target_phase} --slug <task-slug>`` to "
@@ -400,8 +405,14 @@ def decide_transition(
     ctx: PredicateContext,
     lm_client: EmbedClient | None = None,
     next_phase_hint: str | None = None,
+    target_phase: str | None = None,
 ) -> PhaseTransitionDecision:
-    """Evaluate gates and decide whether to transition to the next phase."""
+    """Evaluate gates and decide whether to transition to the next phase.
+
+    When ``target_phase`` is provided it is used as the next phase directly.
+    When omitted, ``_NEXT`` (imported from ``graph.py``) is used for the
+    standard linear route.
+    """
     qwen_calls: list[int] = [0]
     result, all_evals = evaluate_node(gate_spec, ctx, lm_client, qwen_calls)
 
@@ -410,7 +421,18 @@ def decide_transition(
     advisories: list[str] = [e.advisory for e in all_evals if e.advisory is not None]
 
     should_transition = result == PredicateResult.MET
-    to_phase = next_phase_hint or _PHASE_GRAPH.get(current_phase)
+    if target_phase is not None:
+        to_phase = target_phase
+    elif next_phase_hint is not None:
+        to_phase = next_phase_hint
+    else:
+        # Lazy import to avoid circular import with graph.py (which imports
+        # evaluate_phase_gate from this module at module level).
+        from agentalloy.signals.graph import (  # noqa: PLC0415
+            _PHASE_GRAPH,
+        )
+
+        to_phase = _PHASE_GRAPH.get(current_phase)
 
     # The trigger fired (decide_transition is only called after a transition
     # trigger matches), but the deterministic guard isn't satisfied. Tell the
@@ -498,15 +520,15 @@ _APPROVAL_SINCE: dict[str, str] = {
 # records an approval digest the gate can never reproduce, and the phase stays
 # blocked while the CLI reports success. test_approval_globs_match_packs pins it.
 _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
-    "spec": "*.md",
-    # design produces exactly approach.md post-split; narrower than "*.md" on
-    # purpose, so a leftover pre-split tasks.md under phase=design can't shift
-    # the digest.
-    "design": "approach.md",
-    # plan produces tasks.md + test-plan.md, so "*.md" covers both.
-    "plan": "*.md",
+    "spec": "spec.artifact",
+    # design produces exactly approach.artifact post-split; narrower than
+    # "*.artifact" on purpose, so a leftover pre-split tasks.artifact under
+    # phase=design can't shift the digest.
+    "design": "approach.artifact",
+    # plan produces tasks.artifact + test-plan.artifact, so "*.artifact" covers both.
+    "plan": "*.artifact",
     # sdd-fast's one collapsed artifact; matches the pack's artifact_exists leaf.
-    "sdd-fast": "*.md",
+    "sdd-fast": "*.artifact",
 }
 
 
@@ -551,7 +573,7 @@ def evaluate_phase_gate(
     # Approval gate: forward transitions out of approval-gated phases
     # require a recorded human approval marker. --force does NOT bypass
     # this checkpoint.
-    if target_phase == _PHASE_GRAPH.get(current_phase) and approval_required(current_phase):
+    if target_phase == _get_next().get(current_phase) and approval_required(current_phase):
         approval_blocked = False
         if current_phase in _APPROVAL_STORE_NAME_GLOB and project_root:
             name_glob = _APPROVAL_STORE_NAME_GLOB[current_phase]
@@ -597,7 +619,7 @@ def evaluate_phase_gate(
         exit_gates_for_phase,
     )
 
-    if target_phase != _PHASE_GRAPH.get(current_phase):
+    if target_phase != _get_next().get(current_phase):
         return None  # backward / bail / non-linear → unguarded
 
     gate_spec = exit_gates_for_phase(current_phase)
@@ -617,7 +639,9 @@ def evaluate_phase_gate(
 
     # Use decide_transition for human-readable advisory text (near-miss paths,
     # missing-artifact guidance). It re-evaluates deterministically (lm_client=None).
-    decision = decide_transition(current_phase, gate_spec, ctx, lm_client=None)
+    decision = decide_transition(
+        current_phase, gate_spec, ctx, lm_client=None, target_phase=target_phase
+    )
     return {
         "result": "not_met",
         "reason": decision.advisories[0] if decision.advisories else "Exit gate not met",

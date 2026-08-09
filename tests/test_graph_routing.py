@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from agentalloy.signals.gates import _PHASE_GRAPH
 from agentalloy.signals.graph import (
+    _PHASE_GRAPH,
     build_phase_graph,
     phase_node,
-    route_step,
+)
+from agentalloy.signals.graph import (
+    _route_step as route_step,
 )
 
 _ALLOW = None  # evaluate_phase_gate returning None == gate met (fail open)
@@ -151,6 +153,9 @@ def test_route_from_decision_forwards() -> None:
         should_transition = True
         to_phase = "design"
         advisories = []
+        gates_met = []
+        gates_unmet = []
+        qwen_calls = 0
 
     out = route_from_decision(_D(), "spec", "sdd-full")
     assert out.should_transition is True
@@ -164,6 +169,9 @@ def test_route_from_decision_self_loops_when_blocked() -> None:
         should_transition = False
         to_phase = "design"
         advisories = ["not done"]
+        gates_met = []
+        gates_unmet = []
+        qwen_calls = 0
 
     out = route_from_decision(_D(), "spec", "sdd-full")
     assert out.should_transition is False
@@ -208,3 +216,110 @@ def test_t24_graph_never_dispatches_send() -> None:
     # build_phase_graph registers only prose-binding nodes, never a dispatcher.
     build_src = inspect.getsource(build_phase_graph)
     assert "add_node" in build_src
+
+
+# ---------------------------------------------------------------------------
+# T10 — HTTP path through graph + gate block via graph
+# ---------------------------------------------------------------------------
+
+
+def test_http_target_phase_overrides_auto_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T10 — when the HTTP /state/phase path sends target_phase, it overrides _PHASE_GRAPH."""
+    import agentalloy.signals.graph as graph
+
+    # Gate always passes when called
+    monkeypatch.setattr(graph, "evaluate_phase_gate", lambda *a, **k: _ALLOW)
+
+    # Without target_phase: spec → design (normal _PHASE_GRAPH route)
+    out = route_step("spec", "sdd-full")
+    assert out.to_phase == "design"
+    assert out.should_transition is True
+
+    # With target_phase: spec → qa (bypasses design + plan + build)
+    out = route_step("spec", "sdd-full", target_phase="qa")
+    assert out.to_phase == "qa"
+    assert out.should_transition is True
+
+
+def test_gateway_block_returns_self_loop_with_advisories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T10 — when evaluate_phase_gate blocks, route_step returns should_transition=False."""
+    import agentalloy.signals.graph as graph
+
+    # Gate blocks with an advisory message
+    block_verdict = {"result": "blocked", "advisories": ["missing: docs/spec/approach.artifact"]}
+    monkeypatch.setattr(graph, "evaluate_phase_gate", lambda *a, **k: block_verdict)
+
+    out = route_step("spec", "sdd-full")
+    assert out.should_transition is False
+    assert out.to_phase == "design"  # still reports the *intended* target
+    assert "missing: docs/spec/approach.artifact" in out.advisories
+
+
+def test_gateway_block_prevents_transition_for_all_phases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T10 — gate block stops transition for every non-terminal phase."""
+    import agentalloy.signals.graph as graph
+
+    blocked = {"result": "blocked", "advisories": ["not done"]}
+    monkeypatch.setattr(graph, "evaluate_phase_gate", lambda *a, **k: blocked)
+
+    for phase in ["intake", "spec", "design", "plan", "build", "qa"]:
+        out = route_step(phase, "sdd-full")
+        assert out.should_transition is False, f"expected block for {phase}"
+
+
+def test_gateway_override_skips_completeness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T10 — override=True makes evaluate_phase_gate return None (allowed).
+
+    override=True does NOT skip the gate function entirely — evaluate_phase_gate
+    is still called, but it returns None (gate met) when override=True, so the
+    transition proceeds.
+    """
+    import agentalloy.signals.graph as graph
+
+    call_count = [0]
+
+    def mock_gate(*a, **k):
+        call_count[0] += 1
+        if k.get("override") or (len(a) > 3 and a[3]):
+            return _ALLOW  # override=True → gate met
+        return {"result": "blocked", "advisories": ["not done"]}
+
+    monkeypatch.setattr(graph, "evaluate_phase_gate", mock_gate)
+
+    # override=True → gate returns None → transition allowed
+    out = route_step("spec", "sdd-full", override=True)
+    assert out.should_transition is True
+    assert call_count[0] == 1
+
+
+def test_gateway_approval_gate_not_skipped_by_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T10 — override=True skips completeness but NOT the approval gate.
+
+    The approval gate is a separate check inside evaluate_phase_gate.
+    When approval is required and not recorded, the verdict is blocked
+    even with override=True.
+    """
+    import agentalloy.signals.graph as graph
+
+    # Approval gate blocks
+    approval_block = {
+        "result": "blocked",
+        "advisories": [
+            "'spec' is complete and awaiting human approval. PRESENT the work in full and STOP"
+        ],
+    }
+
+    call_count = [0]
+
+    def mock_gate(*a, **k):
+        call_count[0] += 1
+        return approval_block
+
+    monkeypatch.setattr(graph, "evaluate_phase_gate", mock_gate)
+
+    # Even with override=True, approval gate still blocks
+    out = route_step("spec", "sdd-full", override=True)
+    assert out.should_transition is False
+    assert call_count[0] == 1
