@@ -56,7 +56,8 @@ class JsTypeInferenceEngine:
                             )
 
                             if var_type := self._infer_js_variable_type_from_value(
-                                value_node, module_qn
+                                value_node,
+                                module_qn,
                             ):
                                 local_var_types[var_name] = var_type
                                 logger.debug(
@@ -94,7 +95,8 @@ class JsTypeInferenceEngine:
                 logger.debug(ls.JS_EXTRACTED_METHOD_CALL, method_call=method_call_text)
                 if method_call_text:
                     if inferred_type := self._infer_js_method_return_type(
-                        method_call_text, module_qn
+                        method_call_text,
+                        module_qn,
                     ):
                         logger.debug(
                             ls.JS_TYPE_INFERRED,

@@ -37,7 +37,8 @@ def pair_captures_by_ancestor(
             if ancestor is None:
                 continue
             slot = grouped.setdefault(
-                (ancestor.start_byte, ancestor.end_byte), [None] * len(capture_lists)
+                (ancestor.start_byte, ancestor.end_byte),
+                [None] * len(capture_lists),
             )
             held = slot[index]
             # Two same-name captures under one ancestor (nested matches):

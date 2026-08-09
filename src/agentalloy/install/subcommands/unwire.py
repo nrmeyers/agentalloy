@@ -120,7 +120,8 @@ def _registry_row(slug: str) -> tuple[str, str] | None:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
             row = conn.execute(
-                "SELECT repo_path, data_dir FROM indexed_repos WHERE slug = ?", (slug,)
+                "SELECT repo_path, data_dir FROM indexed_repos WHERE slug = ?",
+                (slug,),
             ).fetchone()
         finally:
             conn.close()
@@ -131,7 +132,8 @@ def _registry_row(slug: str) -> tuple[str, str] | None:
 
 def _remove_index_via_service(slug: str, port: int) -> bool | None:
     """DELETE /code/index/{slug}. True=removed, False=refused (active job /
-    error reported), None=service unreachable (caller falls back)."""
+    error reported), None=service unreachable (caller falls back).
+    """
     try:
         with httpx.Client(base_url=service_base_url(port), timeout=30.0) as client:
             resp = client.delete(f"/code/index/{slug}")
@@ -147,7 +149,8 @@ def _remove_index_via_service(slug: str, port: int) -> bool | None:
     print(f"ERROR: Could not remove the code index for {slug!r}.", file=sys.stderr)
     print(f"CAUSE: Service returned {resp.status_code}: {detail}", file=sys.stderr)
     print(
-        "FIX:   Retry with `agentalloy code remove` once no index job is active.", file=sys.stderr
+        "FIX:   Retry with `agentalloy code remove` once no index job is active.",
+        file=sys.stderr,
     )
     return False
 
@@ -191,7 +194,10 @@ def _remove_index_direct(slug: str, data_dir: str) -> bool:
 
 
 def _maybe_remove_code_index(
-    root: Path, *, assume_yes: bool, remove_index: bool
+    root: Path,
+    *,
+    assume_yes: bool,
+    remove_index: bool,
 ) -> dict[str, Any] | None:
     """Offer to drop *root*'s code index after unwiring. None = not indexed.
 
@@ -278,7 +284,8 @@ _SCAN_AMBIGUOUS_CONFIGS: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def _scan_carriers(
-    root: Path, harness: str | None
+    root: Path,
+    harness: str | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Remove unrecorded self-marking carriers under *root*; warn on ambiguous ones.
 
@@ -298,7 +305,7 @@ def _scan_carriers(
         [harness]
         if harness is not None
         else sorted(
-            set(_SCAN_DEDICATED_FILES) | set(_SCAN_SENTINEL_FILES) | set(_SCAN_AMBIGUOUS_CONFIGS)
+            set(_SCAN_DEDICATED_FILES) | set(_SCAN_SENTINEL_FILES) | set(_SCAN_AMBIGUOUS_CONFIGS),
         )
     )
     for name in names:
@@ -340,7 +347,7 @@ def _scan_carriers(
                     f"scan: {path} still points at the AgentAlloy proxy but may be a "
                     f"redirected copy of your own config — left in place. Remove it or "
                     f"restore the model endpoint by hand. (With the activation carriers "
-                    f"removed, new sessions already bypass it.)"
+                    f"removed, new sessions already bypass it.)",
                 )
     return removed, modified, warns
 
@@ -417,14 +424,14 @@ def _run(args: argparse.Namespace) -> int:
         where = "any recorded repo" if all_repos else str(scan_root)
         if scan_requested:
             result.setdefault("warnings", []).append(
-                f"No recorded or on-disk {harness!r} wiring found for {where}; nothing to remove."
+                f"No recorded or on-disk {harness!r} wiring found for {where}; nothing to remove.",
             )
         else:
             result.setdefault("warnings", []).append(
                 f"No recorded {harness!r} wiring for {where}; nothing was removed. "
                 f"If this repo still behaves as wired, its carriers exist on disk but "
                 f"were never recorded (state reset, or wiring committed into the repo). "
-                f"Re-run with --scan to remove the unrecorded carriers."
+                f"Re-run with --scan to remove the unrecorded carriers.",
             )
 
     write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Unwire"))

@@ -101,7 +101,10 @@ class JavaTypeInferenceEngine(
         return local_var_types
 
     def resolve_java_method_call(
-        self, call_node: ASTNode, local_var_types: dict[str, str], module_qn: str
+        self,
+        call_node: ASTNode,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> tuple[str, str] | None:
         return self._do_resolve_java_method_call(call_node, local_var_types, module_qn)
 

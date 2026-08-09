@@ -103,6 +103,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     agentalloy_dir = Path.home() / ".agentalloy"
     agentalloy_dir.mkdir(parents=True, exist_ok=True)
@@ -146,5 +147,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=content_sha,
             original_content=original_content,
             marker_key="claude-code.env",
-        )
+        ),
     ]

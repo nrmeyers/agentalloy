@@ -59,7 +59,7 @@ _log = logging.getLogger(__name__)
 # (approach.md §1; state_store.SESSION_SCOPED_KINDS). Pulling these into graph
 # state would force ``thread_id = session`` — exactly the collapse #548 removes.
 _NON_GRAPH_SESSION_KINDS: frozenset[str] = frozenset(
-    {"announced", "composed", "banner-turns", "pause-reminded"}
+    {"announced", "composed", "banner-turns", "pause-reminded"},
 )
 
 # The four lanes (approach.md §1, §7 step 3 / coordination.md). ``sdd-full`` is
@@ -286,7 +286,11 @@ def _route_step(
         return RoutingOutcome(False, current_phase, current_phase, lane, [])
 
     verdict = evaluate_phase_gate(
-        current_phase, to_phase, project_root, override=override, store=store
+        current_phase,
+        to_phase,
+        project_root,
+        override=override,
+        store=store,
     )
     if verdict is not None:
         # Gate blocked — pull gates_met/gates_unmet/qwen_calls via decide_transition
@@ -345,7 +349,9 @@ def _route_step(
 
 
 def route_from_decision(
-    decision: Any, current_phase: str, lane: str = "sdd-full"
+    decision: Any,
+    current_phase: str,
+    lane: str = "sdd-full",
 ) -> RoutingOutcome:
     """Adapt an already-computed ``PhaseTransitionDecision`` to a routing key.
 

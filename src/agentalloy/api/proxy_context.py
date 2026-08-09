@@ -180,5 +180,6 @@ def read_upstream(cwd: Path) -> UpstreamFile:
     key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
 
     return UpstreamFile(
-        kind="valid", upstream=Upstream(url=url.rstrip("/"), model=model, key_env=key_env)
+        kind="valid",
+        upstream=Upstream(url=url.rstrip("/"), model=model, key_env=key_env),
     )

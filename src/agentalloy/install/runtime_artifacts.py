@@ -244,7 +244,11 @@ def _safe_reclaim(port: int, match: tuple[str, ...]) -> int | None:
 def _systemctl(*args: str) -> None:
     try:
         subprocess.run(
-            ["systemctl", "--user", *args], capture_output=True, text=True, timeout=15, check=False
+            ["systemctl", "--user", *args],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("systemctl %s failed: %s", args, exc)
@@ -253,7 +257,11 @@ def _systemctl(*args: str) -> None:
 def _launchctl(*args: str) -> None:
     try:
         subprocess.run(
-            ["launchctl", *args], capture_output=True, text=True, timeout=15, check=False
+            ["launchctl", *args],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("launchctl %s failed: %s", args, exc)
@@ -296,11 +304,11 @@ def detect_orphans() -> list[Orphan]:
                         f"stale {match[0]} on :{port} (pid {pid})",
                         port=port,
                         pid=pid,
-                    )
+                    ),
                 )
         else:
             found.append(
-                Orphan("conflict", f":{port} held by foreign pid {pid}", port=port, pid=pid)
+                Orphan("conflict", f":{port} held by foreign pid {pid}", port=port, pid=pid),
             )
 
     shim = shim_path()
@@ -360,7 +368,7 @@ def _reap_processes(*, dry_run: bool) -> list[Action]:
                     f"pid://{pid}",
                     f":{port} held by foreign pid {pid} — left running",
                     executed=False,
-                )
+                ),
             )
             continue
         if dry_run:
@@ -370,7 +378,7 @@ def _reap_processes(*, dry_run: bool) -> list[Action]:
                     f"pid://{pid}",
                     f"stop {match[0]} on :{port} (pid {pid})",
                     executed=False,
-                )
+                ),
             )
             continue
         reaped = _safe_reclaim(port, match)
@@ -380,7 +388,7 @@ def _reap_processes(*, dry_run: bool) -> list[Action]:
                 f"pid://{pid}",
                 f"stopped {match[0]} on :{port} (pid {pid})",
                 executed=reaped is not None,
-            )
+            ),
         )
     return actions
 
@@ -403,13 +411,13 @@ def _reap_systemd(*, dry_run: bool, stale_only: bool) -> list[Action]:
             continue  # live, presumably-healthy — leave it for a real uninstall
         if dry_run:
             actions.append(
-                Action("remove_unit", str(unit_path), f"disable + remove {unit}", executed=False)
+                Action("remove_unit", str(unit_path), f"disable + remove {unit}", executed=False),
             )
             continue
         _systemctl("disable", "--now", unit)
         _unlink(unit_path)
         actions.append(
-            Action("remove_unit", str(unit_path), f"disabled + removed {unit}", executed=True)
+            Action("remove_unit", str(unit_path), f"disabled + removed {unit}", executed=True),
         )
         # The sanitized env file is written next to the main service unit.
         if unit == "agentalloy.service":
@@ -417,7 +425,7 @@ def _reap_systemd(*, dry_run: bool, stale_only: bool) -> list[Action]:
             if env_file.exists():
                 _unlink(env_file)
                 actions.append(
-                    Action("remove_unit", str(env_file), "removed agentalloy.env", executed=True)
+                    Action("remove_unit", str(env_file), "removed agentalloy.env", executed=True),
                 )
         removed_any = True
     if removed_any and not dry_run:
@@ -437,13 +445,13 @@ def _reap_launchd(*, dry_run: bool, stale_only: bool) -> list[Action]:
             continue
         if dry_run:
             actions.append(
-                Action("remove_unit", str(plist), f"unload + remove {label}", executed=False)
+                Action("remove_unit", str(plist), f"unload + remove {label}", executed=False),
             )
             continue
         _launchctl("unload", str(plist))
         _unlink(plist)
         actions.append(
-            Action("remove_unit", str(plist), f"unloaded + removed {label}", executed=True)
+            Action("remove_unit", str(plist), f"unloaded + removed {label}", executed=True),
         )
     return actions
 

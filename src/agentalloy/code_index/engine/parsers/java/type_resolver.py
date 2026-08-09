@@ -139,11 +139,14 @@ class JavaTypeResolverMixin:
         return self._find_superclass_using_ast(ctx.root_node, ctx.target_class_name, ctx.module_qn)
 
     def _find_superclass_using_ast(
-        self, node: ASTNode, target_class_name: str, module_qn: str
+        self,
+        node: ASTNode,
+        target_class_name: str,
+        module_qn: str,
     ) -> str | None:
         if node.type == cs.TS_CLASS_DECLARATION:
             if (name_node := node.child_by_field_name(cs.FIELD_NAME)) and safe_decode_text(
-                name_node
+                name_node,
             ) == target_class_name:
                 if superclass_node := node.child_by_field_name(cs.FIELD_SUPERCLASS):
                     if superclass_name := self._extract_type_name_from_node(superclass_node):
@@ -182,11 +185,14 @@ class JavaTypeResolverMixin:
         return self._find_interfaces_using_ast(root_node, target_class_name, module_qn)
 
     def _find_interfaces_using_ast(
-        self, node: ASTNode, target_class_name: str, module_qn: str
+        self,
+        node: ASTNode,
+        target_class_name: str,
+        module_qn: str,
     ) -> list[str]:
         if node.type == cs.TS_CLASS_DECLARATION:
             if (name_node := node.child_by_field_name(cs.FIELD_NAME)) and safe_decode_text(
-                name_node
+                name_node,
             ) == target_class_name:
                 if interfaces_node := node.child_by_field_name(cs.FIELD_INTERFACES):
                     interface_list: list[str] = []
@@ -200,7 +206,10 @@ class JavaTypeResolverMixin:
         return []
 
     def _extract_interface_names(
-        self, interfaces_node: ASTNode, interface_list: list[str], module_qn: str
+        self,
+        interfaces_node: ASTNode,
+        interface_list: list[str],
+        module_qn: str,
     ) -> None:
         for child in interfaces_node.children:
             if child.type == cs.TS_TYPE_IDENTIFIER:
@@ -212,7 +221,9 @@ class JavaTypeResolverMixin:
 
     def _get_current_class_name(self, module_qn: str) -> str | None:
         root_node = get_root_node_from_module_qn(
-            module_qn, self.module_qn_to_file_path, self.ast_cache
+            module_qn,
+            self.module_qn_to_file_path,
+            self.ast_cache,
         )
         if not root_node:
             return None

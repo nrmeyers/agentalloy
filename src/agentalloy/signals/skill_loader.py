@@ -235,7 +235,7 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
     view = _phase_view(project_root)
     if view is None:
         raise RuntimeError(
-            "no state store bound in this process — phase writes require the service"
+            "no state store bound in this process — phase writes require the service",
         )
     prev = _read_phase(project_root)
     view.write_phase(phase, actor=session_key)
@@ -421,7 +421,9 @@ def _read_announced(project_root: Path) -> str | None:
 
 
 def _write_announced_atomic(
-    project_root: Path, phase: str, session_keys: list[str] | None = None
+    project_root: Path,
+    phase: str,
+    session_keys: list[str] | None = None,
 ) -> None:
     """Record *(phase, session_keys)* as announced (Tier 1 cadence).
 
@@ -483,7 +485,9 @@ def _read_orientation_announced(project_root: Path) -> tuple[str | None, list[st
 
 
 def _write_orientation_announced_atomic(
-    project_root: Path, phase: str, session_keys: list[str] | None = None
+    project_root: Path,
+    phase: str,
+    session_keys: list[str] | None = None,
 ) -> None:
     """Record *(phase, session_keys)* as oriented (session cadence).
 
@@ -551,7 +555,8 @@ def _has_legacy_contract_layout(contracts_root: Path) -> bool:
     """Cheap check for any legacy flat-layout indicator (fast path for the auto
     migrate). True when flat ``*.md`` sit in the contracts root, a legacy
     per-phase dir exists, ``archive/`` holds flat ``*.md``, or ``_superseded/``
-    exists. Once migrated, all of these are gone and this returns False."""
+    exists. Once migrated, all of these are gone and this returns False.
+    """
     if not contracts_root.is_dir():
         return False
     if any(contracts_root.glob("*.md")):
@@ -673,7 +678,10 @@ def _read_banner_turn(project_root: Path) -> tuple[str | None, str | None, int]:
 
 
 def _write_banner_turn_atomic(
-    project_root: Path, phase: str, session_key: str | None, count: int
+    project_root: Path,
+    phase: str,
+    session_key: str | None,
+    count: int,
 ) -> None:
     """Record the banner carrier-turn counter for *(phase, session_key)*.
 
@@ -803,6 +811,7 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
     Args:
         phase: The current phase (e.g. "build").
         cwd: The working directory for profile detection. Defaults to ``Path.cwd()``.
+
     """
     from agentalloy.signals.invariants import overlay_prose
 
@@ -813,7 +822,8 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
         return None
 
     override_prose, override_tags = _load_workflow_prose_override(
-        str(shipped.get("skill_id", "")), cwd
+        str(shipped.get("skill_id", "")),
+        cwd,
     )
     eff, missing = overlay_prose(shipped, override_prose, override_tags)
     if missing:

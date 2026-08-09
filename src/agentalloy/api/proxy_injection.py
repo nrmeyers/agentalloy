@@ -229,7 +229,10 @@ def _message_contains(message: Any, needle: str) -> bool:
 
 
 def anthropic_has_marker(
-    payload: dict[str, Any], *, kind: str = "workflow", phase: str | None = None
+    payload: dict[str, Any],
+    *,
+    kind: str = "workflow",
+    phase: str | None = None,
 ) -> bool:
     """True if a matching marker is present in the payload's messages.
 
@@ -254,7 +257,11 @@ def anthropic_has_marker(
 
 
 def inject_into_anthropic_messages(
-    payload: dict[str, Any], block: str, *, phase: str, kind: str = "workflow"
+    payload: dict[str, Any],
+    block: str,
+    *,
+    phase: str,
+    kind: str = "workflow",
 ) -> dict[str, Any]:
     """Inject *block* into the LAST ``role == "user"`` message.
 
@@ -393,7 +400,10 @@ def _input_item_contains(item: Any, needle: str) -> bool:
 
 
 def responses_has_marker(
-    payload: dict[str, Any], *, kind: str = "workflow", phase: str | None = None
+    payload: dict[str, Any],
+    *,
+    kind: str = "workflow",
+    phase: str | None = None,
 ) -> bool:
     """True if a matching marker is present in the payload's ``input`` items."""
     raw = payload.get("input")
@@ -416,7 +426,11 @@ def responses_has_marker(
 
 
 def inject_into_responses_input(
-    payload: dict[str, Any], block: str, *, phase: str, kind: str = "workflow"
+    payload: dict[str, Any],
+    block: str,
+    *,
+    phase: str,
+    kind: str = "workflow",
 ) -> dict[str, Any]:
     """Inject *block* into the LAST user message item of a Responses payload.
 
@@ -506,7 +520,11 @@ def _last_user_message_index(messages: list[ProxyMessage]) -> int | None:
 
 
 def inject_into_openai_messages(
-    messages: list[ProxyMessage], block: str, *, phase: str, kind: str = "workflow"
+    messages: list[ProxyMessage],
+    block: str,
+    *,
+    phase: str,
+    kind: str = "workflow",
 ) -> list[ProxyMessage] | None:
     """Inject *block* into the LAST ``role == "user"`` message of a typed list.
 
@@ -612,7 +630,10 @@ def inject_into_openai_messages(
 
 
 def inject_into_openai_system_prompt(
-    messages: list[ProxyMessage], block: str, *, phase: str
+    messages: list[ProxyMessage],
+    block: str,
+    *,
+    phase: str,
 ) -> list[ProxyMessage] | None:
     """Append a new ``role == "system"`` message carrying *block*.
 
@@ -681,7 +702,10 @@ def inject_into_openai_system_prompt(
 
 
 def inject_into_responses_instructions(
-    payload: dict[str, Any], block: str, *, phase: str
+    payload: dict[str, Any],
+    block: str,
+    *,
+    phase: str,
 ) -> dict[str, Any]:
     """Inject *block* into a Responses payload's top-level ``instructions``.
 
@@ -767,7 +791,10 @@ def _has_ttl(value: Any, ttl: str) -> bool:
 
 
 def inject_into_anthropic_system_prompt(
-    payload: dict[str, Any], block: str, *, phase: str
+    payload: dict[str, Any],
+    block: str,
+    *,
+    phase: str,
 ) -> dict[str, Any] | None:
     """Inject *block* into the Anthropic top-level ``system`` field.
 
@@ -836,7 +863,7 @@ def inject_into_anthropic_system_prompt(
         # Yielding rather than erroring when the harness already spent all 4: dropping
         # the breakpoint costs tokens, exceeding the limit costs the whole request.
         spent = _count_cache_breakpoints(blocks) + _count_cache_breakpoints(
-            {k: v for k, v in payload.items() if k != "system"}
+            {k: v for k, v in payload.items() if k != "system"},
         )
         if spent < _CACHE_BREAKPOINT_LIMIT:
             cache_control: dict[str, Any] = {"type": "ephemeral"}

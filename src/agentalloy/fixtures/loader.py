@@ -73,7 +73,9 @@ def load_fixtures(
                 created_fragments += 1
 
     summary = LoadSummary(
-        skills=created_skills, versions=created_versions, fragments=created_fragments
+        skills=created_skills,
+        versions=created_versions,
+        fragments=created_fragments,
     )
     logger.info(
         "fixtures_load ok skills=%d versions=%d fragments=%d",

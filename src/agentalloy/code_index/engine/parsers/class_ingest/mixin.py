@@ -272,7 +272,10 @@ class ClassIngestMixin:
 
             module_name = safe_decode_text(module_name_node)
             nested_qn = id_.build_nested_qualified_name_for_class(
-                module_node, module_qn, module_name or "", lang_config
+                module_node,
+                module_qn,
+                module_name or "",
+                lang_config,
             )
             inline_module_qn = nested_qn or f"{module_qn}.{module_name}"
 
@@ -282,7 +285,7 @@ class ClassIngestMixin:
                 cs.KEY_PATH: f"{cs.INLINE_MODULE_PATH_PREFIX}{module_name}",
             }
             logger.info(
-                logs.CLASS_FOUND_INLINE_MODULE.format(name=module_name, qn=inline_module_qn)
+                logs.CLASS_FOUND_INLINE_MODULE.format(name=module_name, qn=inline_module_qn),
             )
             self.ingestor.ensure_node_batch(cs.NodeLabel.MODULE, module_props)
 
@@ -295,7 +298,10 @@ class ClassIngestMixin:
 
     def _resolve_class_name(self, class_name: str, module_qn: str) -> str | None:
         return resolve_class_name(
-            class_name, module_qn, self.import_processor, self.function_registry
+            class_name,
+            module_qn,
+            self.import_processor,
+            self.function_registry,
         )
 
     def _extract_cpp_base_class_name(self, parent_text: str) -> str:

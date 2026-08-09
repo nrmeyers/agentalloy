@@ -44,7 +44,7 @@ CODE_VECTORS_SCHEMA = pa.schema(
         pa.field("end_line", pa.int64(), nullable=True),
         pa.field("indexed_at", pa.int64(), nullable=False),
         pa.field("text", pa.string(), nullable=False),
-    ]
+    ],
 )
 
 
@@ -86,7 +86,9 @@ class LanceCodeVectorStore:
         """
         try:
             return self._db.create_table(
-                self._table_name, schema=CODE_VECTORS_SCHEMA, exist_ok=True
+                self._table_name,
+                schema=CODE_VECTORS_SCHEMA,
+                exist_ok=True,
             )
         except Exception as exc:
             if "schema" not in str(exc).lower():
@@ -125,7 +127,7 @@ class LanceCodeVectorStore:
                 # Message MUST contain an upgrade.py marker substring ("dimension").
                 raise EmbeddingDimMismatch(
                     f"qualified_name={r.qualified_name}: embedding has {len(r.embedding)} "
-                    f"dimensions, expected {EMBEDDING_DIM} (nomic-embed-text-v1.5)"
+                    f"dimensions, expected {EMBEDDING_DIM} (nomic-embed-text-v1.5)",
                 )
 
     # -- writes --------------------------------------------------------------
@@ -160,7 +162,9 @@ class LanceCodeVectorStore:
         self._check_dims(batch)
         payload = [self._row(r) for r in batch]
         self._table = self._db.create_table(
-            self._table_name, schema=CODE_VECTORS_SCHEMA, mode="overwrite"
+            self._table_name,
+            schema=CODE_VECTORS_SCHEMA,
+            mode="overwrite",
         )
         if payload:
             self._table.add(payload)
@@ -180,7 +184,11 @@ class LanceCodeVectorStore:
     # -- reads ---------------------------------------------------------------
 
     def search_similar(
-        self, query_vec: Sequence[float], *, k: int = 10, where: str | None = None
+        self,
+        query_vec: Sequence[float],
+        *,
+        k: int = 10,
+        where: str | None = None,
     ) -> list[CodeSearchHit]:
         """Top-k cosine similarity (``score`` = 1 - cosine distance).
 
@@ -193,7 +201,7 @@ class LanceCodeVectorStore:
         """
         if len(query_vec) != EMBEDDING_DIM:
             raise EmbeddingDimMismatch(
-                f"query vector has {len(query_vec)} dimensions, expected {EMBEDDING_DIM}"
+                f"query vector has {len(query_vec)} dimensions, expected {EMBEDDING_DIM}",
             )
         if self._table.count_rows() == 0:
             return []
@@ -201,7 +209,7 @@ class LanceCodeVectorStore:
         # ``distance_type`` lives on the vector-query subclass; LanceDB's stubs
         # type ``.search()`` as the base builder, so pyright can't see it.
         search = self._table.search(q, vector_column_name="embedding").distance_type(  # pyright: ignore[reportAttributeAccessIssue]
-            "cosine"
+            "cosine",
         )
         if where:
             search = search.where(where, prefilter=True)
@@ -218,7 +226,11 @@ class LanceCodeVectorStore:
         ]
 
     def search_bm25(
-        self, query: str, *, k: int = 10, where: str | None = None
+        self,
+        query: str,
+        *,
+        k: int = 10,
+        where: str | None = None,
     ) -> list[tuple[str, float]]:
         """Native BM25 (Tantivy) over the ``text`` column. Returns [] if no
         FTS index has been built yet (BM25 leg degrades gracefully).
@@ -244,7 +256,8 @@ class LanceCodeVectorStore:
 
     def embedding_dim(self) -> int | None:
         """Row-count gated: int when populated, None when empty (hard contract,
-        same as ``LanceFragmentStore.embedding_dim``)."""
+        same as ``LanceFragmentStore.embedding_dim``).
+        """
         return None if self.count() == 0 else EMBEDDING_DIM
 
     # -- maintenance ---------------------------------------------------------
@@ -258,12 +271,15 @@ class LanceCodeVectorStore:
 
     def optimize(self) -> None:
         """Compact + (re)build indices at the end of an index pass: BM25
-        always, the ANN vector index only once the dataset is large enough."""
+        always, the ANN vector index only once the dataset is large enough.
+        """
         self.rebuild_fts_index()
         if self.count() >= _ANN_MIN_ROWS:
             try:
                 self._table.create_index(
-                    metric="cosine", vector_column_name="embedding", index_type="IVF_PQ"
+                    metric="cosine",
+                    vector_column_name="embedding",
+                    index_type="IVF_PQ",
                 )
                 self._has_vector_index = True
             except Exception:

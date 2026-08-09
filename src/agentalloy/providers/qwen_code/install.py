@@ -54,7 +54,8 @@ def extract_upstream(root: Path) -> Upstream | None:
 
     # Read the active model name.
     model_name = cast("str | None", model_block.get("name")) or cast(
-        "str | None", model_block.get("default")
+        "str | None",
+        model_block.get("default"),
     )
     if not model_name:
         return None
@@ -85,6 +86,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     # Lazy import: wire_harness imports the provider registry at module load,
     # so a top-level import here would be circular.

@@ -64,7 +64,7 @@ BINARY_EXTENSIONS: frozenset[str] = frozenset(
         ".ico",
         ".tiff",
         ".webp",
-    }
+    },
 )
 
 # (H) Source file extensions by language
@@ -368,7 +368,7 @@ _missing_keys = set(NodeLabel) - set(_NODE_LABEL_UNIQUE_KEYS.keys())
 if _missing_keys:
     raise RuntimeError(
         f"NodeLabel(s) missing from _NODE_LABEL_UNIQUE_KEYS: {_missing_keys}. "
-        "Every NodeLabel MUST have a unique key defined."
+        "Every NodeLabel MUST have a unique key defined.",
     )
 
 
@@ -434,7 +434,7 @@ DEPENDENCY_FILES = frozenset(
         "go.mod",
         "gemfile",
         "composer.json",
-    }
+    },
 )
 CSPROJ_SUFFIX = ".csproj"
 
@@ -871,7 +871,7 @@ IGNORE_PATTERNS = frozenset(
         "tmp",
         "vendor",
         "venv",
-    }
+    },
 )
 IGNORE_SUFFIXES = frozenset({".tmp", "~", ".pyc", ".pyo", ".o", ".a", ".so", ".dll", ".class"})
 
@@ -1000,7 +1000,7 @@ CYPHER_DANGEROUS_KEYWORDS: frozenset[str] = frozenset(
         "CALL",
         "LOAD CSV",
         "FOREACH",
-    }
+    },
 )
 
 # (H) Tool success messages
@@ -1058,7 +1058,7 @@ SHELL_DANGEROUS_COMMANDS = frozenset(
         "crontab",
         "at",
         "batch",
-    }
+    },
 )
 
 # (H) Dangerous rm flags
@@ -1087,7 +1087,7 @@ SHELL_SYSTEM_DIRECTORIES = frozenset(
         "tmp",
         "usr",
         "var",
-    }
+    },
 )
 
 # (H) Dangerous patterns for full pipeline (cross-segment patterns with pipes/operators)
@@ -1211,7 +1211,7 @@ JS_BUILTIN_TYPES: frozenset[str] = frozenset(
         "Promise",
         "Error",
         "Boolean",
-    }
+    },
 )
 
 # (H) JavaScript built-in function patterns
@@ -1256,7 +1256,7 @@ JS_BUILTIN_PATTERNS: frozenset[str] = frozenset(
         "Math.min",
         "Date.now",
         "Date.parse",
-    }
+    },
 )
 
 JS_METHOD_BIND = "bind"
@@ -1333,7 +1333,7 @@ LANG_FUNCTION_KEYWORDS = frozenset(
         "arrow_function",
         "anonymous_function",
         "closure",
-    }
+    },
 )
 LANG_CLASS_KEYWORDS = frozenset(
     {
@@ -1346,7 +1346,7 @@ LANG_CLASS_KEYWORDS = frozenset(
         "type",
         "impl",
         "union",
-    }
+    },
 )
 LANG_CALL_KEYWORDS = frozenset({"call", "invoke", "invocation"})
 LANG_MODULE_KEYWORDS = frozenset({"program", "source_file", "compilation_unit", "module", "chunk"})
@@ -1824,7 +1824,7 @@ LUA_STDLIB_MODULES = frozenset(
         "coroutine",
         "utf8",
         "bit32",
-    }
+    },
 )
 
 # (H) Entity type names
@@ -1871,7 +1871,7 @@ CPP_STDLIB_ENTITIES = frozenset(
         "copy",
         "transform",
         "accumulate",
-    }
+    },
 )
 
 # (H) Java common class names for heuristic detection
@@ -1891,7 +1891,7 @@ JAVA_STDLIB_CLASSES = frozenset(
         "Pattern",
         "LocalDateTime",
         "BigDecimal",
-    }
+    },
 )
 
 # (H) Import processor misc
@@ -1919,7 +1919,7 @@ JAVA_PRIMITIVE_TYPES = frozenset(
         "char",
         "byte",
         "short",
-    }
+    },
 )
 JAVA_WRAPPER_TYPES = frozenset(
     {
@@ -1929,7 +1929,7 @@ JAVA_WRAPPER_TYPES = frozenset(
         "Long",
         "Double",
         "Boolean",
-    }
+    },
 )
 
 # (H) Java tree-sitter node types
@@ -2048,7 +2048,7 @@ JAVA_CLASS_MODIFIERS = frozenset(
         JAVA_MODIFIER_STATIC,
         JAVA_MODIFIER_FINAL,
         JAVA_MODIFIER_ABSTRACT,
-    }
+    },
 )
 
 JAVA_METHOD_MODIFIERS = frozenset(
@@ -2060,7 +2060,7 @@ JAVA_METHOD_MODIFIERS = frozenset(
         JAVA_MODIFIER_FINAL,
         JAVA_MODIFIER_ABSTRACT,
         JAVA_MODIFIER_SYNCHRONIZED,
-    }
+    },
 )
 
 JAVA_FIELD_MODIFIERS = frozenset(
@@ -2072,7 +2072,7 @@ JAVA_FIELD_MODIFIERS = frozenset(
         JAVA_MODIFIER_FINAL,
         JAVA_MODIFIER_TRANSIENT,
         JAVA_MODIFIER_VOLATILE,
-    }
+    },
 )
 
 # (H) Java visibility values
@@ -2094,7 +2094,7 @@ JAVA_CLASS_NODE_TYPES = frozenset(
         TS_ENUM_DECLARATION,
         TS_ANNOTATION_TYPE_DECLARATION,
         TS_RECORD_DECLARATION,
-    }
+    },
 )
 
 # (H) Java method node types
@@ -2102,7 +2102,7 @@ JAVA_METHOD_NODE_TYPES = frozenset(
     {
         TS_METHOD_DECLARATION,
         TS_CONSTRUCTOR_DECLARATION,
-    }
+    },
 )
 
 # (H) Java main method constants
@@ -2124,14 +2124,14 @@ JAVA_JVM_LANGUAGES = frozenset(
         JAVA_PATH_JAVA,
         JAVA_PATH_KOTLIN,
         JAVA_PATH_SCALA,
-    }
+    },
 )
 
 JAVA_SRC_FOLDERS = frozenset(
     {
         JAVA_PATH_MAIN,
         JAVA_PATH_TEST,
-    }
+    },
 )
 
 # (H) Delimiter tokens for argument parsing

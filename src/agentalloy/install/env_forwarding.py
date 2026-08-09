@@ -86,7 +86,7 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # JIT push phase 2: merge related (thematic) decisions into the
         # decision block (default on — measured ~4 ms median overhead).
         "KNOWLEDGE_RELATED_ENABLED",
-    }
+    },
 )
 
 # Keys NEVER forwarded — the container bakes its own value.
@@ -113,7 +113,7 @@ HOST_TOPOLOGY_KEYS: frozenset[str] = frozenset(
         "AGENTALLOY_PACKS",
         "AGENTALLOY_RUNTIME_STATE_DIR",
         "AGENTALLOY_PROJECTS_ROOT",
-    }
+    },
 )
 
 # Forwarded URL keys that normally point at a service on the HOST. A loopback
@@ -126,7 +126,7 @@ URL_CLASS_UPSTREAM_KEYS: frozenset[str] = frozenset(
         "UPSTREAM_URL",
         "ANTHROPIC_UPSTREAM_URL",
         "RESPONSES_UPSTREAM_URL",
-    }
+    },
 )
 
 
@@ -198,6 +198,6 @@ def loopback_upstream_warnings(forwarded: dict[str, str]) -> list[str]:
             warnings.append(
                 f"{key}={value} points at a loopback address, which resolves inside "
                 f"the container — use host.containers.internal or a LAN address to "
-                f"reach a service on the host."
+                f"reach a service on the host.",
             )
     return warnings

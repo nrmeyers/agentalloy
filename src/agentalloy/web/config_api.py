@@ -200,7 +200,9 @@ async def put_config(
 
     if not updates:
         return ConfigUpdateResult(
-            status="ok", message="No changes.", env_file_path=str(_env_file_path())
+            status="ok",
+            message="No changes.",
+            env_file_path=str(_env_file_path()),
         )
     env_file = _upsert_env_file(updates)
     return ConfigUpdateResult(

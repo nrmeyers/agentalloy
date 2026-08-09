@@ -112,7 +112,8 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
 
     Cursor-scoped (#378) to match the predicate: counts against the active design
     work-item's tasks.md and its own build contracts, so the numbers reported are
-    the same ones the gate judged (never the repo aggregate)."""
+    the same ones the gate judged (never the repo aggregate).
+    """
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         _count_task_items,
         _item_build_contracts,
@@ -165,7 +166,8 @@ def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> st
     """Advisory for ``build_contract_tag_focus`` NOT_MET — name the over-tagged contracts.
 
     Cursor-scoped (#378): names only the active work-item's offenders, matching the
-    predicate, so a sibling item's wide-tag contract is neither judged nor named."""
+    predicate, so a sibling item's wide-tag contract is neither judged nor named.
+    """
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         _item_build_contracts,
         _resolve_workitem_slug,
@@ -226,7 +228,7 @@ def _evaluate_single(
         return result
     raise ValueError(
         f"Unknown predicate '{predicate_name}'. "
-        f"Available: {sorted(list(PREDICATES) + list(SEMANTIC_PREDICATES))}"
+        f"Available: {sorted(list(PREDICATES) + list(SEMANTIC_PREDICATES))}",
     )
 
 
@@ -459,7 +461,7 @@ def decide_transition(
                     f"Phase '{current_phase}' isn't complete yet, so staying in "
                     f"'{current_phase}'. To advance to '{to_phase}', record its exit "
                     f"artifact: `agentalloy contract artifact-set --phase {phase_name} "
-                    f"--slug <slug> --name {name_glob}`."
+                    f"--slug <slug> --name {name_glob}`.",
                 )
         # Split missing paths into "wrote it somewhere wrong" vs "doesn't exist at
         # all". A near-miss (the deliverable exists but at the wrong path — e.g.
@@ -473,7 +475,7 @@ def decide_transition(
                 advisories.append(
                     f"Found {found}, but phase '{current_phase}' expects its exit "
                     f"artifact at `{p}`. Move or rename it there to advance to "
-                    f"'{to_phase}'."
+                    f"'{to_phase}'.",
                 )
             else:
                 generic.append(p)
@@ -482,7 +484,7 @@ def decide_transition(
             advisories.append(
                 f"Phase '{current_phase}' isn't complete yet, so staying in "
                 f"'{current_phase}'. To advance to '{to_phase}', produce its exit "
-                f"artifact(s): {paths}."
+                f"artifact(s): {paths}.",
             )
 
     return PhaseTransitionDecision(
@@ -584,7 +586,9 @@ def evaluate_phase_gate(
                 # (#516). eval_approval_recorded itself returns NOT_MET when
                 # nothing is produced/approvable.
                 ctx = PredicateContext(
-                    project_root=project_root, current_phase=current_phase, store=store
+                    project_root=project_root,
+                    current_phase=current_phase,
+                    store=store,
                 )
                 result = eval_approval_recorded({"since_name_glob": name_glob}, ctx)
                 approval_blocked = result == PredicateResult.NOT_MET
@@ -594,7 +598,9 @@ def evaluate_phase_gate(
             # forward (completeness) gate handle it.
             if since and project_root and any(p.is_file() for p in project_root.glob(since)):
                 ctx = PredicateContext(
-                    project_root=project_root, current_phase=current_phase, store=store
+                    project_root=project_root,
+                    current_phase=current_phase,
+                    store=store,
                 )
                 result = eval_approval_recorded({"since": since}, ctx)
                 approval_blocked = result == PredicateResult.NOT_MET
@@ -605,7 +611,7 @@ def evaluate_phase_gate(
                 "advisories": [
                     f"'{current_phase}' requires human approval before advancing "
                     f"to '{target_phase}'. Run `agentalloy approve {current_phase}` "
-                    f"once the user has approved."
+                    f"once the user has approved.",
                 ],
             }
 
@@ -640,7 +646,11 @@ def evaluate_phase_gate(
     # Use decide_transition for human-readable advisory text (near-miss paths,
     # missing-artifact guidance). It re-evaluates deterministically (lm_client=None).
     decision = decide_transition(
-        current_phase, gate_spec, ctx, lm_client=None, target_phase=target_phase
+        current_phase,
+        gate_spec,
+        ctx,
+        lm_client=None,
+        target_phase=target_phase,
     )
     return {
         "result": "not_met",

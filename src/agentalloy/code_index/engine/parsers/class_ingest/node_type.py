@@ -39,7 +39,7 @@ def determine_node_type(
         case cs.CppNodeType.TEMPLATE_DECLARATION:
             node_type = extract_template_class_type(class_node) or NodeType.CLASS
             logger.info(
-                logs.CLASS_FOUND_TEMPLATE.format(node_type=node_type, name=class_name, qn=class_qn)
+                logs.CLASS_FOUND_TEMPLATE.format(node_type=node_type, name=class_name, qn=class_qn),
             )
             return node_type
         case cs.CppNodeType.FUNCTION_DEFINITION if language == cs.SupportedLanguage.CPP:

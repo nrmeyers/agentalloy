@@ -63,7 +63,7 @@ _CANDIDATE_TARGETS: tuple[str, ...] = (
 )
 
 _DEDICATED_TARGETS = frozenset(
-    {".cursor/rules/agentalloy-code-index.mdc", ".cursor/rules/codebase-indexer.mdc"}
+    {".cursor/rules/agentalloy-code-index.mdc", ".cursor/rules/codebase-indexer.mdc"},
 )
 
 # Inner block template (without sentinels). Kept small — it loads into every
@@ -262,7 +262,10 @@ def remove_code_index_blocks(root: Path) -> list[dict[str, Any]]:
 
 
 def wire_code_index_block(
-    root: Path, port: int, *, harness: str | None = None
+    root: Path,
+    port: int,
+    *,
+    harness: str | None = None,
 ) -> list[dict[str, Any]]:
     """Write/refresh the code-index block, migrating any legacy block in place.
 
@@ -277,6 +280,7 @@ def wire_code_index_block(
         harness: Harness registry key (e.g. ``"qwen-code"``). Used for
             harness-aware target detection — prevents creating a CLAUDE.md
             for non-claude-code harnesses.
+
     """
     root = Path(root)
     slug = repo_slug(root)
@@ -350,6 +354,7 @@ def maybe_wire(
 
     Best-effort: wiring already succeeded when this runs, so failures are
     reported as warnings, never raised.
+
     """
     try:
         status = service_module_status(port)

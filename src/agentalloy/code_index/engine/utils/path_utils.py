@@ -94,6 +94,7 @@ def should_prune_dir(
 
     Returns:
         True when the walk should not descend into ``dir_path``.
+
     """
     try:
         rel_path = dir_path.relative_to(repo_path)

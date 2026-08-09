@@ -17,7 +17,7 @@ router = APIRouter()
 
 def get_retrieve_orchestrator() -> RetrieveOrchestrator:
     raise RuntimeError(
-        "get_retrieve_orchestrator must be bound during app lifespan; no default available"
+        "get_retrieve_orchestrator must be bound during app lifespan; no default available",
     )
 
 
@@ -37,7 +37,8 @@ async def retrieve_by_id(
     result = await orchestrator.by_id(skill_id)
     if result is None:
         raise HTTPException(
-            status_code=404, detail=f"skill {skill_id!r} not found or has no active version"
+            status_code=404,
+            detail=f"skill {skill_id!r} not found or has no active version",
         )
     return result
 

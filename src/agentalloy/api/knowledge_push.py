@@ -36,7 +36,8 @@ _SOLUTIONS_PREFIX = "docs/solutions/"
 @dataclass(frozen=True)
 class DecisionPush:
     """The rendered decision block plus its provenance counts (for telemetry —
-    the push runs outside the compose telemetry merge, so it reports its own)."""
+    the push runs outside the compose telemetry merge, so it reports its own).
+    """
 
     text: str
     count: int
@@ -48,14 +49,16 @@ def _is_superseded(_decision: DecisionRow) -> bool:
     """Forward-compatible no-op (DK5): decisions carry no status today — the
     schema/``DecisionRow`` have no such field and ingestion never sets one. Placed
     at the seam so the exclusion activates unchanged when supersession authoring
-    lands (a later, deferred slice)."""
+    lands (a later, deferred slice).
+    """
     return False
 
 
 def _solutions_slug(decision_qn: str) -> str | None:
     """The lesson slug for a ``docs/solutions/<slug>.md::anchor`` decision, else
     None (only solutions decisions can have a promoted skill — the #375 promote
-    path only promotes ``docs/solutions/``)."""
+    path only promotes ``docs/solutions/``).
+    """
     path = decision_qn.split("::", 1)[0]
     if path.startswith(_SOLUTIONS_PREFIX) and path.endswith(".md"):
         return path[len(_SOLUTIONS_PREFIX) : -len(".md")]
@@ -67,7 +70,8 @@ def _covered_by_instructions(decision: DecisionRow, composed_text: str) -> bool:
     into this turn's composed text (DK4). We dedup against what was really composed
     — not mere skill existence — so Knowledge yields only when Instructions truly
     covered the why here; a promoted-but-unranked/untagged skill leaves no fragment
-    in the text and the decision is still pushed (no silent gap)."""
+    in the text and the decision is still pushed (no silent gap).
+    """
     slug = _solutions_slug(decision.qualified_name)
     if slug is None:
         return False
@@ -78,7 +82,8 @@ def _covered_by_instructions(decision: DecisionRow, composed_text: str) -> bool:
 def _resolve_touched_files(graph: CodeGraphStore, globs: list[str]) -> list[str]:
     """Indexed files matching any ``scope.touches`` glob, scan-bounded and capped
     at ``_MAX_TOUCH_FILES`` (DK6). ``fnmatch`` ``*`` spans ``/`` — intentional, so a
-    ``dir/**`` glob matches nested files."""
+    ``dir/**`` glob matches nested files.
+    """
     matched: list[str] = []
     for f in graph.list_files(limit=_FILE_SCAN_LIMIT):
         if any(fnmatch.fnmatch(f, g) for g in globs):
@@ -93,7 +98,8 @@ def _strip_duplicate_heading(snippet: str, heading: str) -> str:
 
     Markdown chunks carry their own ``## Heading`` line in the body, and
     :func:`_render` emits the heading itself — without this the decision heading
-    appears twice in the injected block (UAT finding)."""
+    appears twice in the injected block (UAT finding).
+    """
     body = snippet.strip()
     first, _, rest = body.partition("\n")
     if first.startswith("#") and first.lstrip("#").strip().casefold() == heading.strip().casefold():
@@ -183,7 +189,7 @@ def build_decision_block(
                         if "::" in r.qualified_name
                         else None,
                         start_line=None,
-                    )
+                    ),
                 )
                 related_count += 1
         except Exception:

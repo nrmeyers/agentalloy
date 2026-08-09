@@ -38,7 +38,7 @@ VALID_PRESETS = frozenset(
         "apple-silicon",
         "nvidia",
         "radeon",
-    }
+    },
 )
 
 # Keys the user is allowed to override via --overrides.
@@ -59,7 +59,7 @@ _KNOWN_KEYS = frozenset(
         "CODE_INDEX_ENABLED",
         "CODE_INDEX_DATA_DIR",
         "CODE_INDEX_WATCH",
-    }
+    },
 )
 
 # Sentinel comment marking a CLI-generated .env

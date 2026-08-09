@@ -193,12 +193,12 @@ class _StructuralMigration:
             conn.execute(f"ALTER TABLE {table_name} RENAME TO {old_name}")
             conn.execute(new_ddl)
             col_list = sorted(
-                cols & {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")}
+                cols & {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")},
             )
             if col_list:
                 conn.execute(
                     f"INSERT INTO {table_name} ({', '.join(col_list)}) "
-                    f"SELECT {', '.join(col_list)} FROM {old_name}"
+                    f"SELECT {', '.join(col_list)} FROM {old_name}",
                 )
             conn.execute(f"DROP TABLE {old_name}")
             # Recreate indexes from _DDL (they reference the new table name)
@@ -451,7 +451,8 @@ class CodeIndexJobsStore:
 
     def find_active(self, slug: str) -> CodeIndexJob | None:
         """The most recent queued/running job for ``slug``, if any (used to
-        fail-fast on duplicate concurrent index requests)."""
+        fail-fast on duplicate concurrent index requests).
+        """
         row = self.conn.execute(
             """
             SELECT * FROM jobs
@@ -505,7 +506,8 @@ class CodeIndexJobsStore:
     def touch_heartbeat(self, job_id: str) -> None:
         """Advance only the ``updated_at`` liveness clock of a running job —
         proves a long, callback-silent write phase is still alive without
-        mutating phase/progress. No-op for terminal/absent rows."""
+        mutating phase/progress. No-op for terminal/absent rows.
+        """
         with self._lock:
             self.conn.execute(
                 "UPDATE jobs SET updated_at = ? WHERE job_id = ? AND status = 'running'",
@@ -515,7 +517,12 @@ class CodeIndexJobsStore:
     # -- jobs: terminal transitions -------------------------------------------------
 
     def mark_done(
-        self, job_id: str, *, symbol_count: int, edge_count: int, embedding_count: int
+        self,
+        job_id: str,
+        *,
+        symbol_count: int,
+        edge_count: int,
+        embedding_count: int,
     ) -> None:
         """Idempotent transition to ``status='done'``, ``progress_pct=100``."""
         now = time.time()
@@ -540,7 +547,8 @@ class CodeIndexJobsStore:
 
     def mark_failed(self, job_id: str, *, error: str, terminal_status: str = "failed") -> None:
         """Idempotent transition to a terminal failure status
-        (``failed`` | ``cancelled`` | ``interrupted``)."""
+        (``failed`` | ``cancelled`` | ``interrupted``).
+        """
         now = time.time()
         with self._lock:
             self.conn.execute(
@@ -570,7 +578,8 @@ class CodeIndexJobsStore:
     def is_cancel_requested(self, job_id: str) -> bool:
         """Lock-free read used by the worker between phases."""
         row = self.conn.execute(
-            "SELECT cancel_requested FROM jobs WHERE job_id = ?", (job_id,)
+            "SELECT cancel_requested FROM jobs WHERE job_id = ?",
+            (job_id,),
         ).fetchone()
         return bool(row[0]) if row is not None else False
 
@@ -607,7 +616,8 @@ class CodeIndexJobsStore:
         """Record the decision phase's GOVERNS-edge delta (#527 B) on the job
         row. Also appends a warn-level event when the result looks bad
         (dropped > written, or anything reported suspicious) so
-        ``list_job_events``/CLI surfaces it without a separate poll."""
+        ``list_job_events``/CLI surfaces it without a separate poll.
+        """
         with self._lock:
             self.conn.execute(
                 """
@@ -711,7 +721,11 @@ class CodeIndexJobsStore:
             return cur.rowcount > 0
 
     def mark_indexed(
-        self, slug: str, *, head_sha: str | None = None, repo_path: str | None = None
+        self,
+        slug: str,
+        *,
+        head_sha: str | None = None,
+        repo_path: str | None = None,
     ) -> bool:
         """Advance ``last_indexed_at`` (and optionally ``head_sha``).
 
@@ -768,7 +782,8 @@ class CodeIndexJobsStore:
     def get_repos_by_slug(self, slug: str) -> list[IndexedRepo]:
         """All registry rows for a slug (0, 1, or multiple checkouts)."""
         rows = self.conn.execute(
-            "SELECT * FROM indexed_repos WHERE slug = ? ORDER BY repo_path", (slug,)
+            "SELECT * FROM indexed_repos WHERE slug = ? ORDER BY repo_path",
+            (slug,),
         ).fetchall()
         return [_row_to_repo(r) for r in rows]
 
@@ -827,14 +842,15 @@ class CodeIndexJobsStore:
         """Find all registry entries whose repo_path matches (resolved)."""
         target = str(Path(repo_path).resolve())
         rows = self.conn.execute(
-            "SELECT * FROM indexed_repos WHERE repo_path = ? ORDER BY slug", (target,)
+            "SELECT * FROM indexed_repos WHERE repo_path = ? ORDER BY slug",
+            (target,),
         ).fetchall()
         return [_row_to_repo(r) for r in rows]
 
     def list_watch_enabled_repos(self) -> list[IndexedRepo]:
         """Registry rows enrolled for watching (service-startup observer set)."""
         rows = self.conn.execute(
-            "SELECT * FROM indexed_repos WHERE watch_enabled = 1 ORDER BY slug"
+            "SELECT * FROM indexed_repos WHERE watch_enabled = 1 ORDER BY slug",
         ).fetchall()
         return [_row_to_repo(r) for r in rows]
 

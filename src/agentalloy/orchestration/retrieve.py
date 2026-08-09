@@ -49,7 +49,8 @@ class RetrieveOrchestrator:
 
     def rebind_source(self, source: RuntimeCache | SkillStore) -> None:
         """Swap the skill source — a freshly reloaded RuntimeCache after an
-        in-process corpus write (see web/runtime_refresh.py)."""
+        in-process corpus write (see web/runtime_refresh.py).
+        """
         self._source = source
 
     async def by_id(self, skill_id: str) -> RetrieveByIdResponse | None:
@@ -59,7 +60,8 @@ class RetrieveOrchestrator:
             return None
 
         version_meta, raw_prose = await asyncio.to_thread(
-            self._fetch_version_meta_and_prose, skill.active_version_id
+            self._fetch_version_meta_and_prose,
+            skill.active_version_id,
         )
         response = RetrieveByIdResponse(
             skill_id=skill.skill_id,
@@ -80,7 +82,7 @@ class RetrieveOrchestrator:
                 source_skill_ids=[skill.skill_id],
                 latency_retrieval_ms=elapsed_ms,
                 latency_total_ms=elapsed_ms,
-            )
+            ),
         )
         return response
 
@@ -138,7 +140,7 @@ class RetrieveOrchestrator:
                     canonical_name=skill.canonical_name,
                     raw_prose=raw_prose,
                     score=score,
-                )
+                ),
             )
 
         elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
@@ -153,7 +155,7 @@ class RetrieveOrchestrator:
                 latency_retrieval_ms=elapsed_ms,
                 latency_total_ms=elapsed_ms,
                 error_payload=error_payload,
-            )
+            ),
         )
         return RetrieveQueryResponse(results=hits)
 

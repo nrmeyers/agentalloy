@@ -208,7 +208,10 @@ def promote_lesson(
     lesson_text = _read_store_lesson(root, slug)
     if lesson_text is not None:
         gen = generate_lesson_pack_from_text(
-            slug, lesson_text, dest_root, source=f"store:{LESSON_PHASE}/{slug}/{LESSON_NAME}"
+            slug,
+            lesson_text,
+            dest_root,
+            source=f"store:{LESSON_PHASE}/{slug}/{LESSON_NAME}",
         )
     else:
         # Pre-migration repos still keep lessons on disk; promote those unchanged.
@@ -252,7 +255,10 @@ def promote_lesson(
         # (it can't reach a container corpus). Its dedup verdicts surface as-is;
         # everything else runs through the shared finalizer.
         install_result = (push_fn or push_pack_to_service)(
-            pack_dir, route=route, allow_duplicates=allow_duplicates, reembed=True
+            pack_dir,
+            route=route,
+            allow_duplicates=allow_duplicates,
+            reembed=True,
         )
         action = install_result.get("action")
         if action in ("duplicate_refused", "dedup_probe_failed"):
@@ -262,7 +268,11 @@ def promote_lesson(
             install_result.setdefault("pack_dir", str(pack_dir))
             return install_result
         return _finalize_promote(
-            install_result, slug=slug, gen=gen, pack_dir=pack_dir, hard_hits=[]
+            install_result,
+            slug=slug,
+            gen=gen,
+            pack_dir=pack_dir,
+            hard_hits=[],
         )
 
     # else: write_host — the direct host-side probe + install below.
@@ -341,7 +351,11 @@ def promote_lesson(
         install_fn = install_local_pack
     install_result = install_fn(pack_dir, root=root, strict=True, allow_duplicates=allow_duplicates)
     return _finalize_promote(
-        install_result, slug=slug, gen=gen, pack_dir=pack_dir, hard_hits=hard_hits
+        install_result,
+        slug=slug,
+        gen=gen,
+        pack_dir=pack_dir,
+        hard_hits=hard_hits,
     )
 
 
@@ -376,7 +390,7 @@ def _finalize_promote(
             ),
             "remediation": str(
                 install_result.get("remediation")
-                or f"fix the failure and re-run `agentalloy install-pack {pack_dir}`."
+                or f"fix the failure and re-run `agentalloy install-pack {pack_dir}`.",
             ),
         }
 

@@ -84,6 +84,7 @@ def write_proxy_trace(
             compose was built from; None on free-text rows — the populated/null
             split is what makes injection mode auditable in production.
         contract_tags: The contract's domain_tags (the BM25 steer + soft filter).
+
     """
     try:
         trace = CompositionTrace(

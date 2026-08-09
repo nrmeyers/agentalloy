@@ -70,7 +70,7 @@ type FileStatCache = dict[str, StatEntry]
 # Sidecar cache files that should never be scanned as input. Used by
 # `_collect_eligible_files` to skip self-referential entries.
 _SIDECAR_CACHE_FILENAMES: frozenset[str] = frozenset(
-    {cs.HASH_CACHE_FILENAME, cs.STAT_CACHE_FILENAME}
+    {cs.HASH_CACHE_FILENAME, cs.STAT_CACHE_FILENAME},
 )
 
 
@@ -99,7 +99,9 @@ class FunctionRegistryTrie:
         current[cs.TRIE_QN_KEY] = qualified_name
 
     def get(
-        self, qualified_name: QualifiedName, default: NodeType | None = None
+        self,
+        qualified_name: QualifiedName,
+        default: NodeType | None = None,
     ) -> NodeType | None:
         return self._entries.get(qualified_name, default)
 
@@ -664,7 +666,7 @@ class GraphUpdater:
                             "phase": "parsing",
                             "files_done": _files_scanned,
                             "current_file": file_key,
-                        }
+                        },
                     )
                     _last_cb_time = _now
                     _files_since_cb = 0
@@ -698,7 +700,7 @@ class GraphUpdater:
                         "phase": "parsing",
                         "files_done": _files_scanned,
                         "current_file": file_key,
-                    }
+                    },
                 )
                 _last_cb_time = _now
                 _files_since_cb = 0
@@ -765,7 +767,10 @@ class GraphUpdater:
         if workers <= 1 or len(ast_cache_items) < 2:
             for file_path, (root_node, language) in ast_cache_items:
                 self.factory.call_processor.process_calls_in_file(
-                    file_path, root_node, language, self.queries
+                    file_path,
+                    root_node,
+                    language,
+                    self.queries,
                 )
             return
 

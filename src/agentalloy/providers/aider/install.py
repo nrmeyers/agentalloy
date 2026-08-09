@@ -54,6 +54,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     files: list[WireRecord] = []
 
@@ -72,7 +73,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(template_content),
             original_content=original_instructions,
             marker_key="aider.instructions",
-        )
+        ),
     )
 
     # 2. Write/update .aider.conf.yml with proxy config
@@ -107,7 +108,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(block),
             original_content=original_conf,
             marker_key="aider.conf.proxy",
-        )
+        ),
     )
 
     return files

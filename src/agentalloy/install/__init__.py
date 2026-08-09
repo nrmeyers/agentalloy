@@ -13,7 +13,7 @@ Each module exposes ``add_parser(subparsers)`` and ``run(args) -> int``.
 # They require legacy markdown-injection wiring or the sidecar file watcher.
 PROXY_UNABLE_HARNESSES: frozenset[str] = frozenset(
     # "gemini-cli" is the deprecated alias for antigravity (Antigravity CLI).
-    {"cursor", "windsurf", "github-copilot", "antigravity", "gemini-cli"}
+    {"cursor", "windsurf", "github-copilot", "antigravity", "gemini-cli"},
 )
 
 # Harnesses that use the native Anthropic passthrough (`/proj/<token>/v1/messages`)

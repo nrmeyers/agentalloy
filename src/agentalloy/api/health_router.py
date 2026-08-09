@@ -44,7 +44,8 @@ class LMAssistConfigView(BaseModel):
     """Effective Stage B (LM fragment re-rank) config, for benchmark preflight.
 
     The service owns this config (env-driven); the ``composed-lm`` benchmark arm
-    reads it to fail fast when ``LM_ASSIST`` is not ``arbitrate``."""
+    reads it to fail fast when ``LM_ASSIST`` is not ``arbitrate``.
+    """
 
     mode: str
     model: str
@@ -61,7 +62,8 @@ class ServiceProvenance(BaseModel):
     ``corpus_stamp`` is a SHA-256 over the active ``(skill_id, version_id)``
     pairs in ``skill_id`` order: it changes iff the active corpus changes
     (ingest, version activation, deprecation) and is insensitive to row order
-    or connection details. ``None`` when the store is unreachable."""
+    or connection details. ``None`` when the store is unreachable.
+    """
 
     version: str
     corpus_stamp: str | None = None
@@ -194,13 +196,14 @@ class HealthChecker:
 
     def _corpus_stamp(self) -> str | None:
         """SHA-256 over the sorted active (skill_id, version_id) pairs, or None
-        when the store is unreachable. The probe must never break /health."""
+        when the store is unreachable. The probe must never break /health.
+        """
         try:
             rows = self._store.execute(
                 "SELECT s.skill_id, s.current_version_id FROM skills s "
                 "JOIN skill_versions v ON v.version_id = s.current_version_id "
                 "WHERE v.status = 'active' AND s.deprecated = false "
-                "ORDER BY s.skill_id"
+                "ORDER BY s.skill_id",
             )
             digest = hashlib.sha256()
             for skill_id, version_id in rows:
@@ -221,7 +224,8 @@ class HealthChecker:
     def _probe_embed_model(self) -> str | None:
         """FastFlowLM hides the embedding slot from /v1/models, so we probe by
         actually embedding a short string. A 1024-dim (or any non-empty) result
-        proves both the endpoint and the model are responsive."""
+        proves both the endpoint and the model are responsive.
+        """
         try:
             vectors = self._lm.embed(model=self._embedding_model, texts=["health"])
             if not vectors or not vectors[0]:
@@ -238,7 +242,8 @@ class HealthChecker:
         window (updated by the scorer itself), so it never makes a live reranker
         call and adds no latency to /health. Returns None when Stage B is disabled
         (no attempts ever run) or the window has no failing majority. Any unexpected
-        error is swallowed — the probe must never break /health."""
+        error is swallowed — the probe must never break /health.
+        """
         try:
             from agentalloy.retrieval.lm_assist import reranker_status
 
@@ -259,7 +264,9 @@ async def health(request: Request) -> HealthResponse:
         # No checker (lifespan-less TestClient): version is still known; the
         # corpus stamp requires a store, so it stays None.
         return HealthResponse(
-            status="healthy", modules=modules, service=ServiceProvenance(version=__version__)
+            status="healthy",
+            modules=modules,
+            service=ServiceProvenance(version=__version__),
         )
     response = await checker.check()
     response.modules = modules

@@ -292,7 +292,10 @@ def _check_llama_server_present() -> dict[str, Any]:
     binary = shutil.which("llama-server")
     if binary:
         return _check(
-            "llama_server_present", passed=True, started=t0, detail=f"llama-server at {binary}"
+            "llama_server_present",
+            passed=True,
+            started=t0,
+            detail=f"llama-server at {binary}",
         )
 
     # macOS auto-install via Homebrew (llama.cpp formula ships llama-server).
@@ -408,6 +411,7 @@ def _check_runtime_binary(runtime: str | None) -> dict[str, Any]:
     -------
     dict
         Check result with ``passed``, ``detail``/``error``, and ``remediation``.
+
     """
     t0 = time.monotonic()
     if runtime is None:
@@ -543,6 +547,7 @@ def _check_name_conflicts(runtime: str) -> dict[str, Any]:
     -------
     dict
         Check result. Fails if a container named ``agentalloy`` is found.
+
     """
     t0 = time.monotonic()
     try:
@@ -597,6 +602,7 @@ def _check_volume_exists(runtime: str) -> dict[str, Any]:
     -------
     dict
         Check result (always passes).
+
     """
     t0 = time.monotonic()
     try:
@@ -697,7 +703,7 @@ def run_preflight(
                         "Run `agentalloy recommend-models` first, or pass "
                         "`--runner <llama-server|fastflowlm>` explicitly."
                     ),
-                )
+                ),
             )
         elif chosen == "llama-server":
             checks.append(_check_llama_server_present())
@@ -716,7 +722,7 @@ def run_preflight(
                         f"runner {chosen!r} has no preflight coverage "
                         "(manual-pull runner: LM Studio, MLX, vLLM)"
                     ),
-                )
+                ),
             )
 
     fatal_failed = [c for c in checks if not c["passed"] and c.get("severity", "fatal") == "fatal"]

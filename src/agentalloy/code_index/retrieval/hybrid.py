@@ -78,13 +78,14 @@ _QUERY_STOP_WORDS: frozenset[str] = frozenset(
         "they", "them", "their",
         # generic search verbs
         "show", "find", "list", "get",
-    }
+    },
 )  # fmt: skip
 
 
 def rewrite_query(raw: str) -> str:
     """Strip stop-words from descriptive queries; never rewrite short or
-    symbol-like (dotted / snake_case / hyphenated token) queries."""
+    symbol-like (dotted / snake_case / hyphenated token) queries.
+    """
     tokens = raw.rstrip("?").strip().split()
     if len(tokens) < 4:
         return raw
@@ -160,7 +161,7 @@ def _hydrate(
                     score=score,
                     snippet=_snippet(sym),
                     indexed_head=indexed_head,
-                )
+                ),
             )
             continue
         hit = dense_by_qn.get(qn)
@@ -175,16 +176,18 @@ def _hydrate(
                     score=score,
                     snippet="",
                     indexed_head=indexed_head,
-                )
+                ),
             )
     return out
 
 
 def _normalized_pagerank(
-    dense: list[CodeSearchHit], pagerank: dict[str, float]
+    dense: list[CodeSearchHit],
+    pagerank: dict[str, float],
 ) -> dict[str, float]:
     """Min-max normalize pagerank to [0, 1] WITHIN the candidate set. A flat
-    (or absent) distribution contributes 0 to every candidate."""
+    (or absent) distribution contributes 0 to every candidate.
+    """
     values = [pagerank.get(h.qualified_name, 0.0) for h in dense]
     lo, hi = min(values, default=0.0), max(values, default=0.0)
     if hi <= lo:
@@ -194,7 +197,8 @@ def _normalized_pagerank(
 
 def _rrf_fuse(dense_order: list[str], bm25_order: list[str]) -> list[tuple[str, float]]:
     """Reciprocal Rank Fusion of two ranked qualified-name lists (K=60).
-    Ties break on qualified name for deterministic output."""
+    Ties break on qualified name for deterministic output.
+    """
     fused: dict[str, float] = {}
     for order in (dense_order, bm25_order):
         for rank, qn in enumerate(order, start=1):
@@ -234,7 +238,8 @@ async def semantic_search(
             # Centrality fusion over the dense candidates only (BM25 scores
             # are rank-fused below, not blended with pagerank).
             norm_pr = _normalized_pagerank(
-                dense, handles.graph.read_centrality([h.qualified_name for h in dense])
+                dense,
+                handles.graph.read_centrality([h.qualified_name for h in dense]),
             )
             fused_dense = sorted(
                 dense,
@@ -249,7 +254,11 @@ async def semantic_search(
 
             ranked = _rrf_fuse([h.qualified_name for h in fused_dense], [qn for qn, _score in bm25])
             return _hydrate(
-                handles.graph, ranked, k=k, dense_by_qn=dense_by_qn, indexed_head=indexed_head
+                handles.graph,
+                ranked,
+                k=k,
+                dense_by_qn=dense_by_qn,
+                indexed_head=indexed_head,
             )
         finally:
             handles.close()

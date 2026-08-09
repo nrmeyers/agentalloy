@@ -245,7 +245,7 @@ def _render_cli_hint(result: dict[str, Any]) -> None:
     hint = result.get("cli_hint")
     if hint:
         print_rich(
-            f"\n  [dim]The agentalloy CLI itself was left installed. To remove it: {hint}[/dim]"
+            f"\n  [dim]The agentalloy CLI itself was left installed. To remove it: {hint}[/dim]",
         )
 
 
@@ -321,7 +321,7 @@ def _run_deep(args: argparse.Namespace) -> int:
                     "plan": plan,
                     "warnings": plan_report.warnings,
                     "cli_hint": plan_report.cli_hint,
-                }
+                },
             )
         if nothing_to_do:
             result = {

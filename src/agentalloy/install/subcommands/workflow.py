@@ -61,7 +61,11 @@ def _rewrite_and_verify_posture(root: Path, phase: str, mode: str) -> None:
         rewrite_enforcement_posture(root, phase, mode=mode)
     except Exception:
         logger.warning(
-            "posture rewrite failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+            "posture rewrite failed for %s phase=%s mode=%s",
+            root,
+            phase,
+            mode,
+            exc_info=True,
         )
         print(
             f"Warning: could not update enforcement posture for phase '{phase}' "
@@ -75,7 +79,11 @@ def _rewrite_and_verify_posture(root: Path, phase: str, mode: str) -> None:
         mismatched = verify_enforcement_posture(root, phase, mode)
     except Exception:
         logger.warning(
-            "posture verification failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+            "posture verification failed for %s phase=%s mode=%s",
+            root,
+            phase,
+            mode,
+            exc_info=True,
         )
         return
 
@@ -246,7 +254,7 @@ def _run_pause(args: argparse.Namespace) -> int:
     else:
         print(
             f"Already in workflow pause (since {result.get('paused_since') or 'unknown'}); "
-            f"workflow paused at phase '{result['phase']}'."
+            f"workflow paused at phase '{result['phase']}'.",
         )
     return 0
 

@@ -63,7 +63,7 @@ def print_rich(*args: Any, **kwargs: Any) -> None:
 # ---------------------------------------------------------------------------
 
 _markup_re = re.compile(
-    r"\[(/?)?(bold|dim|red|green|yellow|blue|magenta|cyan|white|black|default|link|on\s+\w+|default|link\s+\S+|[a-z_]+)\]"
+    r"\[(/?)?(bold|dim|red|green|yellow|blue|magenta|cyan|white|black|default|link|on\s+\w+|default|link\s+\S+|[a-z_]+)\]",
 )
 
 

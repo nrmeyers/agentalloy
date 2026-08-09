@@ -55,6 +55,7 @@ class Profile:
         datastore_path: DuckDB path for this profile's skills.
             ``~/.agentalloy/profiles/<name>/skills.duck``.
         is_default: True if this is the built-in ``default`` profile.
+
     """
 
     name: str
@@ -70,6 +71,7 @@ class ProfilesConfig:
     Attributes:
         profiles: Raw config dict keyed by profile name.
         default_profile: Name of the fallback profile.
+
     """
 
     profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -350,7 +352,7 @@ def list_profiles(cwd: Path | None = None) -> list[dict[str, Any]]:
             "match_path": [],
             "has_overrides": _profile_has_overrides(DEFAULT_PROFILE_NAME),
             "is_default": True,
-        }
+        },
     )
 
     # Include user-configured profiles
@@ -365,7 +367,7 @@ def list_profiles(cwd: Path | None = None) -> list[dict[str, Any]]:
                 "match_path": rules.get("match_path", []) or [],
                 "has_overrides": _profile_has_overrides(name),
                 "is_default": False,
-            }
+            },
         )
 
     return all_profiles
@@ -399,11 +401,12 @@ def init_profile(
 
     Returns:
         The newly created Profile object.
+
     """
     # Validate name
     if not name or not name.replace("-", "").replace("_", "").isalnum():
         raise ValueError(
-            f"Invalid profile name: {name!r}. Use letters, digits, hyphens, underscores."
+            f"Invalid profile name: {name!r}. Use letters, digits, hyphens, underscores.",
         )
     if name == DEFAULT_PROFILE_NAME:
         raise ValueError(f"Cannot use reserved name: {DEFAULT_PROFILE_NAME}")
@@ -467,7 +470,7 @@ def delete_profile(name: str) -> None:
         raise ValueError(
             "Cannot delete the current default profile. "
             "Set a different default first with "
-            "'agentalloy profile set-default <name>'."
+            "'agentalloy profile set-default <name>'.",
         )
 
     # Remove profile directory

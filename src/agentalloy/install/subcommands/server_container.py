@@ -33,7 +33,8 @@ _STOPPED_STATES = {"created", "exited", "stopped", "dead", "configured"}
 
 
 def _functional_runtime_or_error(
-    target: DeploymentTarget, verb: str
+    target: DeploymentTarget,
+    verb: str,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Validate the resolved runtime; return ``(runtime, None)`` or ``(None, error)``.
 
@@ -76,7 +77,10 @@ def _state(runtime: str, name: str) -> str:
 
 
 def _runtime_call(
-    runtime: str, args: list[str], *, timeout: float
+    runtime: str,
+    args: list[str],
+    *,
+    timeout: float,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``{runtime} {args...}`` capturing output (mirrors container_runtime style)."""
     return subprocess.run(  # noqa: S603 — fixed argv, runtime resolved from state
@@ -178,7 +182,9 @@ def run_stop(target: DeploymentTarget, *, timeout: float) -> tuple[int, dict[str
         }
 
     proc = _runtime_call(
-        runtime, ["stop", "--time", str(int(timeout)), name], timeout=timeout + 30.0
+        runtime,
+        ["stop", "--time", str(int(timeout)), name],
+        timeout=timeout + 30.0,
     )
     if proc.returncode != 0:
         return EXIT_USER, {
@@ -197,7 +203,10 @@ def run_stop(target: DeploymentTarget, *, timeout: float) -> tuple[int, dict[str
 
 
 def run_restart(
-    target: DeploymentTarget, *, stop_timeout: float, wait: float
+    target: DeploymentTarget,
+    *,
+    stop_timeout: float,
+    wait: float,
 ) -> tuple[int, dict[str, Any]]:
     """``server-restart`` on a container: ``{runtime} restart`` then wait /health.
 
@@ -228,7 +237,9 @@ def run_restart(
         return run_start(target, wait=wait)
 
     proc = _runtime_call(
-        runtime, ["restart", "--time", str(int(stop_timeout)), name], timeout=stop_timeout + 90.0
+        runtime,
+        ["restart", "--time", str(int(stop_timeout)), name],
+        timeout=stop_timeout + 90.0,
     )
     if proc.returncode != 0:
         return EXIT_USER, {

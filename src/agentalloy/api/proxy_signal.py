@@ -220,7 +220,9 @@ def _extract_task_from_messages(request: ProxyRequest) -> str | None:
 
 
 def _resolve_current_contract(
-    cwd: Path, phase: str, session_key: str | None = None
+    cwd: Path,
+    phase: str,
+    session_key: str | None = None,
 ) -> tuple[str | None, Path | None]:
     """Resolve the current work-item contract for Tier 2 domain composition.
 
@@ -398,7 +400,11 @@ def _store_artifact_status(
 
     for gate_phase, name, sections in _extract_artifact_contains_store_specs(exit_gates):
         present, total, gate_missing = store_section_completeness(
-            store, gate_phase, name, sections, slug=slug
+            store,
+            gate_phase,
+            name,
+            sections,
+            slug=slug,
         )
         present_total += present
         section_total += total
@@ -456,7 +462,9 @@ def build_banner(
     any_recorded = False
     try:
         unrecorded, s_present, s_total, s_missing, any_recorded = _store_artifact_status(
-            exit_gates, store, slug
+            exit_gates,
+            store,
+            slug,
         )
     except Exception:
         logger.debug("banner store status failed for phase=%s", phase, exc_info=True)
@@ -745,6 +753,7 @@ async def evaluate_signal(
 
     Returns:
         SignalResult with composition decision and metadata
+
     """
     # Trace ID — single source of truth for correlating all telemetry events
     # (phase_start, llm_sent, llm_received, composition_traces) for this request.
@@ -1006,7 +1015,10 @@ async def evaluate_signal(
     #    a turn carrying no completion/approval signal the trigger does not fire,
     #    so an in-progress phase stays silent unless it is also an entry turn.
     match: PreFilterMatch | None = check_transition_trigger(
-        signal_keywords, exit_gates, ctx, embed_client
+        signal_keywords,
+        exit_gates,
+        ctx,
+        embed_client,
     )
 
     # 6. Eval (only when the trigger fired): evaluate exit gates, transition the
@@ -1126,7 +1138,7 @@ async def evaluate_signal(
     #     `not phase_changed` excludes the same-session-advanced-here case (that's a
     #     phase entry, oriented via Tier 1, not a stale-phase resume to confirm).
     new_session = bool(
-        is_carrier and session_key and session_key not in last_sessions and not phase_changed
+        is_carrier and session_key and session_key not in last_sessions and not phase_changed,
     )
     confirm_directives = _boundary_confirm_directives(
         cwd,
@@ -1290,13 +1302,13 @@ def _boundary_confirm_directives(
                 "You are resuming a NEW session on phase `intake` (the entry phase). "
                 "Before doing any work, RUN `agentalloy contract init --phase spec` "
                 "to write the contract and PRESENT it in full and STOP — do not draft "
-                "solutions. The user will approve and advance the phase."
+                "solutions. The user will approve and advance the phase.",
             ]
         return []
 
     ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))
     swept = bool(
-        phase_changed and session_key and transitioned_by and transitioned_by != session_key
+        phase_changed and session_key and transitioned_by and transitioned_by != session_key,
     )
 
     if new_session:
@@ -1306,13 +1318,13 @@ def _boundary_confirm_directives(
                 "already recorded. First CONFIRM with the user that `ship` is the right "
                 "phase to be on; if it is, ASK whether they are ready to reset to intake "
                 "for the next work item (`agentalloy phase set intake`). Do NOT change "
-                "the phase on your own initiative — wait for their answer."
+                "the phase on your own initiative — wait for their answer.",
             ]
         return [
             f"You are resuming a NEW session on phase `{phase}` (not intake). Before "
             f"doing this phase's work, CONFIRM with the user that `{phase}` is the "
             "correct phase to resume — the per-repo phase file can be left stale by a "
-            "prior or concurrent session. Do NOT change the phase on your own initiative."
+            "prior or concurrent session. Do NOT change the phase on your own initiative.",
         ]
 
     if swept:
@@ -1324,13 +1336,13 @@ def _boundary_confirm_directives(
                 "CONFIRM with the user that `ship` is the right phase to be on; if it "
                 "is, ASK whether they are ready to reset to intake for the next work "
                 "item (`agentalloy phase set intake`). Do NOT change the phase on your "
-                "own initiative — wait for their answer."
+                "own initiative — wait for their answer.",
             ]
         return [
             f"The phase changed to `{phase}` since your last turn here — a different "
             "concurrent session on this repo advanced it, not this one. CONFIRM with "
             f"the user that `{phase}` is the correct phase to continue on before doing "
-            "this phase's work. Do NOT change the phase on your own initiative."
+            "this phase's work. Do NOT change the phase on your own initiative.",
         ]
 
     if ship_landed:
@@ -1338,7 +1350,7 @@ def _boundary_confirm_directives(
             "Delivery has landed (a docs/ship/ record exists). Before anything else, "
             "ASK the user whether they are ready to reset to intake for the next work "
             "item (`agentalloy phase set intake`). Do NOT reset on your own initiative "
-            "— wait for their answer."
+            "— wait for their answer.",
         ]
     return []
 

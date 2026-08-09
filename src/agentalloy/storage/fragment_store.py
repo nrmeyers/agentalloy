@@ -58,7 +58,7 @@ FRAGMENTS_SCHEMA = pa.schema(
         pa.field("prose", pa.string(), nullable=False),
         pa.field("phase_scope", pa.list_(pa.string()), nullable=True),
         pa.field("domain_tags", pa.list_(pa.string()), nullable=True),
-    ]
+    ],
 )
 
 
@@ -93,7 +93,7 @@ def _build_filter(
     if categories and phases:
         clauses.append(
             f"(category IN {_in_list(categories)} "
-            f"OR array_has_any(phase_scope, {_arr_list(phases)}))"
+            f"OR array_has_any(phase_scope, {_arr_list(phases)}))",
         )
     elif categories:
         clauses.append(f"category IN {_in_list(categories)}")
@@ -172,7 +172,7 @@ class LanceFragmentStore:
                 # Message MUST contain an upgrade.py marker substring ("dimension").
                 raise EmbeddingDimMismatch(
                     f"fragment_id={f.fragment_id}: embedding has {len(f.embedding)} "
-                    f"dimensions, expected {EMBEDDING_DIM} (nomic-embed-text-v1.5)"
+                    f"dimensions, expected {EMBEDDING_DIM} (nomic-embed-text-v1.5)",
                 )
 
     # -- writes --------------------------------------------------------------
@@ -209,7 +209,9 @@ class LanceFragmentStore:
         self._check_dims(batch)
         rows = [self._row(f) for f in batch]
         self._table = self._db.create_table(
-            self._table_name, schema=FRAGMENTS_SCHEMA, mode="overwrite"
+            self._table_name,
+            schema=FRAGMENTS_SCHEMA,
+            mode="overwrite",
         )
         if rows:
             self._table.add(rows)
@@ -247,7 +249,9 @@ class LanceFragmentStore:
         """Wipe the dataset (public replacement for the v5.3 private ``_conn`` DELETE)."""
         n = self._table.count_rows()
         self._table = self._db.create_table(
-            self._table_name, schema=FRAGMENTS_SCHEMA, mode="overwrite"
+            self._table_name,
+            schema=FRAGMENTS_SCHEMA,
+            mode="overwrite",
         )
         self._has_vector_index = False
         return n
@@ -274,7 +278,7 @@ class LanceFragmentStore:
         """
         if len(query_vec) != EMBEDDING_DIM:
             raise EmbeddingDimMismatch(
-                f"query vector has {len(query_vec)} dimensions, expected {EMBEDDING_DIM}"
+                f"query vector has {len(query_vec)} dimensions, expected {EMBEDDING_DIM}",
             )
         if self._table.count_rows() == 0:
             return []
@@ -282,7 +286,7 @@ class LanceFragmentStore:
         # ``distance_type`` lives on the vector-query subclass; LanceDB's stubs
         # type ``.search()`` as the base builder, so pyright can't see it.
         search = self._table.search(q, vector_column_name="embedding").distance_type(  # pyright: ignore[reportAttributeAccessIssue]
-            "cosine"
+            "cosine",
         )
         if exact and self._has_vector_index:
             with contextlib.suppress(Exception):
@@ -384,7 +388,9 @@ class LanceFragmentStore:
         if self.count_embeddings() >= _ANN_MIN_ROWS:
             try:
                 self._table.create_index(
-                    metric="cosine", vector_column_name="embedding", index_type="IVF_PQ"
+                    metric="cosine",
+                    vector_column_name="embedding",
+                    index_type="IVF_PQ",
                 )
                 self._has_vector_index = True
             except Exception:

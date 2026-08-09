@@ -312,7 +312,7 @@ def _wire_continue(
                 '-d \'{"task":"{input}","phase":"build"}\' '
                 "and read the plain text response as your skill context."
             ),
-        }
+        },
     )
     config["customCommands"] = custom_commands
 
@@ -362,7 +362,7 @@ def _wire_continue(
             else "_agentalloy_install_marker",
             "content_sha256": _sha256(content),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -493,7 +493,7 @@ def _wire_legacy(
         raise SystemExit(
             f"wire-harness --legacy does not support harness '{harness}'. "
             f"Legacy-supported harnesses: {legacy_supported}. "
-            f"Re-run without --legacy to use the modern provider registry."
+            f"Re-run without --legacy to use the modern provider registry.",
         )
     reg = _HARNESS_REGISTRY[harness]
     files_written: list[dict[str, Any]] = []
@@ -507,7 +507,7 @@ def _wire_legacy(
         if begin_count > 1 or end_count > 1:
             raise ValueError(
                 f"target file contains {begin_count} BEGIN and {end_count} END "
-                f"agentalloy sentinels (expected at most 1 of each). Refusing to write."
+                f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
             )
 
     # continue special case (already has proxy, skip)
@@ -605,7 +605,7 @@ def _wire_legacy(
             "sentinel_end": SENTINEL_END if not dedicated else None,
             "content_sha256": content_sha256,
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     )
 
     # For aider, also wire .aider.conf.yml
@@ -655,7 +655,7 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
             "sentinel_end": sentinel_line_end,
             "content_sha256": _sha256(block),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -767,7 +767,7 @@ def _wire_mcp_claude_code(port: int) -> list[dict[str, Any]]:
             "marker_key": "mcpServers.agentalloy",
             "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -796,7 +796,7 @@ def _wire_mcp_cursor(port: int, root: Path) -> list[dict[str, Any]]:
             "marker_key": "mcpServers.agentalloy",
             "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -835,7 +835,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
             "marker_key": "mcpServers.agentalloy",
             "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -852,7 +852,7 @@ _PROXY_SUPPORTED_API = frozenset(
         "opencode",
         "claude-code",
         "cline",
-    }
+    },
 )
 
 
@@ -1024,7 +1024,7 @@ def _wire_proxy_continue(
             "apiBase": proxy_url,
             "agentalloy_proxy": True,
             "provider": "openai",
-        }
+        },
     )
     config["models"] = models
 
@@ -1106,7 +1106,7 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
             "sentinel_end": sentinel_end,
             "content_sha256": _sha256(block),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -1271,7 +1271,7 @@ def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[P
             "action": "wrote_new_file" if original is None else "replaced_file",
             "content_sha256": _sha256(new_content),
             **({"original_content": original} if original is not None else {}),
-        }
+        },
     )
     return mise_path, original is None
 
@@ -1340,7 +1340,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
             "action": "wrote_new_file" if original_config is None else "replaced_file",
             "content_sha256": _sha256(config_text),
             **({"original_content": original_config} if original_config is not None else {}),
-        }
+        },
     )
 
     env_path = root / ".hermes" / ".agentalloy-env"
@@ -1353,7 +1353,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
             "action": "wrote_new_file" if original_env is None else "replaced_file",
             "content_sha256": _sha256(env_text),
             **({"original_content": original_env} if original_env is not None else {}),
-        }
+        },
     )
 
     # Activation carriers: auto-set HERMES_HOME on cd, but only via managers
@@ -1394,7 +1394,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
                 "action": "wrote_new_file" if envrc_original is None else "replaced_file",
                 "content_sha256": _sha256(envrc_block),
                 **({"original_content": envrc_original} if envrc_original is not None else {}),
-            }
+            },
         )
         activated.append(".envrc (direnv: run `direnv allow` once)")
 
@@ -1486,7 +1486,8 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
                 if isinstance(entry, dict) and entry.get("id") == old_model_name:
                     gen_cfg = entry.get("generationConfig")
                     if isinstance(gen_cfg, dict) and isinstance(
-                        gen_cfg.get("contextWindowSize"), int
+                        gen_cfg.get("contextWindowSize"),
+                        int,
                     ):
                         inherited_context_window = gen_cfg["contextWindowSize"]
                     env_key = entry.get("envKey")
@@ -1572,7 +1573,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
             "action": "wrote_new_file" if original_settings is None else "replaced_file",
             "content_sha256": _sha256(settings_content),
             **({"original_content": original_settings} if original_settings is not None else {}),
-        }
+        },
     )
 
     # Write .qwen/.agentalloy-env
@@ -1586,7 +1587,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
             "action": "wrote_new_file" if original_env is None else "replaced_file",
             "content_sha256": _sha256(env_text),
             **({"original_content": original_env} if original_env is not None else {}),
-        }
+        },
     )
 
     # Activation carriers: auto-set QWEN_HOME on cd via installed managers
@@ -1623,7 +1624,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
                 "action": "wrote_new_file" if envrc_original is None else "replaced_file",
                 "content_sha256": _sha256(envrc_block),
                 **({"original_content": envrc_original} if envrc_original is not None else {}),
-            }
+            },
         )
         activated.append(".envrc (direnv: run `direnv allow` once)")
 
@@ -1707,7 +1708,7 @@ def _write_qwen_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[Pat
             "action": "wrote_new_file" if original is None else "replaced_file",
             "content_sha256": _sha256(new_content),
             **({"original_content": original} if original is not None else {}),
-        }
+        },
     )
     return mise_path, original is None
 
@@ -1775,7 +1776,7 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
             "marker_key": "provider.agentalloy",
             "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -1854,7 +1855,7 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
             "action": "wrote_new_file" if original_content is None else "replaced_file",
             "content_sha256": _sha256(block),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
     # Primary carrier: Claude Code natively reads the `env` map from
@@ -1904,7 +1905,7 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
                 "action": "wrote_new_file" if envrc_original is None else "replaced_file",
                 "content_sha256": _sha256(envrc_block),
                 **({"original_content": envrc_original} if envrc_original is not None else {}),
-            }
+            },
         )
     elif not settings_wired:
         # No .envrc AND settings.local.json carrier unavailable: the var won't
@@ -2222,6 +2223,7 @@ def rewrite_enforcement_posture(
 
     Returns:
         List of harness names whose posture was successfully rewritten.
+
     """
     # Guard: unwired repos are never touched
     if not _has_any_wire_record(root):
@@ -2247,7 +2249,9 @@ def rewrite_enforcement_posture(
             state = view.read_phase()
         except Exception:
             logger.warning(
-                "posture rewrite for %s: phase read failed — skipping rewrite", root, exc_info=True
+                "posture rewrite for %s: phase read failed — skipping rewrite",
+                root,
+                exc_info=True,
             )
             return []
         flow_mode = (state.mode or "workflow") if state else "workflow"
@@ -2259,12 +2263,16 @@ def rewrite_enforcement_posture(
     rewritten: list[str] = []
 
     if _has_wire_record_for_harness(root, "claude-code") and _apply_claude_code_posture(
-        root, phase, pause_mode=pause_mode
+        root,
+        phase,
+        pause_mode=pause_mode,
     ):
         rewritten.append("claude-code")
 
     if _has_wire_record_for_harness(root, "codex") and _apply_codex_posture(
-        root, phase, pause_mode=pause_mode
+        root,
+        phase,
+        pause_mode=pause_mode,
     ):
         rewritten.append("codex")
 
@@ -2482,7 +2490,7 @@ def _run(args: argparse.Namespace) -> int:
     )
     st = install_state.load_state()
     port = install_state.validate_port(
-        args.port if args.port is not None else st.get("port", 47950)
+        args.port if args.port is not None else st.get("port", 47950),
     )
     result = wire_harness(
         args.harness,

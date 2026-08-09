@@ -63,7 +63,9 @@ def validate_pack(pack_dir: Path, *, strict: bool = True) -> dict[str, Any]:
 
     skills_entries: list[dict[str, Any]] = manifest.get("skills") or []
     schema_result: PackValidationResult = validate_pack_skills(
-        pack_dir, skills_entries, strict=strict
+        pack_dir,
+        skills_entries,
+        strict=strict,
     )
 
     # Gate 1.5 (semantic review) is reported as a dry-run prediction of what
@@ -73,7 +75,9 @@ def validate_pack(pack_dir: Path, *, strict: bool = True) -> dict[str, Any]:
     review_enabled = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_REVIEW") == "1"
     require_independent = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW") == "1"
     review_result: PackValidationResult = validate_review_verdicts(
-        pack_dir, skills_entries, require_independent=require_independent
+        pack_dir,
+        skills_entries,
+        require_independent=require_independent,
     )
     review_blocks = review_enabled and not review_result.ok
 
@@ -184,7 +188,7 @@ def _render_human(result: dict[str, Any]) -> None:
     if status == "disabled":
         print_rich(
             "  Review gate (Gate 1.5): [dim]disabled[/dim] "
-            "(set AGENTALLOY_INSTALL_REQUIRE_REVIEW=1 to enforce)"
+            "(set AGENTALLOY_INSTALL_REQUIRE_REVIEW=1 to enforce)",
         )
     elif status == "passed":
         print_rich("  Review gate (Gate 1.5): [green]passed[/green]")

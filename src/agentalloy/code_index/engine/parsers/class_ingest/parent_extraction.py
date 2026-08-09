@@ -31,19 +31,22 @@ def extract_parent_classes(
         parent_classes.extend(extract_java_superclass(class_node, module_qn, resolve_to_qn))
 
     parent_classes.extend(
-        extract_python_superclasses(class_node, module_qn, import_processor, resolve_to_qn)
+        extract_python_superclasses(class_node, module_qn, import_processor, resolve_to_qn),
     )
 
     if class_heritage_node := find_child_by_type(class_node, cs.TS_CLASS_HERITAGE):
         parent_classes.extend(
             extract_js_ts_heritage_parents(
-                class_heritage_node, module_qn, import_processor, resolve_to_qn
-            )
+                class_heritage_node,
+                module_qn,
+                import_processor,
+                resolve_to_qn,
+            ),
         )
 
     if class_node.type == cs.TS_INTERFACE_DECLARATION:
         parent_classes.extend(
-            extract_interface_parents(class_node, module_qn, import_processor, resolve_to_qn)
+            extract_interface_parents(class_node, module_qn, import_processor, resolve_to_qn),
         )
 
     return parent_classes
@@ -120,7 +123,9 @@ def extract_java_superclass(
 
     if superclass_node.type == cs.TS_TYPE_IDENTIFIER:
         if resolved := resolve_superclass_from_type_identifier(
-            superclass_node, module_qn, resolve_to_qn
+            superclass_node,
+            module_qn,
+            resolve_to_qn,
         ):
             return [resolved]
         return []
@@ -172,7 +177,7 @@ def extract_js_ts_heritage_parents(
     for child in class_heritage_node.children:
         if child.type == cs.TS_EXTENDS_CLAUSE:
             parent_classes.extend(
-                extract_from_extends_clause(child, module_qn, import_processor, resolve_to_qn)
+                extract_from_extends_clause(child, module_qn, import_processor, resolve_to_qn),
             )
             break
         if child.type in cs.JS_TS_PARENT_REF_TYPES:
@@ -180,13 +185,16 @@ def extract_js_ts_heritage_parents(
                 if parent_name := safe_decode_text(child):
                     parent_classes.append(
                         resolve_js_ts_parent_class(
-                            parent_name, module_qn, import_processor, resolve_to_qn
-                        )
+                            parent_name,
+                            module_qn,
+                            import_processor,
+                            resolve_to_qn,
+                        ),
                     )
         elif child.type == cs.TS_CALL_EXPRESSION:
             if is_preceded_by_extends(child, class_heritage_node):
                 parent_classes.extend(
-                    extract_mixin_parent_classes(child, module_qn, import_processor, resolve_to_qn)
+                    extract_mixin_parent_classes(child, module_qn, import_processor, resolve_to_qn),
                 )
 
     return parent_classes
@@ -203,8 +211,11 @@ def extract_from_extends_clause(
             if parent_name := safe_decode_text(grandchild):
                 return [
                     resolve_js_ts_parent_class(
-                        parent_name, module_qn, import_processor, resolve_to_qn
-                    )
+                        parent_name,
+                        module_qn,
+                        import_processor,
+                        resolve_to_qn,
+                    ),
                 ]
     return []
 
@@ -230,8 +241,11 @@ def extract_interface_parents(
             if parent_name := safe_decode_text(child):
                 parent_classes.append(
                     resolve_js_ts_parent_class(
-                        parent_name, module_qn, import_processor, resolve_to_qn
-                    )
+                        parent_name,
+                        module_qn,
+                        import_processor,
+                        resolve_to_qn,
+                    ),
                 )
     return parent_classes
 
@@ -251,14 +265,20 @@ def extract_mixin_parent_classes(
                     if parent_name := safe_decode_text(arg_child):
                         parent_classes.append(
                             resolve_js_ts_parent_class(
-                                parent_name, module_qn, import_processor, resolve_to_qn
-                            )
+                                parent_name,
+                                module_qn,
+                                import_processor,
+                                resolve_to_qn,
+                            ),
                         )
                 elif arg_child.type == cs.TS_CALL_EXPRESSION:
                     parent_classes.extend(
                         extract_mixin_parent_classes(
-                            arg_child, module_qn, import_processor, resolve_to_qn
-                        )
+                            arg_child,
+                            module_qn,
+                            import_processor,
+                            resolve_to_qn,
+                        ),
                     )
             break
 
@@ -289,7 +309,10 @@ def extract_implemented_interfaces(
     interfaces_node = class_node.child_by_field_name(cs.FIELD_INTERFACES)
     if interfaces_node:
         extract_java_interface_names(
-            interfaces_node, implemented_interfaces, module_qn, resolve_to_qn
+            interfaces_node,
+            implemented_interfaces,
+            module_qn,
+            resolve_to_qn,
         )
 
     return implemented_interfaces

@@ -364,7 +364,10 @@ def _reclaim_port(unit_name: str, port: int, match: list[str]) -> None:
     pid = reclaim_stale_port(port, match)
     if pid is not None:
         logger.info(
-            "reclaimed stale holder pid=%d on port %d before enabling %s", pid, port, unit_name
+            "reclaimed stale holder pid=%d on port %d before enabling %s",
+            pid,
+            port,
+            unit_name,
         )
 
 
@@ -482,7 +485,7 @@ def _enable_native_linux(
     if result.returncode != 0:
         raise RuntimeError(
             f"agentalloy.service enable failed (rc={result.returncode}): "
-            f"{(result.stderr or '').strip()}"
+            f"{(result.stderr or '').strip()}",
         )
 
     return {
@@ -881,7 +884,7 @@ def _render_human(result: dict[str, Any]) -> None:
 def run(args: argparse.Namespace) -> int:
     st = install_state.load_state()
     port = install_state.validate_port(
-        args.port if args.port is not None else st.get("port", 47950)
+        args.port if args.port is not None else st.get("port", 47950),
     )
     preset: str | None = _resolve_preset(st)
 

@@ -44,7 +44,11 @@ class EngineLogger:
         return f"{text} [{', '.join(extras)}]" if extras else text
 
     def _log(
-        self, level: int, message: object, args: tuple[Any, ...], kwargs: dict[str, Any]
+        self,
+        level: int,
+        message: object,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
     ) -> None:
         if self._logger.isEnabledFor(level):
             self._logger.log(level, self._format(message, args, kwargs))

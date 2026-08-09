@@ -21,7 +21,8 @@ class LuaHandler(BaseLanguageHandler):
 
         if node.type == cs.TS_LUA_FUNCTION_DEFINITION:
             return lua_utils.extract_assigned_name(
-                node, accepted_var_types=(cs.TS_DOT_INDEX_EXPRESSION, cs.TS_IDENTIFIER)
+                node,
+                accepted_var_types=(cs.TS_DOT_INDEX_EXPRESSION, cs.TS_IDENTIFIER),
             )
 
         return None

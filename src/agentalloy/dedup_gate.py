@@ -123,7 +123,9 @@ def dedup_fragment(
         if hit.fragment_id == exclude_fragment_id or hit.skill_id in skip_skills:
             continue
         verdict = classify_hit(
-            hit, hard_similarity=hard_similarity, soft_similarity=soft_similarity
+            hit,
+            hard_similarity=hard_similarity,
+            soft_similarity=soft_similarity,
         )
         if verdict == "hard":
             if hard_match is None or hit.distance < hard_match.distance:
@@ -177,6 +179,7 @@ def run_dedup_gate(
         ``.hard`` — cross-pack hard duplicates (similarity ≥ hard_similarity).
         ``.soft`` — cross-pack near-duplicates (similarity ≥ soft_similarity).
         Same-pack hits (existing ``skill_id`` ∈ ``new_skill_ids``) are excluded.
+
     """
     result = DedupGateResult()
 
@@ -216,7 +219,7 @@ def run_dedup_gate(
                     fragment_id_existing=hard_hit.fragment_id,
                     similarity=sim,
                     verdict="hard",
-                )
+                ),
             )
 
         for soft_hit in soft_hits:
@@ -230,7 +233,7 @@ def run_dedup_gate(
                         fragment_id_existing=soft_hit.fragment_id,
                         similarity=sim,
                         verdict="soft",
-                    )
+                    ),
                 )
 
     logger.info(

@@ -41,7 +41,8 @@ def head_commit(repo_path: Path) -> str | None:
 
 def commits_behind(repo_path: Path, stored_sha: str) -> int | None:
     """``git rev-list --count stored..HEAD``, or None when git can't answer
-    (e.g. the stored sha vanished from history after a rebase)."""
+    (e.g. the stored sha vanished from history after a rebase).
+    """
     count = _git(repo_path, "rev-list", "--count", f"{stored_sha}..HEAD")
     if count is None or not count.isdigit():
         return None

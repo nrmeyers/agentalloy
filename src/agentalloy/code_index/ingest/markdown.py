@@ -31,7 +31,7 @@ EXCLUDED_DIRS: frozenset[str] = frozenset(
         "venv",
         "__pycache__",
         ".agentalloy",
-    }
+    },
 )
 
 # Keep individual chunks well inside the embedder's 2048-token window
@@ -78,7 +78,13 @@ def _slugify_heading(text: str) -> str:
 
 
 def _chunk(
-    *, rel_path: str, anchor: str, heading: str, body: str, start_line: int, end_line: int
+    *,
+    rel_path: str,
+    anchor: str,
+    heading: str,
+    body: str,
+    start_line: int,
+    end_line: int,
 ) -> MarkdownChunk:
     return MarkdownChunk(
         qualified_name=f"{rel_path}::{anchor}",
@@ -123,7 +129,7 @@ def chunk_markdown(rel_path: str, content: str) -> list[MarkdownChunk]:
                     body=body,
                     start_line=1,
                     end_line=len(lines),
-                )
+                ),
             )
         return chunks
 
@@ -138,7 +144,7 @@ def chunk_markdown(rel_path: str, content: str) -> list[MarkdownChunk]:
                     body=preamble,
                     start_line=1,
                     end_line=anchors[0][0],
-                )
+                ),
             )
 
     seen: dict[str, int] = {}
@@ -159,13 +165,19 @@ def chunk_markdown(rel_path: str, content: str) -> list[MarkdownChunk]:
                 body=body,
                 start_line=start_idx + 1,
                 end_line=end_idx,
-            )
+            ),
         )
     return chunks
 
 
 def _split_capped(
-    *, rel_path: str, anchor: str, heading: str, body: str, start_line: int, end_line: int
+    *,
+    rel_path: str,
+    anchor: str,
+    heading: str,
+    body: str,
+    start_line: int,
+    end_line: int,
 ) -> list[MarkdownChunk]:
     """One chunk when the body fits; ``-partN`` slices otherwise."""
     if len(body) <= _MAX_CHUNK_CHARS:
@@ -177,7 +189,7 @@ def _split_capped(
                 body=body,
                 start_line=start_line,
                 end_line=end_line,
-            )
+            ),
         ]
     out: list[MarkdownChunk] = []
     pos = 0
@@ -195,7 +207,7 @@ def _split_capped(
                 body=slice_text,
                 start_line=sl,
                 end_line=min(sl + slice_text.count("\n"), end_line),
-            )
+            ),
         )
         pos += _MAX_CHUNK_CHARS
     return out
@@ -203,7 +215,8 @@ def _split_capped(
 
 def collect_markdown_chunks(repo_root: Path) -> list[MarkdownChunk]:
     """Discover, read, and chunk every eligible markdown file (unreadable or
-    non-UTF-8-decodable files are skipped, never fatal)."""
+    non-UTF-8-decodable files are skipped, never fatal).
+    """
     root = repo_root.resolve()
     chunks: list[MarkdownChunk] = []
     for path in discover_markdown_files(root):

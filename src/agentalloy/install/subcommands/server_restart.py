@@ -4,7 +4,8 @@
 Native: stop (if running) and relaunch uvicorn in the background.
 Container: ``{runtime} restart <container>`` then wait for /health on the
 mapped port (the container runs the image's baked entrypoint, so an in-place
-restart survives — no recreate needed)."""
+restart survives — no recreate needed).
+"""
 
 from __future__ import annotations
 
@@ -101,7 +102,9 @@ def _run(args: argparse.Namespace) -> int:
 def _run_container(args: argparse.Namespace, target: server_proc.DeploymentTarget) -> int:
     """Container leg: ``{runtime} restart`` (or start if stopped) + /health wait."""
     code, payload = server_container.run_restart(
-        target, stop_timeout=args.stop_timeout, wait=args.wait
+        target,
+        stop_timeout=args.stop_timeout,
+        wait=args.wait,
     )
     action = payload.get("action")
     if action in ("restarted", "started"):

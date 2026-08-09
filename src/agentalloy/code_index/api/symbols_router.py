@@ -53,7 +53,10 @@ async def symbol_callees(
 ) -> list[CallSiteView]:
     indexed = require_indexed_repo(state, repo)
     sites = await with_handles(
-        state, repo, lambda h: h.graph.callees(fqn), repo_path=indexed.repo_path
+        state,
+        repo,
+        lambda h: h.graph.callees(fqn),
+        repo_path=indexed.repo_path,
     )
     return [CallSiteView.from_call_site(s) for s in sites]
 
@@ -70,7 +73,10 @@ async def symbol_detail(
 ) -> SymbolView:
     indexed = require_indexed_repo(state, repo)
     sym = await with_handles(
-        state, repo, lambda h: h.graph.symbol(fqn), repo_path=indexed.repo_path
+        state,
+        repo,
+        lambda h: h.graph.symbol(fqn),
+        repo_path=indexed.repo_path,
     )
     if sym is None:
         raise HTTPException(status_code=404, detail=f"no such symbol in {repo!r}: {fqn}")

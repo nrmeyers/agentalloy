@@ -65,7 +65,7 @@ class DefinitionProcessor(
         try:
             if language not in queries:
                 logger.warning(
-                    ls.DEF_UNSUPPORTED_LANGUAGE.format(language=language, path=file_path)
+                    ls.DEF_UNSUPPORTED_LANGUAGE.format(language=language, path=file_path),
                 )
                 return None
 
@@ -81,11 +81,11 @@ class DefinitionProcessor(
             root_node = tree.root_node
 
             module_qn = cs.SEPARATOR_DOT.join(
-                [self.project_name] + list(relative_path.with_suffix("").parts)
+                [self.project_name] + list(relative_path.with_suffix("").parts),
             )
             if file_path.name in (cs.INIT_PY, cs.MOD_RS):
                 module_qn = cs.SEPARATOR_DOT.join(
-                    [self.project_name] + list(relative_path.parent.parts)
+                    [self.project_name] + list(relative_path.parent.parts),
                 )
             self.module_qn_to_file_path[module_qn] = file_path
 
@@ -146,7 +146,10 @@ class DefinitionProcessor(
             self._add_dependency(dep.name, dep.spec, dep.properties)
 
     def _add_dependency(
-        self, dep_name: str, dep_spec: str, properties: dict[str, str] | None = None
+        self,
+        dep_name: str,
+        dep_spec: str,
+        properties: dict[str, str] | None = None,
     ) -> None:
         if not dep_name or dep_name.lower() in cs.EXCLUDED_DEPENDENCY_NAMES:
             return
@@ -177,7 +180,7 @@ class DefinitionProcessor(
             text = first_statement.children[0].text
             if text is not None:
                 result: str = safe_decode_with_fallback(first_statement.children[0]).strip(
-                    cs.DOCSTRING_STRIP_CHARS
+                    cs.DOCSTRING_STRIP_CHARS,
                 )
                 return result
         return None

@@ -5,7 +5,8 @@ from ..utils import contains_node, safe_decode_text
 
 
 def extract_assigned_name(
-    target_node: Node, accepted_var_types: tuple[str, ...] = cs.LUA_DEFAULT_VAR_TYPES
+    target_node: Node,
+    accepted_var_types: tuple[str, ...] = cs.LUA_DEFAULT_VAR_TYPES,
 ) -> str | None:
     current = target_node.parent
     while current and current.type != cs.TS_LUA_ASSIGNMENT_STATEMENT:

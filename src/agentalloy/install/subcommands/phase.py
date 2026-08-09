@@ -149,7 +149,10 @@ def _migrate_design_to_plan(store: Any) -> None:
 
 
 def _forward_gate_blocks(
-    current: str, target: str, root: Path, store: Any
+    current: str,
+    target: str,
+    root: Path,
+    store: Any,
 ) -> tuple[bool, list[str]]:
     """Whether a *forward* ``phase set`` should be refused, with advisories.
 
@@ -193,7 +196,10 @@ def _forward_gate_blocks(
 
 
 def _approval_gate_blocks(
-    current: str, target: str, root: Path, store: Any
+    current: str,
+    target: str,
+    root: Path,
+    store: Any,
 ) -> tuple[bool, list[str]]:
     """Whether a forward ``phase set`` must be refused for lack of human approval.
 
@@ -242,7 +248,7 @@ def _approval_gate_blocks(
         return False, []  # MET or UNKNOWN → allow
     return True, [
         f"'{current}' requires human approval before advancing to '{target}'. "
-        f"Run `agentalloy approve {current}` once the user has approved."
+        f"Run `agentalloy approve {current}` once the user has approved.",
     ]
 
 
@@ -486,7 +492,9 @@ def _run_get(args: argparse.Namespace) -> int:
 
 def _run_set(args: argparse.Namespace) -> int:
     result = run_phase_set(
-        args.phase, root=_resolve_root(args), force=getattr(args, "force", False)
+        args.phase,
+        root=_resolve_root(args),
+        force=getattr(args, "force", False),
     )
     if result.get("blocked"):
         if result.get("reason") == "approval":

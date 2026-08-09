@@ -70,7 +70,8 @@ def _active_design_slug(project_root: Path) -> str | None:
 def _inject_work_item(content: str, slug: str | None) -> str:
     """Insert a ``work_item: <slug>`` line into a contract's YAML frontmatter,
     right after ``task_slug:``. No-op when *slug* is None, the field is already
-    present, or the content has no ``task_slug:`` frontmatter line to anchor to."""
+    present, or the content has no ``task_slug:`` frontmatter line to anchor to.
+    """
     if slug is None or "\nwork_item:" in content or content.startswith("work_item:"):
         return content
     lines = content.splitlines(keepends=True)
@@ -140,7 +141,7 @@ def _load_contract_template(phase: str) -> str | None:
         conn = duckdb.connect(str(ds_path), read_only=True)
         try:
             conn.execute(
-                "SELECT applies_to_phases, raw_prose FROM profile_skills WHERE skill_class = 'workflow'"
+                "SELECT applies_to_phases, raw_prose FROM profile_skills WHERE skill_class = 'workflow'",
             ).fetchall()
         except Exception:
             pass
@@ -351,7 +352,7 @@ def _init(args: argparse.Namespace) -> int:
                 "slug": slug,
                 "route": route,
                 "body": content,
-            }
+            },
         )
     except StateClientError as exc:
         print(f"Error: {exc.message}", file=sys.stderr)
@@ -468,7 +469,8 @@ def _edit(args: argparse.Namespace) -> int:
 def _artifact_set(args: argparse.Namespace) -> int:
     """Upsert a deliverable artifact body (docs/spec/<slug>.md and friends,
     store-backed) via StateClient. This is the write path an agent uses in
-    place of its file-write tool once phase gates no longer read the disk."""
+    place of its file-write tool once phase gates no longer read the disk.
+    """
     client = _get_client()
     body = args.body
     if args.body_file is not None:
@@ -511,7 +513,7 @@ def _artifact_list(args: argparse.Namespace) -> int:
         result,
         args,
         human_fn=lambda r: print_rich(
-            "\n".join(f"{a['phase']}/{a['slug']}/{a['name']}" for a in r["artifacts"]) or "(none)"
+            "\n".join(f"{a['phase']}/{a['slug']}/{a['name']}" for a in r["artifacts"]) or "(none)",
         ),
     )
     return 0
@@ -660,13 +662,22 @@ def add_parser(
     edit_p.add_argument("contract_id", help="Contract ID to edit.")
     edit_p.add_argument("--body", default=None, help="New body text.")
     edit_p.add_argument(
-        "--domain-tags", default=None, action="append", help="Domain tags (can repeat)."
+        "--domain-tags",
+        default=None,
+        action="append",
+        help="Domain tags (can repeat).",
     )
     edit_p.add_argument(
-        "--scope-touches", default=None, action="append", help="Scope touches (can repeat)."
+        "--scope-touches",
+        default=None,
+        action="append",
+        help="Scope touches (can repeat).",
     )
     edit_p.add_argument(
-        "--scope-avoids", default=None, action="append", help="Scope avoids (can repeat)."
+        "--scope-avoids",
+        default=None,
+        action="append",
+        help="Scope avoids (can repeat).",
     )
     edit_p.add_argument(
         "--success-criteria",
@@ -684,13 +695,22 @@ def add_parser(
     sup_p.add_argument("--slug", default=None, help="Slug.")
     sup_p.add_argument("--body", default=None, help="New body text.")
     sup_p.add_argument(
-        "--domain-tags", default=None, action="append", help="Domain tags (can repeat)."
+        "--domain-tags",
+        default=None,
+        action="append",
+        help="Domain tags (can repeat).",
     )
     sup_p.add_argument(
-        "--scope-touches", default=None, action="append", help="Scope touches (can repeat)."
+        "--scope-touches",
+        default=None,
+        action="append",
+        help="Scope touches (can repeat).",
     )
     sup_p.add_argument(
-        "--scope-avoids", default=None, action="append", help="Scope avoids (can repeat)."
+        "--scope-avoids",
+        default=None,
+        action="append",
+        help="Scope avoids (can repeat).",
     )
     sup_p.add_argument(
         "--success-criteria",
@@ -702,7 +722,8 @@ def add_parser(
 
     # artifact-set
     aset_p = sub.add_parser(
-        "artifact-set", help="Store a deliverable artifact body (spec.md, approach.md, ...)."
+        "artifact-set",
+        help="Store a deliverable artifact body (spec.md, approach.md, ...).",
     )
     aset_p.add_argument("--phase", required=True, help="Phase (spec, design, ...).")
     aset_p.add_argument("--slug", required=True, help="Task slug.")
@@ -720,7 +741,8 @@ def add_parser(
 
     # artifact-show
     ashow_p = sub.add_parser(
-        "artifact-show", help="Show the content of a stored deliverable artifact."
+        "artifact-show",
+        help="Show the content of a stored deliverable artifact.",
     )
     ashow_p.add_argument(
         "triple",

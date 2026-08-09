@@ -73,21 +73,33 @@ class CallProcessor:
 
         try:
             module_qn = cs.SEPARATOR_DOT.join(
-                [self.project_name] + list(relative_path.with_suffix("").parts)
+                [self.project_name] + list(relative_path.with_suffix("").parts),
             )
             if file_path.name in (cs.INIT_PY, cs.MOD_RS):
                 module_qn = cs.SEPARATOR_DOT.join(
-                    [self.project_name] + list(relative_path.parent.parts)
+                    [self.project_name] + list(relative_path.parent.parts),
                 )
 
             self._process_calls_in_functions(
-                root_node, module_qn, language, queries, call_site_file_path
+                root_node,
+                module_qn,
+                language,
+                queries,
+                call_site_file_path,
             )
             self._process_calls_in_classes(
-                root_node, module_qn, language, queries, call_site_file_path
+                root_node,
+                module_qn,
+                language,
+                queries,
+                call_site_file_path,
             )
             self._process_module_level_calls(
-                root_node, module_qn, language, queries, call_site_file_path
+                root_node,
+                module_qn,
+                language,
+                queries,
+                call_site_file_path,
             )
 
         except Exception as e:
@@ -120,7 +132,10 @@ class CallProcessor:
             if not func_name:
                 continue
             if func_qn := self._build_nested_qualified_name(
-                func_node, module_qn, func_name, lang_config
+                func_node,
+                module_qn,
+                func_name,
+                lang_config,
             ):
                 self._ingest_function_calls(
                     func_node,
@@ -146,7 +161,9 @@ class CallProcessor:
         )
 
     def _get_class_name_for_node(
-        self, class_node: Node, language: cs.SupportedLanguage
+        self,
+        class_node: Node,
+        language: cs.SupportedLanguage,
     ) -> str | None:
         if language == cs.SupportedLanguage.RUST and class_node.type == cs.TS_IMPL_ITEM:
             return self._get_rust_impl_class_name(class_node)
@@ -306,7 +323,9 @@ class CallProcessor:
             return
 
         local_var_types = self._resolver.type_inference.build_local_variable_type_map(
-            caller_node, module_qn, language
+            caller_node,
+            module_qn,
+            language,
         )
 
         cursor = QueryCursor(calls_query)
@@ -338,17 +357,23 @@ class CallProcessor:
             # function-call → builtin → cpp-operator → drop.
             if language == cs.SupportedLanguage.JAVA and call_node.type == cs.TS_METHOD_INVOCATION:
                 tagged_callee = self._resolver.resolve_java_method_call_with_provenance(
-                    call_node, module_qn, local_var_types
+                    call_node,
+                    module_qn,
+                    local_var_types,
                 )
             else:
                 tagged_callee = self._resolver.resolve_function_call_with_provenance(
-                    call_name, module_qn, local_var_types, class_context
+                    call_name,
+                    module_qn,
+                    local_var_types,
+                    class_context,
                 )
             if tagged_callee is None:
                 tagged_callee = self._resolver.resolve_builtin_call_with_provenance(call_name)
             if tagged_callee is None:
                 tagged_callee = self._resolver.resolve_cpp_operator_call_with_provenance(
-                    call_name, module_qn
+                    call_name,
+                    module_qn,
                 )
             if tagged_callee is None:
                 continue
@@ -366,7 +391,8 @@ class CallProcessor:
             # resolved_via slot) when the resolver was constructed without
             # a rebind_registry or when no rebind targets this qname.
             callee_type, callee_qn, rebind_resolved_via = self._resolver.apply_rebind(
-                callee_type, callee_qn
+                callee_type,
+                callee_qn,
             )
 
             logger.debug(

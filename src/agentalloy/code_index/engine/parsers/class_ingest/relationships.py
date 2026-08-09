@@ -29,7 +29,10 @@ def create_class_relationships(
     function_registry: FunctionRegistryTrieProtocol,
 ) -> None:
     parent_classes = pe.extract_parent_classes(
-        class_node, module_qn, import_processor, resolve_to_qn
+        class_node,
+        module_qn,
+        import_processor,
+        resolve_to_qn,
     )
     class_inheritance[class_qn] = parent_classes
 
@@ -48,7 +51,11 @@ def create_class_relationships(
 
     for parent_class_qn in parent_classes:
         create_inheritance_relationship(
-            node_type, class_qn, parent_class_qn, function_registry, ingestor
+            node_type,
+            class_qn,
+            parent_class_qn,
+            function_registry,
+            ingestor,
         )
 
     if class_node.type == cs.TS_CLASS_DECLARATION:

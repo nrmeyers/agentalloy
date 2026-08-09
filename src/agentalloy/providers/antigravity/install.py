@@ -50,6 +50,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     target_path = root / "GEMINI.md"
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,5 +74,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(instruction_content),
             original_content=original_content,
             marker_key="antigravity.instructions",
-        )
+        ),
     ]

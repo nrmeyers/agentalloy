@@ -54,7 +54,8 @@ Reason = Literal["seed", "caller", "callee"]
 
 class BundleItem(BaseModel):
     """One symbol in the bundle. Header fields are always populated; only
-    ``source`` is subject to budget truncation."""
+    ``source`` is subject to budget truncation.
+    """
 
     qualified_name: str
     file_path: str | None
@@ -80,7 +81,8 @@ class Bundle(BaseModel):
 
 def _is_test_path(qualified_name: str, file_path: str | None) -> bool:
     """Substring match on the file path (falls back to the dotted FQN mapped
-    to path form so registry-less symbols still get classified)."""
+    to path form so registry-less symbols still get classified).
+    """
     probe = (file_path or qualified_name.replace(".", "/")).lower()
     return any(marker in probe for marker in _TEST_PATH_MARKERS)
 
@@ -151,7 +153,7 @@ async def build_bundle(
                         score=score,
                         reason=reason,
                         source=source,
-                    )
+                    ),
                 )
                 if total >= budget_chars:
                     break

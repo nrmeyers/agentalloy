@@ -80,10 +80,16 @@ def add_parser(
         ),
     )
     phases_p.add_argument(
-        "--since", type=int, default=None, help="Only events at/after this unix ms timestamp."
+        "--since",
+        type=int,
+        default=None,
+        help="Only events at/after this unix ms timestamp.",
     )
     phases_p.add_argument(
-        "--until", type=int, default=None, help="Only events at/before this unix ms timestamp."
+        "--until",
+        type=int,
+        default=None,
+        help="Only events at/before this unix ms timestamp.",
     )
     phases_p.add_argument(
         "--limit",
@@ -139,7 +145,8 @@ def _current_repo_key() -> str:
 
 def _resolve_scope(args: argparse.Namespace) -> str | None:
     """Return the repo filter for this invocation: None for ``--all``, else the
-    current repo key."""
+    current repo key.
+    """
     return None if getattr(args, "all_repos", False) else _current_repo_key()
 
 
@@ -160,7 +167,7 @@ def _run_clear(args: argparse.Namespace) -> int:
             answer = (
                 input(
                     "This will permanently delete all composition traces and prompt-load "
-                    "records from the local DuckDB.\nContinue? [y/N]: "
+                    "records from the local DuckDB.\nContinue? [y/N]: ",
                 )
                 .strip()
                 .lower()
@@ -351,13 +358,13 @@ def _render_savings(result: dict[str, Any], repo: str | None = None) -> None:
             print_rich(
                 f"  {str(row['phase']):<12}  {int(row['composes']):>9,}  "
                 f"{int(row['tokens_returned']):>10,}  {ph_flat:>11,}  "
-                f"{int(row['tokens_saved']):>10,}  {float(row['savings_pct']):>6.1f}%{note}"
+                f"{int(row['tokens_saved']):>10,}  {float(row['savings_pct']):>6.1f}%{note}",
             )
         if any(int(r["tokens_flat_equivalent"]) == 0 for r in per_phase):
             print_rich()
             print_rich(
                 "  * flat-equivalent is 0 for traces recorded before this feature "
-                "was deployed or with a non-RuntimeCache source."
+                "was deployed or with a non-RuntimeCache source.",
             )
     print_rich()
 
@@ -422,7 +429,11 @@ def _query_phase_events(
     repo, otherwise matches rows for that repo (and anything nested under it).
     """
     where, params = _phase_events_where(
-        phase=phase, event_type=event_type, since=since, until=until, repo=repo
+        phase=phase,
+        event_type=event_type,
+        since=since,
+        until=until,
+        repo=repo,
     )
 
     counts_rows = store.query(
@@ -521,10 +532,11 @@ def _phase_events_has_workflow_delivered_column(store: Any) -> bool:
     ``phase_events``. Mirrors ``_phase_events_has_repo_column``: the writer's
     migration only runs on the next *write*, and this CLI only ever reads
     (``open_telemetry(..., read_only=True)``), so a pre-migration table on disk
-    is never touched here."""
+    is never touched here.
+    """
     rows = store.query(
         "SELECT 1 FROM information_schema.columns "
-        "WHERE table_name = 'phase_events' AND column_name = 'workflow_delivered'"
+        "WHERE table_name = 'phase_events' AND column_name = 'workflow_delivered'",
     )
     return bool(rows)
 
@@ -554,7 +566,11 @@ def _query_delivery_rate(
     there is no surface discriminator column to split on today.
     """
     where, params = _phase_events_where(
-        phase=phase, event_type="llm_sent", since=since, until=until, repo=repo
+        phase=phase,
+        event_type="llm_sent",
+        since=since,
+        until=until,
+        repo=repo,
     )
     rows = store.query(
         f"""
@@ -580,7 +596,7 @@ def _query_delivery_rate(
                 "delivered": delivered,
                 "not_delivered": not_delivered,
                 "delivery_rate": round(delivered / total, 3) if total else None,
-            }
+            },
         )
     return result
 
@@ -599,7 +615,7 @@ def _phase_events_has_repo_column(store: Any) -> bool:
     """
     rows = store.query(
         "SELECT 1 FROM information_schema.columns "
-        "WHERE table_name = 'phase_events' AND column_name = 'repo'"
+        "WHERE table_name = 'phase_events' AND column_name = 'repo'",
     )
     return bool(rows)
 
@@ -686,7 +702,9 @@ def _run_phases(args: argparse.Namespace) -> int:
 
 
 def _render_phases(
-    result: dict[str, Any], phase: str | None = None, repo: str | None = None
+    result: dict[str, Any],
+    phase: str | None = None,
+    repo: str | None = None,
 ) -> None:
     """Render the phase_events query in human-readable format."""
     per_phase: list[dict[str, Any]] = list(result.get("per_phase") or [])
@@ -738,7 +756,7 @@ def _render_phases(
             rate_str = f"{rate * 100:.0f}%" if rate is not None else "n/a"
             print_rich(
                 f"  {str(row['phase']):<12} {rate_str:>5}   "
-                f"[dim](delivered={row['delivered']}, suppressed={row['not_delivered']})[/dim]"
+                f"[dim](delivered={row['delivered']}, suppressed={row['not_delivered']})[/dim]",
             )
 
     print_rich()
@@ -755,6 +773,6 @@ def _render_phases(
             lat = f"{row['latency_ms']}ms" if row["latency_ms"] is not None else "-"
             print_rich(
                 f"  {row['request_ts']:<15}  {str(row['phase']):<10}  "
-                f"{str(row['event_type']):<16}  {model:<20}  {lat:>8}"
+                f"{str(row['event_type']):<16}  {model:<20}  {lat:>8}",
             )
     print_rich()

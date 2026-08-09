@@ -23,7 +23,7 @@ ALL_KINDS: frozenset[str] = frozenset(
         "approved",
         "banner-turns",
         "pause-reminded",
-    }
+    },
 )
 
 # Kinds that participate in lease-based concurrency control.
@@ -212,7 +212,8 @@ class ContractCreateRequest(BaseModel):
     scope_touches: list[str] | None = Field(default=None, description="Files the contract touches")
     scope_avoids: list[str] | None = Field(default=None, description="Files the contract avoids")
     success_criteria: list[str | dict[str, Any]] | None = Field(
-        default=None, description="Success criteria list of strings or {id, text} dicts"
+        default=None,
+        description="Success criteria list of strings or {id, text} dicts",
     )
     body: str | None = Field(default=None, description="Contract body (markdown)")
 

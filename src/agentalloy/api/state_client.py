@@ -131,7 +131,11 @@ class StateClient:
         return self._post("/state/phase", body, repo_root=repo_root)
 
     def set_phase_with_contract(
-        self, value: str, contract: dict[str, Any], *, repo_root: str | None = None
+        self,
+        value: str,
+        contract: dict[str, Any],
+        *,
+        repo_root: str | None = None,
     ) -> dict[str, Any]:
         """Advance phase and store a contract in a single transaction.
 
@@ -143,7 +147,9 @@ class StateClient:
         harnesses (D1–D9) as part of the phase advance.
         """
         return self._post(
-            "/state/phase", {"value": value, "contract": contract}, repo_root=repo_root
+            "/state/phase",
+            {"value": value, "contract": contract},
+            repo_root=repo_root,
         )
 
     def import_files(self, repo_root: str | None = None) -> dict[str, str]:
@@ -203,7 +209,8 @@ class StateClient:
         """
         try:
             resp = urllib.request.urlopen(
-                self._url("/state/phase", repo_root=repo_root), timeout=self._timeout
+                self._url("/state/phase", repo_root=repo_root),
+                timeout=self._timeout,
             )
             body = json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
@@ -238,7 +245,8 @@ class StateClient:
     def clear_phase(self, *, repo_root: str | None = None) -> None:
         """Delete the phase row.  Idempotent — clearing an absent phase is fine."""
         req = urllib.request.Request(
-            self._url("/state/phase", repo_root=repo_root), method="DELETE"
+            self._url("/state/phase", repo_root=repo_root),
+            method="DELETE",
         )
         try:
             urllib.request.urlopen(req, timeout=self._timeout)
@@ -260,7 +268,8 @@ class StateClient:
         """Read a contract by ID.  Returns None if not found."""
         try:
             resp = urllib.request.urlopen(
-                self._url(f"/contracts/{contract_id}"), timeout=self._timeout
+                self._url(f"/contracts/{contract_id}"),
+                timeout=self._timeout,
             )
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
@@ -336,7 +345,8 @@ class StateClient:
     def set_artifact(self, phase: str, slug: str, name: str, content: str) -> dict[str, Any]:
         """Upsert a deliverable artifact body via the service."""
         return self._put(
-            "/state/artifact", {"phase": phase, "slug": slug, "name": name, "content": content}
+            "/state/artifact",
+            {"phase": phase, "slug": slug, "name": name, "content": content},
         )
 
     def list_artifacts(
@@ -354,7 +364,8 @@ class StateClient:
             params.append(("name_glob", name_glob))
         try:
             resp = urllib.request.urlopen(
-                self._url("/state/artifact", params), timeout=self._timeout
+                self._url("/state/artifact", params),
+                timeout=self._timeout,
             )
             data = json.loads(resp.read().decode())
             return data.get("artifacts", [])
@@ -365,7 +376,8 @@ class StateClient:
         """Fetch a single artifact by (phase, slug, name), or None if absent."""
         path = f"/state/artifact/{urllib.parse.quote(phase, safe='')}/{urllib.parse.quote(slug, safe='')}/{urllib.parse.quote(name, safe='')}"
         req = urllib.request.Request(
-            f"{self.base_url}{path}", headers={"Accept": "application/json"}
+            f"{self.base_url}{path}",
+            headers={"Accept": "application/json"},
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
@@ -378,7 +390,11 @@ class StateClient:
             raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
     def set_approval(
-        self, phase: str, artifact_digest: str, *, approver: str | None = None
+        self,
+        phase: str,
+        artifact_digest: str,
+        *,
+        approver: str | None = None,
     ) -> dict[str, Any]:
         """Record human approval for *phase* with the artifact digest it covers.
 
@@ -393,7 +409,7 @@ class StateClient:
                 "artifact_digest": artifact_digest,
                 "approver": approver,
                 "approved_at": datetime.now(UTC).isoformat(),
-            }
+            },
         )
         return self._post("/state/approve", {"value": value, "session_key": phase})
 
@@ -401,7 +417,8 @@ class StateClient:
         """Fetch the recorded approval for *phase*, or None if never approved."""
         try:
             resp = urllib.request.urlopen(
-                self._url("/state/approved", [("session_key", phase)]), timeout=self._timeout
+                self._url("/state/approved", [("session_key", phase)]),
+                timeout=self._timeout,
             )
             data = json.loads(resp.read().decode())
             raw = data.get("value")

@@ -189,7 +189,7 @@ def compute_consistency(
                     skill_id=sid,
                     store_version_id=store_map[sid],
                     cache_version_id=cache_map[sid],
-                )
+                ),
             )
 
     missing_in_cache = sorted(store_ids - cache_ids)

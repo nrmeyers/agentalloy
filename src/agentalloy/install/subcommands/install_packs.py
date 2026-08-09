@@ -46,6 +46,7 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
     container (``is_in_container()``) — the entrypoint script runs
     ``install-packs`` directly and must NOT recurse back into a container
     exec on itself.
+
     """
     # Local imports to keep module import time low (this function is on the
     # cold path; install_packs is also imported by tests that don't need
@@ -346,7 +347,9 @@ def _run(args: argparse.Namespace) -> int:
 
     interactive = sys.stdin.isatty() and not args.non_interactive
     selected, unknown, consumed_pending = _select_packs(
-        available, args.packs, interactive=interactive
+        available,
+        args.packs,
+        interactive=interactive,
     )
 
     if unknown and not args.ignore_unknown:
@@ -383,7 +386,10 @@ def _run(args: argparse.Namespace) -> int:
     # _run_container_guard() owns the AGENTALLOY_DB_LOCK_HELD lifecycle;
     # child ingest subprocesses inherit the sentinel via POSIX env and no-op.
     install_results, named_results, reembed_rc = _run_container_guard(
-        args, selected, packs_root, root
+        args,
+        selected,
+        packs_root,
+        root,
     )
 
     for pack_name, r in named_results:
@@ -831,7 +837,8 @@ def _run_container_guard(
         container_stopped = stop_service_in_container()
         if container_stopped:
             print(
-                "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
+                "[agentalloy] Service stopped; ingesting packs with --no-restart",
+                file=sys.stderr,
             )
     elif not no_restart:
         # Native: free the corpus DB lock from our own running service before the

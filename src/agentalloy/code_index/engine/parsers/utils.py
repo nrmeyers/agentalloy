@@ -176,7 +176,7 @@ def ingest_exported_function(
     }
 
     logger.info(
-        logs.EXPORT_FOUND.format(export_type=export_type, name=function_name, qn=function_qn)
+        logs.EXPORT_FOUND.format(export_type=export_type, name=function_name, qn=function_qn),
     )
     ingestor.ensure_node_batch(cs.NodeLabel.FUNCTION, function_props)
     function_registry[function_qn] = NodeType.FUNCTION

@@ -9,7 +9,10 @@ from ..constants import ENCODING_UTF8
 
 
 def extract_source_lines(
-    file_path: Path, start_line: int, end_line: int, encoding: str = ENCODING_UTF8
+    file_path: Path,
+    start_line: int,
+    end_line: int,
+    encoding: str = ENCODING_UTF8,
 ) -> str | None:
     if not file_path.exists():
         logger.warning(ls.SOURCE_FILE_NOT_FOUND.format(path=file_path))
@@ -34,7 +37,7 @@ def extract_source_lines(
                     end=end_line,
                     length=len(lines),
                     path=file_path,
-                )
+                ),
             )
             end_line = min(end_line, len(lines))
             if start_line > len(lines):
@@ -67,7 +70,9 @@ def extract_source_with_fallback(
 
 
 def validate_source_location(
-    file_path: str | None, start_line: int | None, end_line: int | None
+    file_path: str | None,
+    start_line: int | None,
+    end_line: int | None,
 ) -> tuple[bool, Path | None]:
     if not all([file_path, start_line, end_line]):
         return False, None

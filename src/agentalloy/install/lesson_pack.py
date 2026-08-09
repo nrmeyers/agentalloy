@@ -63,7 +63,8 @@ _RATIONALE_KEYS = (
 _PROBLEM_KEYS = ("problem", "context", "symptom", "background", "issue")
 
 _TAGS_RE = re.compile(
-    r"^\s*(?:\*\*|_)?tags(?:\*\*|_)?\s*[:=]\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE
+    r"^\s*(?:\*\*|_)?tags(?:\*\*|_)?\s*[:=]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -197,7 +198,11 @@ def generate_lesson_pack(lesson_path: Path, dest_root: Path) -> dict[str, Any]:
 
 
 def generate_lesson_pack_from_text(
-    slug: str, text: str, dest_root: Path, *, source: str | None = None
+    slug: str,
+    text: str,
+    dest_root: Path,
+    *,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Generate a domain-skill pack from lesson ``text`` under ``dest_root``.
 
@@ -239,7 +244,7 @@ def generate_lesson_pack_from_text(
     manifest = _default_pack_manifest(pack_name)
     manifest["description"] = f"Promoted compound-engineering lesson(s): {pack_name}."
     manifest["skills"] = [
-        {"skill_id": skill_id, "file": f"{skill_id}.yaml", "fragment_count": len(fragments)}
+        {"skill_id": skill_id, "file": f"{skill_id}.yaml", "fragment_count": len(fragments)},
     ]
 
     pack_dir.mkdir(parents=True, exist_ok=True)

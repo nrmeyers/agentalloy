@@ -55,7 +55,11 @@ class RustHandler(BaseLanguageHandler):
     ) -> str:
         if (fqn_config := LANGUAGE_FQN_SPECS.get(cs.SupportedLanguage.RUST)) and file_path:
             if func_qn := resolve_fqn_from_ast(
-                node, file_path, repo_path, project_name, fqn_config
+                node,
+                file_path,
+                repo_path,
+                project_name,
+                fqn_config,
             ):
                 return func_qn
 

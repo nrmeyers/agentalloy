@@ -116,7 +116,8 @@ def get_settings_for_proxy(request: Request) -> AppSettings:
 
 
 def _get_phase_telemetry_writer(
-    app: Any, vector_store: TelemetryStore | None
+    app: Any,
+    vector_store: TelemetryStore | None,
 ) -> PhaseTelemetryWriter | None:
     """Prefer the lifespan-scoped writer on ``app.state.phase_telemetry`` (task
     04) so the schema DDL is not re-run on every single write. Falls back to a
@@ -142,7 +143,9 @@ def _get_phase_telemetry_writer(
 
 
 def _get_or_create_upstream_client(
-    app: Any, base_url: str, api_key: str | None
+    app: Any,
+    base_url: str,
+    api_key: str | None,
 ) -> httpx.AsyncClient:
     """Return a cached httpx client for *base_url* (per-repo upstream).
 
@@ -274,7 +277,7 @@ def _upstream_not_configured_error() -> JSONResponse:
             "error": {
                 "code": "upstream_not_configured",
                 "message": "Upstream LLM is not configured. Set UPSTREAM_URL and UPSTREAM_MODEL.",
-            }
+            },
         },
     )
 
@@ -286,7 +289,7 @@ def _upstream_parse_error(detail: str) -> JSONResponse:
             "error": {
                 "code": "upstream_parse_error",
                 "message": f"Per-repo upstream is malformed: {detail}",
-            }
+            },
         },
     )
 
@@ -298,7 +301,7 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
             "error": {
                 "code": "upstream_unavailable",
                 "message": f"Upstream LLM unavailable: {detail}",
-            }
+            },
         },
     )
 
@@ -312,7 +315,8 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
 class _StreamTelemetry:
     """Bundle threaded into the SSE generator so it can emit the terminal
     llm_received/llm_error event itself (the handler has already returned by
-    the time the stream finishes)."""
+    the time the stream finishes).
+    """
 
     writer: PhaseTelemetryWriter
     trace_id: str | None
@@ -546,7 +550,8 @@ def _stream_upstream_response(
                 if resp.status_code >= 500:
                     logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
                     yield error_sse_plain(
-                        f"Upstream returned HTTP {resp.status_code}", resp.status_code
+                        f"Upstream returned HTTP {resp.status_code}",
+                        resp.status_code,
                     )
                     _finish_error(f"Upstream returned HTTP {resp.status_code}")
                     return
@@ -636,7 +641,7 @@ def _build_payload(
     if resolved is None:
         raise ValueError(
             "Model 'agentalloy-proxy' requires an upstream model. "
-            "Set UPSTREAM_MODEL in your configuration."
+            "Set UPSTREAM_MODEL in your configuration.",
         )
     payload: dict[str, Any] = {
         "model": resolved,
@@ -850,7 +855,10 @@ async def proxy_chat_completions(
     # from the harness's own config by `agentalloy add`) wins, else the global
     # lifespan client. 503 only when neither resolves.
     resolved_upstream = _resolve_upstream(
-        fastapi_request.app, cwd, upstream, settings.upstream_model
+        fastapi_request.app,
+        cwd,
+        upstream,
+        settings.upstream_model,
     )
     if isinstance(resolved_upstream, UpstreamFile) and resolved_upstream.kind == "error":
         detail = resolved_upstream.detail
@@ -961,7 +969,8 @@ async def proxy_chat_completions(
                 composed = True
         except Exception:
             logger.warning(
-                "Composition/injection failed -- passing through unchanged", exc_info=True
+                "Composition/injection failed -- passing through unchanged",
+                exc_info=True,
             )
             current = request
 
@@ -977,7 +986,10 @@ async def proxy_chat_completions(
     ):
         try:
             new_msgs = inject_into_openai_messages(
-                current.messages, signal_result.banner, phase=signal_result.phase, kind="banner"
+                current.messages,
+                signal_result.banner,
+                phase=signal_result.phase,
+                kind="banner",
             )
             if new_msgs is not None:
                 current = current.model_copy(update={"messages": new_msgs})
@@ -1000,7 +1012,9 @@ async def proxy_chat_completions(
     ):
         try:
             sys_msgs = inject_into_openai_system_prompt(
-                current.messages, signal_result.workflow_system_prose, phase=signal_result.phase
+                current.messages,
+                signal_result.workflow_system_prose,
+                phase=signal_result.phase,
             )
             if sys_msgs is not None:
                 current = current.model_copy(update={"messages": sys_msgs})
@@ -1037,7 +1051,7 @@ async def proxy_chat_completions(
                     "code": "upstream_model_not_configured",
                     "message": str(e),
                     "type": "api_error",
-                }
+                },
             },
         )
     error_code: str | None = None
@@ -1085,7 +1099,11 @@ async def proxy_chat_completions(
             else None
         )
         return _stream_upstream_response(
-            upstream_client, chat_url, payload, on_status=_commit, telemetry=stream_telemetry
+            upstream_client,
+            chat_url,
+            payload,
+            on_status=_commit,
+            telemetry=stream_telemetry,
         )
 
     # Non-streaming: forward and return JSON
@@ -1365,7 +1383,7 @@ async def proxy_embeddings(
                     "message": "Embed server not configured",
                     "type": "api_error",
                     "code": "embed_not_configured",
-                }
+                },
             },
         )
 
@@ -1381,7 +1399,7 @@ async def proxy_embeddings(
                     "message": f"Embed server unavailable: {e}",
                     "type": "api_error",
                     "code": "embed_connection_error",
-                }
+                },
             },
         )
     except httpx.TimeoutException as e:
@@ -1393,7 +1411,7 @@ async def proxy_embeddings(
                     "message": f"Embed server timeout: {e}",
                     "type": "api_error",
                     "code": "embed_timeout",
-                }
+                },
             },
         )
     except httpx.HTTPError as e:
@@ -1405,7 +1423,7 @@ async def proxy_embeddings(
                     "message": f"Embed server HTTP error: {e}",
                     "type": "api_error",
                     "code": "embed_http_error",
-                }
+                },
             },
         )
 

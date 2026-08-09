@@ -50,10 +50,12 @@ class IngestPackRequest(BaseModel):
     """A generated pack pushed as bytes so it crosses the host→container boundary."""
 
     pack: dict[str, str] = Field(
-        ..., description="Pack files as {relative-path: text-content} (pack.yaml + skill YAMLs)."
+        ...,
+        description="Pack files as {relative-path: text-content} (pack.yaml + skill YAMLs).",
     )
     allow_duplicates: bool = Field(
-        default=False, description="Install even on a hard cross-pack near-duplicate."
+        default=False,
+        description="Install even on a hard cross-pack near-duplicate.",
     )
     strict: bool = Field(
         default=True,

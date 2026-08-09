@@ -130,7 +130,7 @@ def _load_pack_skills(pack_dir: Path) -> list[dict[str, Any]]:
                 "phase_scope": data.get("phase_scope") or ["build"],
                 "skill_class": str(data.get("skill_class") or "domain"),
                 "deprecated": bool(data.get("deprecated", False)),
-            }
+            },
         )
     return result
 
@@ -212,7 +212,7 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
                         "ship",
                         "sdd-fast",
                         "add-skill",
-                    }
+                    },
                 )
                 probe_phase = next((p for p in phase_list if p in _VALID_PROBE_PHASES), "build")
 

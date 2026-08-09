@@ -20,7 +20,16 @@ if TYPE_CHECKING:
 # custom-skill authoring lane (scaffold → validate → approve → install) that
 # returns to intake when done.
 Phase = Literal[
-    "intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill", "sdd-flow"
+    "intake",
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+    "sdd-flow",
 ]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings; build/ship
@@ -111,7 +120,8 @@ class ComposeRequest(BaseModel):
     task: Annotated[str, Field(min_length=1, description="Natural language task description")]
     phase: Phase = Field(description="SDD phase the task belongs to")
     domain_tags: list[str] | None = Field(
-        default=None, description="Optional domain tag filter applied to domain fragments"
+        default=None,
+        description="Optional domain tag filter applied to domain fragments",
     )
     k: Annotated[
         int | None,
@@ -219,7 +229,8 @@ class ComposeTelemetry(BaseModel):
     """Persisted-trace fields the orchestrator computes but the result body
     otherwise omits. Surfaced on the result so a caller that suppresses the
     orchestrator's internal trace write (the proxy, via ``record_trace=False``)
-    can fold them into one consolidated row instead of losing them."""
+    can fold them into one consolidated row instead of losing them.
+    """
 
     tokens_returned: int = 0
     tokens_flat_equivalent: int = 0
@@ -293,7 +304,8 @@ class ComposedResult(BaseModel):
         ),
     )
     debug: RetrievalDebug | None = Field(
-        default=None, description="Per-stage retrieval detail; present only when requested."
+        default=None,
+        description="Per-stage retrieval detail; present only when requested.",
     )
 
 
@@ -314,7 +326,8 @@ class EmptyResult(BaseModel):
     dense_leg_degraded: bool = False
     telemetry: ComposeTelemetry = Field(default_factory=ComposeTelemetry)
     debug: RetrievalDebug | None = Field(
-        default=None, description="Per-stage retrieval detail; present only when requested."
+        default=None,
+        description="Per-stage retrieval detail; present only when requested.",
     )
 
 

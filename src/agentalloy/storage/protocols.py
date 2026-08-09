@@ -77,7 +77,8 @@ class FragmentEmbedding:
     """A fragment's embedding plus the denormalized columns that make filtered
     vector search cheap. In v5 these columns are a *derived projection* of the
     SQL-canonical source (``agentalloy.duck``), rebuilt on every reembed, so
-    they cannot drift (decision D8: always consistent)."""
+    they cannot drift (decision D8: always consistent).
+    """
 
     fragment_id: str
     embedding: Sequence[float]  # raw; normalized on insert
@@ -107,7 +108,8 @@ class BM25Hit:
 @dataclass(frozen=True)
 class CompositionTrace:
     """One row in ``composition_traces``. Optional fields carry None into the
-    DB column as SQL NULL."""
+    DB column as SQL NULL.
+    """
 
     trace_id: str
     request_ts: int
@@ -185,7 +187,8 @@ class CodeSymbol:
 @dataclass(frozen=True)
 class CodeEdge:
     """One relationship row (CALLS / CONTAINS / IMPORTS / ...) between two
-    qualified names. Endpoints may dangle (unresolved externals) — no FKs."""
+    qualified names. Endpoints may dangle (unresolved externals) — no FKs.
+    """
 
     src: str
     dst: str
@@ -206,7 +209,8 @@ class CodeEdge:
 @dataclass(frozen=True)
 class CodeVectorRow:
     """A symbol's embedding plus the denormalized columns the search surface
-    returns. Derived from the graph store; rebuilt on re-embed."""
+    returns. Derived from the graph store; rebuilt on re-embed.
+    """
 
     qualified_name: str
     embedding: Sequence[float]  # raw; normalized on insert
@@ -247,7 +251,8 @@ class DecisionRow:
 @dataclass(frozen=True)
 class CodeSearchHit:
     """One vector/FTS search hit. ``score`` is higher-is-better (cosine
-    similarity for the dense leg, BM25 for the sparse leg)."""
+    similarity for the dense leg, BM25 for the sparse leg).
+    """
 
     qualified_name: str
     file_path: str
@@ -305,10 +310,14 @@ class SkillStore(Protocol):
 
     def migrate(self) -> None: ...
     def execute(
-        self, sql: str, params: Sequence[object] | Mapping[str, object] | None = None
+        self,
+        sql: str,
+        params: Sequence[object] | Mapping[str, object] | None = None,
     ) -> list[tuple[Any, ...]]: ...
     def scalar(
-        self, sql: str, params: Sequence[object] | Mapping[str, object] | None = None
+        self,
+        sql: str,
+        params: Sequence[object] | Mapping[str, object] | None = None,
     ) -> Any: ...
     def begin(self) -> None: ...
     def commit(self) -> None: ...
@@ -357,11 +366,14 @@ class TelemetryStore(Protocol):
 @runtime_checkable
 class CodeGraphStore(Protocol):
     """Per-repo symbol graph (DuckDB ``graph.duck``). Source of truth for the
-    code index; the Lance vector dataset is derived from it."""
+    code index; the Lance vector dataset is derived from it.
+    """
 
     def migrate(self) -> None: ...
     def replace_all(
-        self, symbols: Iterable[CodeSymbol], edges: Iterable[CodeEdge]
+        self,
+        symbols: Iterable[CodeSymbol],
+        edges: Iterable[CodeEdge],
     ) -> tuple[int, int]: ...
     def upsert_symbols(self, symbols: Iterable[CodeSymbol]) -> int: ...
     def upsert_edges(self, edges: Iterable[CodeEdge]) -> int: ...
@@ -379,7 +391,11 @@ class CodeGraphStore(Protocol):
     def count_govern_edges_for_doc(self, doc_path: str) -> int: ...
     def counts_by_kind(self) -> dict[str, int]: ...
     def list_files(
-        self, *, prefix: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        *,
+        prefix: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[str]: ...
     def calls_edges(self) -> list[tuple[str, str]]: ...
     def write_centrality(self, scores: Mapping[str, float]) -> int: ...
@@ -398,10 +414,18 @@ class CodeVectorStore(Protocol):
     def upsert(self, rows: Iterable[CodeVectorRow]) -> int: ...
     def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int: ...
     def search_similar(
-        self, query_vec: Sequence[float], *, k: int = 10, where: str | None = None
+        self,
+        query_vec: Sequence[float],
+        *,
+        k: int = 10,
+        where: str | None = None,
     ) -> list[CodeSearchHit]: ...
     def search_bm25(
-        self, query: str, *, k: int = 10, where: str | None = None
+        self,
+        query: str,
+        *,
+        k: int = 10,
+        where: str | None = None,
     ) -> list[tuple[str, float]]: ...
     def delete(self, qualified_names: Sequence[str]) -> int: ...
     def count(self) -> int: ...

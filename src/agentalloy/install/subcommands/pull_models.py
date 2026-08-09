@@ -325,7 +325,7 @@ def _write_llama_server_wrapper(os_key: str, runtime_dir: Path, bin_dir: Path) -
         wrapper.write_text(
             "@echo off\r\n"
             f'set "PATH={runtime_dir};%PATH%"\r\n'
-            f'"{runtime_dir}\\llama-server.exe" %*\r\n'
+            f'"{runtime_dir}\\llama-server.exe" %*\r\n',
         )
     else:
         wrapper = bin_dir / "llama-server"
@@ -336,7 +336,7 @@ def _write_llama_server_wrapper(os_key: str, runtime_dir: Path, bin_dir: Path) -
             f'LLAMA_LIB_DIR="{runtime_dir}"\n'
             'export LD_LIBRARY_PATH="$LLAMA_LIB_DIR:${LD_LIBRARY_PATH:-}"\n'
             'export DYLD_LIBRARY_PATH="$LLAMA_LIB_DIR:${DYLD_LIBRARY_PATH:-}"\n'
-            'exec "$LLAMA_LIB_DIR/llama-server" "$@"\n'
+            'exec "$LLAMA_LIB_DIR/llama-server" "$@"\n',
         )
     wrapper.chmod(0o755)
     return wrapper
@@ -749,7 +749,10 @@ def _download_gguf_once(url: str, dest_path: Path) -> int:
 
 
 def _download_with_retry(
-    url: str, dest_path: Path, *, label: str = "llama-server"
+    url: str,
+    dest_path: Path,
+    *,
+    label: str = "llama-server",
 ) -> dict[str, Any]:
     """Stream ``url`` to ``dest_path``, retrying transient network failures.
 
@@ -914,7 +917,9 @@ def ensure_runner_binary(*, interactive: bool, preset: str = "cpu") -> dict[str,
 
 
 def _handle_llama_server(
-    model: str, interactive: bool, hardware: str = "cpu"
+    model: str,
+    interactive: bool,
+    hardware: str = "cpu",
 ) -> tuple[
     list[dict[str, Any]],  # auto_pulled entries
     list[dict[str, Any]],  # error entries
@@ -936,7 +941,7 @@ def _handle_llama_server(
                 "success": False,
                 "error": bin_result.get("error", "unknown error provisioning llama-server"),
                 "hint": bin_result.get("hint"),
-            }
+            },
         )
         return auto_pulled, errors
 
@@ -953,7 +958,7 @@ def _handle_llama_server(
                 "model": model,
                 "success": False,
                 "error": download_result.get("error", "unknown download error"),
-            }
+            },
         )
         return auto_pulled, errors
 
@@ -963,7 +968,7 @@ def _handle_llama_server(
             "model": model,
             "duration_ms": download_result.get("duration_ms", 0),
             "path": download_result.get("path"),
-        }
+        },
     )
     return auto_pulled, errors
 
@@ -1107,7 +1112,7 @@ def pull_models(
                     "runner": runner,
                     "model": model,
                     "instruction": f"Manually install model '{model}' using runner '{runner}'.",
-                }
+                },
             )
 
     output: dict[str, Any] = {

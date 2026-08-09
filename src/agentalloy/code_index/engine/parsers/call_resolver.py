@@ -70,7 +70,7 @@ _EMITTABLE_RESOLVED_VIA: frozenset[str] = frozenset(
         RESOLVED_VIA_WILDCARD,
         RESOLVED_VIA_FALLBACK,
         RESOLVED_VIA_UNKNOWN,
-    }
+    },
 )
 
 
@@ -80,7 +80,7 @@ def _assert_emittable_resolved_via(tag: str) -> None:
         raise ValueError(
             f"resolved_via {tag!r} is reserved for a sibling ticket "
             f"(BUC-1611 'rebound' / BUC-1615 'scip') and must not be "
-            f"emitted by the BUC-1609 resolver"
+            f"emitted by the BUC-1609 resolver",
         )
 
 
@@ -183,7 +183,10 @@ class CallResolver:
         return new_label, rebind.new_target_qn, "rebound"
 
     def _resolve_class_qn_from_type(
-        self, var_type: str, import_map: dict[str, str], module_qn: str
+        self,
+        var_type: str,
+        import_map: dict[str, str],
+        module_qn: str,
     ) -> str:
         if cs.SEPARATOR_DOT in var_type:
             return var_type
@@ -192,7 +195,10 @@ class CallResolver:
         return self._resolve_class_name(var_type, module_qn) or ""
 
     def _try_resolve_method(
-        self, class_qn: str, method_name: str, separator: str = cs.SEPARATOR_DOT
+        self,
+        class_qn: str,
+        method_name: str,
+        separator: str = cs.SEPARATOR_DOT,
     ) -> tuple[str, str] | None:
         method_qn = f"{class_qn}{separator}{method_name}"
         if method_qn in self.function_registry:
@@ -339,7 +345,10 @@ class CallResolver:
             return ResolveResult.from_tuple(result, RESOLVED_VIA_EXACT, CONFIDENCE_EXACT)
 
         if result := self._try_resolve_qualified_call(
-            call_name, import_map, module_qn, local_var_types
+            call_name,
+            import_map,
+            module_qn,
+            local_var_types,
         ):
             return ResolveResult.from_tuple(result, RESOLVED_VIA_EXACT, CONFIDENCE_EXACT)
 
@@ -360,7 +369,9 @@ class CallResolver:
         )
 
     def resolve_cpp_operator_call_with_provenance(
-        self, call_name: str, module_qn: str
+        self,
+        call_name: str,
+        module_qn: str,
     ) -> ResolveResult | None:
         return ResolveResult.from_tuple(
             self.resolve_cpp_operator_call(call_name, module_qn),
@@ -414,14 +425,19 @@ class CallResolver:
             return result
 
         if result := self._try_resolve_qualified_call(
-            call_name, import_map, module_qn, local_var_types
+            call_name,
+            import_map,
+            module_qn,
+            local_var_types,
         ):
             return result
 
         return self._try_resolve_wildcard_imports(call_name, import_map)
 
     def _try_resolve_direct_import(
-        self, call_name: str, import_map: dict[str, str]
+        self,
+        call_name: str,
+        import_map: dict[str, str],
     ) -> tuple[str, str] | None:
         if call_name not in import_map:
             return None
@@ -442,7 +458,9 @@ class CallResolver:
         return None
 
     def _try_resolve_direct_import_with_wildcard_flag(
-        self, call_name: str, import_map: dict[str, str]
+        self,
+        call_name: str,
+        import_map: dict[str, str],
     ) -> tuple[tuple[str, str], bool] | None:
         """Tagged sibling of :meth:`_try_resolve_direct_import`.
 
@@ -625,17 +643,30 @@ class CallResolver:
 
         if len(parts) == 2:
             if result := self._resolve_two_part_call(
-                parts, call_name, separator, import_map, module_qn, local_var_types
+                parts,
+                call_name,
+                separator,
+                import_map,
+                module_qn,
+                local_var_types,
             ):
                 return result
 
         if len(parts) >= 3 and parts[0] == cs.KEYWORD_SELF:
             return self._resolve_self_attribute_call(
-                parts, call_name, import_map, module_qn, local_var_types
+                parts,
+                call_name,
+                import_map,
+                module_qn,
+                local_var_types,
             )
 
         return self._resolve_multi_part_call(
-            parts, call_name, import_map, module_qn, local_var_types
+            parts,
+            call_name,
+            import_map,
+            module_qn,
+            local_var_types,
         )
 
     def _has_separator(self, call_name: str) -> bool:
@@ -653,7 +684,9 @@ class CallResolver:
         return cs.SEPARATOR_DOT
 
     def _try_resolve_wildcard_imports(
-        self, call_name: str, import_map: dict[str, str]
+        self,
+        call_name: str,
+        import_map: dict[str, str],
     ) -> tuple[str, str] | None:
         for local_name, imported_qn in import_map.items():
             if not local_name.startswith("*"):
@@ -716,7 +749,11 @@ class CallResolver:
             return result
 
         if result := self._try_resolve_via_import(
-            object_name, method_name, separator, call_name, import_map
+            object_name,
+            method_name,
+            separator,
+            call_name,
+            import_map,
         ):
             return result
 
@@ -739,7 +776,12 @@ class CallResolver:
 
         if class_qn := self._resolve_class_qn_from_type(var_type, import_map, module_qn):
             if result := self._try_method_on_class(
-                class_qn, method_name, separator, call_name, object_name, var_type
+                class_qn,
+                method_name,
+                separator,
+                call_name,
+                object_name,
+                var_type,
             ):
                 return result
 
@@ -793,7 +835,10 @@ class CallResolver:
             return None
 
         class_qn = self._resolve_imported_class_qn(
-            import_map[object_name], object_name, method_name, separator
+            import_map[object_name],
+            object_name,
+            method_name,
+            separator,
         )
 
         registry_separator = separator if separator == cs.SEPARATOR_COLON else cs.SEPARATOR_DOT
@@ -831,7 +876,10 @@ class CallResolver:
         )
 
     def _try_resolve_module_method(
-        self, method_name: str, call_name: str, module_qn: str
+        self,
+        method_name: str,
+        call_name: str,
+        module_qn: str,
     ) -> tuple[str, str] | None:
         method_qn = f"{module_qn}.{method_name}"
         if method_qn in self.function_registry:
@@ -985,7 +1033,9 @@ class CallResolver:
         object_expr = call_name[: match.start()]
 
         if object_type := self.type_inference.python_type_inference._infer_expression_return_type(
-            object_expr, module_qn, local_var_types
+            object_expr,
+            module_qn,
+            local_var_types,
         ):
             full_object_type = object_type
             if cs.SEPARATOR_DOT not in object_type:
@@ -1017,7 +1067,9 @@ class CallResolver:
         return None
 
     def _resolve_super_call(
-        self, call_name: str, class_context: str | None = None
+        self,
+        call_name: str,
+        class_context: str | None = None,
     ) -> tuple[str, str] | None:
         match call_name:
             case _ if call_name == cs.KEYWORD_SUPER:
@@ -1102,7 +1154,10 @@ class CallResolver:
 
     def _resolve_class_name(self, class_name: str, module_qn: str) -> str | None:
         return resolve_class_name(
-            class_name, module_qn, self.import_processor, self.function_registry
+            class_name,
+            module_qn,
+            self.import_processor,
+            self.function_registry,
         )
 
     def resolve_java_method_call(

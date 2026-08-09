@@ -71,7 +71,9 @@ class RuntimeCache:
         return self._skills.get(skill_id)
 
     def get_active_skills(
-        self, *, skill_class: SkillClass | tuple[str, ...] | None = None
+        self,
+        *,
+        skill_class: SkillClass | tuple[str, ...] | None = None,
     ) -> list[ActiveSkill]:
         skills = list(self._skills.values())
         if skill_class is not None:
@@ -124,7 +126,8 @@ class RuntimeCache:
         """REQUIRES_COMPOSITIONAL targets of ``skill_id`` (one hop, requires only).
 
         Used by graph-expansion retrieval (RETRIEVAL_GRAPH_EXPAND). Returns []
-        for unknown skills or a corpus with no declared edges."""
+        for unknown skills or a corpus with no declared edges.
+        """
         return list(self._requires_edges.get(skill_id, []))
 
     def get_deprecated_skill_ids(self) -> list[str]:
@@ -228,7 +231,7 @@ def load_runtime_cache(store: SkillStore) -> RuntimeCache:
     requires_edges: dict[str, list[str]] = {}
     edge_rows = store.execute(
         "SELECT source_skill_id, target_skill_id FROM skill_dependencies "
-        "WHERE rel_type = 'requires'"
+        "WHERE rel_type = 'requires'",
     )
     for row in edge_rows:
         requires_edges.setdefault(str(row[0]), []).append(str(row[1]))
@@ -272,7 +275,7 @@ def load_profile_runtime_cache(profile_name: str) -> RuntimeCache:
         conn = duckdb.connect(str(ds_path), read_only=True)
         try:
             rows = conn.execute(
-                "SELECT skill_id, skill_class, canonical_name, raw_prose FROM profile_skills"
+                "SELECT skill_id, skill_class, canonical_name, raw_prose FROM profile_skills",
             ).fetchall()
         except duckdb.CatalogException:
             # Table doesn't exist yet

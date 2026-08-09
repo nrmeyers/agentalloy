@@ -58,6 +58,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     _ = force
     env_path = root / ENV_FILE_RELPATH
@@ -85,5 +86,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(env_content),
             original_content=original_content,
             marker_key="copilot-cli.env",
-        )
+        ),
     ]

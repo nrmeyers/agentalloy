@@ -59,7 +59,8 @@ _WORKFLOW_PLACEHOLDER_TAG = "phase:build"
 
 def _derive_canonical_name(skill_id: str) -> str:
     """ "foo-bar" -> "Foo Bar". Strips a leading "sys-" so system skills get a
-    clean title rather than "Sys Foo Bar"."""
+    clean title rather than "Sys Foo Bar".
+    """
     base = skill_id[len("sys-") :] if skill_id.startswith("sys-") else skill_id
     parts = re.split(r"[-_]+", base.strip())
     title = " ".join(p.capitalize() for p in parts if p)
@@ -114,7 +115,9 @@ def _domain_fragments(skill_id: str) -> list[dict[str, Any]]:
 
 
 def _build_skill_record(
-    effective_skill_id: str, skill_class: str, canonical_name: str
+    effective_skill_id: str,
+    skill_class: str,
+    canonical_name: str,
 ) -> dict[str, Any]:
     """Build the skill YAML content (as an ordered dict) for *skill_class*."""
     description = f"[FILL IN] one-line summary of what '{canonical_name}' teaches an agent."
@@ -231,7 +234,8 @@ def _default_pack_manifest(pack_name: str) -> dict[str, Any]:
 class _BlockDumper(_yaml.SafeDumper):
     """Local (non-global) Dumper subclass so multi-line strings render as
     readable YAML block scalars (``|``) without mutating yaml.SafeDumper for
-    the whole process."""
+    the whole process.
+    """
 
 
 def _str_presenter(dumper: _yaml.SafeDumper, data: str) -> Any:
@@ -364,7 +368,7 @@ def new_skill_pack(
             "skill_id": effective_skill_id,
             "file": f"{effective_skill_id}.yaml",
             "fragment_count": fragment_count,
-        }
+        },
     )
     manifest["skills"] = skills_list
 

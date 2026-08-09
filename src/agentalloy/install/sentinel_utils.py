@@ -51,6 +51,7 @@ def replace_marked_block(
 
     Returns:
         The modified content with the sentinel-bounded block.
+
     """
     nl = detect_line_ending(existing) if existing else "\n"
 
@@ -61,7 +62,7 @@ def replace_marked_block(
     if begin_count > 1 or end_count > 1:
         raise ValueError(
             f"target file contains {begin_count} BEGIN and {end_count} END "
-            f"agentalloy sentinels (expected at most 1 of each). Refusing to write."
+            f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
         )
 
     if sentinel_begin in existing and sentinel_end in existing:
@@ -72,7 +73,7 @@ def replace_marked_block(
         end_marker_start = existing.index(sentinel_end)
         if end_marker_start < begin_idx:
             raise ValueError(
-                "sentinel END marker appears before BEGIN marker in target file. Refusing to write."
+                "sentinel END marker appears before BEGIN marker in target file. Refusing to write.",
             )
 
         # Consume trailing newline if present
@@ -180,7 +181,7 @@ def remove_sentinel_block_simple(
     end_marker_start = text.index(end)
     if end_marker_start < b:
         raise ValueError(
-            "sentinel END marker appears before BEGIN marker in target file. Refusing to remove."
+            "sentinel END marker appears before BEGIN marker in target file. Refusing to remove.",
         )
 
     # Consume trailing newline

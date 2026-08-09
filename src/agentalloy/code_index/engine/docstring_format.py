@@ -37,6 +37,7 @@ def format_docstring(raw: str | None) -> str:
     Returns:
         Structured multi-line string, or ``""`` when there is nothing to
         embed.
+
     """
     if raw is None:
         return ""

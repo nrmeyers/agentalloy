@@ -21,17 +21,24 @@ if TYPE_CHECKING:
 
     class _ExpressionAnalyzerDeps(Protocol):
         def _analyze_self_assignments(
-            self, node: Node, local_var_types: dict[str, str], module_qn: str
+            self,
+            node: Node,
+            local_var_types: dict[str, str],
+            module_qn: str,
         ) -> None: ...
 
         def build_local_variable_type_map(
-            self, caller_node: Node, module_qn: str
+            self,
+            caller_node: Node,
+            module_qn: str,
         ) -> dict[str, str]: ...
 
         def _find_method_ast_node(self, method_qn: str) -> Node | None: ...
 
         def _analyze_method_return_statements(
-            self, method_node: Node, method_qn: str
+            self,
+            method_node: Node,
+            method_qn: str,
         ) -> str | None: ...
 
     _ExprBase: type = _ExpressionAnalyzerDeps
@@ -93,7 +100,10 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
         return None
 
     def _infer_type_from_expression_complex(
-        self, node: Node, module_qn: str, local_var_types: dict[str, str]
+        self,
+        node: Node,
+        module_qn: str,
+        local_var_types: dict[str, str],
     ) -> str | None:
         if node.type == cs.TS_PY_CALL:
             func_node = node.child_by_field_name(cs.TS_FIELD_FUNCTION)
@@ -103,7 +113,9 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
                 and (method_call_text := self._extract_full_method_call(func_node))
             ):
                 return self._infer_method_call_return_type(
-                    method_call_text, module_qn, local_var_types
+                    method_call_text,
+                    module_qn,
+                    local_var_types,
                 )
 
         return None
@@ -123,7 +135,9 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
     ) -> str | None:
         if cs.SEPARATOR_DOT in method_call and self._is_method_chain(method_call):
             return self._infer_chained_call_return_type_fixed(
-                method_call, module_qn, local_var_types
+                method_call,
+                module_qn,
+                local_var_types,
             )
 
         return self._infer_method_return_type(method_call, module_qn, local_var_types)
@@ -150,7 +164,9 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
         object_expr = call_name[: match.start()]
 
         object_type = self._infer_object_type_for_chained_call(
-            object_expr, module_qn, local_var_types
+            object_expr,
+            module_qn,
+            local_var_types,
         )
         if not object_type:
             return None
@@ -224,7 +240,9 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
         try:
             if (
                 method_qn := self._resolve_method_qualified_name(
-                    method_call, module_qn, local_var_types
+                    method_call,
+                    module_qn,
+                    local_var_types,
                 )
             ) and (method_node := self._find_method_ast_node(method_qn)):
                 return self._analyze_method_return_statements(method_node, method_qn)
@@ -275,7 +293,10 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
         return None
 
     def _resolve_class_method(
-        self, class_name: str, method_name: str, module_qn: str
+        self,
+        class_name: str,
+        method_name: str,
+        module_qn: str,
     ) -> str | None:
         local_class_qn = f"{module_qn}{cs.SEPARATOR_DOT}{class_name}"
         if result := self._try_resolve_method(local_class_qn, method_name):
@@ -345,7 +366,7 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
 
         import_mapping = self.import_processor.import_mapping.get(module_qn, {})
         if (imported_qn := import_mapping.get(class_name)) and self.function_registry.get(
-            imported_qn
+            imported_qn,
         ) == NodeType.CLASS:
             return class_name
 
@@ -359,5 +380,8 @@ class PythonExpressionAnalyzerMixin(_ExprBase):
 
     def _resolve_class_name(self, class_name: str, module_qn: str) -> str | None:
         return resolve_class_name(
-            class_name, module_qn, self.import_processor, self.function_registry
+            class_name,
+            module_qn,
+            self.import_processor,
+            self.function_registry,
         )

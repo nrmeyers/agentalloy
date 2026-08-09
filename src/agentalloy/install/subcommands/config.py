@@ -125,14 +125,14 @@ def run(args: argparse.Namespace) -> int:
             if status == "source":
                 print(
                     "  [red]Cannot enable code-index: source/editable checkout — run "
-                    "`uv sync`, then re-run.[/red]"
+                    "`uv sync`, then re-run.[/red]",
                 )
             else:
                 suffix = f": {detail}" if detail else ""
                 print(f"  [red]Cannot enable code-index: install failed{suffix}.[/red]")
                 print(
                     "  [yellow]Reinstall agentalloy (pipx upgrade / pip install --force-reinstall), "
-                    "then re-run: agentalloy config enable code-index[/yellow]"
+                    "then re-run: agentalloy config enable code-index[/yellow]",
                 )
             return 1
 

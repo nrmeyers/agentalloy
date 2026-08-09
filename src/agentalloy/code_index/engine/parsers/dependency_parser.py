@@ -62,7 +62,7 @@ class PyProjectTomlParser(DependencyParser):
                     dep_name, _ = _extract_pep508_package_name(dep_line)
                     if dep_name:
                         dependencies.append(
-                            Dependency(dep_name, dep_line, {cs.DEP_KEY_GROUP: group_name})
+                            Dependency(dep_name, dep_line, {cs.DEP_KEY_GROUP: group_name}),
                         )
         except Exception as e:
             logger.error(ls.DEP_PARSE_ERROR_PYPROJECT.format(path=file_path, error=e))

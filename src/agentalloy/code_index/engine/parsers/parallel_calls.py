@@ -165,7 +165,8 @@ def _build_worker_processor(factory: ProcessorFactory, buffered: BufferedIngesto
     """Build a CallProcessor whose writes route to ``buffered`` but whose
     read-only inputs (function_registry, import_processor, type_inference,
     class_inheritance, rebind_registry) are the shared instances from
-    Pass 2."""
+    Pass 2.
+    """
     return CallProcessor(
         ingestor=buffered,  # type: ignore[arg-type]
         repo_path=factory.repo_path,

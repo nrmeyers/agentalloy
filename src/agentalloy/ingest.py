@@ -56,17 +56,17 @@ EXIT_DB = 3
 EXIT_DUPLICATE = 4
 
 _VALID_SYSTEM_CATEGORIES = frozenset(
-    {"governance", "operational", "tooling", "safety", "quality", "observability"}
+    {"governance", "operational", "tooling", "safety", "quality", "observability"},
 )
 _VALID_DOMAIN_CATEGORIES = frozenset(
     # "benchmark" is the reserved benchmark-pack category (plan #14 Option B):
     # the five eval/benchmark packs are re-categorized rather than deleted so
     # gold_hit stays 18/18, and retrieval.domain._PRODUCT_CATEGORIES excludes it
     # (the E6 pool-gate keeps benchmark packs out of production retrieval).
-    {"engineering", "ops", "review", "design", "tooling", "quality", "benchmark"}
+    {"engineering", "ops", "review", "design", "tooling", "quality", "benchmark"},
 )
 _VALID_FRAGMENT_TYPES = frozenset(
-    {"setup", "execution", "verification", "example", "guardrail", "rationale"}
+    {"setup", "execution", "verification", "example", "guardrail", "rationale"},
 )
 # System-skill phase_scope vocabulary — the canonical SDD lifecycle (matches
 # graph._PHASE_GRAPH and the api.compose_models.Phase Literal). Previously the
@@ -74,7 +74,18 @@ _VALID_FRAGMENT_TYPES = frozenset(
 # and whose "review" never matched runtime "qa". Reconciled in Stage 3b;
 # "sdd-fast" (the fast-lane phase) added so sys skills can scope to it.
 _VALID_PHASES = frozenset(
-    {"intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill", "sdd-flow"}
+    {
+        "intake",
+        "spec",
+        "design",
+        "plan",
+        "build",
+        "qa",
+        "ship",
+        "sdd-fast",
+        "add-skill",
+        "sdd-flow",
+    },
 )
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
@@ -101,7 +112,7 @@ WORKFLOW_POSITION_MARKERS = frozenset(
         "release",
         "incident",
         "rfc",
-    }
+    },
 )
 
 TAG_POLICY_BY_TIER: dict[str, dict[str, int]] = {
@@ -223,16 +234,29 @@ def main(argv: list[str] | None = None) -> int:
 
     if target.is_dir():
         return _batch_with_container(
-            target, force=args.force, yes=args.yes, strict=args.strict, no_restart=no_restart
+            target,
+            force=args.force,
+            yes=args.yes,
+            strict=args.strict,
+            no_restart=no_restart,
         )
 
     return _single_with_container(
-        target, force=args.force, yes=args.yes, strict=args.strict, no_restart=no_restart
+        target,
+        force=args.force,
+        yes=args.yes,
+        strict=args.strict,
+        no_restart=no_restart,
     )
 
 
 def _single_with_container(
-    yaml_path: Path, *, force: bool, yes: bool, strict: bool = False, no_restart: bool = False
+    yaml_path: Path,
+    *,
+    force: bool,
+    yes: bool,
+    strict: bool = False,
+    no_restart: bool = False,
 ) -> int:
     """Wrap _single() with container stop/restart logic."""
     container_stopped = False
@@ -246,7 +270,12 @@ def _single_with_container(
 
 
 def _batch_with_container(
-    directory: Path, *, force: bool, yes: bool, strict: bool = False, no_restart: bool = False
+    directory: Path,
+    *,
+    force: bool,
+    yes: bool,
+    strict: bool = False,
+    no_restart: bool = False,
 ) -> int:
     """Wrap _batch() with container stop/restart logic."""
     container_stopped = False
@@ -450,7 +479,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
         )
         if existing_name is not None and not force:
             blocked.append(
-                (f, record, f"skill_id '{record.skill_id}' already exists — use --force")
+                (f, record, f"skill_id '{record.skill_id}' already exists — use --force"),
             )
             continue
 
@@ -466,7 +495,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                         record,
                         f"canonical_name '{record.canonical_name}' "
                         f"already used by '{existing_id}' — use --force",
-                    )
+                    ),
                 )
                 continue
 
@@ -601,7 +630,7 @@ def _load_yaml(path: Path) -> ReviewRecord:
     skill_class = _str("skill_class")
     if skill_class not in ("domain", "system", "workflow"):
         raise IngestError(
-            f"{path}: 'skill_class' must be 'domain', 'system', or 'workflow', got '{skill_class}'"
+            f"{path}: 'skill_class' must be 'domain', 'system', or 'workflow', got '{skill_class}'",
         )
 
     raw_fragments: Any = data.get("fragments") or []
@@ -618,7 +647,7 @@ def _load_yaml(path: Path) -> ReviewRecord:
                 sequence=int(frag_data.get("sequence", i + 1)),
                 fragment_type=str(frag_data.get("fragment_type", "")).strip(),
                 content=str(frag_data.get("content", "")).strip(),
-            )
+            ),
         )
 
     exit_gates_raw: Any = data.get("exit_gates")
@@ -663,7 +692,7 @@ def _validate(record: ReviewRecord) -> list[str]:
     if record.deprecated and not record.superseded_by:
         errors.append(
             "deprecated: true requires 'superseded_by' to be set — "
-            "a skill cannot be deprecated without a replacement"
+            "a skill cannot be deprecated without a replacement",
         )
 
     if record.superseded_by and not re.match(r"^[a-z0-9-]+$", record.superseded_by):
@@ -675,7 +704,7 @@ def _validate(record: ReviewRecord) -> list[str]:
             errors.append(f"requires contains a self-edge to '{target}' — not allowed")
         elif not re.match(r"^[a-z0-9-]+$", target):
             errors.append(
-                f"requires target '{target}' must be a kebab-case, lowercase ASCII skill_id"
+                f"requires target '{target}' must be a kebab-case, lowercase ASCII skill_id",
             )
 
     if record.skill_class == "system":
@@ -684,33 +713,33 @@ def _validate(record: ReviewRecord) -> list[str]:
         if record.category and record.category not in _VALID_SYSTEM_CATEGORIES:
             errors.append(
                 f"category '{record.category}' is not valid for system skills "
-                f"(must be one of {sorted(_VALID_SYSTEM_CATEGORIES)})"
+                f"(must be one of {sorted(_VALID_SYSTEM_CATEGORIES)})",
             )
         if not record.always_apply and not record.phase_scope and not record.category_scope:
             errors.append(
                 "system skill must declare applicability: "
-                "set always_apply=true, phase_scope, or category_scope"
+                "set always_apply=true, phase_scope, or category_scope",
             )
         if record.always_apply and (record.phase_scope or record.category_scope):
             errors.append(
-                "always_apply=true is mutually exclusive with phase_scope / category_scope"
+                "always_apply=true is mutually exclusive with phase_scope / category_scope",
             )
         for phase in record.phase_scope:
             if phase not in _VALID_PHASES:
                 errors.append(
-                    f"phase_scope '{phase}' is not valid (must be one of {sorted(_VALID_PHASES)})"
+                    f"phase_scope '{phase}' is not valid (must be one of {sorted(_VALID_PHASES)})",
                 )
         if record.fragments:
             errors.append(
                 "system skills do not declare fragments — the ingest CLI generates "
-                "a single guardrail fragment from raw_prose automatically"
+                "a single guardrail fragment from raw_prose automatically",
             )
 
     elif record.skill_class == "domain":
         if record.category and record.category not in _VALID_DOMAIN_CATEGORIES:
             errors.append(
                 f"category '{record.category}' is not valid for domain skills "
-                f"(must be one of {sorted(_VALID_DOMAIN_CATEGORIES)})"
+                f"(must be one of {sorted(_VALID_DOMAIN_CATEGORIES)})",
             )
         if not record.fragments:
             errors.append("domain skill requires at least one fragment")
@@ -726,7 +755,7 @@ def _validate(record: ReviewRecord) -> list[str]:
                 if frag.fragment_type not in _VALID_FRAGMENT_TYPES:
                     errors.append(
                         f"fragment_type '{frag.fragment_type}' is not valid "
-                        f"(must be one of {sorted(_VALID_FRAGMENT_TYPES)})"
+                        f"(must be one of {sorted(_VALID_FRAGMENT_TYPES)})",
                     )
                 if not frag.content:
                     errors.append(f"fragment sequence {frag.sequence} has empty content")
@@ -736,22 +765,22 @@ def _validate(record: ReviewRecord) -> list[str]:
                     errors.append(
                         f"fragment sequence {frag.sequence} is {wc} words; "
                         f"hard floor is {_FRAG_WORDS_HARD_MIN} — merge with "
-                        f"adjacent fragment or expand"
+                        f"adjacent fragment or expand",
                     )
                 if wc > _FRAG_WORDS_HARD_MAX:
                     errors.append(
                         f"fragment sequence {frag.sequence} is {wc} words; "
-                        f"hard ceiling is {_FRAG_WORDS_HARD_MAX} — split at semantic boundary"
+                        f"hard ceiling is {_FRAG_WORDS_HARD_MAX} — split at semantic boundary",
                     )
                 if _is_heading_only(frag.content):
                     errors.append(
                         f"fragment sequence {frag.sequence} is a heading-only stub "
-                        f"({wc} words); merge with the next fragment or drop it"
+                        f"({wc} words); merge with the next fragment or drop it",
                     )
         if len(record.domain_tags) > _TAGS_VALIDATE_HARD_CAP:
             errors.append(
                 f"domain_tags has {len(record.domain_tags)} entries; hard ceiling is "
-                f"{_TAGS_VALIDATE_HARD_CAP}"
+                f"{_TAGS_VALIDATE_HARD_CAP}",
             )
 
     elif record.skill_class == "workflow":
@@ -762,7 +791,7 @@ def _validate(record: ReviewRecord) -> list[str]:
         if record.fragments:
             errors.append(
                 "workflow skills are raw_prose-only and must not declare fragments "
-                "(they are injected by the phase hook, not retrieved)"
+                "(they are injected by the phase hook, not retrieved)",
             )
         if not record.raw_prose.strip():
             errors.append("workflow skill requires non-empty raw_prose")
@@ -770,12 +799,12 @@ def _validate(record: ReviewRecord) -> list[str]:
         if record.category and record.category not in valid_workflow_cats:
             errors.append(
                 f"category '{record.category}' is not valid for workflow skills "
-                f"(must be one of {sorted(valid_workflow_cats)})"
+                f"(must be one of {sorted(valid_workflow_cats)})",
             )
         if len(record.domain_tags) > _TAGS_VALIDATE_HARD_CAP:
             errors.append(
                 f"domain_tags has {len(record.domain_tags)} entries; hard ceiling is "
-                f"{_TAGS_VALIDATE_HARD_CAP}"
+                f"{_TAGS_VALIDATE_HARD_CAP}",
             )
 
     # --- exit_gates spec validation (any skill that declares one) ---
@@ -851,7 +880,7 @@ def _validate_gate_spec(spec: Any, *, path: str = "exit_gates") -> list[str]:
                 if fnmatch.fnmatch(glob_val, f"docs/{phase}/**"):
                     return [
                         f"{path}: '{glob_val}' targets a store-backed docs/{phase}/ phase; "
-                        f"use phase: {phase}, name: <pattern> instead"
+                        f"use phase: {phase}, name: <pattern> instead",
                     ]
 
     return []
@@ -868,7 +897,8 @@ def _normalize_ws(text: str) -> str:
 def _is_heading_only(content: str) -> bool:
     """A fragment is a heading-only stub if it contains nothing but a single
     markdown heading (no body) — these embed under-discriminatively and should
-    be merged into the following fragment."""
+    be merged into the following fragment.
+    """
     stripped = (content or "").strip()
     if not stripped.startswith("#"):
         return False
@@ -914,7 +944,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
                 f"fragment sequence {frag.sequence} content is not a contiguous "
                 f"slice of raw_prose (modulo whitespace) — drift breaks "
                 f"BM25/full-text retrieval against the canonical body "
-                f"(fixtures/skill-authoring-agent.md §'Domain skill rules')"
+                f"(fixtures/skill-authoring-agent.md §'Domain skill rules')",
             )
 
     types = {f.fragment_type for f in record.fragments}
@@ -922,19 +952,19 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
     if types == {"execution"} and len(record.fragments) > 1:
         warnings.append(
             "all fragments are 'execution' — diversify into setup/example/"
-            "verification/guardrail/rationale per the 6-type taxonomy"
+            "verification/guardrail/rationale per the 6-type taxonomy",
         )
 
     if "rationale" not in types:
         warnings.append(
             "no 'rationale' fragment — R8: rationale anchors retrieval for "
-            "'why' queries; add one with ≥3 obvious-query keywords"
+            "'why' queries; add one with ≥3 obvious-query keywords",
         )
 
     if "verification" not in types:
         warnings.append(
             "no 'verification' fragment — R3: verification items are contracts "
-            "for downstream agents; add mechanically-checkable post-conditions"
+            "for downstream agents; add mechanically-checkable post-conditions",
         )
 
     for frag in record.fragments:
@@ -943,7 +973,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
             warnings.append(
                 f"fragment sequence {frag.sequence} is {wc} words; below the "
                 f"{_FRAG_WORDS_WARN_MIN}-word floor — nomic-embed-text-v1.5 "
-                f"produces under-discriminative vectors at this size"
+                f"produces under-discriminative vectors at this size",
             )
         elif wc < _FRAG_WORDS_HARD_MIN:
             # Hard-fail surfaces in _validate; suppress dup warning here.
@@ -951,7 +981,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
         if wc > _FRAG_WORDS_WARN_MAX and wc <= _FRAG_WORDS_HARD_MAX:
             warnings.append(
                 f"fragment sequence {frag.sequence} is {wc} words; above the "
-                f"{_FRAG_WORDS_WARN_MAX}-word target — split at a semantic boundary"
+                f"{_FRAG_WORDS_WARN_MAX}-word target — split at a semantic boundary",
             )
         if frag.fragment_type == "execution":
             fence_count = frag.content.count("```")
@@ -969,7 +999,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
                     warnings.append(
                         f"fragment sequence {frag.sequence} ('execution') is "
                         f"code-fence-heavy — likely should be 'example' per "
-                        f"fixtures/skill-authoring-agent.md §'Special cases'"
+                        f"fixtures/skill-authoring-agent.md §'Special cases'",
                     )
 
     cs = (record.change_summary or "").lower()
@@ -977,7 +1007,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
         warnings.append(
             "change_summary says 'imported from ...' but raw_prose >4000 chars — "
             "verify per R6: if scaffolded, use 'scaffold by agentalloy around "
-            "upstream prose preserved in fragment <N>'"
+            "upstream prose preserved in fragment <N>'",
         )
 
     return warnings
@@ -1014,7 +1044,8 @@ def _insert(store: DuckDBSkillStore, record: ReviewRecord, *, force: bool) -> li
     into their authored ``fragments`` list, and workflow skills carry none.
 
     Returns the list of deferred edges (targets not yet in the graph) for the
-    caller's batch-end retry pass. Single-file callers resolve them inline."""
+    caller's batch-end retry pass. Single-file callers resolve them inline.
+    """
     version_id = f"{record.skill_id}-v1"
     now = datetime.now(tz=UTC)
 
@@ -1101,7 +1132,8 @@ class DeferredEdge:
     Cross-pack forward references are legitimate (pack B requires a skill from
     pack A which is ingested in a different pack). These are retried at the end
     of a batch; any still-missing target is then warned about — never an error,
-    since install-packs ingests pack-by-pack and edges may cross packs."""
+    since install-packs ingests pack-by-pack and edges may cross packs.
+    """
 
     source_id: str
     target_id: str
@@ -1133,12 +1165,16 @@ def _write_edges(store: DuckDBSkillStore, record: ReviewRecord) -> list[Deferred
 
 
 def _create_edge_if_target_exists(
-    store: DuckDBSkillStore, source_id: str, target_id: str, rel: str
+    store: DuckDBSkillStore,
+    source_id: str,
+    target_id: str,
+    rel: str,
 ) -> bool:
     """Insert one ``(source)-[rel]->(target)`` dependency row if the target exists.
 
     Returns True if the edge was written, False if the target is missing (caller
-    defers it). Assumes the source skill already exists (just inserted)."""
+    defers it). Assumes the source skill already exists (just inserted).
+    """
     exists = store.scalar(
         "SELECT skill_id FROM skills WHERE skill_id = ?",
         [target_id],
@@ -1154,13 +1190,15 @@ def _create_edge_if_target_exists(
 
 
 def _resolve_deferred_edges(
-    store: DuckDBSkillStore, deferred: list[DeferredEdge]
+    store: DuckDBSkillStore,
+    deferred: list[DeferredEdge],
 ) -> list[DeferredEdge]:
     """Retry deferred (forward-ref) edges after a full batch insert.
 
     Returns the edges that are *still* missing their target — the caller warns
     about these (they reference a skill_id not present in any pack of the batch
-    or the existing corpus)."""
+    or the existing corpus).
+    """
     still_missing: list[DeferredEdge] = []
     for edge in deferred:
         if not _create_edge_if_target_exists(store, edge.source_id, edge.target_id, edge.rel):

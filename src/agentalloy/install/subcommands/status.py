@@ -240,7 +240,7 @@ def _run(args: argparse.Namespace) -> int:
                 "path": path,
                 "action": entry.get("action"),
                 "scope": _path_scope(path),
-            }
+            },
         )
 
     # Service reachability — TCP connect only; doctor/verify do the deeper /health

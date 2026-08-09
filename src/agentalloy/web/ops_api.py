@@ -75,7 +75,9 @@ def _wired_repos() -> dict[str, list[str]]:
 
 
 def _approval_state(
-    root: Path, phase: str | None, store: DuckDBStateStore | None = None
+    root: Path,
+    phase: str | None,
+    store: DuckDBStateStore | None = None,
 ) -> tuple[bool, bool]:
     """(required, pending) — pending means required and not satisfied/stale."""
     from agentalloy.install.subcommands.phase import (
@@ -348,7 +350,7 @@ async def list_approvals(store: DuckDBStateStore = Depends(get_state_store)) -> 
                     next_phase=_PHASE_GRAPH.get(phase),
                     stale=stale,
                     artifacts=artifacts,
-                )
+                ),
             )
         return ApprovalsResponse(total=len(pending), pending=pending)
 
@@ -378,7 +380,8 @@ async def approve(
     result = await asyncio.to_thread(run_approve, body.phase, root, body.approver)
     if not result.get("ok"):
         raise HTTPException(
-            status_code=409, detail={"error": "approve_refused", "detail": result.get("error")}
+            status_code=409,
+            detail={"error": "approve_refused", "detail": result.get("error")},
         )
     return result
 
@@ -436,7 +439,7 @@ async def list_packs(request: Request) -> PacksResponse:
                     description=(manifest.get("description") or "").strip() or None,
                     skill_count=len(skill_ids),
                     installed_count=len([s for s in skill_ids if s in corpus_ids]),
-                )
+                ),
             )
         return PacksResponse(total=len(packs), packs=packs)
 

@@ -313,7 +313,7 @@ def _unwire_claude_code_hooks_settings_json() -> list[dict[str, Any]]:
                 {
                     "path": str(settings_path),
                     "action": "removed_sentinel_block",
-                }
+                },
             )
             return removed
         except json.JSONDecodeError:
@@ -332,7 +332,7 @@ def _unwire_claude_code_hooks_settings_json() -> list[dict[str, Any]]:
                 "path": str(settings_path),
                 "action": "removed_key",
                 "key": key,
-            }
+            },
         )
 
     if keys_to_remove:

@@ -271,7 +271,11 @@ def _rewrite_posture(root: Path, phase: str, mode: str | None) -> list[str]:
         return _rewrite(root, phase, mode=mode)
     except Exception:
         logger.debug(
-            "posture rewrite failed for %s phase=%s mode=%s", root, phase, mode, exc_info=True
+            "posture rewrite failed for %s phase=%s mode=%s",
+            root,
+            phase,
+            mode,
+            exc_info=True,
         )
         return []
 
@@ -340,7 +344,9 @@ async def _trigger_compose_in_process(
                     )
         except Exception:
             logger.debug(
-                "Gate feedback evaluation failed for contract %s", contract_id, exc_info=True
+                "Gate feedback evaluation failed for contract %s",
+                contract_id,
+                exc_info=True,
             )
 
     task = asyncio.create_task(_run())
@@ -558,7 +564,10 @@ async def list_artifacts(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ArtifactListResponse:
     rows: list[dict[str, Any]] = await asyncio.to_thread(
-        store.list_artifacts, phase, slug=slug, name_glob=name_glob
+        store.list_artifacts,
+        phase,
+        slug=slug,
+        name_glob=name_glob,
     )
     # Convert datetime.updated_at to ISO string for pydantic validation
     cleaned: list[dict[str, Any]] = []
@@ -632,7 +641,8 @@ async def archive_all(
 async def read_state(
     kind: str,
     session_key: str | None = Query(
-        default=None, description="Session-scoped kinds (and phase-scoped 'approved') use this."
+        default=None,
+        description="Session-scoped kinds (and phase-scoped 'approved') use this.",
     ),
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateReadResponse:
@@ -805,7 +815,10 @@ async def write_phase(
         if repo_root is not None:
             written = await asyncio.to_thread(store.read_phase)
             await asyncio.to_thread(
-                _rewrite_posture, Path(repo_root), phase_value, written.mode if written else None
+                _rewrite_posture,
+                Path(repo_root),
+                phase_value,
+                written.mode if written else None,
             )
         # Stamp the phase-start HEAD ref on a real transition (soft — must not
         # block the phase advance).
@@ -934,7 +947,11 @@ async def write_approve(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
     result = await asyncio.to_thread(
-        store.write, "approved", req.value, session_key=req.session_key, owner=req.owner
+        store.write,
+        "approved",
+        req.value,
+        session_key=req.session_key,
+        owner=req.owner,
     )
     http_status, response = _write_result_to_response(result)
     if http_status != 200:
@@ -1036,7 +1053,11 @@ async def list_contracts(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractListResponse:
     rows = await asyncio.to_thread(
-        store.list_contracts, phase=phase, slug=slug, work_item=work_item, status=status
+        store.list_contracts,
+        phase=phase,
+        slug=slug,
+        work_item=work_item,
+        status=status,
     )
     return ContractListResponse(contracts=[_contract_row_to_response(row) for row in rows])
 

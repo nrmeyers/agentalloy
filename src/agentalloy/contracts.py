@@ -149,7 +149,7 @@ def parse_contract_text(
     task_slug = data.get("task_slug")
     if not task_slug or not isinstance(task_slug, str):
         raise ContractMalformed(
-            "Contract 'task_slug' field is required and must be a non-empty string"
+            "Contract 'task_slug' field is required and must be a non-empty string",
         )
 
     # domain_tags is optional: when empty/absent the compose engine retrieves
@@ -189,7 +189,7 @@ def parse_contract_text(
     route = str(data.get("route") or "full").strip().lower()
     if route not in ("full", "fast", "add-skill"):
         raise ContractMalformed(
-            f"Contract 'route' must be 'full', 'fast', or 'add-skill', got '{route}'"
+            f"Contract 'route' must be 'full', 'fast', or 'add-skill', got '{route}'",
         )
 
     return Contract(
@@ -228,7 +228,7 @@ def _normalize_success_criteria(raw: list[Any]) -> list[str | dict[str, Any]]:
                 {
                     "id": str(item.get("id", "")),
                     "text": str(item.get("text", "")),
-                }
+                },
             )
         else:
             # Legacy format: string, preserve as-is
@@ -397,7 +397,8 @@ def cursor_state_name(session_key: str | None) -> str:
     ``CLAUDE_CODE_SESSION_ID`` env var are the one session UUID, so a scoped write
     by the CLI is read back by the proxy (and vice versa) across the container bind
     mount. The cursor is deliberately NOT a relocated runtime-state key, so scoped
-    files stay in the repo tree where both sides see them."""
+    files stay in the repo tree where both sides see them.
+    """
     if not session_key:
         return "cursor"
     digest = hashlib.sha1(session_key.encode()).hexdigest()[:16]
@@ -603,7 +604,10 @@ def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: 
 
 
 def plan_archive(
-    project_root: Path, *, phase: str | None = None, slug: str | None = None
+    project_root: Path,
+    *,
+    phase: str | None = None,
+    slug: str | None = None,
 ) -> MigrationPlan:
     """Plan moving live contracts from ``active/<phase>/`` to ``archive/<phase>/``."""
     root = contracts_root(project_root)
@@ -654,7 +658,9 @@ def _read_cursor_value(project_root: Path, session_key: str | None = None) -> st
 
 
 def resolve_current_contract(
-    project_root: Path, phase: str, session_key: str | None = None
+    project_root: Path,
+    phase: str,
+    session_key: str | None = None,
 ) -> tuple[str | None, Path | None]:
     """Resolve the current work-item contract for ``phase``.
 

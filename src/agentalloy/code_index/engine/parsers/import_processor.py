@@ -673,7 +673,10 @@ class ImportProcessor:
         return None
 
     def _parse_js_import_clause(
-        self, clause_node: Node, source_module: str, current_module: str
+        self,
+        clause_node: Node,
+        source_module: str,
+        current_module: str,
     ) -> None:
         for child in clause_node.children:
             if child.type == cs.TS_IDENTIFIER:
@@ -744,7 +747,8 @@ class ImportProcessor:
                                 required_module = safe_decode_with_fallback(arg).strip("'\"")
 
                                 resolved_module = self._resolve_js_module_path(
-                                    required_module, current_module
+                                    required_module,
+                                    current_module,
                                 )
                                 self.import_mapping[current_module][var_name] = resolved_module
                                 logger.debug(
@@ -1097,7 +1101,7 @@ class ImportProcessor:
         decl_text = decoded_text.strip()
 
         if decl_text.startswith(cs.CPP_MODULE_PREFIX) and not decl_text.startswith(
-            cs.CPP_MODULE_PRIVATE_PREFIX
+            cs.CPP_MODULE_PRIVATE_PREFIX,
         ):
             parts = decl_text.split()
             if len(parts) >= 2:
@@ -1120,7 +1124,11 @@ class ImportProcessor:
                     )
 
     def _register_cpp_module_mapping(
-        self, parts: list[str], name_index: int, module_qn: str, log_template: str
+        self,
+        parts: list[str],
+        name_index: int,
+        module_qn: str,
+        log_template: str,
     ) -> None:
         module_name = parts[name_index].rstrip(";")
         self.import_mapping[module_qn][module_name] = (
@@ -1129,7 +1137,10 @@ class ImportProcessor:
         logger.debug(log_template, name=module_name)
 
     def _parse_generic_imports(
-        self, captures: dict, module_qn: str, lang_config: LanguageSpec
+        self,
+        captures: dict,
+        module_qn: str,
+        lang_config: LanguageSpec,
     ) -> None:
         for import_node in captures.get(cs.CAPTURE_IMPORT, []):
             logger.debug(
@@ -1221,11 +1232,11 @@ class ImportProcessor:
 
     def _resolve_lua_module_path(self, import_path: str, current_module: str) -> str:
         if import_path.startswith(cs.PATH_RELATIVE_PREFIX) or import_path.startswith(
-            cs.PATH_PARENT_PREFIX
+            cs.PATH_PARENT_PREFIX,
         ):
             parts = current_module.split(cs.SEPARATOR_DOT)[:-1]
             rel_parts = list(
-                import_path.replace("\\", cs.SEPARATOR_SLASH).split(cs.SEPARATOR_SLASH)
+                import_path.replace("\\", cs.SEPARATOR_SLASH).split(cs.SEPARATOR_SLASH),
             )
             for p in rel_parts:
                 if p == cs.PATH_CURRENT_DIR:

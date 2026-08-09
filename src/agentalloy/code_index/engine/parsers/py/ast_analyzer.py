@@ -21,15 +21,23 @@ if TYPE_CHECKING:
 
     class _AstAnalyzerDeps(Protocol):
         def build_local_variable_type_map(
-            self, caller_node: Node, module_qn: str
+            self,
+            caller_node: Node,
+            module_qn: str,
         ) -> dict[str, str]: ...
 
         def _analyze_comprehension(
-            self, node: Node, local_var_types: dict[str, str], module_qn: str
+            self,
+            node: Node,
+            local_var_types: dict[str, str],
+            module_qn: str,
         ) -> None: ...
 
         def _analyze_for_loop(
-            self, node: Node, local_var_types: dict[str, str], module_qn: str
+            self,
+            node: Node,
+            local_var_types: dict[str, str],
+            module_qn: str,
         ) -> None: ...
 
         def _infer_instance_variable_types_from_assignments(
@@ -60,19 +68,28 @@ class PythonAstAnalyzerMixin(_AstBase):
 
     @abstractmethod
     def _infer_type_from_expression_complex(
-        self, node: Node, module_qn: str, local_var_types: dict[str, str]
+        self,
+        node: Node,
+        module_qn: str,
+        local_var_types: dict[str, str],
     ) -> str | None: ...
 
     @abstractmethod
     def _infer_method_call_return_type(
-        self, method_qn: str, module_qn: str, local_var_types: dict[str, str] | None
+        self,
+        method_qn: str,
+        module_qn: str,
+        local_var_types: dict[str, str] | None,
     ) -> str | None: ...
 
     @abstractmethod
     def _find_class_in_scope(self, class_name: str, module_qn: str) -> str | None: ...
 
     def _traverse_single_pass(
-        self, node: Node, local_var_types: dict[str, str], module_qn: str
+        self,
+        node: Node,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> None:
         assignments: list[Node] = []
         comprehensions: list[Node] = []
@@ -119,7 +136,9 @@ class PythonAstAnalyzerMixin(_AstBase):
             self._analyze_for_loop(for_stmt, local_var_types, module_qn)
 
         self._infer_instance_variable_types_from_assignments(
-            assignments, local_var_types, module_qn
+            assignments,
+            local_var_types,
+            module_qn,
         )
 
     def _traverse_for_assignments(
@@ -137,7 +156,10 @@ class PythonAstAnalyzerMixin(_AstBase):
             stack.extend(reversed(current.children))
 
     def _process_assignment_simple(
-        self, assignment_node: Node, local_var_types: dict[str, str], module_qn: str
+        self,
+        assignment_node: Node,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> None:
         left_node = assignment_node.child_by_field_name(cs.TS_FIELD_LEFT)
         right_node = assignment_node.child_by_field_name(cs.TS_FIELD_RIGHT)
@@ -154,7 +176,10 @@ class PythonAstAnalyzerMixin(_AstBase):
             logger.debug(lg.PY_TYPE_SIMPLE, var=var_name, type=inferred_type)
 
     def _process_assignment_complex(
-        self, assignment_node: Node, local_var_types: dict[str, str], module_qn: str
+        self,
+        assignment_node: Node,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> None:
         left_node = assignment_node.child_by_field_name(cs.TS_FIELD_LEFT)
         right_node = assignment_node.child_by_field_name(cs.TS_FIELD_RIGHT)
@@ -170,7 +195,9 @@ class PythonAstAnalyzerMixin(_AstBase):
             return
 
         if inferred_type := self._infer_type_from_expression_complex(
-            right_node, module_qn, local_var_types
+            right_node,
+            module_qn,
+            local_var_types,
         ):
             local_var_types[var_name] = inferred_type
             logger.debug(lg.PY_TYPE_COMPLEX, var=var_name, type=inferred_type)
@@ -212,7 +239,10 @@ class PythonAstAnalyzerMixin(_AstBase):
                 return None
 
     def _find_python_method_in_ast(
-        self, root_node: Node, class_name: str, method_name: str
+        self,
+        root_node: Node,
+        class_name: str,
+        method_name: str,
     ) -> Node | None:
         lang_queries = self.queries[cs.SupportedLanguage.PYTHON]
         class_query = lang_queries[cs.QUERY_KEY_CLASSES]

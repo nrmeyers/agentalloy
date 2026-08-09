@@ -58,10 +58,10 @@ class Settings(BaseSettings):
     # the reembed writer. Env: DUCKDB_PATH, FRAGMENTS_LANCE_PATH, TELEMETRY_DB_PATH.
     duckdb_path: str = Field(default_factory=lambda: str(_user_corpus_dir() / "agentalloy.duck"))
     fragments_lance_path: str = Field(
-        default_factory=lambda: str(_user_corpus_dir() / "fragments.lance")
+        default_factory=lambda: str(_user_corpus_dir() / "fragments.lance"),
     )
     telemetry_db_path: str = Field(
-        default_factory=lambda: str(_user_corpus_dir() / "telemetry.duck")
+        default_factory=lambda: str(_user_corpus_dir() / "telemetry.duck"),
     )
     log_level: str = "INFO"
 

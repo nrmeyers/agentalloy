@@ -119,7 +119,7 @@ def _prompt_uninstall_custom() -> dict[str, bool]:
         "remove_models": _prompt_yes_no("Remove pulled models (llama-server GGUF cache)?"),
         "remove_datastore": _prompt_yes_no("Remove skills datastore (corpus DB)?"),
         "remove_wiring": _prompt_yes_no(
-            "Remove harness wiring (CLAUDE.md, .cursorrules, MCP entries, etc.)?"
+            "Remove harness wiring (CLAUDE.md, .cursorrules, MCP entries, etc.)?",
         ),
         "remove_env_state": _prompt_yes_no("Remove .env and install-state directory?"),
     }
@@ -166,7 +166,7 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
                             "model": model,
                             "path": str(gguf_path),
                             "action": "gguf_removed",
-                        }
+                        },
                     )
                 except OSError as exc:
                     actions.append(
@@ -176,7 +176,7 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
                             "path": str(gguf_path),
                             "action": "gguf_remove_failed",
                             "error": str(exc),
-                        }
+                        },
                     )
             else:
                 actions.append(
@@ -185,7 +185,7 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
                         "model": model,
                         "path": str(gguf_path),
                         "action": "gguf_already_absent",
-                    }
+                    },
                 )
         else:
             # Unknown runner (lm-studio, fastflowlm, etc.). We don't manage
@@ -199,7 +199,7 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
                         f"AgentAlloy doesn't track the {runner} model cache. "
                         "Remove it manually using the runner's own tooling."
                     ),
-                }
+                },
             )
     return actions
 
@@ -257,7 +257,7 @@ def _remove_compose_volumes(
         warnings.append(
             "Container deployment detected but runtime binary unresolved — "
             "skipping volume cleanup. Remove manually with your runtime: "
-            f"`<podman|docker> volume rm -f {' '.join(_COMPOSE_NAMED_VOLUMES)}`"
+            f"`<podman|docker> volume rm -f {' '.join(_COMPOSE_NAMED_VOLUMES)}`",
         )
         return actions
 
@@ -320,7 +320,7 @@ def _remove_container_image(
         warnings.append(
             "Container deployment detected but runtime binary unresolved — "
             "skipping image cleanup. Remove manually with your runtime: "
-            "`<podman|docker> rmi -f ghcr.io/nrmeyers/agentalloy:latest`"
+            "`<podman|docker> rmi -f ghcr.io/nrmeyers/agentalloy:latest`",
         )
         return actions
 
@@ -422,19 +422,19 @@ def _stop_container_stack(
                 warnings.append(
                     f"Container '{name}' ({status}) publishes port {port} but was not "
                     f"created by this install — leaving it; remove manually with "
-                    f"`{runtime} rm {name}` if it blocks reinstall."
+                    f"`{runtime} rm {name}` if it blocks reinstall.",
                 )
             return actions
         warnings.append(
             f"State has no container deployment recorded, but container "
-            f"'{container_name}' exists (likely an interrupted install) — removing it."
+            f"'{container_name}' exists (likely an interrupted install) — removing it.",
         )
         runtime_binary_label = runtime
 
     if not runtime_binary_label:
         warnings.append(
             "Container deployment detected but runtime_binary is missing in state — "
-            "skipping container teardown."
+            "skipping container teardown.",
         )
         return actions
 
@@ -444,7 +444,7 @@ def _stop_container_stack(
     if binary_name is None:
         warnings.append(
             f"Invalid runtime_binary label in state: {runtime_binary_label!r} — "
-            "skipping container teardown."
+            "skipping container teardown.",
         )
         return actions
 
@@ -472,12 +472,12 @@ def _stop_container_stack(
                         "action": "container_stop_failed",
                         "container": container_name,
                         "error": stderr,
-                    }
+                    },
                 )
     except OSError as exc:
         warnings.append(f"container stop: binary not found ({binary_name}): {exc}")
         actions.append(
-            {"action": "container_stop_skipped", "container": container_name, "error": str(exc)}
+            {"action": "container_stop_skipped", "container": container_name, "error": str(exc)},
         )
     except subprocess.TimeoutExpired:
         warnings.append("container stop timed out after 60s")
@@ -500,12 +500,12 @@ def _stop_container_stack(
             else:
                 warnings.append(f"container rm failed: {stderr}")
                 actions.append(
-                    {"action": "container_rm_failed", "container": container_name, "error": stderr}
+                    {"action": "container_rm_failed", "container": container_name, "error": stderr},
                 )
     except OSError as exc:
         warnings.append(f"container rm: binary not found ({binary_name}): {exc}")
         actions.append(
-            {"action": "container_rm_skipped", "container": container_name, "error": str(exc)}
+            {"action": "container_rm_skipped", "container": container_name, "error": str(exc)},
         )
     except subprocess.TimeoutExpired:
         warnings.append("container rm timed out after 30s")
@@ -877,7 +877,7 @@ def _unwire_repo_local(
 
             try:
                 deleted = StateClient(repo_root=str(repo_root)).delete_repo_rows(
-                    repo_root=str(repo_root)
+                    repo_root=str(repo_root),
                 )
             except StateClientError as exc:
                 if warnings is not None:
@@ -896,7 +896,7 @@ def _unwire_repo_local(
                     "repo": str(repo_root),
                     "action": "dropped_store_rows",
                     "deleted_rows": deleted,
-                }
+                },
             )
     except Exception as exc:
         if warnings is not None:
@@ -908,7 +908,7 @@ def _unwire_repo_local(
             try:
                 _state_file.unlink()
                 files_removed.append(
-                    {"path": str(_state_file), "action": "removed_lifecycle_state"}
+                    {"path": str(_state_file), "action": "removed_lifecycle_state"},
                 )
             except OSError:
                 pass
@@ -957,7 +957,10 @@ def _resolves_equal(a: str | Path, b: Path) -> bool:
 
 
 def _harnesses_in_repo(
-    entries: list[dict[str, Any]], repo_root: Path, *, exclude: str | None = None
+    entries: list[dict[str, Any]],
+    repo_root: Path,
+    *,
+    exclude: str | None = None,
 ) -> set[str]:
     """Distinct harness names with a recorded carrier under ``repo_root``.
 
@@ -980,7 +983,10 @@ def _harnesses_in_repo(
 
 
 def _harness_in_other_repos(
-    entries: list[dict[str, Any]], harness: str, *, this_repo: Path
+    entries: list[dict[str, Any]],
+    harness: str,
+    *,
+    this_repo: Path,
 ) -> bool:
     """True if ``harness`` has a carrier recorded for some repo other than ``this_repo``.
 
@@ -1074,7 +1080,7 @@ def uninstall(
             "volumes (agentalloy-data) cannot "
             "be removed while the container still mounts them. Re-run with "
             "stop_services=True, or stop the container and remove the "
-            "volumes manually with `<podman|docker> volume rm`."
+            "volumes manually with `<podman|docker> volume rm`.",
         )
 
     # 1. Remove harness wiring. State is user-scoped and may carry entries
@@ -1182,7 +1188,7 @@ def uninstall(
         # against tampered entries like `/etc/shadow`.
         if not any(str(path).endswith(suffix) for suffix in allowed_path_suffixes):
             warnings.append(
-                f"Skipping harness entry with non-harness path (state may be tampered): {raw_path}"
+                f"Skipping harness entry with non-harness path (state may be tampered): {raw_path}",
             )
             continue
         # Containment: the path must live under one of three trusted roots:
@@ -1225,7 +1231,7 @@ def uninstall(
             # can see why state still has entries.
             warnings.append(
                 f"Skipping harness entry from a different repo "
-                f"(repo_root={entry_repo_root_str!r}): {raw_path}"
+                f"(repo_root={entry_repo_root_str!r}): {raw_path}",
             )
             continue
         # Defense in depth: even when path passes containment, refuse to
@@ -1234,14 +1240,14 @@ def uninstall(
             resolved = path.resolve()
             if path_inside_cwd_repo and not str(resolved).startswith(str(root_resolved)):
                 warnings.append(
-                    f"Skipping harness entry that escapes repo root via symlink: {raw_path}"
+                    f"Skipping harness entry that escapes repo root via symlink: {raw_path}",
                 )
                 continue
             if path_inside_entry_repo and entry_repo_root is not None:
                 entry_root_resolved = entry_repo_root.resolve()
                 if not str(resolved).startswith(str(entry_root_resolved)):
                     warnings.append(
-                        f"Skipping harness entry that escapes its repo root via symlink: {raw_path}"
+                        f"Skipping harness entry that escapes its repo root via symlink: {raw_path}",
                     )
                     continue
             # User-scope paths get the same defense, but only when user-scope is their
@@ -1258,7 +1264,7 @@ def uninstall(
             ):
                 warnings.append(
                     f"Skipping harness entry that escapes its user-scope prefix via symlink: "
-                    f"{raw_path}"
+                    f"{raw_path}",
                 )
                 continue
         except OSError:
@@ -1304,7 +1310,7 @@ def uninstall(
                 if current_sha != expected and not force:
                     warnings.append(
                         f"Tampered sentinel block in {path} (sha256 mismatch). "
-                        f"Skipped to preserve your edits — use --force to remove anyway."
+                        f"Skipped to preserve your edits — use --force to remove anyway.",
                     )
                     continue
 
@@ -1330,7 +1336,7 @@ def uninstall(
                 handled_paths.add(raw_path)
             else:
                 warnings.append(
-                    f"Sentinel block not found in {path} — skipped. Use --force to delete anyway."
+                    f"Sentinel block not found in {path} — skipped. Use --force to delete anyway.",
                 )
 
     # 2a. Handle proxy config cleanup (new sentinel-bounded blocks)
@@ -1372,7 +1378,9 @@ def uninstall(
             # any OTHER harness still owns the repo; drop it only when this is the
             # last harness out (or on the unscoped path, harness is None).
             remove_lifecycle = harness is None or not _harnesses_in_repo(
-                harness_entries, _repo, exclude=harness
+                harness_entries,
+                _repo,
+                exclude=harness,
             )
             _pr, _fr = _unwire_repo_local(
                 _repo,
@@ -1467,7 +1475,7 @@ def uninstall(
                 else:
                     continuerc.unlink()
                     files_removed.append(
-                        {"path": str(continuerc), "action": "deleted_empty_continuerc"}
+                        {"path": str(continuerc), "action": "deleted_empty_continuerc"},
                     )
         except json.JSONDecodeError:
             warnings.append(f"Could not parse {continuerc} as JSON — skipped")
@@ -1688,7 +1696,7 @@ def uninstall(
         other_warnings.append(
             f"Service is running — left store rows in place for "
             f"{len(service_warnings)} repo(s): {', '.join(service_warnings)}. "
-            "Stop the service and re-run to drop them."
+            "Stop the service and re-run to drop them.",
         )
     warnings = other_warnings
 
@@ -1947,7 +1955,7 @@ def _run(args: argparse.Namespace) -> int:
                 "remove_user_state": False,
                 "remove_env": True,
                 "remove_wiring": True,
-            }
+            },
         )
     elif preset == "full":
         kwargs.update(
@@ -1958,7 +1966,7 @@ def _run(args: argparse.Namespace) -> int:
                 "remove_user_state": True,
                 "remove_env": True,
                 "remove_wiring": True,
-            }
+            },
         )
     elif preset == "custom":
         answers = _prompt_uninstall_custom()
@@ -1974,7 +1982,7 @@ def _run(args: argparse.Namespace) -> int:
                 "remove_user_state": answers["remove_env_state"],
                 "remove_env": answers["remove_env_state"],
                 "remove_wiring": answers["remove_wiring"],
-            }
+            },
         )
 
     result = uninstall(**kwargs)

@@ -149,7 +149,8 @@ class DuckDBTelemetryStore:
 
     def record_composition_trace(self, trace: CompositionTrace) -> None:
         """Insert a composition trace. Callers wrap in try/except so a telemetry
-        failure never propagates to the /compose or proxy caller."""
+        failure never propagates to the /compose or proxy caller.
+        """
         self._c().execute(
             """
             INSERT INTO composition_traces (
@@ -246,7 +247,11 @@ class DuckDBTelemetryStore:
         repo: str | None = None,
     ) -> int:
         where, params = _trace_where(
-            phase=phase, status=status, since=since, until=until, repo=repo
+            phase=phase,
+            status=status,
+            since=since,
+            until=until,
+            repo=repo,
         )
         row = (
             self._c().execute(f"SELECT COUNT(*) FROM composition_traces {where}", params).fetchone()
@@ -265,7 +270,11 @@ class DuckDBTelemetryStore:
         offset: int = 0,
     ) -> list[CompositionTrace]:
         where, params = _trace_where(
-            phase=phase, status=status, since=since, until=until, repo=repo
+            phase=phase,
+            status=status,
+            since=since,
+            until=until,
+            repo=repo,
         )
         sql = f"""
             SELECT trace_id, correlation_id, request_ts, phase, category,
@@ -394,7 +403,7 @@ class DuckDBTelemetryStore:
                     "tokens_flat_equivalent": ph_flat,
                     "tokens_saved": ph_saved,
                     "savings_pct": ph_pct,
-                }
+                },
             )
 
         return {
@@ -431,7 +440,7 @@ class DuckDBTelemetryStore:
                         "composed": int(composed),  # pyright: ignore[reportArgumentType]
                         "passthrough": int(passthrough),  # pyright: ignore[reportArgumentType]
                         "key": key,
-                    }
+                    },
                 )
             return out
 

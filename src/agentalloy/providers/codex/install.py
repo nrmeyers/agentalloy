@@ -85,6 +85,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     _ = force
     codex_dir = root / ".codex"
@@ -102,7 +103,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(config_text),
             original_content=original_config,
             marker_key="codex.model_provider",
-        )
+        ),
     )
 
     env_path = codex_dir / ".agentalloy-env"
@@ -116,7 +117,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(env_text),
             original_content=original_env,
             marker_key="codex.env",
-        )
+        ),
     )
 
     gitignore_path = codex_dir / ".gitignore"
@@ -129,7 +130,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
                 action="wrote_new_file",
                 content_sha256=_sha256(gitignore_text),
                 marker_key="codex.gitignore",
-            )
+            ),
         )
 
     print(
