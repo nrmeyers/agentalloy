@@ -19,11 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict
 
-from langgraph.checkpoint.memory import SimpleCheckpointer
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-
-# Re-export the compiled graph type for downstream imports.
-from langgraph.graph.graph import Graph  # noqa: F401
+from langgraph.graph.state import CompiledStateGraph
 
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.signals.gates import evaluate_phase_gate
@@ -419,20 +417,20 @@ def build_phase_graph() -> StateGraph:
 # Compiled-graph helper (module-level singleton)
 # ---------------------------------------------------------------------------
 
-_graph_compilation: Graph | None = None
+_graph_compilation: CompiledStateGraph | None = None
 _graph_phases: list[str] | None = None
 
 
-def phase_graph() -> Graph:
+def phase_graph() -> CompiledStateGraph:
     """Return a compiled LangGraph ``StateGraph`` with checkpointer.
 
     The graph is compiled once per Python process so that every caller
-    shares the same ``threading.Lock`` inside ``SimpleCheckpointer`` and
+    shares the same ``threading.Lock`` inside ``MemorySaver`` and
     checkpoint writes/reads are mutually consistent.
     """
     global _graph_compilation
     if _graph_compilation is None:
-        _graph_compilation = build_phase_graph().compile(checkpointer=SimpleCheckpointer())
+        _graph_compilation = build_phase_graph().compile(checkpointer=MemorySaver())
     return _graph_compilation
 
 
