@@ -387,10 +387,11 @@ def route_from_decision(
 
 
 def _node(phase: str):
-    """A StateGraph node for ``phase``: resolve prose, yield unchanged state."""
+    """A StateGraph node for ``phase``: resolve prose, update state phase to self."""
 
     def _run(state: PhaseGraphState) -> PhaseGraphState:
         phase_node(phase)  # pure read — binds prose for the proxy to inject
+        state["phase"] = phase  # keep graph-phase in sync with the executing node
         return state
 
     return _run
@@ -411,10 +412,11 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
 
     def _advance(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)
-        _lane = _d.get("lane") if "lane" in _d else "sdd-full"
-        _lane = _lane if _lane in _LANES else "sdd-full"
-        out = _route_step(_d["phase"], _lane, store=None)
-        return out.to_phase if (out.should_transition and out.to_phase) else _d["phase"]
+        phase = _d["phase"]
+        nxt = _PHASE_GRAPH.get(phase)
+        if nxt is None or nxt == phase:  # terminal or unknown phase → stay
+            return phase
+        return nxt
 
     g.add_conditional_edges(
         "intake",
