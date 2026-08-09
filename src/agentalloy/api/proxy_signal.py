@@ -1051,11 +1051,12 @@ async def evaluate_signal(
             config = {"configurable": {"thread_id": thread_key.as_tuple()}}
             result = graph.invoke(input_state, config=config)
             to_phase = result.get("phase") if result else None
-            
+
             # Gate evaluation still runs via _route_step for advisories/gates_met
             from agentalloy.signals.graph import (  # noqa: PLC0415
                 _route_step,
             )
+
             out = _route_step(phase, lane, store=ctx.store)
             to_phase = out.to_phase if out.should_transition else to_phase
             if mutate and to_phase:
