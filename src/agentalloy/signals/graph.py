@@ -412,25 +412,11 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
 
     def _advance(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)
-        _lane = _d.get("lane") if "lane" in _d else "sdd-full"
-        _lane = _lane if _lane in _LANES else "sdd-full"
-        out = _route_step(_d["phase"], _lane, store=None)
-        result = out.to_phase if (out.should_transition and out.to_phase) else _d["phase"]
-        # Clamp to valid destinations for this phase's conditional edge.
-        # Without this, mocked gate evaluations returning unexpected phases
-        # cause LangGraph to hang on an unresolvable routing decision.
-        nxt = _PHASE_GRAPH.get(_d["phase"])
-        if nxt is not None and _d["phase"] != nxt:
-            valid_destinations = {_d["phase"], nxt}
-            if result not in valid_destinations:
-                _log.warning(
-                    "_advance returned '%s' for phase '%s', clamping to '%s'",
-                    result,
-                    _d["phase"],
-                    _d["phase"],
-                )
-                result = _d["phase"]
-        return result
+        phase = _d["phase"]
+        nxt = _PHASE_GRAPH.get(phase)
+        if nxt is None or nxt == phase:  # terminal or unknown phase → stay
+            return phase
+        return nxt
 
     g.add_conditional_edges(
         "intake",
