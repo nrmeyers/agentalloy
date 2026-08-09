@@ -7,7 +7,7 @@ rebuild. The graph edges are folded into relational columns/tables:
 
 Non-active versions remain invisible to compose-time callers by construction:
 queries only join on ``current_version_id`` where ``status = 'active'``, and the
-consistency guards raise :class:`InconsistentActiveVersion` rather than silently
+consistency guards raise :class:`InconsistentActiveVersionError` rather than silently
 fall through. Behaviour (row order, null-list normalization, guard semantics) is
 preserved 1:1 with the v5.3 Cypher path.
 """
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentalloy.storage.protocols import SkillStore  # pyright: ignore[reportUnusedImport]
 
 
-class InconsistentActiveVersion(Exception):
+class InconsistentActiveVersionError(Exception):
     """Raised when CURRENT_VERSION state disagrees with the active-version contract."""
 
     def __init__(self, skill_id: str, reason: str) -> None:
@@ -157,7 +157,7 @@ def get_active_fragments_for_skill(store: SkillStore, skill_id: str) -> list[Act
 def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, Any]:
     """Return raw SkillVersion data, enforcing that the version is active.
 
-    Raises :class:`InconsistentActiveVersion` if the version exists but is not
+    Raises :class:`InconsistentActiveVersionError` if the version exists but is not
     active; :class:`RuntimeError` if not found at all. The single enforced gate
     for version-id-based fetches.
     """
@@ -175,7 +175,7 @@ def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, An
             "SELECT skill_id FROM skill_versions WHERE version_id = $vid", {"vid": version_id}
         )
         skill_id = str(skill_rows[0][0]) if skill_rows else f"<unknown skill for {version_id}>"
-        raise InconsistentActiveVersion(
+        raise InconsistentActiveVersionError(
             skill_id, f"version {version_id!r} has status={status!r}, expected 'active'"
         )
     return {
@@ -206,7 +206,7 @@ def _run_consistency_guard(
     )
     if rows:
         sid, status = rows[0][0], rows[0][1]
-        raise InconsistentActiveVersion(sid, f"CURRENT_VERSION points at status={status!r} version")
+        raise InconsistentActiveVersionError(sid, f"CURRENT_VERSION points at status={status!r} version")
 
     # (b) An active version exists (HAS_VERSION) but there is no CURRENT_VERSION edge.
     rows = store.execute(
@@ -217,7 +217,7 @@ def _run_consistency_guard(
         params,
     )
     if rows:
-        raise InconsistentActiveVersion(
+        raise InconsistentActiveVersionError(
             rows[0][0], "active SkillVersion exists but no CURRENT_VERSION edge"
         )
 
@@ -230,7 +230,7 @@ def _run_consistency_guard_for(store: SkillStore, skill_id: str) -> None:
         {"skill_id": skill_id},
     )
     if rows:
-        raise InconsistentActiveVersion(
+        raise InconsistentActiveVersionError(
             skill_id, f"CURRENT_VERSION points at status={rows[0][0]!r} version"
         )
 
@@ -242,7 +242,7 @@ def _run_consistency_guard_for(store: SkillStore, skill_id: str) -> None:
         {"skill_id": skill_id},
     )
     if rows:
-        raise InconsistentActiveVersion(
+        raise InconsistentActiveVersionError(
             skill_id, "active SkillVersion exists but no CURRENT_VERSION edge"
         )
 
