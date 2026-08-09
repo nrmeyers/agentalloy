@@ -1037,15 +1037,27 @@ async def evaluate_signal(
             # the linear intake → spec.
             route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
             lane = route_hint if route_hint else "sdd-full"
-            # Execute the graph to route the transition (task 07).
-            # The graph's ``route_step`` wraps ``evaluate_phase_gate`` —
-            # this is the single decision point, not a second one.
+            # Execute the LangGraph to route the transition (task 07).
+            # The graph's nodes load workflow prose; conditional edges decide routing.
+            from agentalloy.signals.graph import (  # noqa: PLC0415
+                initial_phase_graph_state,
+                make_thread_key,
+                phase_graph,
+            )
+
+            thread_key = make_thread_key(cwd)
+            input_state = initial_phase_graph_state(phase=phase, lane=lane)
+            graph = phase_graph()
+            config = {"configurable": {"thread_id": thread_key.as_tuple()}}
+            result = graph.invoke(input_state, config=config)
+            to_phase = result.get("phase") if result else None
+            
+            # Gate evaluation still runs via _route_step for advisories/gates_met
             from agentalloy.signals.graph import (  # noqa: PLC0415
                 _route_step,
             )
-
             out = _route_step(phase, lane, store=ctx.store)
-            to_phase = out.to_phase if out.should_transition else None
+            to_phase = out.to_phase if out.should_transition else to_phase
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
                 # test-plan.md into plan so the plan gate is satisfied on first
