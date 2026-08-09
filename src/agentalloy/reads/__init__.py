@@ -7,7 +7,7 @@ goes through this module. Non-active versions are filtered out by default.
 from __future__ import annotations
 
 from agentalloy.reads.active import (
-    InconsistentActiveVersion,
+    InconsistentActiveVersionError,
     get_active_fragments,
     get_active_fragments_for_skill,
     get_active_skill_by_id,
@@ -20,7 +20,7 @@ from agentalloy.reads.models import ActiveFragment, ActiveSkill
 __all__ = [
     "ActiveFragment",
     "ActiveSkill",
-    "InconsistentActiveVersion",
+    "InconsistentActiveVersionError",
     "get_active_fragments",
     "get_active_fragments_for_skill",
     "get_active_skill_by_id",
