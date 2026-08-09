@@ -1048,8 +1048,8 @@ async def evaluate_signal(
             thread_key = make_thread_key(cwd)
             input_state = initial_phase_graph_state(phase=phase, lane=lane)
             graph = phase_graph()
-            config = {"configurable": {"thread_id": thread_key.as_tuple()}}
-            result = graph.invoke(input_state, config=config)
+            config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
+            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType]
             to_phase = result.get("phase") if result else None
 
             # Gate evaluation still runs via _route_step for advisories/gates_met
