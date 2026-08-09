@@ -17,9 +17,13 @@ from agentalloy.reads.active import (
 )
 from agentalloy.reads.models import ActiveFragment, ActiveSkill
 
+# Short alias preferred by tests and callers
+InconsistentActiveVersion = InconsistentActiveVersionError
+
 __all__ = [
     "ActiveFragment",
     "ActiveSkill",
+    "InconsistentActiveVersion",
     "InconsistentActiveVersionError",
     "get_active_fragments",
     "get_active_fragments_for_skill",

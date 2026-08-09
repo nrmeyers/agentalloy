@@ -43,7 +43,7 @@ def _get_next() -> dict[str, str]:
         # __getattr__ should have populated this, but guard for direct imports.
         from agentalloy.signals.graph import _NEXT as _next_map  # noqa: N811
 
-        _NEXT = _next_map
+        _NEXT = _next_map  # type: ignore[assignment]
     return _NEXT
 
 

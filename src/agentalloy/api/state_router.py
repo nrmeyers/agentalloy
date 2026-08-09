@@ -690,11 +690,8 @@ def _route_phase(
         project_root=project_root,
         store=store,
     )
-    if out is None:
-        return None  # same-phase no-op → skip gate entirely
-    # Same-phase no-op (target == current) — also skip gate entirely.
-    # _route_step returns RoutingOutcome with to_phase==from_phase for this case;
-    # callers (run_phase_set, write_phase) must not treat it as blocked.
+    # _route_step always returns RoutingOutcome; same-phase no-op returns
+    # to_phase==from_phase so we skip the gate here.
     if out.to_phase == (current_phase or ""):
         return None
     result: dict[str, Any] = {

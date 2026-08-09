@@ -87,7 +87,7 @@ class PhaseGraphState(TypedDict, total=False):
     phase: str  # intake, spec, design, plan, build, qa, ship, sdd-fast, add-skill, flow
     lane: str  # sdd-full | sdd-fast | add-skill | flow
     paused: bool  # workflow pause flag (#550) — not a node
-    paused_since: int | None  # (#550) epoch-ms
+    paused_since: str | None  # (#550) ISO-8601 timestamp (passthrough from store)
     contract_id: str | None  # active contract ref (if any)
     cursor: str | None  # current work-item slug
     approved: bool  # approval-marker validity (staleness-aware)
@@ -155,14 +155,21 @@ def to_phase_graph_state(phase_state: PhaseState | None) -> PhaseGraphState:
     read or left at defaults where the row does not carry them. Session-scoped
     kinds are never surfaced here.
     """
-    mode = phase_state.mode if phase_state else None
+    if phase_state is None:
+        return PhaseGraphState(
+            phase="intake",
+            lane="sdd-full",
+            paused=False,
+            paused_since=None,
+        )
+    mode = phase_state.mode
     lane = mode if mode in _LANES else "sdd-full"
     paused = mode == "paused"
     return PhaseGraphState(
-        phase=phase_state.phase if phase_state else "intake",
+        phase=phase_state.phase,
         lane=lane,
         paused=paused,
-        paused_since=phase_state.paused_since if phase_state else None,
+        paused_since=phase_state.paused_since,
     )
 
 
@@ -383,7 +390,7 @@ def _node(phase: str):
     return _run
 
 
-def build_phase_graph() -> StateGraph:
+def build_phase_graph() -> StateGraph[PhaseGraphState]:
     """Assemble the reactive phase topology (approach.md §2 diagram).
 
     One node per phase; a conditional edge out of ``intake`` selects the lane;
@@ -391,14 +398,17 @@ def build_phase_graph() -> StateGraph:
     ``ship`` is terminal. Returns an *uncompiled* graph — callers choose whether
     and how to checkpointer it (task 05).
     """
-    g = StateGraph(PhaseGraphState)
+    g = StateGraph[PhaseGraphState](PhaseGraphState)
     for phase in _PHASE_GRAPH:
         g.add_node(phase, _node(phase))
     g.add_edge(START, "intake")  # entrypoint — intake is the front door
 
     def _advance(state: PhaseGraphState) -> str:
-        out = _route_step(state["phase"], state.get("lane", "sdd-full"), store=None)
-        return out.to_phase if (out.should_transition and out.to_phase) else state["phase"]
+        _d: dict[str, Any] = dict(state)
+        _lane = _d.get("lane") if "lane" in _d else "sdd-full"
+        _lane = _lane if _lane in _LANES else "sdd-full"
+        out = _route_step(_d["phase"], _lane, store=None)
+        return out.to_phase if (out.should_transition and out.to_phase) else _d["phase"]
 
     g.add_conditional_edges(
         "intake",
@@ -417,11 +427,13 @@ def build_phase_graph() -> StateGraph:
 # Compiled-graph helper (module-level singleton)
 # ---------------------------------------------------------------------------
 
-_graph_compilation: CompiledStateGraph | None = None
+_graph_compilation: (
+    CompiledStateGraph[PhaseGraphState, None, PhaseGraphState, PhaseGraphState] | None
+) = None  # type: ignore[type-arg]
 _graph_phases: list[str] | None = None
 
 
-def phase_graph() -> CompiledStateGraph:
+def phase_graph() -> CompiledStateGraph[PhaseGraphState, None, PhaseGraphState, PhaseGraphState]:  # type: ignore[type-arg]
     """Return a compiled LangGraph ``StateGraph`` with checkpointer.
 
     The graph is compiled once per Python process so that every caller
@@ -438,7 +450,7 @@ def all_phases() -> list[str]:
     """Return every phase node in the graph (intake, spec, design, …, sdd-flow)."""
     global _graph_phases
     if _graph_phases is None:
-        _graph_phases = list(phase_graph().graph_nodes.keys())
+        _graph_phases = list(_PHASE_GRAPH.keys())
     return _graph_phases
 
 
