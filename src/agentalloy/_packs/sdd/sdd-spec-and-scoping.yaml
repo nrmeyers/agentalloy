@@ -1,6 +1,6 @@
 skill_id: sdd-spec-and-scoping
 canonical_name: SDD — Spec and Scoping (sdd-spec)
-description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via `agentalloy contract artifact-set --phase spec --slug <slug> --name spec.md`."
+description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via `agentalloy contract artifact-set --phase spec --slug <slug> --name spec.artifact`."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -21,10 +21,10 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: spec
-        name: "*.md"
+        name: "*.artifact"
     - artifact_contains:
         phase: spec
-        name: "*.md"
+        name: "*.artifact"
         sections:
           - Acceptance Criteria
           - Out of Scope
@@ -38,7 +38,7 @@ exit_gates:
     # BEFORE the user tries to advance. Matches the design node at
     # sdd-design-and-planning.yaml.
     - approval_recorded:
-        since_name_glob: "*.md"
+        since_name_glob: "*.artifact"
 signal_keywords:
   - done with spec
   - ready to design
@@ -67,7 +67,7 @@ contract_template: |
   ## Spec
 
   Acceptance criteria and out-of-scope live in the spec artifact
-  (agentalloy contract artifact-set --phase spec --slug {{task_slug}} --name spec.md).
+  (agentalloy contract artifact-set --phase spec --slug {{task_slug}} --name spec.artifact).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -87,7 +87,7 @@ raw_prose: |
   it if you're not sure.) If it does not exist, you skipped intake; STOP and go back.
 
   You MUST record the spec via `agentalloy contract artifact-set --phase spec --slug <slug>
-  --name spec.md --body <text>` (or `--body-file -` for stdin) with its **Acceptance
+  --name spec.artifact --body <text>` (or `--body-file -` for stdin) with its **Acceptance
   Criteria** and **Out of Scope** sections. There is no file to write — this is a store
   write, not a filesystem document. You MUST NOT design solutions or touch `src/` here — spec
   settles *what* and *done*, never *how*.
@@ -175,7 +175,7 @@ raw_prose: |
   The **spec artifact** is the deliverable and the single source of truth for acceptance —
   record it with:
 
-      agentalloy contract artifact-set --phase spec --slug <task-slug> --name spec.md
+      agentalloy contract artifact-set --phase spec --slug <task-slug> --name spec.artifact
 
   The body MUST include `## Acceptance Criteria` and `## Out of Scope` sections. That
   completes spec.

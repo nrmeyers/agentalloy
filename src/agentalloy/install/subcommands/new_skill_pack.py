@@ -173,7 +173,7 @@ def _build_skill_record(
         "reference so a later edit doesn't silently break the phase-transition "
         "check.\n\n"
         "Phase artifacts are recorded to the AgentAlloy store with `agentalloy "
-        "contract artifact-set --phase <phase> --slug <slug> --name <name>.md`, "
+        "contract artifact-set --phase <phase> --slug <slug> --name <name>.artifact`, "
         "never written as files. Only runtime source code and its tests go to "
         "disk — do not instruct the agent to create a spec, plan, or contract "
         "file, because the exit gate queries the store and will not see it."

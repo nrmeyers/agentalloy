@@ -1,6 +1,6 @@
 skill_id: sdd-plan-and-contracts
 canonical_name: SDD — Plan (sdd-plan)
-description: "Turn the design approach into an ordered task plan, unit test cases, and one build contract per task — recorded as tasks.md and test-plan.md via agentalloy contract artifact-set --phase plan --slug <slug>, with agentalloy contract init --phase build --slug <NN-slug> for each task."
+description: "Turn the design approach into an ordered task plan, unit test cases, and one build contract per task — recorded as tasks.artifact and test-plan.artifact via agentalloy contract artifact-set --phase plan --slug <slug>, with agentalloy contract init --phase build --slug <NN-slug> for each task."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -33,22 +33,22 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: plan
-        name: tasks.md
+        name: tasks.artifact
     - artifact_contains:
         phase: plan
-        name: tasks.md
+        name: tasks.artifact
         sections:
           - Tasks
     - artifact_exists:
         phase: plan
-        name: test-plan.md
+        name: test-plan.artifact
     - artifact_contains:
         phase: plan
-        name: test-plan.md
+        name: test-plan.artifact
         sections:
           - Test Cases
     # §6 density floor: ONE build contract PER TASK. Counts top-level items
-    # under ## Tasks in tasks.md and requires at least that many build contracts.
+    # under ## Tasks in tasks.artifact and requires at least that many build contracts.
     - build_contracts_cover_tasks:
         tasks_from_store: true
         phase: plan
@@ -62,7 +62,7 @@ exit_gates:
     # `since_name_glob` covers the plan artifacts so editing them after
     # approval invalidates the marker. --force never bypasses this.
     - approval_recorded:
-        since_name_glob: "*.md"
+        since_name_glob: "*.artifact"
 signal_keywords:
   - done with plan
   - ready to build
@@ -90,7 +90,7 @@ contract_template: |
   ## Plan
 
   Tasks and test cases are recorded as plan artifacts
-  (tasks.md, test-plan.md) via
+  (tasks.artifact, test-plan.artifact) via
   `agentalloy contract artifact-set --phase plan --slug {{task_slug}}`.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
@@ -100,8 +100,7 @@ author: agentalloy
 change_summary: "split from sdd-design-and-planning: plan handles task decomposition, test cases, and build contracts; design handles approach, decisions, and rationale only. MIGRATION: `agentalloy task next` is now asserted as a prose invariant (it advances the work-item cursor every later phase resolves its task from, including qa's codify gate), and §5 names DEFAULT_K_BY_PHASE where it explains the k≈4 density floor. A pre-existing enabled profile override for this skill that lacks the `agentalloy task next` token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
 raw_prose: |
 
-  **Before writing any code, verify the preceding phase's deliverables exist**
-  (`docs/design/*/tasks.md`, `docs/design/*/test-plan.md`).  # SDD — Plan
+  **Before writing any code, verify the preceding phase's deliverables exist.**  # SDD — Plan
 
   **Checkpoint first.** You MUST confirm the design artifact exists by running:
 
@@ -123,7 +122,7 @@ raw_prose: |
 
   Read the spec artifact (`agentalloy contract artifact-list --phase spec
   --slug <slug>`) and the design artifact (`agentalloy contract artifact-list
-  --phase design --slug <slug> --name approach.md`). The spec's acceptance and
+  --phase design --slug <slug> --name approach.artifact`). The spec's acceptance and
   non-goals are fixed; design's approach and decisions are fixed. Your job is
   to decompose them into buildable tasks.
 
@@ -163,11 +162,11 @@ raw_prose: |
   with the exact section headers the gates check:
 
       agentalloy contract artifact-set --phase plan --slug <task-slug> \
-        --name tasks.md      --body <text>   # the ordered worklist, under `## Tasks`
+        --name tasks.artifact      --body <text>   # the ordered worklist, under `## Tasks`
       agentalloy contract artifact-set --phase plan --slug <task-slug> \
-        --name test-plan.md  --body <text>   # the unit cases, under `## Test Cases`
+        --name test-plan.artifact  --body <text>   # the unit cases, under `## Test Cases`
 
-  Then **verify tasks.md and test-plan.md exist with their required sections**.
+  Then **verify tasks.artifact and test-plan.artifact exist with their required sections**.
   That completes the artifact recording.
 
   ## 5. Emit one build contract per task
@@ -209,7 +208,7 @@ raw_prose: |
   implement. That body becomes build's retrieval prompt: the proxy composes
   the skills matching it and front-loads them with the task, so build never has
   to decide what it needs. Set `scope.touches/avoids` and name the `## Test
-  cases` (the test-plan.md cases by AC-N). The contracts sort by their `NN-`
+  cases` (the test-plan.artifact cases by AC-N). The contracts sort by their `NN-`
   prefix — that's build's worklist order.
 
   Anti-pattern (a real calendar build that starved): one contract tagged
@@ -232,7 +231,7 @@ raw_prose: |
   task it is on (qa's codify gate resolves its slug from it).
   Phase advance ends this session; the next phase begins in a fresh one,
   and `agentalloy resume` rebuilds context. The phase guard refuses the jump until
-  `tasks.md`, `test-plan.md`, and one build contract per task exist with ≤2
+  `tasks.artifact`, `test-plan.artifact`, and one build contract per task exist with ≤2
   tags each AND a human approval is recorded, so a premature `phase set` just
   names what's missing.
 
@@ -245,7 +244,7 @@ raw_prose: |
   boundaries before anything could act on it.
 
   Switching branches in place is safe — the artifact store is keyed by repo path,
-  not by branch, so `approach.md`, `tasks.md`, `test-plan.md`, and the build
+  not by branch, so `approach.artifact`, `tasks.artifact`, `test-plan.artifact`, and the build
   contracts all follow you. A new **worktree** is a different path and therefore a
   different store key: the artifacts do NOT follow, and build would start empty.
   If the user wants a worktree, say so before they create it.

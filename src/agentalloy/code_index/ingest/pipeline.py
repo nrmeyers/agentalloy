@@ -71,7 +71,7 @@ _MARKDOWN_KIND = "MarkdownDoc"
 ProgressCallback = Callable[[str, float], None]
 
 
-class JobCancelled(Exception):
+class JobCancelledError(Exception):
     """Internal control-flow signal: the job's cancel flag was set."""
 
 
@@ -556,7 +556,7 @@ async def run_index_job(
 
     def _check_cancel() -> None:
         if jobs.is_cancel_requested(job_id):
-            raise JobCancelled
+            raise JobCancelledError
 
     def _result(status: str, **kw: object) -> IndexResult:
         return IndexResult(
@@ -736,7 +736,7 @@ async def run_index_job(
             symbols_embedded=symbols_embedded,
             markdown_embedded=markdown_embedded,
         )
-    except JobCancelled:
+    except JobCancelledError:
         jobs.mark_failed(job_id, error="cancelled by request", terminal_status="cancelled")
         return _result("cancelled", error="cancelled by request")
     except asyncio.CancelledError:

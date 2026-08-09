@@ -69,7 +69,7 @@ _VALID_FRAGMENT_TYPES = frozenset(
     {"setup", "execution", "verification", "example", "guardrail", "rationale"}
 )
 # System-skill phase_scope vocabulary — the canonical SDD lifecycle (matches
-# gates._PHASE_GRAPH and the api.compose_models.Phase Literal). Previously the
+# graph._PHASE_GRAPH and the api.compose_models.Phase Literal). Previously the
 # alien {design, build, review} set, which couldn't scope to intake/spec/qa/ship
 # and whose "review" never matched runtime "qa". Reconciled in Stage 3b;
 # "sdd-fast" (the fast-lane phase) added so sys skills can scope to it.

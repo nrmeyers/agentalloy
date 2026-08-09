@@ -170,15 +170,15 @@ def test_store_lesson_coexists_with_the_qa_report_artifact(tmp_path: Path):
     """End-to-end, through the real forward gate and a real store — the claim
     the whole migration rests on.
 
-    The qa exit gate globs `name: "*.md"` and ``artifact_contains`` demands
-    ## Checks/## Review of EVERY row that glob matches. Writing the lesson
-    alongside the qa report must therefore clear the gate, not break it. A
-    lesson named ``solution.md`` would fail here; ``solution`` does not.
+    The qa exit gate globs `name: "*.artifact"` and ``artifact_contains``
+    demands ## Checks/## Review of EVERY row that glob matches. Writing the
+    lesson alongside the qa report must therefore clear the gate, not break it.
+    A lesson named ``solution.artifact`` would fail here; ``solution`` does not.
     """
     _qa_contract(tmp_path)
     scoped = _store_for(tmp_path)
     scoped.set_artifact(
-        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+        "qa", SLUG, "report.artifact", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
     )
     scoped.set_artifact(LESSON_PHASE, SLUG, LESSON_NAME, "# lesson\n\nwhat worked\n")
 
@@ -190,18 +190,18 @@ def test_store_lesson_coexists_with_the_qa_report_artifact(tmp_path: Path):
 def test_md_suffixed_lesson_would_break_the_qa_gate(tmp_path: Path):
     """Proves the name choice is load-bearing rather than cosmetic.
 
-    Identical to the test above except the lesson is stored as ``solution.md``.
-    The qa gate's ``*.md`` glob then sweeps it up and ``artifact_contains``
+    Identical to the test above except the lesson is stored as ``solution.artifact``.
+    The qa gate's ``*.artifact`` glob then sweeps it up and ``artifact_contains``
     demands ## Checks/## Review of it, so the gate blocks — recording the lesson
     would have broken the edge it is supposed to open. This test failing means
-    someone gave LESSON_NAME an .md suffix.
+    someone gave LESSON_NAME an .artifact suffix.
     """
     _qa_contract(tmp_path)
     scoped = _store_for(tmp_path)
     scoped.set_artifact(
-        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+        "qa", SLUG, "report.artifact", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
     )
-    scoped.set_artifact("qa", SLUG, "solution.md", "# lesson\n\nwhat worked\n")
+    scoped.set_artifact("qa", SLUG, "solution.artifact", "# lesson\n\nwhat worked\n")
 
     blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, scoped)
 

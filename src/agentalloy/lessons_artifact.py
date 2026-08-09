@@ -19,7 +19,7 @@ name='solution')``. Two shape decisions are load-bearing:
   ``knowledge_push._solutions_slug`` (which parses the slug back out of a
   ``docs/solutions/<slug>.md::anchor`` qualified name) keep working untouched.
   This mirrors the design-artifact migration, which kept
-  ``docs/design/<slug>/approach.md`` for exactly the same reason.
+  ``docs/design/<slug>/approach.artifact`` for exactly the same reason.
 """
 
 from __future__ import annotations

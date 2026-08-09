@@ -6,12 +6,12 @@ import os
 from pathlib import Path
 
 from agentalloy.signals.gates import (
-    _PHASE_GRAPH,
     _near_miss_candidates,
     aggregate,
     decide_transition,
     evaluate_node,
 )
+from agentalloy.signals.graph import _PHASE_GRAPH
 from agentalloy.signals.predicates import PredicateContext, PredicateResult
 from agentalloy.storage.state_store import DuckDBStateStore
 
@@ -344,7 +344,7 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
     """
     d = tmp_path / "docs" / "design" / "01-task"
     d.mkdir(parents=True)
-    (d / "approach.md").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
+    (d / "approach.artifact").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
     (d / "tasks.md").write_text("# x\n\n## Tasks\n\n- t1\n", encoding="utf-8")
     (d / "test-plan.md").write_text("# x\n\n## Test Cases\n\n- AC-1\n", encoding="utf-8")
     dc = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
@@ -366,7 +366,7 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
         f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
         VALUES ('{repo}', 'design-01-task', '01-task', '[]', NULL, 'design', 'active', CURRENT_TIMESTAMP)"""
     )
-    store.set_artifact("design", "01-task", "approach.md", "# x\n\n## Approach\n\nhow\n")
+    store.set_artifact("design", "01-task", "approach.artifact", "# x\n\n## Approach\n\nhow\n")
     store.set_artifact("design", "01-task", "tasks.md", "# x\n\n## Tasks\n\n- t1\n")
     store.set_artifact("design", "01-task", "test-plan.md", "# x\n\n## Test Cases\n\n- AC-1\n")
     store.close()
@@ -460,10 +460,10 @@ def _approve_design(tmp_path: Path) -> None:
     store = DuckDBStateStore(db)
     store.open()
     # Must match the design gate's `since_name_glob`, which the design/plan split
-    # tightened from "*.md" to "approach.md" (design now produces one artifact;
+    # tightened from "*.md" to "approach.artifact" (design now produces one artifact;
     # tasks.md/test-plan.md became plan's). Digesting a wider set than the gate
     # re-digests is a permanent mismatch — approval would never read as recorded.
-    rows = store.list_artifacts("design", name_glob="approach.md")
+    rows = store.list_artifacts("design", name_glob="approach.artifact")
     store.set_approval("design", _artifact_digest(rows))
     store.close()
 

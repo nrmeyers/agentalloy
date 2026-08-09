@@ -208,6 +208,32 @@ class TestPostPhase:
         resp = state_client.post("/state/phase", json={"value": ""})
         assert resp.status_code == 422
 
+    def test_write_phase_persists_graph_checkpoint(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """T21 — HTTP write persists the phase row (authoritative source).
+
+        A phase advance over ``repo_root`` must persist the ``phase`` row
+        via ``store.write_phase`` — the graph checkpoint shim was retired
+        in step 08. This is the only seam that proves the router committed
+        the phase blob (with lease semantics) rather than a bare row write.
+        """
+        from agentalloy.api.state_router import default_repo_root
+
+        root = Path(str(default_repo_root()))
+        resp = state_client.post(
+            "/state/phase",
+            params={"repo_root": str(root)},
+            json={"value": "spec"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == "spec"
+
+        # Phase row is authoritative (graph checkpoint shim retired in step 08).
+        phase_row = state_store.read_phase()
+        assert phase_row is not None
+        assert phase_row.phase == "spec"
+
 
 class TestPostCursor:
     """POST /state/cursor."""

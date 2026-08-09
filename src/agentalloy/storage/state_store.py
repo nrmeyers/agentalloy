@@ -532,6 +532,33 @@ class DuckDBStateStore:
             )
         logger.debug("sdd_artifact lifecycle column and index ensured")
 
+        # Store-only artifact naming migration (#552 06a): lifecycle artifact
+        # names in store-backed phases must end with ARTIFACT_EXT, not the
+        # legacy ".md". Rename legacy rows in place (strip ".md", append
+        # ".artifact"). Idempotent once no ".md"-suffixed rows remain.
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            ARTIFACT_EXT,
+            LEGACY_ARTIFACT_EXT,
+            STORE_BACKED_PHASES,
+        )
+
+        phases_sql = ",".join(f"'{p}'" for p in sorted(STORE_BACKED_PHASES))
+        # `name` is TEXT so REPLACE works portably in DuckDB: strip the legacy
+        # ".md" suffix (if any) then append the canonical ".artifact".
+        self.conn.execute(
+            f"UPDATE sdd_artifact "
+            f"SET name = REPLACE(name, '{LEGACY_ARTIFACT_EXT}', '') || '{ARTIFACT_EXT}' "
+            f"WHERE name LIKE '%{LEGACY_ARTIFACT_EXT}' "
+            f"AND phase IN ({phases_sql})"
+        )
+        # Approval digests (_artifact_digest) hash (name, content). The stored
+        # approval was computed over ".md" names, so after this rename the
+        # recomputed digest no longer matches → the phase re-evaluates as stale,
+        # by design (the artifact changed names even if content didn't). No
+        # approval rows are rewritten; re-approval is 06a's intended single
+        # observable effect for any repo mid-flight.
+        logger.debug("sdd_artifact legacy .md names migrated to .artifact")
+
     # -- read / write --------------------------------------------------------
 
     def read(self, kind: str, session_key: str | None = None) -> str | None:

@@ -28,10 +28,10 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: sdd-fast
-        name: "*.md"
+        name: "*.artifact"
     - artifact_contains:
         phase: sdd-fast
-        name: "*.md"
+        name: "*.artifact"
         sections:
           - Acceptance Criteria
           - Approach
@@ -49,7 +49,7 @@ exit_gates:
     # as a path for the agent to write. MUST equal _APPROVAL_STORE_NAME_GLOB
     # ["sdd-fast"] — test_approval_globs_match_packs pins it.
     - approval_recorded:
-        since_name_glob: "*.md"
+        since_name_glob: "*.artifact"
     - artifact_exists:
         path: "src/**"
     # Stack-aware: pytest, or JS/TS (Vitest/Jest) when package.json is present.
@@ -107,7 +107,7 @@ raw_prose: |
   **The sdd-fast artifact is not a file.** It lives in the AgentAlloy store, and
   the only way to record it is:
 
-      agentalloy contract artifact-set --phase sdd-fast --slug <slug> --name fast.md --body-file -
+      agentalloy contract artifact-set --phase sdd-fast --slug <slug> --name fast.artifact --body-file -
 
   Do **NOT** create `docs/fast/`, a spec markdown file, or any other file on disk
   for it. The exit gate reads the store, so a file written anywhere on disk does

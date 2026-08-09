@@ -663,21 +663,48 @@ async def read_state(
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_phase_gate(
+def _route_phase(
     store: DuckDBStateStore,
     current_phase: str | None,
-    target_phase: str,
-    project_root: Path | None,
-    override: bool,
+    lane: str = "sdd-full",
+    target_phase: str | None = None,
+    override: bool = False,
+    project_root: Path | None = None,
 ) -> dict[str, Any] | None:
-    """Evaluate the exit gate for a phase transition.
+    """Route a phase transition through the LangGraph.
 
-    Delegates to :func:`agentalloy.signals.gates.evaluate_phase_gate` so the
-    route and the CLI share a single evaluation point.
+    Uses the graph's ``_route_step`` which wraps ``evaluate_phase_gate`` —
+    the single decision point for all routing (proxy, CLI, API).
+
+    When ``target_phase`` is provided, it overrides the automatic
+    ``_PHASE_GRAPH`` lookup so the caller can evaluate a specific
+    transition (used by the HTTP / CLI path).
     """
-    from agentalloy.signals.gates import evaluate_phase_gate as _eval  # noqa: PLC0415
+    from agentalloy.signals.graph import _route_step  # noqa: PLC0415
 
-    return _eval(current_phase, target_phase, project_root, override, store)
+    out = _route_step(
+        current_phase or "",
+        lane,
+        target_phase=target_phase,
+        override=override,
+        project_root=project_root,
+        store=store,
+    )
+    # _route_step always returns RoutingOutcome; same-phase no-op returns
+    # to_phase==from_phase so we skip the gate here.
+    if out.to_phase == (current_phase or ""):
+        return None
+    result: dict[str, Any] = {
+        "should_transition": out.should_transition,
+        "to_phase": out.to_phase,
+        "advisories": list(out.advisories),
+        "lane": out.lane,
+    }
+    # Carry through the verdict reason so callers can distinguish
+    # "approval" vs "not_met" without re-evaluating the gate.
+    if out.reason:
+        result["reason"] = out.reason
+    return result
 
 
 @router.post(
@@ -733,8 +760,16 @@ async def write_phase(
     current_phase_row = store.read_phase()
     current_phase = current_phase_row.phase if current_phase_row else None
     project_root = Path(repo_root) if repo_root else None
-    verdict = _evaluate_phase_gate(store, current_phase, phase_value, project_root, req.override)
-    if verdict is not None:
+    # Route through the graph's route_step (single decision point).
+    verdict = _route_phase(
+        store,
+        current_phase,
+        lane="sdd-full",  # HTTP path doesn't carry a lane; target_phase overrides _PHASE_GRAPH lookup
+        target_phase=phase_value,
+        override=req.override,
+        project_root=project_root,
+    )
+    if verdict is not None and not verdict.get("should_transition", True):
         # Gate blocks the transition — return verdict without writing. Mark
         # success=False so a 2xx cannot be read as a recorded advance (#501).
         return PhaseAdvanceResponse(
@@ -744,7 +779,9 @@ async def write_phase(
             success=False,
         )
 
-    # Fast path: no contract — use the existing non-transactional path
+    # Fast path: no contract — use the existing non-transactional path.
+    # The ``phase`` row is the authoritative source (retired the graph
+    # checkpoint shim in step 08).
     if req.contract is None:
         result = await asyncio.to_thread(
             store.write_phase,
@@ -828,7 +865,7 @@ async def write_phase(
                 success_criteria=contract.success_criteria,
                 body=contract.body,
             )
-        # Transaction committed — posture rewrite + in-process compose
+        # Transaction committed — posture rewrite + in-process compose.
         if repo_root is not None:
             await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value, written_mode)
         asyncio.create_task(_trigger_compose_in_process(store, contract_id, request))

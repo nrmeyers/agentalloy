@@ -169,8 +169,8 @@ def test_validate_rejects_prose_dropping_invariant():
     data["raw_prose"] = "Reworded design guidance that omits all the load-bearing paths." * 3
     errors = _validate_skill_data(data, _WF_SKILL)
     assert any("load-bearing token" in e for e in errors)
-    # Names a concrete dropped token.
-    assert any("approach.md" in e for e in errors)
+    # Names a concrete dropped token (approach.artifact, not approach.md).
+    assert any("approach.artifact" in e for e in errors)
 
 
 def test_validate_rejects_locked_field_edit():

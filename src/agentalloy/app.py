@@ -52,7 +52,7 @@ from agentalloy.orchestration.compose import (
     RetrievalStageError,
 )
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
-from agentalloy.reads import InconsistentActiveVersion
+from agentalloy.reads import InconsistentActiveVersionError
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
 from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
 from agentalloy.storage.state_store import bind_process_store, open_state_store
@@ -462,9 +462,9 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     async def _assembly_handler(_req: Request, err: AssemblyStageError) -> JSONResponse:
         return _stage_error_response("assembly", err)
 
-    @app.exception_handler(InconsistentActiveVersion)
+    @app.exception_handler(InconsistentActiveVersionError)
     async def _inconsistent_version_handler(
-        _req: Request, err: InconsistentActiveVersion
+        _req: Request, err: InconsistentActiveVersionError
     ) -> JSONResponse:
         body = {
             "code": "inconsistent_active_version",

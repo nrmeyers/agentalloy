@@ -88,8 +88,8 @@ def run_approve(
         phase_access,
     )
     from agentalloy.install.subcommands.phase import run_phase_set  # noqa: PLC0415
-    from agentalloy.signals.gates import (  # noqa: PLC0415
-        _PHASE_GRAPH,
+    from agentalloy.signals.graph import (  # noqa: PLC0415
+        _NEXT as _PHASE_GRAPH,
     )
 
     root = root or _repo_root()
