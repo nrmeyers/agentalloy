@@ -387,10 +387,11 @@ def route_from_decision(
 
 
 def _node(phase: str):
-    """A StateGraph node for ``phase``: resolve prose, yield unchanged state."""
+    """A StateGraph node for ``phase``: resolve prose, update state phase to self."""
 
     def _run(state: PhaseGraphState) -> PhaseGraphState:
         phase_node(phase)  # pure read — binds prose for the proxy to inject
+        state["phase"] = phase  # keep graph-phase in sync with the executing node
         return state
 
     return _run
