@@ -73,7 +73,8 @@ class RetrievalStageError(_StageErrorBase):
 class AssemblyStageError(_StageErrorBase):
     """Reserved for backwards compatibility. v5.4 removes the LLM assembly
     stage; this class remains so callers that still ``except`` it keep
-    compiling, but it is no longer raised by the runtime path."""
+    compiling, but it is no longer raised by the runtime path.
+    """
 
 
 class ComposeOrchestrator:
@@ -109,7 +110,8 @@ class ComposeOrchestrator:
 
     def rebind_source(self, source: RuntimeCache | SkillStore) -> None:
         """Swap the skill source — a freshly reloaded RuntimeCache after an
-        in-process corpus write (see web/runtime_refresh.py)."""
+        in-process corpus write (see web/runtime_refresh.py).
+        """
         self._source = source
 
     async def compose(
@@ -250,7 +252,7 @@ class ComposeOrchestrator:
                         lm_assist_kept_ids=list(stage_b_kept),
                         lm_assist_dropped_ids=list(stage_b_dropped),
                         lm_assist_scores=dict(stage_b_scores),
-                    )
+                    ),
                 )
             return EmptyResult(
                 task=req.task,
@@ -268,7 +270,7 @@ class ComposeOrchestrator:
         domain_fragment_ids = [f.fragment_id for f in retrieval.candidates]
         source_skills = list(dict.fromkeys(f.skill_id for f in retrieval.candidates))
         workflow_skill_ids = list(
-            dict.fromkeys(f.skill_id for f in retrieval.candidates if f.skill_class == "workflow")
+            dict.fromkeys(f.skill_id for f in retrieval.candidates if f.skill_class == "workflow"),
         )
         reranked = isinstance(retrieval, RetrievalResult) and retrieval.reranked
 
@@ -339,7 +341,7 @@ class ComposeOrchestrator:
                     lm_assist_kept_ids=list(stage_b_kept),
                     lm_assist_dropped_ids=list(stage_b_dropped),
                     lm_assist_scores=dict(stage_b_scores),
-                )
+                ),
             )
         return ComposedResult(
             task=req.task,

@@ -49,7 +49,7 @@ class PredicateContext:
     session_key: str | None = None
     # mutable cache for git state (use dict so we can mutate from frozen dataclass)
     _git_cache: dict[str, str | None] = field(
-        default_factory=lambda: cast(dict[str, str | None], {})
+        default_factory=lambda: cast(dict[str, str | None], {}),
     )
     # Mutable diagnostics sink (same frozen-dataclass-safe pattern as _git_cache).
     # Semantic predicates record an embed-call failure here so the proxy can
@@ -62,7 +62,7 @@ class PredicateContext:
     # evaluation resolves it exactly once (#518). Same frozen-dataclass-safe
     # mutability trick as _git_cache / _diagnostics.
     _active_slug_cache: dict[str, str | None] = field(
-        default_factory=lambda: cast(dict[str, str | None], {})
+        default_factory=lambda: cast(dict[str, str | None], {}),
     )
 
     def record_embed_failure(self) -> None:
@@ -215,7 +215,10 @@ def _query_store_contracts(
         return []
     try:
         return ctx.store.list_contracts(
-            phase=phase, slug=slug, work_item=work_item, status="active"
+            phase=phase,
+            slug=slug,
+            work_item=work_item,
+            status="active",
         )
     except Exception:
         return None
@@ -488,7 +491,9 @@ def _section_completeness_cached(
     which requires a coarse-mtime filesystem or a checkout restoring old stamps.
     """
     present, total, missing = _section_completeness_uncached(
-        path_glob, list(sections_key), project_root
+        path_glob,
+        list(sections_key),
+        project_root,
     )
     return present, total, tuple(missing)
 
@@ -1145,7 +1150,8 @@ def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
 def _contract_work_item(content: str) -> str | None:
     """The ``work_item`` frontmatter field (the parent design-item slug that
     ``contract init --phase build`` stamps from the active design cursor), or
-    ``None`` when the field is absent or the file has no parseable frontmatter."""
+    ``None`` when the field is absent or the file has no parseable frontmatter.
+    """
     import yaml as _yaml
 
     if not content.startswith("---"):
@@ -1162,7 +1168,10 @@ def _contract_work_item(content: str) -> str | None:
 
 
 def _item_build_contracts(
-    ctx: PredicateContext, slug: str, *, contracts_glob: str | None = None
+    ctx: PredicateContext,
+    slug: str,
+    *,
+    contracts_glob: str | None = None,
 ) -> list[dict[str, Any]]:
     """The build contracts attributed to design work-item ``slug``.
 
@@ -1196,7 +1205,8 @@ def _item_build_contracts(
 
 
 def eval_build_contracts_cover_tasks(
-    args: dict[str, Any], ctx: PredicateContext
+    args: dict[str, Any],
+    ctx: PredicateContext,
 ) -> PredicateResult:
     """MET when #build-contracts >= #tasks for the CURSOR'D work-item (floor 1).
 

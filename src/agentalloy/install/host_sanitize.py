@@ -67,7 +67,7 @@ _PRUNE_DIRS: frozenset[str] = frozenset(
         ".next",
         "target",
         ".idea",
-    }
+    },
 )
 _HOME_TOP_SKIP: frozenset[str] = _PRUNE_DIRS | frozenset(
     {
@@ -88,7 +88,7 @@ _HOME_TOP_SKIP: frozenset[str] = _PRUNE_DIRS | frozenset(
         "snap",
         ".pyenv",
         ".rbenv",
-    }
+    },
 )
 _MAX_SCAN_DEPTH = 12
 
@@ -191,11 +191,11 @@ def _teardown_containers(*, dry_run: bool) -> tuple[list[Action], list[str]]:
                 ["container", "inspect", _CONTAINER_NAME],
                 ["rm", "-f", _CONTAINER_NAME],
                 _CONTAINER_NAME,
-            )
+            ),
         ]
         for vol in _VOLUME_NAMES:
             targets.append(
-                ("volume_rm", ["volume", "inspect", vol], ["volume", "rm", "-f", vol], vol)
+                ("volume_rm", ["volume", "inspect", vol], ["volume", "rm", "-f", vol], vol),
             )
         targets.append(("image_rm", ["image", "inspect", _IMAGE], ["rmi", "-f", _IMAGE], _IMAGE))
 
@@ -397,14 +397,17 @@ def sanitize(*, dry_run: bool, scan_home: bool) -> SanitizeReport:
         if dry_run:
             actions.append(
                 Action(
-                    "kill_orphan", f"pid://{pid}", f"would stop orphan llama-server {pid}", False
-                )
+                    "kill_orphan",
+                    f"pid://{pid}",
+                    f"would stop orphan llama-server {pid}",
+                    False,
+                ),
             )
             continue
         try:
             server_proc.stop(pid)
             actions.append(
-                Action("kill_orphan", f"pid://{pid}", f"stopped orphan llama-server {pid}", True)
+                Action("kill_orphan", f"pid://{pid}", f"stopped orphan llama-server {pid}", True),
             )
         except server_proc.ServerLifecycleError as exc:
             warnings.append(f"could not stop orphan llama-server {pid}: {exc}")

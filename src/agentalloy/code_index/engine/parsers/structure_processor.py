@@ -37,7 +37,9 @@ class StructureProcessor:
         self.exclude_paths = exclude_paths
 
     def _get_parent_identifier(
-        self, parent_rel_path: Path, parent_container_qn: str | None
+        self,
+        parent_rel_path: Path,
+        parent_container_qn: str | None,
     ) -> NodeIdentifier:
         if parent_rel_path == Path(cs.PATH_CURRENT_DIR):
             return (cs.NodeLabel.PROJECT, cs.KEY_NAME, self.project_name)
@@ -87,7 +89,8 @@ class StructureProcessor:
                     },
                 )
                 parent_identifier = self._get_parent_identifier(
-                    parent_rel_path, parent_container_qn
+                    parent_rel_path,
+                    parent_container_qn,
                 )
                 self.ingestor.ensure_relationship_batch(
                     parent_identifier,
@@ -102,7 +105,8 @@ class StructureProcessor:
                     {cs.KEY_PATH: relative_root.as_posix(), cs.KEY_NAME: root.name},
                 )
                 parent_identifier = self._get_parent_identifier(
-                    parent_rel_path, parent_container_qn
+                    parent_rel_path,
+                    parent_container_qn,
                 )
                 self.ingestor.ensure_relationship_batch(
                     parent_identifier,

@@ -366,8 +366,8 @@ def reembed_fragments(
                             prose=indexed,
                             phase_scope=getattr(frag, "phase_scope", None),
                             domain_tags=frag.domain_tags if frag.domain_tags else None,
-                        )
-                    ]
+                        ),
+                    ],
                 )
             except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
                 stats.failed += 1
@@ -456,8 +456,8 @@ def insert_cards(
                     embedding_model=embedding_model,
                     prose=text,
                     domain_tags=rep.domain_tags if rep.domain_tags else None,
-                )
-            ]
+                ),
+            ],
         )
         inserted += 1
     return inserted
@@ -657,7 +657,10 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                 logger.info("--force: deleted all %d existing embeddings for full reindex", n)
 
         fragments = discover_unembedded_fragments(
-            store, vs, skill_id=args.skill_id, force=args.force
+            store,
+            vs,
+            skill_id=args.skill_id,
+            force=args.force,
         )
         if args.limit is not None:
             fragments = fragments[: args.limit]
@@ -672,7 +675,10 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         if args.dry_run:
             for f in fragments[:20]:
                 logger.info(
-                    "  would embed: %s (%s, %s)", f.fragment_id, f.skill_id, f.fragment_type
+                    "  would embed: %s (%s, %s)",
+                    f.fragment_id,
+                    f.skill_id,
+                    f.fragment_type,
                 )
             if len(fragments) > 20:
                 logger.info("  ... and %d more", len(fragments) - 20)
@@ -700,7 +706,8 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
 
                     def _ntok(s: str) -> int:
                         resp = embed_client._post_json(  # type: ignore[attr-defined]
-                            "/tokenize", {"content": s}
+                            "/tokenize",
+                            {"content": s},
                         )
                         return len(cast(dict[str, Any], resp).get("tokens", []))
 
@@ -744,8 +751,8 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                                     embedding_model=model_id,
                                     prose=indexed,
                                     domain_tags=frag.domain_tags if frag.domain_tags else None,
-                                )
-                            ]
+                                ),
+                            ],
                         )
                     except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
                         stats.failed += 1
@@ -775,7 +782,10 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                 # only replace its own card, never wipe every other skill's.
                 if card_mode.with_cards:
                     all_frags = discover_unembedded_fragments(
-                        store, vs, skill_id=args.skill_id, force=True
+                        store,
+                        vs,
+                        skill_id=args.skill_id,
+                        force=True,
                     )
                     removed = vs.delete_cards(skill_id=args.skill_id)
                     reps = _distinct_skill_cards(all_frags)
@@ -799,8 +809,8 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                                     embedding_model=model_id,
                                     prose=text,
                                     domain_tags=rep.domain_tags if rep.domain_tags else None,
-                                )
-                            ]
+                                ),
+                            ],
                         )
                         n_cards += 1
                     logger.info(
@@ -825,7 +835,9 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             dropped = vs.delete_cards(skill_id=args.skill_id)
             if dropped:
                 logger.info(
-                    "card index: removed %d stale card(s) (mode=%s)", dropped, card_mode.value
+                    "card index: removed %d stale card(s) (mode=%s)",
+                    dropped,
+                    card_mode.value,
                 )
 
         # Record the indexed-representation mode for auditability (on the skill
@@ -874,7 +886,8 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         if stats.embedded > 0 or args.rebuild_fts:
             if stats.embedded > 0:
                 logger.info(
-                    "rebuilding BM25 FTS index after embedding %d fragment(s)", stats.embedded
+                    "rebuilding BM25 FTS index after embedding %d fragment(s)",
+                    stats.embedded,
                 )
             else:
                 logger.info("rebuilding BM25 FTS index (--rebuild-fts requested)")
@@ -940,7 +953,8 @@ def _stop_main_service() -> str | None:
 
 def _start_main_service(mode: str) -> None:
     """Restart what :func:`_stop_main_service` stopped. Best-effort: a restart
-    failure must never fail the (already completed) embed pass."""
+    failure must never fail the (already completed) embed pass.
+    """
     from agentalloy.install import server_proc
     from agentalloy.install.subcommands.upgrade import (
         _systemctl,
@@ -957,13 +971,15 @@ def _start_main_service(mode: str) -> None:
         logger.info("restarted agentalloy server on port %d", port)
     except Exception as exc:  # noqa: BLE001 — never fail the pass over the restart
         logger.warning(
-            "could not restart the service (%s) — start it with `agentalloy server-start`", exc
+            "could not restart the service (%s) — start it with `agentalloy server-start`",
+            exc,
         )
 
 
 def _reopen_after_stop(settings: Any) -> DuckDBSkillStore:
     """Retry the writer open after stopping the service; the OS may take a
-    moment to release the old process's file handle."""
+    moment to release the old process's file handle.
+    """
     last: Exception | None = None
     for delay in (0.2, 0.5, 1.0, 2.0):
         try:

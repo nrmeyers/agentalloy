@@ -152,7 +152,7 @@ class WireRecord:
     def __post_init__(self) -> None:
         if self.action not in _VALID_ACTIONS:
             raise ValueError(
-                f"WireRecord.action must be one of {_VALID_ACTIONS}; got {self.action!r}"
+                f"WireRecord.action must be one of {_VALID_ACTIONS}; got {self.action!r}",
             )
 
     def to_dict(self) -> dict[str, Any]:

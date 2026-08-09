@@ -85,7 +85,7 @@ def _read_corpus_schema_version(duck_path: Path) -> int | None:
         con = duckdb.connect(str(duck_path), read_only=True)
         try:
             row = con.execute(
-                "SELECT value FROM corpus_meta WHERE key = 'schema_version' LIMIT 1"
+                "SELECT value FROM corpus_meta WHERE key = 'schema_version' LIMIT 1",
             ).fetchone()
             if row and row[0] is not None:
                 return int(row[0])
@@ -143,7 +143,7 @@ def _run_migrations(
                     "to": cur + 1,
                     "applied": False,
                     "error": f"No migration registered for {cur} → {cur + 1}",
-                }
+                },
             )
             return applied
         try:
@@ -217,7 +217,7 @@ def update(root: Path | None = None) -> dict[str, Any]:
         summary["corpus"] = {"present": False}
         summary["warnings"].append(
             f"Corpus missing at {user_corpus} — run "
-            "`python -m agentalloy.install seed-corpus` to seed from the bundled wheel."
+            "`python -m agentalloy.install seed-corpus` to seed from the bundled wheel.",
         )
     else:
         recorded = _read_corpus_schema_version(duck_path)
@@ -244,7 +244,7 @@ def update(root: Path | None = None) -> dict[str, Any]:
                     f"v{expected} (current — harmless). Could not stamp it in "
                     "place (the corpus DB is held open, likely by the running "
                     "service); the marker is written by the next `agentalloy "
-                    "upgrade` or reembed pass."
+                    "upgrade` or reembed pass.",
                 )
         elif recorded < expected:
             summary["migrations"] = _run_migrations(duck_path, recorded, expected)
@@ -253,13 +253,13 @@ def update(root: Path | None = None) -> dict[str, Any]:
                 summary["warnings"].append(
                     f"Migration failed at step {failed[0]['from']}→{failed[0]['to']}: "
                     f"{failed[0].get('error')}. Restore by removing "
-                    f"{user_corpus} and re-running `seed-corpus`."
+                    f"{user_corpus} and re-running `seed-corpus`.",
                 )
         elif recorded > expected:
             summary["warnings"].append(
                 f"Corpus is at schema v{recorded}, code expects v{expected}. "
                 "You may be on an older code revision than the corpus was built for. "
-                "Run `pip install -U agentalloy` to update the code."
+                "Run `pip install -U agentalloy` to update the code.",
             )
 
     # 3. Model drift (informational)
@@ -275,7 +275,7 @@ def update(root: Path | None = None) -> dict[str, Any]:
     if summary["web_ui"].get("error"):
         summary["warnings"].append(
             f"web UI bundle unavailable ({summary['web_ui']['error']}) — "
-            "run `agentalloy pull-web` later, then restart the service."
+            "run `agentalloy pull-web` later, then restart the service.",
         )
 
     # 4. Record the update step — but only if no migration failed. A failed

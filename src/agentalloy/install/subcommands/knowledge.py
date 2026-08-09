@@ -104,7 +104,7 @@ def add_parser(
     )
     p.set_defaults(func=_run_knowledge)
     sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(
-        dest="knowledge_cmd"
+        dest="knowledge_cmd",
     )
 
     why_p = sub.add_parser("why", help="Decisions governing a fully-qualified symbol.")

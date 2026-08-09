@@ -105,7 +105,7 @@ _INTENT_TASK_DESCRIPTIONS: dict[str, str] = {
 if set(_INTENT_TASK_DESCRIPTIONS.keys()) != set(_INTENT_REFERENCES.keys()):
     raise ValueError(
         f"_INTENT_TASK_DESCRIPTIONS keys {set(_INTENT_TASK_DESCRIPTIONS)} != "
-        f"_INTENT_REFERENCES keys {set(_INTENT_REFERENCES)}"
+        f"_INTENT_REFERENCES keys {set(_INTENT_REFERENCES)}",
     )
 
 # Recalibrated per Phase 7 calibration script.

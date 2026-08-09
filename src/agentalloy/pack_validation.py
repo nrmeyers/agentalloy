@@ -50,7 +50,7 @@ class PackValidationResult:
 
     ok: bool
     errors: list[SkillValidationError] = field(
-        default_factory=lambda: cast(list[SkillValidationError], [])
+        default_factory=lambda: cast(list[SkillValidationError], []),
     )
 
     def format_errors(self) -> str:
@@ -62,7 +62,10 @@ class PackValidationResult:
 
 
 def validate_pack_skills(
-    pack_dir: Path, skills_entries: list[dict[str, Any]], *, strict: bool = True
+    pack_dir: Path,
+    skills_entries: list[dict[str, Any]],
+    *,
+    strict: bool = True,
 ) -> PackValidationResult:
     """Validate every skill YAML in *skills_entries* against the ingest schema.
 
@@ -102,7 +105,7 @@ def validate_pack_skills(
                     skill_id=skill_id,
                     file=fname,
                     errors=[str(exc)],
-                )
+                ),
             )
             continue
 
@@ -123,7 +126,7 @@ def validate_pack_skills(
                     skill_id=skill_id,
                     file=fname,
                     errors=errs,
-                )
+                ),
             )
 
     return PackValidationResult(ok=len(skill_errors) == 0, errors=skill_errors)
@@ -197,7 +200,7 @@ def _walk_gate_paths(spec: Any, errors: list[str]) -> None:
         if fnmatch.fnmatch(glob_val, f"docs/{phase}/**"):
             errors.append(
                 f"exit_gates: '{glob_val}' targets a store-backed docs/{phase}/ phase; "
-                f"use phase: {phase}, name: <pattern> instead"
+                f"use phase: {phase}, name: <pattern> instead",
             )
             return  # one error per leaf is enough
 
@@ -274,7 +277,7 @@ def _walk_gate_store_names(
         errors.append(
             f"exit_gates: store artifact name {store_name!r} for phase={phase!r} "
             f"uses the legacy '{legacy_ext}' suffix; store artifacts are named "
-            f"with '.artifact' (e.g. {store_name[: -len(legacy_ext)]}.artifact)"
+            f"with '.artifact' (e.g. {store_name[: -len(legacy_ext)]}.artifact)",
         )
 
 
@@ -474,18 +477,22 @@ class ReviewVerdict:
 
 def skill_file_sha256(pack_dir: Path, fname: str) -> str:
     """``sha256:`` over the exact on-disk bytes of a skill YAML — the DK2 hash
-    the review verdict binds to (same bytes Gate 1 reads)."""
+    the review verdict binds to (same bytes Gate 1 reads).
+    """
     return "sha256:" + hashlib.sha256((pack_dir / fname).read_bytes()).hexdigest()
 
 
 def _verdict_errors(
-    v: ReviewVerdict, expected_hash: str, *, require_independent: bool
+    v: ReviewVerdict,
+    expected_hash: str,
+    *,
+    require_independent: bool,
 ) -> list[str]:
     errs: list[str] = []
     if v.target_hash != expected_hash:
         errs.append(
             f"stale review: target_hash {v.target_hash or '(missing)'} does not match the "
-            f"current skill bytes ({expected_hash}) — re-review the edited skill"
+            f"current skill bytes ({expected_hash}) — re-review the edited skill",
         )
     if v.verdict != "approve":
         errs.append(f"review verdict is {v.verdict or '(missing)'!r}, not 'approve'")
@@ -501,7 +508,7 @@ def _verdict_errors(
     if require_independent and v.reviewer_mode != "independent":
         errs.append(
             f"reviewer.mode is {v.reviewer_mode or '(missing)'!r}, but an independent review "
-            f"is required (AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW=1)"
+            f"is required (AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW=1)",
         )
     return errs
 
@@ -576,7 +583,7 @@ def validate_review_verdicts(
                         verdict,
                         skill_file_sha256(pack_dir, fname),
                         require_independent=require_independent,
-                    )
+                    ),
                 )
         if errs:
             skill_errors.append(SkillValidationError(skill_id=skill_id, file=fname, errors=errs))
@@ -589,7 +596,8 @@ def review_modes(pack_dir: Path) -> list[str]:
     for the result contract (surfaced to the human approver / telemetry).
 
     Best-effort and side-effect-free: returns ``[]`` on a missing or malformed
-    file rather than raising (the gate itself has already judged validity)."""
+    file rather than raising (the gate itself has already judged validity).
+    """
     import yaml  # noqa: PLC0415
 
     path = pack_dir / REVIEW_FILENAME

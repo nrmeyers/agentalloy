@@ -142,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_sdd_artifact_phase
 # State kinds and their properties
 REPO_SCOPED_KINDS: frozenset[str] = frozenset({"phase", "cursor", "approved"})
 SESSION_SCOPED_KINDS: frozenset[str] = frozenset(
-    {"announced", "composed", "banner-turns", "pause-reminded"}
+    {"announced", "composed", "banner-turns", "pause-reminded"},
 )
 LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
@@ -475,22 +475,22 @@ class DuckDBStateStore:
                 f"SELECT repo, '', contract_id, phase, slug, work_item, route, "
                 f"domain_tags, scope_touches, scope_avoids, success_criteria, "
                 f"status, supersedes, created_at, updated_at, body "
-                f"FROM sdd_contract_pre_stream_id"
+                f"FROM sdd_contract_pre_stream_id",
             )
             self.conn.execute("DROP TABLE sdd_contract_pre_stream_id")
             self.conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase ON sdd_contract (phase)"
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_phase ON sdd_contract (phase)",
             )
             self.conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_slug ON sdd_contract (slug)"
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_slug ON sdd_contract (slug)",
             )
             self.conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_status ON sdd_contract (status)"
+                "CREATE INDEX IF NOT EXISTS idx_sdd_contract_status ON sdd_contract (status)",
             )
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sdd_state_repo_stream_kind_session "
-            "ON sdd_state (repo, stream_id, kind, COALESCE(session_key, ''))"
+            "ON sdd_state (repo, stream_id, kind, COALESCE(session_key, ''))",
         )
         # Name unchanged from the pre-stream_id definition but the column
         # list changed — CREATE INDEX IF NOT EXISTS matches by name, not
@@ -500,13 +500,13 @@ class DuckDBStateStore:
         # and rebuilding this index unconditionally would mean paying a full
         # sdd_state index rebuild on every startup once the table has data.
         idx_row = self.conn.execute(
-            "SELECT sql FROM duckdb_indexes() WHERE index_name = 'idx_sdd_state_kind_owner'"
+            "SELECT sql FROM duckdb_indexes() WHERE index_name = 'idx_sdd_state_kind_owner'",
         ).fetchone()
         if idx_row is None or "stream_id" not in idx_row[0]:
             self.conn.execute("DROP INDEX IF EXISTS idx_sdd_state_kind_owner")
             self.conn.execute(
                 "CREATE INDEX idx_sdd_state_kind_owner "
-                "ON sdd_state (repo, stream_id, kind, COALESCE(owner, ''))"
+                "ON sdd_state (repo, stream_id, kind, COALESCE(owner, ''))",
             )
         logger.debug("sdd_state/sdd_contract stream_id column ensured")
 
@@ -517,7 +517,7 @@ class DuckDBStateStore:
         # Check first to avoid a cascade of errors.
         row = self.conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = 'sdd_artifact' AND column_name = 'status'"
+            "WHERE table_name = 'sdd_artifact' AND column_name = 'status'",
         ).fetchone()
         col_exists = row[0] if row else 0
         if col_exists == 0:
@@ -528,7 +528,7 @@ class DuckDBStateStore:
         with suppress(duckdb.Error):
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sdd_artifact_repo_phase_status "
-                "ON sdd_artifact (repo, phase, status)"
+                "ON sdd_artifact (repo, phase, status)",
             )
         logger.debug("sdd_artifact lifecycle column and index ensured")
 
@@ -549,7 +549,7 @@ class DuckDBStateStore:
             f"UPDATE sdd_artifact "
             f"SET name = REPLACE(name, '{LEGACY_ARTIFACT_EXT}', '') || '{ARTIFACT_EXT}' "
             f"WHERE name LIKE '%{LEGACY_ARTIFACT_EXT}' "
-            f"AND phase IN ({phases_sql})"
+            f"AND phase IN ({phases_sql})",
         )
         # Approval digests (_artifact_digest) hash (name, content). The stored
         # approval was computed over ".md" names, so after this rename the
@@ -685,7 +685,8 @@ class DuckDBStateStore:
             params = (repo, sid, kind, session_key or "")
 
         before = self.conn.execute(
-            sql.replace("DELETE FROM", "SELECT COUNT(*) FROM"), params
+            sql.replace("DELETE FROM", "SELECT COUNT(*) FROM"),
+            params,
         ).fetchone()
         self.conn.execute(sql, params)
         return int(before[0]) if before else 0
@@ -1075,7 +1076,7 @@ class DuckDBStateStore:
         if phase is None:
             raise StateStoreError(
                 f"{filepath} is not a readable phase file (no 'phase' key); "
-                "refusing to import or delete it"
+                "refusing to import or delete it",
             )
 
         if self.read("phase") is None:
@@ -1614,7 +1615,7 @@ class DuckDBStateStore:
                 "artifact_digest": artifact_digest,
                 "approver": approver,
                 "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
+            },
         )
         self.write("approved", value, session_key=phase, owner=owner)
 

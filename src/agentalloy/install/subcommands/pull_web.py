@@ -61,7 +61,9 @@ def _asset_available(url: str) -> bool:
     and every caller is non-fatal with a `pull-web` retry hint.
     """
     request = urllib.request.Request(  # noqa: S310 — https only
-        url, method="HEAD", headers={"User-Agent": _DOWNLOAD_USER_AGENT}
+        url,
+        method="HEAD",
+        headers={"User-Agent": _DOWNLOAD_USER_AGENT},
     )
     try:
         with urllib.request.urlopen(request, timeout=10):  # noqa: S310 — https only

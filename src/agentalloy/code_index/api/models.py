@@ -129,7 +129,8 @@ class MigrateLayoutRequest(BaseModel):
     """POST /code/migrate-layout body."""
 
     dry_run: bool = Field(
-        default=False, description="Classify every registry row but change nothing."
+        default=False,
+        description="Classify every registry row but change nothing.",
     )
     prune_missing: bool = Field(
         default=True,
@@ -235,7 +236,8 @@ class DecisionView(BaseModel):
 
     Distinct from ``CallSiteView``: a decision is a markdown heading-chunk, so it
     carries a ``heading`` and body ``snippet`` and its ``start_line`` is a heading
-    offset — not a call site."""
+    offset — not a call site.
+    """
 
     qualified_name: str
     file_path: str | None

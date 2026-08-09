@@ -394,7 +394,8 @@ def _check_reranker(env: dict[str, str]) -> dict[str, Any]:
     The reranker (Qwen3-Reranker on :47952) is the primary phase-transition
     trigger; when it's down the signal layer falls back to the cosine floor, so
     an absent reranker warns rather than fails (matching the service check).
-    ``SIGNAL_INTENT_BACKEND=cosine`` → plain pass (reranker not used)."""
+    ``SIGNAL_INTENT_BACKEND=cosine`` → plain pass (reranker not used).
+    """
     t0 = time.monotonic()
     backend, url = install_state.resolve_intent_reranker(env)
     if backend == "cosine":
@@ -713,7 +714,7 @@ def _check_module_drift(env: dict[str, str], health: dict[str, Any] | None) -> d
             declared = env.get(key) or f"unset (default {'on' if info.default_enabled else 'off'})"
             drifts.append(
                 f"host .env says {key}={declared} but the running container reports "
-                f"modules.{info.health_key}={actual}"
+                f"modules.{info.health_key}={actual}",
             )
     if drifts:
         return {
@@ -885,7 +886,7 @@ def _container_fail(error: str, remediation: str, t0: float) -> dict[str, Any]:
                 "duration_ms": int((time.monotonic() - t0) * 1000),
                 "error": error,
                 "remediation": remediation,
-            }
+            },
         ],
     }
 
@@ -1011,7 +1012,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
             "passed": True,
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "detail": f"{container_name} running ({running_image})",
-        }
+        },
     ]
 
     health = _fetch_health(port)
@@ -1025,7 +1026,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 "passed": False,
                 "error": f"Service /health unreachable on port {port}",
                 "remediation": f"Check the container: `{runtime} logs {container_name}`.",
-            }
+            },
         )
     else:
         status = health.get("status")
@@ -1043,7 +1044,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 "detail": f"status={status}; {summary}" if healthy else None,
                 "error": None if healthy else f"Service degraded: {health}",
                 "remediation": None if healthy else f"`{runtime} logs {container_name}`.",
-            }
+            },
         )
 
     # embed_runtime — trust the service's own dependency probe rather than
@@ -1060,7 +1061,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 if embed_status == "ok"
                 else f"Embed server not ready; check `{runtime} logs {container_name}`."
             ),
-        }
+        },
     )
 
     # corpus_files — confirm the seeded DBs are present and non-empty in the volume.
@@ -1080,13 +1081,15 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
             "remediation": None
             if not missing
             else "Re-run the installer to reseed the corpus volume.",
-        }
+        },
     )
 
     # corpus_stamp — provenance + embedding dim (replaces the lock-bound
     # skill_schema/corpus_count/embedding_dim checks). Absent stamp is a warn.
     stamp_raw = _container_read_file(
-        runtime, container_name, f"{_CONTAINER_DATA_DIR}/corpus-stamp.json"
+        runtime,
+        container_name,
+        f"{_CONTAINER_DATA_DIR}/corpus-stamp.json",
     )
     stamp = None
     if stamp_raw:
@@ -1104,7 +1107,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                     f"model={stamp.get('embedding_model')} dim={stamp.get('embedding_dim')} "
                     f"built={stamp.get('built_at')}"
                 ),
-            }
+            },
         )
     else:
         checks.append(
@@ -1113,7 +1116,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 "passed": True,
                 "severity": "warn",
                 "detail": "No corpus-stamp.json in volume (provenance unknown)",
-            }
+            },
         )
 
     # corpus_count — the service holds the DB locks, so it (not doctor) can
@@ -1131,7 +1134,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                     "/diagnostics/corpus unavailable (older image or version skew); "
                     "corpus_files/corpus_stamp cover provenance"
                 ),
-            }
+            },
         )
     else:
         skill_count = diag.get("skill_count")
@@ -1157,7 +1160,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 "remediation": None
                 if passed
                 else "Re-run the installer to reseed/reindex the corpus volume.",
-            }
+            },
         )
 
     # module_drift — host .env intent vs the container's create-time env
@@ -1256,7 +1259,7 @@ def _repair_container(result: dict[str, Any], st: dict[str, Any]) -> int:
     print_rich("")
     print_rich(
         "[bold]Recommended:[/bold] recreate the container by re-running the installer "
-        f"(reseeds the corpus volume and regenerates the entrypoint for {container_name!r})."
+        f"(reseeds the corpus volume and regenerates the entrypoint for {container_name!r}).",
     )
     return 1
 
@@ -1274,7 +1277,7 @@ def _repair(result: dict[str, Any]) -> int:
     if schema_check.get("lock_held"):
         print_rich(
             "[red]ABORT:[/red] DB lock is held by another process. "
-            "Stop the agentalloy service first, then re-run doctor --repair."
+            "Stop the agentalloy service first, then re-run doctor --repair.",
         )
         rem = schema_check.get("remediation", "")
         if rem:

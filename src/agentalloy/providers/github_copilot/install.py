@@ -72,7 +72,7 @@ def render_provider_group(port: int) -> dict[str, Any]:
                 "toolCalling": True,
                 "maxInputTokens": 200000,
                 "maxOutputTokens": 16000,
-            }
+            },
         ],
     }
 
@@ -130,7 +130,7 @@ def apply_byok_config(port: int) -> list[WireRecord]:
             content_sha256=_sha256(content),
             original_content=original_content,
             marker_key="github-copilot.byok.agentalloy",
-        )
+        ),
     ]
 
 

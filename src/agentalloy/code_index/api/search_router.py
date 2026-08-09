@@ -52,7 +52,12 @@ async def search_semantic(
 ) -> list[SearchResult]:
     indexed = require_indexed_repo(state, repo)
     return await semantic_search(
-        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+        state,
+        repo,
+        q,
+        k=k,
+        repo_path=indexed.repo_path,
+        indexed_head=indexed.head_sha,
     )
 
 
@@ -69,7 +74,12 @@ async def search_lexical(
 ) -> list[SearchResult]:
     indexed = require_indexed_repo(state, repo)
     return await lexical_search(
-        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+        state,
+        repo,
+        q,
+        k=k,
+        repo_path=indexed.repo_path,
+        indexed_head=indexed.head_sha,
     )
 
 
@@ -87,7 +97,12 @@ async def search_related_decisions(
     """Semantic search over decision docs only."""
     indexed = require_indexed_repo(state, repo)
     return await related_decisions(
-        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+        state,
+        repo,
+        q,
+        k=k,
+        repo_path=indexed.repo_path,
+        indexed_head=indexed.head_sha,
     )
 
 
@@ -103,7 +118,10 @@ async def search_symbol(
 ) -> SymbolView:
     indexed = require_indexed_repo(state, repo)
     sym = await with_handles(
-        state, repo, lambda h: h.graph.symbol(fqn), repo_path=indexed.repo_path
+        state,
+        repo,
+        lambda h: h.graph.symbol(fqn),
+        repo_path=indexed.repo_path,
     )
     if sym is None:
         raise HTTPException(status_code=404, detail=f"no such symbol in {repo!r}: {fqn}")
@@ -153,7 +171,7 @@ async def search_centrality(
                     pagerank=pagerank,
                     file_path=sym.file_path if sym else None,
                     start_line=sym.start_line if sym else None,
-                )
+                ),
             )
         return out
 

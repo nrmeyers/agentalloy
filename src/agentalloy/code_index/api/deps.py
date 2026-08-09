@@ -13,7 +13,10 @@ from agentalloy.storage.protocols import CodeIndexHandles
 
 
 def require_indexed_repo(
-    state: CodeIndexState, slug: str, *, repo_path: str | None = None
+    state: CodeIndexState,
+    slug: str,
+    *,
+    repo_path: str | None = None,
 ) -> IndexedRepo:
     """404 unless ``slug`` is in the indexed_repos registry.
 

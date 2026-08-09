@@ -82,7 +82,8 @@ def _probe_diagnostics(port: int) -> dict[str, Any] | None:
 
 
 def _check_embedding_via_diagnostics(
-    diag: dict[str, Any] | None, check_name: str
+    diag: dict[str, Any] | None,
+    check_name: str,
 ) -> dict[str, Any]:
     """Read embedder status from /diagnostics/runtime.
 
@@ -497,7 +498,7 @@ def _check_skill_count(
                 rows = store.execute(
                     "SELECT s.skill_id FROM skills s "
                     "JOIN skill_versions v ON v.version_id = s.current_version_id "
-                    "WHERE v.status = 'active' AND s.deprecated = false"
+                    "WHERE v.status = 'active' AND s.deprecated = false",
                 )
             active_ids = {str(r[0]) for r in rows}
             source = "direct store read"

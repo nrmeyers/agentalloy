@@ -66,7 +66,10 @@ def resolve_class_identity_fallback(
     if not class_name:
         return None
     nested_qn = build_nested_qualified_name_for_class(
-        class_node, module_qn, class_name, lang_config
+        class_node,
+        module_qn,
+        class_name,
+        lang_config,
     )
     return nested_qn or f"{module_qn}.{class_name}", class_name, False
 

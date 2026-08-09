@@ -62,6 +62,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     rel_path, dedicated = _resolve_windsurf_path(root)
     target_path = root / rel_path
@@ -86,7 +87,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
                 content_sha256=_sha256(instruction_content),
                 original_content=original_content,
                 marker_key="windsurf.rules",
-            )
+            ),
         ]
     else:
         # Shared file -- sentinel-bounded injection
@@ -100,5 +101,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
                 content_sha256=_sha256(instruction_content),
                 original_content=original_content,
                 marker_key="windsurf.rules.sentinel",
-            )
+            ),
         ]

@@ -29,7 +29,8 @@ if TYPE_CHECKING:
 
 
 def _pair_captures_by_parent(
-    name_nodes: list[ASTNode], value_nodes: list[ASTNode]
+    name_nodes: list[ASTNode],
+    value_nodes: list[ASTNode],
 ) -> list[tuple[ASTNode, ASTNode]]:
     """Pair two capture lists structurally instead of positionally.
 
@@ -131,7 +132,9 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
             # Both captures of one match (at different depths) live under the
             # same assignment_expression — pair on that ancestor.
             for child_node, parent_node in pair_captures_by_ancestor(
-                cs.TS_ASSIGNMENT_EXPRESSION, child_classes, parent_classes
+                cs.TS_ASSIGNMENT_EXPRESSION,
+                child_classes,
+                parent_classes,
             ):
                 if not child_node.text or not parent_node.text:
                     continue
@@ -187,7 +190,10 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         # three captures of one match (at different depths) share an
         # assignment_expression — pair on that ancestor.
         for constructor_node, method_node, func_node in pair_captures_by_ancestor(
-            cs.TS_ASSIGNMENT_EXPRESSION, constructor_names, method_names, method_functions
+            cs.TS_ASSIGNMENT_EXPRESSION,
+            constructor_names,
+            method_names,
+            method_functions,
         ):
             constructor_name = safe_decode_text(constructor_node) if constructor_node.text else None
             method_name = safe_decode_text(method_node) if method_node.text else None
@@ -240,7 +246,11 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         try:
             for query_text in [cs.JS_OBJECT_METHOD_QUERY, cs.JS_METHOD_DEF_QUERY]:
                 self._process_object_method_query(
-                    language_obj, query_text, root_node, module_qn, lang_config
+                    language_obj,
+                    query_text,
+                    root_node,
+                    module_qn,
+                    lang_config,
                 )
         except Exception as e:
             logger.debug(lg.JS_OBJECT_METHODS_DETECT_FAILED, error=e)
@@ -277,7 +287,10 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
                 if not method_func_node:
                     continue
                 self._process_single_object_method(
-                    method_name_node, method_func_node, module_qn, lang_config
+                    method_name_node,
+                    method_func_node,
+                    module_qn,
+                    lang_config,
                 )
         except Exception as e:
             logger.debug(lg.JS_OBJECT_METHODS_PROCESS_FAILED, error=e)
@@ -297,12 +310,16 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
             return
 
         if self._handler.is_class_method(
-            method_func_node
+            method_func_node,
         ) and not self._handler.is_inside_method_with_object_literals(method_func_node):
             return
 
         method_qn = self._resolve_object_method_qn(
-            method_name_node, method_func_node, module_qn, method_name, lang_config
+            method_name_node,
+            method_func_node,
+            module_qn,
+            method_name,
+            lang_config,
         )
 
         self._register_object_method(method_name, method_qn, method_func_node, module_qn)
@@ -317,7 +334,11 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
     ) -> str:
         if lang_config:
             method_qn = self._build_object_method_qualified_name(
-                method_name_node, method_func_node, module_qn, method_name, lang_config
+                method_name_node,
+                method_func_node,
+                module_qn,
+                method_name,
+                lang_config,
             )
             if method_qn is not None:
                 return method_qn
@@ -395,7 +416,10 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
             function_exprs = captures.get(cs.CAPTURE_FUNCTION_EXPR, [])
 
             self._process_direct_arrow_functions(
-                method_names, arrow_functions, module_qn, lang_config
+                method_names,
+                arrow_functions,
+                module_qn,
+                lang_config,
             )
             self._process_member_expr_functions(
                 member_exprs,
@@ -438,11 +462,18 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
                 continue
 
             function_qn = self._resolve_direct_arrow_qn(
-                method_name, arrow_function, module_qn, function_name, lang_config
+                method_name,
+                arrow_function,
+                module_qn,
+                function_name,
+                lang_config,
             )
 
             self._register_arrow_function(
-                function_name, function_qn, arrow_function, lg.JS_OBJECT_ARROW_FOUND
+                function_name,
+                function_qn,
+                arrow_function,
+                lg.JS_OBJECT_ARROW_FOUND,
             )
 
     def _resolve_direct_arrow_qn(
@@ -455,7 +486,10 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
     ) -> str:
         if lang_config:
             function_qn = self._build_object_arrow_qualified_name(
-                method_name_node, module_qn, function_name, lang_config
+                method_name_node,
+                module_qn,
+                function_name,
+                lang_config,
             )
             if function_qn is not None:
                 return function_qn
@@ -476,7 +510,9 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
             cs.TS_PAIR,
         )
         path_parts = self._js_collect_ancestor_path_parts(
-            method_name_node.parent, lang_config, skip_types
+            method_name_node.parent,
+            lang_config,
+            skip_types,
         )
         return self._js_format_qualified_name(module_qn, path_parts, function_name)
 
@@ -502,7 +538,11 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
 
             function_name = member_text.split(cs.SEPARATOR_DOT)[-1]
             function_qn = self._resolve_member_expr_qn(
-                member_expr, function_node, module_qn, function_name, lang_config
+                member_expr,
+                function_node,
+                module_qn,
+                function_name,
+                lang_config,
             )
 
             self._register_arrow_function(function_name, function_qn, function_node, log_message)
@@ -517,7 +557,11 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
     ) -> str:
         if lang_config:
             function_qn = self._build_assignment_arrow_function_qualified_name(
-                member_expr, function_node, module_qn, function_name, lang_config
+                member_expr,
+                function_node,
+                module_qn,
+                function_name,
+                lang_config,
             )
             if function_qn is not None:
                 return function_qn
@@ -593,7 +637,9 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
             cs.TS_PAIR,
         )
         path_parts = self._js_collect_ancestor_path_parts(
-            method_name_node.parent, lang_config, skip_types
+            method_name_node.parent,
+            lang_config,
+            skip_types,
         )
         return self._js_format_qualified_name(module_qn, path_parts, method_name)
 
@@ -648,7 +694,10 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         return safe_decode_text(name_node) if name_node and name_node.text else None
 
     def _js_format_qualified_name(
-        self, module_qn: str, path_parts: list[str], final_name: str
+        self,
+        module_qn: str,
+        path_parts: list[str],
+        final_name: str,
     ) -> str:
         if path_parts:
             return f"{module_qn}{cs.SEPARATOR_DOT}{cs.SEPARATOR_DOT.join(path_parts)}{cs.SEPARATOR_DOT}{final_name}"

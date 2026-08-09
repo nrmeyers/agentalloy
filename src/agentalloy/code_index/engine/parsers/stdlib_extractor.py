@@ -190,7 +190,9 @@ class StdlibExtractor:
                 if self.function_registry and full_qualified_name in self.function_registry:
                     module_path = cs.SEPARATOR_DOT.join(parts[:-1])
                     _cache_stdlib_result(
-                        cs.SupportedLanguage.PYTHON, full_qualified_name, module_path
+                        cs.SupportedLanguage.PYTHON,
+                        full_qualified_name,
+                        module_path,
                     )
                     return module_path
 
@@ -231,7 +233,9 @@ class StdlibExtractor:
                     pass
                 else:
                     _cache_stdlib_result(
-                        cs.SupportedLanguage.PYTHON, full_qualified_name, full_qualified_name
+                        cs.SupportedLanguage.PYTHON,
+                        full_qualified_name,
+                        full_qualified_name,
                     )
                     return full_qualified_name
 
@@ -242,7 +246,9 @@ class StdlibExtractor:
                 if inspect.isclass(obj) or inspect.isfunction(obj) or not inspect.ismodule(obj):
                     module_path = cs.SEPARATOR_DOT.join(parts[:-1])
                     _cache_stdlib_result(
-                        cs.SupportedLanguage.PYTHON, full_qualified_name, module_path
+                        cs.SupportedLanguage.PYTHON,
+                        full_qualified_name,
+                        module_path,
                     )
                     return module_path
         except (ImportError, AttributeError):
@@ -313,7 +319,9 @@ class StdlibExtractor:
                     }:
                         module_path = cs.SEPARATOR_DOT.join(parts[:-1])
                         _cache_stdlib_result(
-                            cs.SupportedLanguage.JS, full_qualified_name, module_path
+                            cs.SupportedLanguage.JS,
+                            full_qualified_name,
+                            module_path,
                         )
                         return module_path
 
@@ -348,7 +356,8 @@ class StdlibExtractor:
 
                 if resolve_result.returncode != 0:
                     raise subprocess.CalledProcessError(
-                        resolve_result.returncode, resolve_result.args
+                        resolve_result.returncode,
+                        resolve_result.args,
                     )
 
                 package_dir = resolve_result.stdout.strip()

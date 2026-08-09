@@ -149,7 +149,8 @@ def _contract_tag_filter_enabled() -> bool:
 
 
 def _soft_tag_filter(
-    ranked: list[ActiveFragment], contract_tags: list[str] | None
+    ranked: list[ActiveFragment],
+    contract_tags: list[str] | None,
 ) -> list[ActiveFragment]:
     """Intersect the fused pool with fragments carrying >=1 contract tag.
 
@@ -229,7 +230,8 @@ _ABOUT_PREFIX_INTERLOPERS = 1
 
 
 def _about_exempt_skills(
-    dense_fragment_ids: list[str], by_id: dict[str, ActiveFragment]
+    dense_fragment_ids: list[str],
+    by_id: dict[str, ActiveFragment],
 ) -> frozenset[str]:
     """Process skills the query is *about*: the dense leg's process prefix.
 
@@ -263,7 +265,9 @@ def _about_exempt_skills(
 
 
 def demote_process_skills(
-    ranked: list[ActiveFragment], k: int, about_exempt: frozenset[str] = frozenset()
+    ranked: list[ActiveFragment],
+    k: int,
+    about_exempt: frozenset[str] = frozenset(),
 ) -> tuple[list[ActiveFragment], frozenset[str]]:
     """Move process-scope skills to the back of the line when a domain skill competes.
 
@@ -615,6 +619,7 @@ def retrieve_domain_candidates(
         service is unavailable (circuit open or call failed). The caller
         (compose.py) should treat this as a partial result and proceed with
         BM25-only fragments if available.
+
     """
     start_ns = time.perf_counter_ns()
 
@@ -747,7 +752,11 @@ def retrieve_domain_candidates(
     # Apply phase-specific RRF weights
     rrf_k, dense_weight, bm25_weight = _get_rrf_params(phase)
     fused_ids = _rrf_fuse(
-        dense_hits, bm25_ids, k=rrf_k, dense_weight=dense_weight, bm25_weight=bm25_weight
+        dense_hits,
+        bm25_ids,
+        k=rrf_k,
+        dense_weight=dense_weight,
+        bm25_weight=bm25_weight,
     )
 
     # Hydrate ActiveFragment metadata from the source. Pull domain fragments
@@ -1030,7 +1039,8 @@ class _LMArbitrationDetail:
     that cleared the keep_threshold filter (NOT necessarily the final injected set,
     which is the downstream skill_granular_select result over the survivors),
     ``dropped_ids`` = scored-but-below-threshold, and ``scores`` = the per-fragment
-    yes-probabilities over the full scored pool (fragment_id -> score)."""
+    yes-probabilities over the full scored pool (fragment_id -> score).
+    """
 
     kept_ids: list[str]
     dropped_ids: list[str]
@@ -1038,7 +1048,9 @@ class _LMArbitrationDetail:
 
 
 def _maybe_lm_arbitrate(
-    ranked: list[ActiveFragment], query: str, k: int
+    ranked: list[ActiveFragment],
+    query: str,
+    k: int,
 ) -> tuple[list[ActiveFragment] | None, LMAssistOutcome, _LMArbitrationDetail | None]:
     """Stage B — LM fragment re-rank (relevance FILTER) over the top fused fragments.
 
@@ -1210,6 +1222,7 @@ def skill_granular_select(
     - k <= 1 → depth stage is a no-op (k // 2 == 0); pure round-robin.
     - Fewer distinct skills than k → later passes fill remaining slots from
       whichever skills still have fragments.
+
     """
     if not ranked:
         return [], []

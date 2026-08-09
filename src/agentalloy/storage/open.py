@@ -36,7 +36,7 @@ def open_fragments(settings: Settings | None = None) -> LanceFragmentStore:
         # multi-surface dim contract; message carries an upgrade.py marker substring.
         raise EmbeddingDimMismatch(
             f"fragments dataset has {dim}-dim embeddings but runtime expects "
-            f"{EMBEDDING_DIM}-dim (nomic-embed-text-v1.5)"
+            f"{EMBEDDING_DIM}-dim (nomic-embed-text-v1.5)",
         )
     return store
 
@@ -47,7 +47,9 @@ def open_skills(settings: Settings | None = None, *, read_only: bool = False) ->
 
 
 def open_telemetry(
-    settings: Settings | None = None, *, read_only: bool = False
+    settings: Settings | None = None,
+    *,
+    read_only: bool = False,
 ) -> DuckDBTelemetryStore:
     s = settings or get_settings()
     return open_telemetry_store(s.telemetry_db_path, read_only=read_only)

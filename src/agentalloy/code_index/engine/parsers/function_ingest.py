@@ -73,7 +73,7 @@ class FunctionIngestMixin:
         for func_node in captures.get(cs.CAPTURE_FUNCTION, []):
             if not isinstance(func_node, Node):
                 logger.warning(
-                    ls.FUNC_EXPECTED_NODE.format(actual_type=type(func_node), value=func_node)
+                    ls.FUNC_EXPECTED_NODE.format(actual_type=type(func_node), value=func_node),
                 )
                 continue
             if self._is_method(func_node, lang_config):
@@ -84,7 +84,11 @@ class FunctionIngestMixin:
                     continue
 
             resolution = self._resolve_function_identity(
-                func_node, module_qn, language, lang_config, file_path
+                func_node,
+                module_qn,
+                language,
+                lang_config,
+                file_path,
             )
             if not resolution:
                 continue
@@ -116,7 +120,11 @@ class FunctionIngestMixin:
             return None
 
         func_qn = resolve_fqn_from_ast(
-            func_node, file_path, self.repo_path, self.project_name, fqn_config
+            func_node,
+            file_path,
+            self.repo_path,
+            self.project_name,
+            fqn_config,
         )
         if not func_qn:
             return None
@@ -232,7 +240,9 @@ class FunctionIngestMixin:
         self._create_function_relationships(func_node, resolution, module_qn, language, lang_config)
 
     def _build_function_props(
-        self, func_node: Node, resolution: FunctionResolution
+        self,
+        func_node: Node,
+        resolution: FunctionResolution,
     ) -> PropertyDict:
         return {
             cs.KEY_QUALIFIED_NAME: resolution.qualified_name,
@@ -343,12 +353,15 @@ class FunctionIngestMixin:
         current = func_node.parent
         if not isinstance(current, Node):
             logger.warning(
-                ls.CALL_UNEXPECTED_PARENT.format(node=func_node, parent_type=type(current))
+                ls.CALL_UNEXPECTED_PARENT.format(node=func_node, parent_type=type(current)),
             )
             return None
 
         path_parts = self._collect_ancestor_path_parts(
-            func_node, current, lang_config, skip_classes
+            func_node,
+            current,
+            lang_config,
+            skip_classes,
         )
         if path_parts is None:
             return None
@@ -399,7 +412,10 @@ class FunctionIngestMixin:
         return self._extract_function_name(node)
 
     def _handle_class_ancestor(
-        self, func_node: Node, class_node: Node, skip_classes: bool
+        self,
+        func_node: Node,
+        class_node: Node,
+        skip_classes: bool,
     ) -> str | None | Literal[False]:
         if skip_classes:
             return None
@@ -419,7 +435,10 @@ class FunctionIngestMixin:
         return f"{module_qn}.{func_name}"
 
     def _build_rust_function_qualified_name(
-        self, func_node: Node, module_qn: str, func_name: str
+        self,
+        func_node: Node,
+        module_qn: str,
+        func_name: str,
     ) -> str:
         path_parts = rs_utils.build_module_path(func_node)
         if path_parts:
@@ -430,7 +449,10 @@ class FunctionIngestMixin:
         return is_method_node(func_node, lang_config)
 
     def _determine_function_parent(
-        self, func_node: Node, module_qn: str, lang_config: LanguageSpec
+        self,
+        func_node: Node,
+        module_qn: str,
+        lang_config: LanguageSpec,
     ) -> tuple[str, str]:
         current = func_node.parent
         if not isinstance(current, Node):
@@ -444,7 +466,10 @@ class FunctionIngestMixin:
                         continue
                     if parent_func_name := safe_decode_text(name_node):
                         if parent_func_qn := self._build_nested_qualified_name(
-                            current, module_qn, parent_func_name, lang_config
+                            current,
+                            module_qn,
+                            parent_func_name,
+                            lang_config,
                         ):
                             return cs.NodeLabel.FUNCTION, parent_func_qn
                 break

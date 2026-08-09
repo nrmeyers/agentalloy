@@ -134,7 +134,8 @@ async def write_file(
         parsed = yaml.safe_load(body.content)
     except yaml.YAMLError as exc:
         raise HTTPException(
-            status_code=400, detail={"error": "invalid_yaml", "detail": str(exc)}
+            status_code=400,
+            detail={"error": "invalid_yaml", "detail": str(exc)},
         ) from exc
     if not isinstance(parsed, dict):
         raise HTTPException(

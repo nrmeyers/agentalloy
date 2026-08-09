@@ -34,7 +34,7 @@ HOP_BY_HOP: frozenset[str] = frozenset(
         "trailers",
         "transfer-encoding",
         "upgrade",
-    }
+    },
 )
 
 # Headers managed by the HTTP client itself: ``host`` is rewritten to the
@@ -68,6 +68,7 @@ def forward_headers(inbound: Mapping[str, str], upstream_host: str) -> dict[str,
     Returns:
         A new dict of outbound headers, original casing preserved where
         practical, with a single ``Host`` entry pointing at ``upstream_host``.
+
     """
     out: dict[str, str] = {}
     for name, value in inbound.items():
@@ -100,6 +101,7 @@ class AnthropicPassthroughClient:
                 ``httpx.MockTransport`` in tests). When omitted, a client with
                 the module default timeouts is constructed and owned by this
                 instance.
+
         """
         self._upstream_base_url = upstream_base_url
         self._upstream_host = httpx.URL(upstream_base_url).host
@@ -143,6 +145,7 @@ class AnthropicPassthroughClient:
 
         Returns:
             The upstream :class:`httpx.Response`.
+
         """
         url = self._build_url(path, query_string)
         headers = forward_headers(inbound_headers, self._upstream_host)
@@ -175,6 +178,7 @@ class AnthropicPassthroughClient:
         Returns:
             An async context manager yielding a streaming
             :class:`httpx.Response`.
+
         """
         url = self._build_url(path, query_string)
         headers = forward_headers(inbound_headers, self._upstream_host)

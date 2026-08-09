@@ -28,13 +28,23 @@ def ingest_cpp_module_declarations(
     for _, decl_text in module_declarations:
         if decl_text.startswith(cs.CPP_EXPORT_MODULE_PREFIX):
             _process_export_module(
-                decl_text, module_qn, file_path, repo_path, project_name, ingestor
+                decl_text,
+                module_qn,
+                file_path,
+                repo_path,
+                project_name,
+                ingestor,
             )
         elif decl_text.startswith(cs.CPP_MODULE_PREFIX) and not decl_text.startswith(
-            cs.CPP_MODULE_PRIVATE_PREFIX
+            cs.CPP_MODULE_PRIVATE_PREFIX,
         ):
             _process_module_implementation(
-                decl_text, module_qn, file_path, repo_path, project_name, ingestor
+                decl_text,
+                module_qn,
+                file_path,
+                repo_path,
+                project_name,
+                ingestor,
             )
 
 

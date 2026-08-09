@@ -22,6 +22,7 @@ def build_launch_env(port: int) -> dict[str, str]:
 
     Returns:
         Environment dict with proxy configuration.
+
     """
     from agentalloy.api.proxy_context import encode_proj_token
 

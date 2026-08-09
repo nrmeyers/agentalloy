@@ -58,7 +58,11 @@ def find_function_source_by_fqn(
         def walk(node: Node) -> str | None:
             if node.type in fqn_config.function_node_types:
                 actual_fqn = resolve_fqn_from_ast(
-                    node, file_path, repo_root, project_name, fqn_config
+                    node,
+                    file_path,
+                    repo_root,
+                    project_name,
+                    fqn_config,
                 )
                 if actual_fqn == target_fqn:
                     return safe_decode_text(node)

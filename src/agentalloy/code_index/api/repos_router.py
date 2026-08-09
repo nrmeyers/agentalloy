@@ -51,7 +51,9 @@ def _absence_is_corroborated(repo_path: Path) -> bool:
 
 
 def _prunable_store_dir(
-    state: CodeIndexState, repo: IndexedRepo, survivors: list[IndexedRepo]
+    state: CodeIndexState,
+    repo: IndexedRepo,
+    survivors: list[IndexedRepo],
 ) -> Path | None:
     """The directory a dead registry row owns outright, or None.
 
@@ -103,7 +105,9 @@ async def list_repos(
         done = state.jobs.list_jobs(slug=repo.slug, status={"done"}, limit=1)
         current_head = _git_current_head(Path(repo.repo_path))
         out.append(
-            RepoView.from_repo(repo, last_done=done[0] if done else None, current_head=current_head)
+            RepoView.from_repo(
+                repo, last_done=done[0] if done else None, current_head=current_head
+            ),
         )
     return out
 
@@ -170,7 +174,10 @@ async def set_watch(
         state.watch.stop(slug)
     state.jobs.set_watch_enabled(slug, req.enabled, repo_path=repo.repo_path)
     return WatchToggleView(
-        slug=slug, watch_enabled=req.enabled, watching=watching, master_switch=master
+        slug=slug,
+        watch_enabled=req.enabled,
+        watching=watching,
+        master_switch=master,
     )
 
 
@@ -191,7 +198,8 @@ async def reindex_repo(
     repo_path = Path(repo.repo_path)
     if not repo_path.is_dir():
         raise HTTPException(
-            status_code=400, detail=f"stored repo_path no longer exists: {repo_path}"
+            status_code=400,
+            detail=f"stored repo_path no longer exists: {repo_path}",
         )
     active = state.jobs.find_active(slug)
     if active is not None:
@@ -259,7 +267,7 @@ async def migrate_layout(
                     data_dir=repo.data_dir,
                     verdict="busy",
                     action="skipped",
-                )
+                ),
             )
             continue
 
@@ -279,7 +287,7 @@ async def migrate_layout(
                         data_dir=repo.data_dir,
                         verdict=verdict,
                         action=action,
-                    )
+                    ),
                 )
                 continue
 
@@ -320,7 +328,7 @@ async def migrate_layout(
                     data_dir=repo.data_dir,
                     verdict=verdict,
                     action=action,
-                )
+                ),
             )
             continue
 
@@ -339,7 +347,7 @@ async def migrate_layout(
                     data_dir=repo.data_dir,
                     verdict="current",
                     action="none",
-                )
+                ),
             )
             continue
 
@@ -359,7 +367,7 @@ async def migrate_layout(
                 verdict="legacy",
                 action=action,
                 job_id=job_id,
-            )
+            ),
         )
 
     return MigrateLayoutView(

@@ -195,7 +195,7 @@ def _locked_field_violations(data: dict[str, Any], shipped: dict[str, Any]) -> l
             out.append(
                 f"'{field_name}' is product-owned and can't be overridden — only raw_prose "
                 f"(and domain_tags) are customizable. Revert '{field_name}' to inherit "
-                f"(or run 'agentalloy customize reset')."
+                f"(or run 'agentalloy customize reset').",
             )
     return out
 
@@ -209,7 +209,7 @@ def _validate_skill_data(data: dict[str, Any], name: str) -> list[str]:
         if skill_class == "domain":
             errors.append(
                 f"customize is for system+workflow skills only. '{name}' is a domain skill "
-                "(centrally curated). See docs/skill-authoring-and-overrides-spec.md."
+                "(centrally curated). See docs/skill-authoring-and-overrides-spec.md.",
             )
         else:
             errors.append(f"skill_class must be 'system' or 'workflow', got: {skill_class!r}")
@@ -218,7 +218,7 @@ def _validate_skill_data(data: dict[str, Any], name: str) -> list[str]:
     raw_prose = data.get("raw_prose", "")
     if len(raw_prose) < 80:
         errors.append(
-            f"raw_prose must be at least 80 characters (got {len(raw_prose)}). Avoid empty stubs."
+            f"raw_prose must be at least 80 characters (got {len(raw_prose)}). Avoid empty stubs.",
         )
 
     if skill_class == "workflow":
@@ -249,7 +249,7 @@ def _validate_skill_data(data: dict[str, Any], name: str) -> list[str]:
                     "raw_prose drops load-bearing token(s) the workflow depends on: "
                     + ", ".join(missing)
                     + " — keep them verbatim (you may reword around them) or "
-                    "run 'agentalloy customize reset'."
+                    "run 'agentalloy customize reset'.",
                 )
             if skill_class == "workflow":
                 errors.extend(_locked_field_violations(data, shipped))
@@ -327,7 +327,8 @@ def _skill_in_store(profile_name: str, skill_id: str) -> bool:
     conn = _open_profile_store(profile_name)
     try:
         row = conn.execute(
-            "SELECT 1 FROM profile_skills WHERE skill_id = ? LIMIT 1", [skill_id]
+            "SELECT 1 FROM profile_skills WHERE skill_id = ? LIMIT 1",
+            [skill_id],
         ).fetchone()
         return row is not None
     finally:
@@ -392,7 +393,7 @@ def _list_skills(args: argparse.Namespace) -> int:
                 "project_path": str(project_path) if project_path else None,
                 "profile_path": str(profile_override) if profile_override else None,
                 "default_path": str(yaml_file),
-            }
+            },
         )
 
     write_result(rows, args, human_fn=_render_skill_list)  # type: ignore[arg-type]
@@ -808,7 +809,7 @@ def _revalidate(args: argparse.Namespace) -> int:
                 if shipped is None:
                     warnings.append(
                         f"profile '{pname}': override '{skill_id}' no longer ships "
-                        "(orphan); retained but inert."
+                        "(orphan); retained but inert.",
                     )
                     continue
                 missing = check_prose(str(raw_prose or ""), derive_invariants(shipped))
@@ -821,7 +822,7 @@ def _revalidate(args: argparse.Namespace) -> int:
                     warnings.append(
                         f"profile '{pname}': override '{skill_id}' disabled — prose dropped "
                         f"{', '.join(missing)}; shipped version now serves. Restore the token(s) "
-                        f"and run 'agentalloy customize update {skill_id}' to re-enable."
+                        f"and run 'agentalloy customize update {skill_id}' to re-enable.",
                     )
         finally:
             conn.close()
@@ -858,7 +859,7 @@ def _revalidate(args: argparse.Namespace) -> int:
                 if missing:
                     warnings.append(
                         f"project {f}: override drops {', '.join(missing)} "
-                        "(project overrides are not yet enforced at runtime)."
+                        "(project overrides are not yet enforced at runtime).",
                     )
 
     result = {"checked": checked, "disabled": disabled, "warnings": warnings}
@@ -869,7 +870,7 @@ def _revalidate(args: argparse.Namespace) -> int:
 def _render_revalidate(result: dict[str, Any]) -> None:
     print_rich(
         f"  Re-validated {result.get('checked', 0)} override(s); "
-        f"disabled {result.get('disabled', 0)}."
+        f"disabled {result.get('disabled', 0)}.",
     )
     warnings = cast("list[str]", result.get("warnings") or [])
     if warnings:
@@ -906,7 +907,8 @@ def add_parser(
 
     # update
     upd_p = sub.add_parser(
-        "update", help="Validate and ingest a skill override into the datastore."
+        "update",
+        help="Validate and ingest a skill override into the datastore.",
     )
     upd_p.add_argument("name", nargs="?", default=None, help="Skill name.")
     upd_p.add_argument("--all", action="store_true", help="Re-ingest all overrides.")

@@ -44,6 +44,7 @@ def get_embed_client(settings: Settings) -> EmbedClient:
     ------
     ValueError
         If ``settings.embedding_provider`` is not one of the supported values.
+
     """
     provider = settings.embedding_provider
 

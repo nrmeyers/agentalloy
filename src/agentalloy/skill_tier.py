@@ -28,6 +28,7 @@ def resolve_skill_tier(yaml_path: Path | str) -> tuple[str | None, str]:
     * ``(None, "pack.yaml:missing")``         — found, no tier key (or non-string value)
     * ``(None, "pack.yaml:parse_error")``     — found, YAML is corrupt / unreadable
     * ``(None, "not_found")``                 — no pack.yaml anywhere in walk
+
     """
     path = Path(yaml_path).resolve()
     current = path.parent

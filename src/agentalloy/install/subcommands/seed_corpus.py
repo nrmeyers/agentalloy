@@ -82,7 +82,7 @@ def _check_skill_store(settings: Settings) -> dict[str, Any]:
     try:
         try:
             skill_count = int(
-                store.scalar("SELECT count(*) FROM skills WHERE deprecated = false") or 0
+                store.scalar("SELECT count(*) FROM skills WHERE deprecated = false") or 0,
             )
             frag_count = int(store.scalar("SELECT count(*) FROM fragments") or 0)
         except Exception:

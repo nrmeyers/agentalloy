@@ -145,7 +145,7 @@ async def list_skills(
                 continue
             if q:
                 hay = " ".join(
-                    [s.skill_id, s.canonical_name, s.description or "", *s.domain_tags]
+                    [s.skill_id, s.canonical_name, s.description or "", *s.domain_tags],
                 ).lower()
                 if q.lower() not in hay:
                     continue
@@ -166,7 +166,7 @@ async def list_skills(
                         if s.skill_class in _OVERRIDABLE_CLASSES
                         else None
                     ),
-                )
+                ),
             )
         out.sort(key=lambda x: (x.skill_class, x.category, x.skill_id))
         return SkillListResponse(total=len(out), skills=out)
@@ -186,7 +186,8 @@ async def skill_versions(request: Request, skill_id: str) -> SkillVersionsRespon
 
     def _query() -> SkillVersionsResponse:
         active_row = store.execute(
-            "SELECT current_version_id FROM skills WHERE skill_id = $sid", {"sid": skill_id}
+            "SELECT current_version_id FROM skills WHERE skill_id = $sid",
+            {"sid": skill_id},
         )
         active_rows = list(active_row)
         if not active_rows:
@@ -348,7 +349,8 @@ async def put_override(
         errors = customize._validate_skill_data(data, skill_id)
         if errors:
             raise HTTPException(
-                status_code=400, detail={"error": "validation_failed", "errors": errors}
+                status_code=400,
+                detail={"error": "validation_failed", "errors": errors},
             )
 
         if body.layer == "project":
@@ -360,7 +362,8 @@ async def put_override(
             target = profile_dir / str(skill_class) / f"{skill_id}.yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
         )
         customize._ingest_skill(str(layers["active_profile_name"]), data)
         return OverrideWriteResult(

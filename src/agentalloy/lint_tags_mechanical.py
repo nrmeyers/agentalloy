@@ -55,7 +55,7 @@ def lint_tags_mechanical(
                     rule="system-empty",
                     verdict="system_has_tags",
                     detail="system skills must have domain_tags: [] — tags are ignored during retrieval",
-                )
+                ),
             )
         return verdicts
 
@@ -82,7 +82,7 @@ def lint_tags_mechanical(
                             f"'{t2}' and '{t1}' are morphological duplicates — pick the "
                             "corpus-canonical form (filters match tags exactly)"
                         ),
-                    )
+                    ),
                 )
 
     if skill_class == "domain":
@@ -98,7 +98,7 @@ def lint_tags_mechanical(
                         f"{len(tags)} tags exceeds {tier} ceiling of "
                         f"{policy['soft_ceiling']} — trim or add tags_rationale"
                     ),
-                )
+                ),
             )
 
     elif skill_class == "workflow":
@@ -114,7 +114,7 @@ def lint_tags_mechanical(
                         f"{len(tags)} tags exceeds workflow ceiling of "
                         f"{policy['soft_ceiling']} — trim or add tags_rationale"
                     ),
-                )
+                ),
             )
 
         # Rule W1: position marker required
@@ -128,7 +128,7 @@ def lint_tags_mechanical(
                         "workflow skill needs at least one position marker from "
                         "WORKFLOW_POSITION_MARKERS (e.g. phase:spec, phase:build, sdd, code-review)"
                     ),
-                )
+                ),
             )
 
     return verdicts

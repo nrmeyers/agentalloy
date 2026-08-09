@@ -113,7 +113,11 @@ def _detect_install_method() -> str:
     # Python import state, version strings, or filesystem layout.
     try:
         out = subprocess.run(
-            ["uv", "tool", "list"], capture_output=True, text=True, timeout=15, check=False
+            ["uv", "tool", "list"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
         if out.returncode == 0 and "agentalloy" in out.stdout:
             return "uv-tool"
@@ -169,7 +173,11 @@ def _current_tool_python() -> Path | None:
     """Path to the currently-installed ``uv tool``'s own interpreter, or ``None``."""
     try:
         out = subprocess.run(
-            ["uv", "tool", "dir"], capture_output=True, text=True, timeout=15, check=False
+            ["uv", "tool", "dir"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -327,7 +335,8 @@ def ensure_code_index_extra(*, show_progress: bool = True) -> tuple[str, str]:
     swap = _swap_command(method, ref, extras)
     try:
         with progress_activity(
-            f"reinstalling code-index dependencies via {method}", enabled=show_progress
+            f"reinstalling code-index dependencies via {method}",
+            enabled=show_progress,
         ):
             subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
@@ -361,7 +370,11 @@ def _is_systemd() -> bool:
 def _systemctl(*args: str) -> int:
     try:
         return subprocess.run(
-            ["systemctl", "--user", *args], capture_output=True, text=True, timeout=60, check=False
+            ["systemctl", "--user", *args],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         ).returncode
     except (OSError, subprocess.SubprocessError):
         return 1
@@ -405,7 +418,10 @@ def _start_service() -> None:
 
 
 def _run_cli(
-    args: list[str], *, check: bool = False, capture: bool = False
+    args: list[str],
+    *,
+    check: bool = False,
+    capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke ``agentalloy <args>`` as a subprocess (resolves the new binary)."""
     return subprocess.run(
@@ -513,7 +529,11 @@ def _drop_legacy_corpus_files() -> list[str]:
 
 
 def _upgrade_native(
-    ref: str, state: dict[str, Any], *, assume_yes: bool, show_progress: bool = False
+    ref: str,
+    state: dict[str, Any],
+    *,
+    assume_yes: bool,
+    show_progress: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Run the native upgrade. Returns (actions, warnings).
 
@@ -529,7 +549,7 @@ def _upgrade_native(
     if method == "source":
         warnings.append(
             "Running from a source/editable checkout — not swapping the package. "
-            "Update with `git pull` (then `uv sync`) instead."
+            "Update with `git pull` (then `uv sync`) instead.",
         )
         return actions, warnings
 
@@ -553,7 +573,7 @@ def _upgrade_native(
         tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
         detail = f": {' / '.join(line.strip() for line in tail)}" if tail else ""
         warnings.append(
-            f"package install failed (exit {exc.returncode}); service left stopped{detail}"
+            f"package install failed (exit {exc.returncode}); service left stopped{detail}",
         )
         return actions, warnings
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -639,7 +659,7 @@ def _upgrade_native(
         warnings.append(
             f"corpus is missing or empty after upgrade ({skill_count} skills "
             f"embedded, expected >= {seed_corpus.MIN_SKILL_COUNT}) — run "
-            f"`agentalloy reembed --force` then `agentalloy doctor`"
+            f"`agentalloy reembed --force` then `agentalloy doctor`",
         )
     else:
         # New corpus is confirmed healthy — safe to reclaim the v4 engine files
@@ -680,7 +700,10 @@ def _upgrade_native(
 
 
 def _migrate_code_index_layout(
-    actions: list[str], warnings: list[str], *, show_progress: bool
+    actions: list[str],
+    warnings: list[str],
+    *,
+    show_progress: bool,
 ) -> None:
     """Run every pending code-index store migration, for every registered repo.
 
@@ -700,7 +723,7 @@ def _migrate_code_index_layout(
     if res.returncode != 0:
         warnings.append(
             "code-index layout migration incomplete — the existing index still works; "
-            "re-run `agentalloy code migrate-layout --wait`"
+            "re-run `agentalloy code migrate-layout --wait`",
         )
         return
     if out:
@@ -794,7 +817,7 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
                 f"{STATE_SERVICE_READY_TIMEOUT_S:.0f}s; the file mirror still works, "
                 "re-run `agentalloy upgrade` once the service is up\n"
                 "  Hint: check `systemctl status agentalloy` or `journalctl -u agentalloy` "
-                "for startup errors"
+                "for startup errors",
             )
             return
         for root in roots:
@@ -808,13 +831,13 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
             except StateClientError as exc:
                 warnings.append(
                     f"phase state migration skipped for {root} ({exc}) — the file "
-                    "still works; re-run `agentalloy upgrade`"
+                    "still works; re-run `agentalloy upgrade`",
                 )
             except Exception as exc:  # noqa: BLE001 — never fail an upgrade
                 logger.debug("state file import failed for %s", root, exc_info=True)
                 warnings.append(
                     f"phase state migration skipped for {root} ({exc!r}) — the file "
-                    "still works; re-run `agentalloy upgrade`"
+                    "still works; re-run `agentalloy upgrade`",
                 )
     if migrated:
         actions.append(f"migrated phase state into the store ({migrated} repos)")
@@ -843,7 +866,10 @@ def _target_image(current_tag: str | None, version: str | None) -> str:
 
 
 def _upgrade_container(
-    ref: str, state: dict[str, Any], *, assume_yes: bool
+    ref: str,
+    state: dict[str, Any],
+    *,
+    assume_yes: bool,
 ) -> tuple[list[str], list[str]]:
     """Run the container upgrade. Returns (actions, warnings).
 
@@ -872,7 +898,7 @@ def _upgrade_container(
         warnings.append(
             f"image {image} isn't available yet — a new release's container image can "
             "take a few minutes to publish after the tag. Nothing was changed (CLI and "
-            "container are both unchanged); re-run `agentalloy upgrade` shortly."
+            "container are both unchanged); re-run `agentalloy upgrade` shortly.",
         )
         return actions, warnings
     actions.append(f"pulled {image}")
@@ -906,7 +932,7 @@ def _upgrade_container(
             detail = (rec.stdout or rec.stderr or "").strip().splitlines()
             warnings.append(
                 "post-swap recreate reported issues: "
-                + (detail[-1] if detail else "re-run `agentalloy upgrade` and check the container")
+                + (detail[-1] if detail else "re-run `agentalloy upgrade` and check the container"),
             )
         else:
             actions.append("corpus self-heals on the new entrypoint (stamp-compare re-seed)")
@@ -1020,7 +1046,7 @@ def _verify_container_spec(runtime: str, cr: Any) -> list[str]:
         return [
             f"container is missing the projects-root mount ({root}) — the proxy "
             "cannot read .agentalloy/ phase state, so phase injection silently no-ops. "
-            "A plain `podman restart` reuses the old spec; re-run `agentalloy upgrade`."
+            "A plain `podman restart` reuses the old spec; re-run `agentalloy upgrade`.",
         ]
     return []
 
@@ -1095,7 +1121,7 @@ def _preflight_confirm(current: str, target: str, ref: str | None, deployment: s
     if customized:
         print_rich_stderr(
             f"\n  [yellow]![/yellow] {customized} customized skill(s) will be re-validated "
-            "against the new release; stale overrides are disabled (preserved) with a warning."
+            "against the new release; stale overrides are disabled (preserved) with a warning.",
         )
     print_rich_stderr("")
     return _confirm(f"  Proceed with upgrade to {target}?", assume_yes=False)
@@ -1180,7 +1206,7 @@ def upgrade(
     if ref is None and latest is None:
         summary["warnings"].append(
             "Could not reach the GitHub releases API to resolve the latest version. "
-            "Retry later, or pass `--ref vX.Y.Z` to target a specific release."
+            "Retry later, or pass `--ref vX.Y.Z` to target a specific release.",
         )
         summary["duration_ms"] = int((time.monotonic() - t0) * 1000)
         return summary
@@ -1222,7 +1248,10 @@ def upgrade(
         actions, warnings = _upgrade_container(target_ref, state, assume_yes=assume_yes)
     else:
         actions, warnings = _upgrade_native(
-            target_ref, state, assume_yes=assume_yes, show_progress=interactive
+            target_ref,
+            state,
+            assume_yes=assume_yes,
+            show_progress=interactive,
         )
 
     summary["actions"].extend(actions)
@@ -1317,7 +1346,7 @@ def _render_human(result: dict[str, Any]) -> None:
 
     if result.get("dismissed_version") is not None:
         print_rich(
-            f"  Dismissed: [bold]{result['dismissed_version']}[/bold] (until a newer release)"
+            f"  Dismissed: [bold]{result['dismissed_version']}[/bold] (until a newer release)",
         )
     elif result.get("new_version"):
         print_rich(f"\n  Now on: [bold]{result.get('new_version')}[/bold]")

@@ -204,7 +204,7 @@ def reembed_corpus(
                     prose=f.content,
                     phase_scope=f.phase_scope,
                     domain_tags=tuple(f.domain_tags) if f.domain_tags else None,
-                )
+                ),
             )
     fs.bulk_replace(items)
     fs.optimize()

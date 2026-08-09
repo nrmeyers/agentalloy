@@ -88,6 +88,7 @@ def _image_variant_label(image_ref: str) -> str:
         'ghcr.io/nrmeyers/agentalloy:full'   -> 'full (~975 MB, pre-pulled model)'
         'latest'                              -> 'latest (~300 MB, no model)'
         'full'                                -> 'full (~975 MB, pre-pulled model)'
+
     """
     # Extract the tag from the image ref (everything after the last ':')
     tag = image_ref.rsplit(":", 1)[-1] if ":" in image_ref else image_ref
@@ -112,6 +113,7 @@ def _check_network_speed() -> tuple[str, int]:
     tuple[str, int]
         (warning_message, adjusted_timeout_seconds).
         Returns an empty message and 1800s timeout on any failure.
+
     """
     try:
         t0 = time.monotonic()
@@ -457,7 +459,7 @@ def _ensure_code_index_module(modules: str) -> str:
     if status == "source":
         _print(
             "  [yellow]Running from a source/editable checkout — run `uv sync`, "
-            "then re-run setup.[/yellow]"
+            "then re-run setup.[/yellow]",
         )
     else:
         suffix = f": {detail}" if detail else ""
@@ -608,7 +610,7 @@ def _offer_switch_to_native(cfg: SetupConfig) -> bool:
         ans = (
             input(
                 "  Install a container runtime (Docker or Podman) and re-run, or switch "
-                "to a native install now? [switch to native: y / N]: "
+                "to a native install now? [switch to native: y / N]: ",
             )
             .strip()
             .lower()
@@ -858,7 +860,7 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
         _print(f"  [yellow]Embedding test failed: {exc}[/yellow]")
         _print(
             f"  [dim]The embed server may still start up; "
-            f"check {install_state.user_data_dir() / 'logs' / 'embed-server.log'}[/dim]"
+            f"check {install_state.user_data_dir() / 'logs' / 'embed-server.log'}[/dim]",
         )
         return
 
@@ -871,7 +873,7 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
             {
                 "model": "agentalloy-proxy",
                 "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
-            }
+            },
         ).encode()
         req2 = urllib.request.Request(
             f"{proxy_url}/v1/chat/completions",
@@ -888,7 +890,7 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
             _print(f"  [yellow]Skill query test: {exc}[/yellow]")
             _print(
                 f"  [dim]The proxy may not be running yet; "
-                f"check {install_state.user_data_dir() / 'logs' / 'agentalloy.log'}[/dim]"
+                f"check {install_state.user_data_dir() / 'logs' / 'agentalloy.log'}[/dim]",
             )
 
 
@@ -1152,7 +1154,7 @@ def _reconcile_native_port_holder(cfg: SetupConfig) -> int:
         _print(f"  [dim]{cmdline[:100]}[/dim]")
         _print(
             f"  [yellow]The container must publish port {cfg.port}. Free it or pick "
-            "another port, then re-run setup.[/yellow]"
+            "another port, then re-run setup.[/yellow]",
         )
         return 1
 
@@ -1161,7 +1163,7 @@ def _reconcile_native_port_holder(cfg: SetupConfig) -> int:
     _print(
         "  [dim]The container can't own the port while this native process is bound — "
         "loopback traffic would reach it instead of the container, which has no embed/"
-        "reranker backend (those run inside the container).[/dim]"
+        "reranker backend (those run inside the container).[/dim]",
     )
     if cfg.non_interactive:
         _print("  [dim]non-interactive: reclaiming automatically[/dim]")
@@ -1171,7 +1173,7 @@ def _reconcile_native_port_holder(cfg: SetupConfig) -> int:
     if confirm not in ("", "y", "yes"):
         _print(
             "[yellow]Setup cancelled. Stop the native service first "
-            "(`agentalloy disable`) or keep the native install instead.[/yellow]"
+            "(`agentalloy disable`) or keep the native install instead.[/yellow]",
         )
         return 1
 
@@ -1180,7 +1182,7 @@ def _reconcile_native_port_holder(cfg: SetupConfig) -> int:
         _print(
             f"  [red]Could not stop pid {pid} on port {cfg.port} (it may have exited, or the "
             f"signal was denied). Stop it manually (e.g. `kill {pid}`) or run "
-            "`agentalloy disable`, then re-run setup.[/red]"
+            "`agentalloy disable`, then re-run setup.[/red]",
         )
         return 1
     _print("  [green]  Reclaimed.[/green]\n")
@@ -1226,7 +1228,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         elif shutil.which(requested) is None:
             _print(
                 f"  [red]--runtime {requested} requested but `{requested}` is not on "
-                f"PATH.[/red]\n  Install it, or drop --runtime to auto-detect."
+                f"PATH.[/red]\n  Install it, or drop --runtime to auto-detect.",
             )
             return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
         else:
@@ -1235,7 +1237,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
                 f"responding.[/red]\n  Start its daemon/machine and re-run setup:\n"
                 "    Podman:  podman machine start\n"
                 "    Docker:  start Docker Desktop (macOS) or "
-                "`sudo systemctl start docker` (Linux)"
+                "`sudo systemctl start docker` (Linux)",
             )
             return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
     elif not functional:
@@ -1246,7 +1248,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
                 "`podman` nor `docker` was found on PATH.[/red]\n"
                 "  Install one (then re-run setup):\n"
                 "    Podman:  brew install podman  (macOS) / sudo apt install podman (Linux)\n"
-                "    Docker:  https://docs.docker.com/get-docker/"
+                "    Docker:  https://docs.docker.com/get-docker/",
             )
         else:
             _print(
@@ -1254,7 +1256,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
                 "  Start its daemon/machine, then re-run setup:\n"
                 "    Podman:  podman machine start\n"
                 "    Docker:  start Docker Desktop (macOS) or "
-                "`sudo systemctl start docker` (Linux)"
+                "`sudo systemctl start docker` (Linux)",
             )
         return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
     elif len(functional) == 1:
@@ -1286,7 +1288,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         "  That's fine for normal use (short-text embeds are fast on CPU); only\n"
         "  corpus-wide work like a full reembed runs meaningfully slower. GPU\n"
         "  acceleration (NVIDIA/AMD/Apple Metal), if you want it for that, needs\n"
-        "  the native deployment."
+        "  the native deployment.",
     )
     if not cfg.non_interactive:
         ans = input("  Continue with container (CPU-only)? [Y/n]: ").strip().lower()
@@ -1407,7 +1409,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         _print(
             f"  [dim]{cfg.runtime_binary} will misbehave if these stay around "
             "(name collisions, stale exit codes, port-reservation conflicts — "
-            f"an Exited container can still hold port {cfg.port}).[/dim]"
+            f"an Exited container can still hold port {cfg.port}).[/dim]",
         )
         if cfg.non_interactive:
             _print("  [dim]non-interactive: removing automatically[/dim]")
@@ -1420,12 +1422,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         if confirm_rm not in ("", "y", "yes"):
             _print(
                 "[yellow]Setup cancelled. Remove the containers manually "
-                "or re-run setup and accept removal.[/yellow]"
+                "or re-run setup and accept removal.[/yellow]",
             )
             return 1
         if not _remove_containers(binary_path, [name for name, _ in existing]):
             _print(
-                "  [red]Failed to remove one or more containers; see errors above. Aborting.[/red]"
+                "  [red]Failed to remove one or more containers; see errors above. Aborting.[/red]",
             )
             return 1
         _print("  [green]  Removed.[/green]\n")
@@ -1473,7 +1475,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         "  [dim]-> Starting agentalloy container "
         "(first run: ~5-10 min to download the embed + reranker GGUF models; "
         "published images ship a prebuilt skill corpus, locally built images "
-        "also build the corpus, adding 20+ min on CPU; restarts: 30-60s)...[/dim]"
+        "also build the corpus, adding 20+ min on CPU; restarts: 30-60s)...[/dim]",
     )
     rc = _run_container(binary_path, cfg.packs, port=cfg.port)
     if rc != 0:
@@ -1516,7 +1518,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     _print(
         f"  [dim]-> Waiting for container readiness "
-        f"(timeout {readiness_timeout}s, ~30s per progress update)...[/dim]"
+        f"(timeout {readiness_timeout}s, ~30s per progress update)...[/dim]",
     )
 
     last_pack: str | None = None
@@ -1553,7 +1555,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             last_pack = "__corpus_seeded__"
             _print(
                 "     [dim]bootstrap: prebuilt corpus seeded from image — "
-                f"skipping skill ingest  elapsed={elapsed}s[/dim]"
+                f"skipping skill ingest  elapsed={elapsed}s[/dim]",
             )
             return
 
@@ -1586,7 +1588,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     if not healthy:
         _print(
             f"  [yellow]  Service not ready after {readiness_timeout}s — "
-            "check container logs.[/yellow]"
+            "check container logs.[/yellow]",
         )
     else:
         _print("  [green]  Service ready.[/green]")
@@ -1643,7 +1645,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # -- Done --
     _print(
-        f"\n[green]  Container setup complete in {int((time.monotonic() - t0) * 1000)}ms[/green]\n"
+        f"\n[green]  Container setup complete in {int((time.monotonic() - t0) * 1000)}ms[/green]\n",
     )
     _print(f"  URL:      http://localhost:{cfg.port}")
     _print(f"  Runtime:  {cfg.runtime_binary}")
@@ -1667,7 +1669,7 @@ def _offer_provision_runner(cfg: SetupConfig, preset: str) -> bool:
     """
     _print(
         "  [yellow]llama-server is not on PATH yet[/yellow] — it's normally "
-        "downloaded during 'Pulling models'."
+        "downloaded during 'Pulling models'.",
     )
     if not cfg.non_interactive:
         try:
@@ -1755,22 +1757,22 @@ def _reconcile_prior_install(
         _print(
             f"\n[yellow]Found an existing [bold]{prior_deployment}[/bold] install; "
             f"you chose [bold]{new_deployment}[/bold]. Setup can switch it in "
-            f"place.[/yellow]"
+            f"place.[/yellow]",
         )
     elif prior_is_deployment:
         _print(
             f"\n[yellow]Found an existing [bold]{prior_deployment}[/bold] install. "
-            f"Setup can overwrite it in place.[/yellow]"
+            f"Setup can overwrite it in place.[/yellow]",
         )
     else:
         _print(
             "\n[yellow]AgentAlloy is already initialized for this profile. Setup "
-            "can overwrite it in place.[/yellow]"
+            "can overwrite it in place.[/yellow]",
         )
     _print(
         "  [dim]This stops and removes the previous runtime "
         "(servers/containers/services) and re-runs setup — no separate "
-        "`uninstall` needed. Your code and repos are untouched.[/dim]"
+        "`uninstall` needed. Your code and repos are untouched.[/dim]",
     )
 
     if cfg.force:
@@ -1778,7 +1780,7 @@ def _reconcile_prior_install(
     elif cfg.non_interactive:
         _print(
             "  [yellow]Existing install present — re-run with `--force` to "
-            "overwrite non-interactively. Leaving it untouched.[/yellow]"
+            "overwrite non-interactively. Leaving it untouched.[/yellow]",
         )
         return EXIT_NOOP
     else:
@@ -1907,7 +1909,7 @@ def run_setup(cfg: SetupConfig) -> int:
     # value passed via --runner is rejected unless it is "llama-server".
     if cfg.runner is not None and cfg.runner.strip().lower() not in ("", "llama-server"):
         _print(
-            f"  [red]Invalid runner: {cfg.runner}. llama-server is the only supported runner.[/red]"
+            f"  [red]Invalid runner: {cfg.runner}. llama-server is the only supported runner.[/red]",
         )
         return 1
     cfg.runner = "llama-server"
@@ -2131,7 +2133,8 @@ def run_setup(cfg: SetupConfig) -> int:
     from agentalloy.install import runtime_artifacts
 
     stale = runtime_artifacts.reap("services", stale_only=True) + runtime_artifacts.reap(
-        "shim", stale_only=True
+        "shim",
+        stale_only=True,
     )
     if stale:
         _print("  [dim]-> Clearing stale state from a prior install[/dim]")
@@ -2209,7 +2212,7 @@ def run_setup(cfg: SetupConfig) -> int:
                 "embed_runner": cfg.runner,
                 "rerank_model": _RERANK_MODEL,
                 "rerank_runner": cfg.runner,
-            }
+            },
         ],
     }
     models_fp = install_state.outputs_dir() / "recommend-models.json"
@@ -2233,7 +2236,9 @@ def run_setup(cfg: SetupConfig) -> int:
     # Step f: Start embed server (llama-server, port 47951)
     _print("  [dim]-> Starting embed server[/dim]")
     rc = start_embed_server.run(
-        _build_namespace(cfg, models=str(models_fp), timeout=120.0, gpu_device=cfg.embed_gpu_device)
+        _build_namespace(
+            cfg, models=str(models_fp), timeout=120.0, gpu_device=cfg.embed_gpu_device
+        ),
     )
     if rc not in (0, 4):
         _print(f"  [red]  start-embed-server failed (exit {rc}).[/red]")
@@ -2249,7 +2254,7 @@ def run_setup(cfg: SetupConfig) -> int:
             hardware_target=cfg.hardware_target or cfg.recommended_host or "cpu",
             timeout=120.0,
             gpu_device=cfg.rerank_gpu_device,
-        )
+        ),
     )
     if rc not in (0, 4):
         _print(f"  [red]  start-rerank-server failed (exit {rc}).[/red]")
@@ -2265,7 +2270,7 @@ def run_setup(cfg: SetupConfig) -> int:
             non_interactive=cfg.non_interactive,
             ignore_unknown=False,
             list=False,
-        )
+        ),
     )
     if rc not in (0, 4):
         _print(f"  [red]  install-packs failed (exit {rc}).[/red]")
@@ -2282,11 +2287,11 @@ def run_setup(cfg: SetupConfig) -> int:
             f"  [red]  install-packs reported success but the corpus at "
             f"{install_state.corpus_dir()} is missing or empty "
             f"({corpus_skill_count} skills embedded, expected "
-            f">= {seed_corpus.MIN_SKILL_COUNT}) — the install is incomplete.[/red]"
+            f">= {seed_corpus.MIN_SKILL_COUNT}) — the install is incomplete.[/red]",
         )
         _print(
             "  [red]  Re-run `agentalloy install-packs`; if it persists, run "
-            "`agentalloy doctor` and share the output.[/red]"
+            "`agentalloy doctor` and share the output.[/red]",
         )
         return 1
 
@@ -2301,7 +2306,7 @@ def run_setup(cfg: SetupConfig) -> int:
         _print(
             f"  [yellow]  Web UI bundle unavailable ({web_result['error']}). "
             "The API works without it; retry later with `agentalloy pull-web` "
-            "then restart the service.[/yellow]"
+            "then restart the service.[/yellow]",
         )
 
     # Step i: Enable service
@@ -2315,7 +2320,7 @@ def run_setup(cfg: SetupConfig) -> int:
             port=cfg.port,
             embed_gpu_device=cfg.embed_gpu_device,
             rerank_gpu_device=cfg.rerank_gpu_device,
-        )
+        ),
     )
     if rc not in (0, 4):
         _print(f"  [red]  enable-service failed (exit {rc}).[/red]")
@@ -2357,18 +2362,18 @@ def run_setup(cfg: SetupConfig) -> int:
     # plain whether the install gets the sharp intent path or the cosine floor.
     try:
         _backend, _rerank_url = install_state.resolve_intent_reranker(
-            install_state.parse_env_file()
+            install_state.parse_env_file(),
         )
         if _backend == "cosine":
             _print("  Reranker: cosine backend (embedder-based intent; no reranker server)")
         elif install_state.rerank_reachable(_rerank_url):
             _print(
-                f"  Reranker: [green]live[/green] at {_rerank_url} (intent-based phase detection)"
+                f"  Reranker: [green]live[/green] at {_rerank_url} (intent-based phase detection)",
             )
         else:
             _print(
                 f"  Reranker: [yellow]not reachable[/yellow] at {_rerank_url} — phase detection "
-                "uses the cosine floor; run [bold]agentalloy enable-service[/bold] to start it"
+                "uses the cosine floor; run [bold]agentalloy enable-service[/bold] to start it",
             )
     except Exception:
         pass
@@ -2382,7 +2387,7 @@ def run_setup(cfg: SetupConfig) -> int:
         _print(f"  Datastore: {_profile.datastore_path}")
         _print(
             "  Customize skills: [bold]agentalloy customize list[/bold] "
-            "to see available system+workflow skills."
+            "to see available system+workflow skills.",
         )
     except Exception:
         pass

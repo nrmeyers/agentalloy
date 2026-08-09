@@ -124,7 +124,8 @@ def _to_code_edge(e: ParsedEdge) -> CodeEdge:
 
 def _markdown_symbol(chunk: MarkdownChunk, digest: str) -> CodeSymbol:
     """Markdown chunks ride the symbols table (kind ``MarkdownDoc``) so the
-    content-hash incremental skip covers them without extra plumbing."""
+    content-hash incremental skip covers them without extra plumbing.
+    """
     return CodeSymbol(
         qualified_name=chunk.qualified_name,
         kind=_MARKDOWN_KIND,
@@ -256,7 +257,8 @@ def _is_code_shaped(span: str) -> bool:
     Tier-2 name resolution (DK2) links a fenced span only if it carries a
     namespace/path separator, an internal underscore, or internal CamelCase — so
     a bare dictionary word (``run``/``build``) matching one symbol is rejected as
-    a coincidental false positive."""
+    a coincidental false positive.
+    """
     if not span or " " in span:
         return False
     if any(sep in span for sep in (".", "::", "/", "_")):
@@ -272,7 +274,8 @@ class GovernResolution:
     exact fqn match, tier 2 a unique short-name match. ``unresolved`` carries
     code-shaped spans that matched MORE THAN ONE symbol: real data the old
     bare-``set[str]`` return silently dropped, needed so an ambiguity can be
-    surfaced instead of quietly losing the edge."""
+    surfaced instead of quietly losing the edge.
+    """
 
     governed: list[tuple[str, str, int]]
     unresolved: list[str]
@@ -286,7 +289,8 @@ def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> GovernResolut
     Non-code-shaped or wholly-unmatched spans are silently dropped (as
     before); an AMBIGUOUS code-shaped span (matches >=2 symbols) is now
     reported via ``unresolved`` rather than silently dropped, so a caller can
-    flag it instead of losing the link with no trace."""
+    flag it instead of losing the link with no trace.
+    """
     governed: list[tuple[str, str, int]] = []
     unresolved: list[str] = []
     seen_fqns: set[str] = set()
@@ -325,7 +329,8 @@ class DecisionIndexResult:
     span``) that matched >=2 symbols. ``suspicious_docs`` are docs whose
     re-derivation yielded ZERO edges while the doc still has current chunks
     and previously had edges — the derive-first/swap-second guard (#527 A)
-    kept their prior edges rather than delete-then-fail-to-write."""
+    kept their prior edges rather than delete-then-fail-to-write.
+    """
 
     written: int = 0
     dropped: int = 0
@@ -413,7 +418,7 @@ def _index_decisions(
                         file_path=doc,
                         span=span,
                         resolution_tier=tier,
-                    )
+                    ),
                 )
 
         prior_count = graph.count_govern_edges_for_doc(doc)
@@ -444,7 +449,8 @@ def _parse_full(repo_path: Path, cache_dir: Path) -> ParseResult:
     return a PARTIAL symbol set (unchanged files are skipped entirely), which
     would corrupt the content-hash diff — every absent symbol would read as
     "removed". Incrementality is owned by the content-hash layer here, so the
-    sidecar caches are cleared before each parse."""
+    sidecar caches are cleared before each parse.
+    """
     cache_dir.mkdir(parents=True, exist_ok=True)
     for sidecar in cache_dir.glob(".cgr-*.json"):
         sidecar.unlink(missing_ok=True)
@@ -497,7 +503,11 @@ async def _embed_batches(
 
 
 async def _embed_one_with_halving(
-    embed_client: EmbedClient, model: str, text: str, *, min_chars: int = 256
+    embed_client: EmbedClient,
+    model: str,
+    text: str,
+    *,
+    min_chars: int = 256,
 ) -> list[float]:
     """Embed one text, halving its length on each server rejection.
 
@@ -616,7 +626,7 @@ async def run_index_job(
                     files = sorted(changed_files)
                     graph.delete_for_files(files)
                     graph.upsert_symbols(
-                        [cs for cs in code_symbols if cs.file_path in changed_files]
+                        [cs for cs in code_symbols if cs.file_path in changed_files],
                     )
                     graph.upsert_edges([e for e in code_edges if e.file_path in changed_files])
                 # Changed symbols without a resolvable file (rare) still land.
@@ -625,7 +635,7 @@ async def run_index_job(
                         cs
                         for cs in code_symbols
                         if cs.file_path is None and cs.qualified_name in changed_qns
-                    ]
+                    ],
                 )
 
             await asyncio.to_thread(_incremental_write)
@@ -758,7 +768,8 @@ async def run_index_job(
 @dataclass(frozen=True)
 class _MarkdownResult:
     """Outcome of the markdown phase — the embedded count plus the change sets
-    the decision phase needs (it acts on the same chunks, no re-walk)."""
+    the decision phase needs (it acts on the same chunks, no re-walk).
+    """
 
     embedded: int
     changed: list[MarkdownChunk]
@@ -832,7 +843,7 @@ async def _index_markdown(
                         _markdown_symbol(c, hashes[c.qualified_name])
                         for c in chunks
                         if c.file_path in removed_files
-                    ]
+                    ],
                 )
             vectors.delete(removed)
         graph.upsert_symbols([_markdown_symbol(c, hashes[c.qualified_name]) for c in changed])
@@ -850,7 +861,7 @@ async def _index_markdown(
                     indexed_at=now,
                 )
                 for c, vec in zip(changed, embeddings, strict=True)
-            ]
+            ],
         )
 
     await asyncio.to_thread(_write)

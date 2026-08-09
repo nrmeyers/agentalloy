@@ -101,7 +101,8 @@ def fingerprint_request(request: ProxyRequest) -> str | None:
 
 
 def resolve_session_key(
-    request: ProxyRequest, session_id: str | None
+    request: ProxyRequest,
+    session_id: str | None,
 ) -> tuple[str | None, str | None]:
     """Resolve ``(session_key, session_source)`` for a request.
 

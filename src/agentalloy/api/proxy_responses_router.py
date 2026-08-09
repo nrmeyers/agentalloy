@@ -171,7 +171,10 @@ async def _maybe_inject(
 
     if signal.banner is not None and signal.phase is not None:
         bannered = inject_into_responses_input(
-            current, signal.banner, phase=signal.phase, kind="banner"
+            current,
+            signal.banner,
+            phase=signal.phase,
+            kind="banner",
         )
         if bannered is not current:
             current = bannered
@@ -185,7 +188,9 @@ async def _maybe_inject(
     # failure here cannot cost the banner. Does not flip `composed` telemetry.
     if signal.workflow_system_prose and signal.phase is not None:
         current = inject_into_responses_instructions(
-            current, signal.workflow_system_prose, phase=signal.phase
+            current,
+            signal.workflow_system_prose,
+            phase=signal.phase,
         )
 
     injected_payload = current if current is not payload else None
@@ -215,7 +220,10 @@ async def passthrough_openai_responses(
         project_dir = None
     if project_dir is not None:
         resolved_client = resolve_passthrough_client(
-            request.app, project_dir, client, _CLIENT_CACHE_ATTR
+            request.app,
+            project_dir,
+            client,
+            _CLIENT_CACHE_ATTR,
         )
     else:
         resolved_client = client
@@ -231,7 +239,7 @@ async def passthrough_openai_responses(
                         "code": "upstream_parse_error",
                         "message": resolved_client.detail,
                     },
-                }
+                },
             ).encode(),
             status_code=503,
             media_type="application/json",
@@ -244,8 +252,8 @@ async def passthrough_openai_responses(
                     "error": {
                         "type": "api_error",
                         "message": "responses passthrough upstream not configured",
-                    }
-                }
+                    },
+                },
             ).encode(),
             status_code=503,
             media_type="application/json",
@@ -294,7 +302,8 @@ async def passthrough_openai_responses(
             )
         except Exception:
             logger.warning(
-                "responses passthrough compose/inject failed; forwarding original", exc_info=True
+                "responses passthrough compose/inject failed; forwarding original",
+                exc_info=True,
             )
             body_to_send = raw_body
 
@@ -309,5 +318,10 @@ async def passthrough_openai_responses(
             path=_UPSTREAM_PATH,
         )
     return await _forward_once(
-        resolved_client, query_string, inbound_headers, body_to_send, on_status, path=_UPSTREAM_PATH
+        resolved_client,
+        query_string,
+        inbound_headers,
+        body_to_send,
+        on_status,
+        path=_UPSTREAM_PATH,
     )

@@ -17,6 +17,7 @@ def build_launch_env(port: int) -> dict[str, str]:
 
     Returns:
         Environment dict with proxy configuration.
+
     """
     return {
         "OPENAI_BASE_URL": f"http://localhost:{port}/v1",

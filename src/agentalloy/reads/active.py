@@ -47,7 +47,8 @@ _FRAGMENT_JOIN = _ACTIVE_JOIN + " JOIN fragments f ON f.version_id = v.version_i
 
 
 def _class_pred(
-    skill_class: SkillClass | tuple[str, ...] | None, params: dict[str, Any]
+    skill_class: SkillClass | tuple[str, ...] | None,
+    params: dict[str, Any],
 ) -> str | None:
     """Build a skill_class predicate, recording the param. None when unfiltered."""
     if skill_class is None:
@@ -63,7 +64,9 @@ def _class_pred(
 
 
 def get_active_skills(
-    store: SkillStore, *, skill_class: SkillClass | tuple[str, ...] | None = None
+    store: SkillStore,
+    *,
+    skill_class: SkillClass | tuple[str, ...] | None = None,
 ) -> list[ActiveSkill]:
     """Return every skill whose CURRENT_VERSION is active, after consistency checks."""
     _run_consistency_guard(store, skill_class=skill_class)
@@ -123,7 +126,7 @@ def get_active_fragments(
         params["phases"] = list(phases)
         filters.append(
             "(list_contains($categories, s.category)"
-            " OR (s.phase_scope IS NOT NULL AND list_has_any(s.phase_scope, $phases)))"
+            " OR (s.phase_scope IS NOT NULL AND list_has_any(s.phase_scope, $phases)))",
         )
     elif categories is not None:
         params["categories"] = list(categories)
@@ -172,11 +175,13 @@ def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, An
     status = str(row[6])
     if status != "active":
         skill_rows = store.execute(
-            "SELECT skill_id FROM skill_versions WHERE version_id = $vid", {"vid": version_id}
+            "SELECT skill_id FROM skill_versions WHERE version_id = $vid",
+            {"vid": version_id},
         )
         skill_id = str(skill_rows[0][0]) if skill_rows else f"<unknown skill for {version_id}>"
         raise InconsistentActiveVersionError(
-            skill_id, f"version {version_id!r} has status={status!r}, expected 'active'"
+            skill_id,
+            f"version {version_id!r} has status={status!r}, expected 'active'",
         )
     return {
         "version_id": str(row[0]),
@@ -192,7 +197,9 @@ def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, An
 
 
 def _run_consistency_guard(
-    store: SkillStore, *, skill_class: SkillClass | tuple[str, ...] | None = None
+    store: SkillStore,
+    *,
+    skill_class: SkillClass | tuple[str, ...] | None = None,
 ) -> None:
     """Scan for CURRENT_VERSION / active-version mismatches. Raises on first one."""
     params: dict[str, Any] = {}
@@ -206,7 +213,9 @@ def _run_consistency_guard(
     )
     if rows:
         sid, status = rows[0][0], rows[0][1]
-        raise InconsistentActiveVersionError(sid, f"CURRENT_VERSION points at status={status!r} version")
+        raise InconsistentActiveVersionError(
+            sid, f"CURRENT_VERSION points at status={status!r} version"
+        )
 
     # (b) An active version exists (HAS_VERSION) but there is no CURRENT_VERSION edge.
     rows = store.execute(
@@ -218,7 +227,8 @@ def _run_consistency_guard(
     )
     if rows:
         raise InconsistentActiveVersionError(
-            rows[0][0], "active SkillVersion exists but no CURRENT_VERSION edge"
+            rows[0][0],
+            "active SkillVersion exists but no CURRENT_VERSION edge",
         )
 
 
@@ -231,7 +241,8 @@ def _run_consistency_guard_for(store: SkillStore, skill_id: str) -> None:
     )
     if rows:
         raise InconsistentActiveVersionError(
-            skill_id, f"CURRENT_VERSION points at status={rows[0][0]!r} version"
+            skill_id,
+            f"CURRENT_VERSION points at status={rows[0][0]!r} version",
         )
 
     rows = store.execute(
@@ -243,7 +254,8 @@ def _run_consistency_guard_for(store: SkillStore, skill_id: str) -> None:
     )
     if rows:
         raise InconsistentActiveVersionError(
-            skill_id, "active SkillVersion exists but no CURRENT_VERSION edge"
+            skill_id,
+            "active SkillVersion exists but no CURRENT_VERSION edge",
         )
 
 

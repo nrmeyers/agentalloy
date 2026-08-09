@@ -119,6 +119,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     # Lazy import: wire_harness imports the provider registry at module load,
     # so a top-level import here would be circular.

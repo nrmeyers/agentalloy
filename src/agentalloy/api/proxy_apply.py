@@ -183,7 +183,8 @@ def _compose_decision_push(
     only **after** the availability probe (which itself checks the module toggle),
     so a disabled or unindexed repo composes byte-identically to before. Reads only
     the code-index store; never touches the prompt-cached system block (the caller
-    folds this into the user-message text like the other tiers)."""
+    folds this into the user-message text like the other tiers).
+    """
     if phase not in ("design", "build"):
         return ""
     if not (contract.scope and contract.scope.touches):
@@ -367,7 +368,11 @@ async def _compose_block(
             # domain text just composed; additive (any gate miss -> "").
             try:
                 decision_block = _compose_decision_push(
-                    signal, compose_phase, contract, tier2, orchestrator
+                    signal,
+                    compose_phase,
+                    contract,
+                    tier2,
+                    orchestrator,
                 )
             except Exception:
                 logger.warning("decision push failed -- passing through", exc_info=True)
@@ -385,7 +390,9 @@ async def _compose_block(
         mode = "paused" if signal.paused_mode else "workflow"
         options_text = _OPTIONS_TEXT_PAUSED if signal.paused_mode else _OPTIONS_TEXT_WORKFLOW
         orientation_block = _COMPOSE_ORIENTATION.format(
-            phase=signal.phase, mode=mode, options_text=options_text
+            phase=signal.phase,
+            mode=mode,
+            options_text=options_text,
         )
 
     return _ComposedBlock(
@@ -398,7 +405,8 @@ async def _compose_block(
 
 
 async def _compose_pause_block(
-    signal: SignalResult, orchestrator: ComposeOrchestrator
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
 ) -> _ComposedBlock:
     """Compose the pause (compose-only) block.
 
@@ -465,7 +473,8 @@ def _merge_compose_telemetry(
     ``tier2_request`` carries the contract provenance (``contract_id`` /
     ``contract_tags``) the request objects already hold but the results do not;
     it is recorded only when the Tier-2 leg actually composed (``tier2`` set),
-    so a thrown compose never stamps contract fields on a row without skills."""
+    so a thrown compose never stamps contract fields on a row without skills.
+    """
     t1 = tier1.telemetry if tier1 is not None else None
     t2 = tier2.telemetry if tier2 is not None else None
     workflow_ids = list(t1.workflow_skill_ids) if t1 else []

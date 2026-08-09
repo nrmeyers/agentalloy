@@ -18,7 +18,10 @@ class BundleRequest(BaseModel):
     repo: str = Field(description="Indexed repo slug")
     task: str = Field(min_length=1, description="Natural-language task description")
     budget_chars: int = Field(
-        default=24000, ge=500, le=500_000, description="Source-excerpt character budget"
+        default=24000,
+        ge=500,
+        le=500_000,
+        description="Source-excerpt character budget",
     )
 
 

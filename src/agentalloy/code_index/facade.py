@@ -24,13 +24,13 @@ from .engine.types_defs import PropertyDict, PropertyValue
 # Project / Package / Folder / File / ExternalPackage, which are keyed by
 # path or name and carry no symbol payload).
 _SYMBOL_LABELS: frozenset[str] = frozenset(
-    {"Function", "Method", "Class", "Interface", "Enum", "Type", "Union", "Module"}
+    {"Function", "Method", "Class", "Interface", "Enum", "Type", "Union", "Module"},
 )
 
 # The engine emits four structural containment relationship names; the
 # storage vocabulary collapses them into a single CONTAINS kind.
 _CONTAINS_KINDS: frozenset[str] = frozenset(
-    {"CONTAINS_PACKAGE", "CONTAINS_FOLDER", "CONTAINS_FILE", "CONTAINS_MODULE"}
+    {"CONTAINS_PACKAGE", "CONTAINS_FOLDER", "CONTAINS_FILE", "CONTAINS_MODULE"},
 )
 
 
@@ -111,7 +111,7 @@ class CollectingIngestor:
                 str(rel_type),
                 (str(to_spec[0]), to_spec[1], to_spec[2]),
                 dict(properties) if properties else {},
-            )
+            ),
         )
 
     def flush_all(self) -> None:  # collection is already in memory
@@ -253,7 +253,7 @@ def _translate(ingestor: CollectingIngestor, repo_root: Path) -> ParseResult:
                 is_async=props.get("is_async") is True,
                 is_generator=props.get("is_generator") is True,
                 source_code=source_code,
-            )
+            ),
         )
 
     edges: list[ParsedEdge] = []
@@ -274,7 +274,7 @@ def _translate(ingestor: CollectingIngestor, repo_root: Path) -> ParseResult:
                 resolved_via=_as_str(props.get("resolved_via")),
                 confidence=_as_float(props.get("confidence")),
                 new_target=_as_str(props.get("new_target")),
-            )
+            ),
         )
 
     return ParseResult(symbols=_dedupe_symbols(symbols), edges=edges)

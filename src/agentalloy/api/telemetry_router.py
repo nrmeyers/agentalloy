@@ -184,11 +184,18 @@ class TelemetryQuerier:
         offset: int,
     ) -> TracesResponse:
         kwargs: dict[str, Any] = dict(
-            phase=phase, status=status, since=since, until=until, repo=repo
+            phase=phase,
+            status=status,
+            since=since,
+            until=until,
+            repo=repo,
         )
         # Off-loop reads via the telemetry store's thread-local cursors.
         traces = await asyncio.to_thread(
-            self._store.query_traces, **kwargs, limit=limit, offset=offset
+            self._store.query_traces,
+            **kwargs,
+            limit=limit,
+            offset=offset,
         )
         total = await asyncio.to_thread(self._store.count_traces_filtered, **kwargs)
         return TracesResponse(
@@ -288,6 +295,11 @@ async def get_coverage(
     querier: TelemetryQuerier | None = getattr(request.app.state, "telemetry_querier", None)
     if querier is None:
         return CoverageResponse(
-            total=0, composed=0, passthrough=0, compose_rate=0.0, per_phase=[], per_repo=[]
+            total=0,
+            composed=0,
+            passthrough=0,
+            compose_rate=0.0,
+            per_phase=[],
+            per_repo=[],
         )
     return await querier.coverage(repo)

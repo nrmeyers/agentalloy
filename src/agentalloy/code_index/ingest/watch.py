@@ -36,7 +36,8 @@ class WatchCapacityError(RuntimeError):
 
 class Debouncer:
     """Trailing-edge debounce: ``fire`` runs once, ``delay_s`` after the last
-    :meth:`poke`. Thread-safe (watchdog delivers events on its own thread)."""
+    :meth:`poke`. Thread-safe (watchdog delivers events on its own thread).
+    """
 
     def __init__(self, delay_s: float, fire: Callable[[], None]) -> None:
         self._delay_s = delay_s
@@ -78,7 +79,8 @@ class _RepoEventHandler(FileSystemEventHandler):
 class WatchManager:
     """Tracks up to :data:`MAX_WATCHES` repo watches, each with its own
     observer + debouncer. ``on_change(slug, repo_path)`` fires (on a watchdog
-    thread) once per settled burst of file events."""
+    thread) once per settled burst of file events.
+    """
 
     def __init__(
         self,
@@ -95,13 +97,14 @@ class WatchManager:
 
     def start(self, slug: str, repo_path: Path) -> None:
         """Begin watching ``repo_path`` under ``slug``. Idempotent per slug;
-        raises :class:`WatchCapacityError` beyond the per-process cap."""
+        raises :class:`WatchCapacityError` beyond the per-process cap.
+        """
         with self._lock:
             if slug in self._watches:
                 return
             if len(self._watches) >= MAX_WATCHES:
                 raise WatchCapacityError(
-                    f"watch cap reached ({MAX_WATCHES}); stop another repo first"
+                    f"watch cap reached ({MAX_WATCHES}); stop another repo first",
                 )
             debouncer = Debouncer(self._debounce_s, lambda: self._on_change(slug, repo_path))
             observer = self._observer_factory()

@@ -127,7 +127,9 @@ class JsTsModuleSystemMixin:
             self._process_commonjs_import(alias_name, module_name, module_qn)
 
     def _process_variable_declarator_for_commonjs(
-        self, declarator: ASTNode, module_qn: str
+        self,
+        declarator: ASTNode,
+        module_qn: str,
     ) -> None:
         try:
             module_name = self._extract_require_module_name(declarator)
@@ -145,11 +147,15 @@ class JsTsModuleSystemMixin:
             logger.debug(ls.JS_COMMONJS_VAR_DECLARATOR_FAILED, error=e)
 
     def _process_commonjs_import(
-        self, imported_name: str, module_name: str, module_qn: str
+        self,
+        imported_name: str,
+        module_name: str,
+        module_qn: str,
     ) -> None:
         try:
             resolved_source_module = self.import_processor._resolve_js_module_path(
-                module_name, module_qn
+                module_name,
+                module_qn,
             )
 
             import_key = f"{module_qn}->{resolved_source_module}"
@@ -215,7 +221,10 @@ class JsTsModuleSystemMixin:
         # `exports.X = ...` statement. All three captures of one match live
         # under the same assignment_expression — pair on that ancestor.
         for exports_obj, export_name, export_function in pair_captures_by_ancestor(
-            cs.TS_ASSIGNMENT_EXPRESSION, exports_objs, export_names, export_functions
+            cs.TS_ASSIGNMENT_EXPRESSION,
+            exports_objs,
+            export_names,
+            export_functions,
         ):
             if not (exports_obj.text and export_name.text):
                 continue
@@ -241,7 +250,11 @@ class JsTsModuleSystemMixin:
         # pair the four captures of a `module.exports.X = ...` match on their
         # shared assignment_expression ancestor instead of positional zip.
         for module_obj, exports_prop, export_name, export_function in pair_captures_by_ancestor(
-            cs.TS_ASSIGNMENT_EXPRESSION, module_objs, exports_props, export_names, export_functions
+            cs.TS_ASSIGNMENT_EXPRESSION,
+            module_objs,
+            exports_props,
+            export_names,
+            export_functions,
         ):
             if not (module_obj.text and exports_prop.text and export_name.text):
                 continue
@@ -327,7 +340,9 @@ class JsTsModuleSystemMixin:
                     # `export const` statement. Name and value of one match
                     # share a variable_declarator — pair on that ancestor.
                     for export_name, export_function in pair_captures_by_ancestor(
-                        cs.TS_VARIABLE_DECLARATOR, export_names, export_functions
+                        cs.TS_VARIABLE_DECLARATOR,
+                        export_names,
+                        export_functions,
                     ):
                         if export_name.text and export_function:
                             if function_name := safe_decode_text(export_name):

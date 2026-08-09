@@ -38,7 +38,7 @@ class CodeIndexState:
     jobs: CodeIndexJobsStore
     worker_token: str = field(default_factory=lambda: uuid.uuid4().hex)
     tasks: dict[str, asyncio.Task[None]] = field(
-        default_factory=lambda: dict[str, asyncio.Task[None]]()
+        default_factory=lambda: dict[str, asyncio.Task[None]](),
     )
     watch: WatchManager | None = None
     # (#526/#527) Built in ``app.py`` from the process's SDD state store —
@@ -250,5 +250,5 @@ class CodeIndexState:
 def get_code_index_state() -> CodeIndexState:
     """DI provider — overridden during the app lifespan (or by tests)."""
     raise RuntimeError(
-        "get_code_index_state must be bound during app lifespan; no default available"
+        "get_code_index_state must be bound during app lifespan; no default available",
     )

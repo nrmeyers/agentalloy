@@ -106,6 +106,7 @@ class EmbeddingErrorResult:
         error: The EmbeddingError that caused this fallback.
         bm25_only: True when the retrieval path fell back to lexical-only search.
         candidates: Hydrated fallback candidates, if any.
+
     """
 
     error: EmbeddingError
@@ -326,6 +327,7 @@ def safe_embed(
 
     Raises:
         EmbeddingError: If the embedding call fails or circuit is open
+
     """
     # Check circuit breaker
     if embedding_breaker.is_open and not embedding_breaker.allow_request():

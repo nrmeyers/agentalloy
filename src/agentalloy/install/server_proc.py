@@ -258,7 +258,9 @@ def port_holder_cmdline(port: int, host: str = DEFAULT_HOST) -> tuple[int | None
 
 
 def reclaim_stale_port(
-    port: int, match_substrings: list[str], host: str = DEFAULT_HOST
+    port: int,
+    match_substrings: list[str],
+    host: str = DEFAULT_HOST,
 ) -> int | None:
     """Kill a STALE AgentAlloy/llama-server process squatting on ``host:port``.
 
@@ -322,7 +324,7 @@ def start_background(
     if existing is not None:
         raise ServerLifecycleError(
             f"port {host}:{port} is already bound by pid {existing}; "
-            "stop it first or pick another port"
+            "stop it first or pick another port",
         )
 
     log_path = server_log_path()

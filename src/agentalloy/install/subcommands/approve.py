@@ -65,7 +65,9 @@ def _digest_disk(root: Path, glob: str) -> str:
 
 
 def run_approve(
-    phase: str, root: Path | None = None, approver: str | None = None
+    phase: str,
+    root: Path | None = None,
+    approver: str | None = None,
 ) -> dict[str, Any]:
     """Record approval for *phase* and advance to the next phase.
 
@@ -131,7 +133,9 @@ def run_approve(
         # matches. Only a *non-empty differentiated* row set would diverge.
         slug = _resolve_workitem_slug_for(handle, root, phase)
         rows = handle.list_artifacts(
-            phase, slug=slug, name_glob=_APPROVAL_STORE_NAME_GLOB.get(phase)
+            phase,
+            slug=slug,
+            name_glob=_APPROVAL_STORE_NAME_GLOB.get(phase),
         )
         if not rows:
             return {
@@ -222,7 +226,9 @@ def _resolve_root(args: argparse.Namespace) -> Path | None:
 
 def _run(args: argparse.Namespace) -> int:
     result = run_approve(
-        args.phase, root=_resolve_root(args), approver=getattr(args, "approver", None)
+        args.phase,
+        root=_resolve_root(args),
+        approver=getattr(args, "approver", None),
     )
     if not result.get("ok"):
         print(f"Cannot approve '{args.phase}': {result.get('error')}", file=sys.stderr)

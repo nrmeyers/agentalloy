@@ -88,7 +88,7 @@ _RESPONSE_HOP = frozenset(
         "trailers",
         "transfer-encoding",
         "upgrade",
-    }
+    },
 )
 
 
@@ -142,7 +142,8 @@ def _noop_status(_status: int) -> None:
 def _flatten_text_field(value: Any) -> str | None:
     """Flatten a system/instructions field (plain string or list of Anthropic-style
     text blocks) to plain text, mirroring ``proxy_router._extract_system_prompt``
-    for the chat-completions surface."""
+    for the chat-completions surface.
+    """
     if isinstance(value, str):
         return value or None
     if isinstance(value, list):
@@ -160,7 +161,8 @@ def _payload_system_prompt_sha(payload: dict[str, Any], field: str) -> str | Non
     """sha256 fingerprint of ``payload[field]`` (Anthropic ``system`` or Responses
     ``instructions``), mirroring ``proxy_router._system_prompt_sha`` so the
     ``workflow_delivered`` telemetry column is comparable across all three proxy
-    surfaces."""
+    surfaces.
+    """
     text = _flatten_text_field(payload.get(field))
     if not text:
         return None
@@ -372,7 +374,10 @@ async def _maybe_inject(
     #    Independent of should_compose: it fires even on a banner-only turn.
     if signal.banner is not None and signal.phase is not None:
         bannered = inject_into_anthropic_messages(
-            current, signal.banner, phase=signal.phase, kind="banner"
+            current,
+            signal.banner,
+            phase=signal.phase,
+            kind="banner",
         )
         if bannered is not current:
             current = bannered
@@ -400,7 +405,9 @@ async def _maybe_inject(
     #    `cache_read_input_tokens` should grow to include it.
     if signal.workflow_system_prose and signal.phase is not None:
         sys_injected = inject_into_anthropic_system_prompt(
-            current, signal.workflow_system_prose, phase=signal.phase
+            current,
+            signal.workflow_system_prose,
+            phase=signal.phase,
         )
         if sys_injected is not None:
             current = sys_injected
@@ -427,7 +434,8 @@ async def _maybe_inject(
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:
     """Filter upstream response headers for relay. Drops hop-by-hop, length, and
     (when the body was decoded by httpx) the now-wrong content-encoding. The
-    content-type is relayed separately via ``media_type``."""
+    content-type is relayed separately via ``media_type``.
+    """
     out: dict[str, str] = {}
     for k, v in headers.items():
         kl = k.lower()
@@ -463,7 +471,10 @@ async def passthrough_anthropic_messages(
         project_dir = None
     if project_dir is not None:
         resolved_client = resolve_passthrough_client(
-            request.app, project_dir, client, _CLIENT_CACHE_ATTR
+            request.app,
+            project_dir,
+            client,
+            _CLIENT_CACHE_ATTR,
         )
     else:
         resolved_client = client
@@ -480,7 +491,7 @@ async def passthrough_anthropic_messages(
                         "code": "upstream_parse_error",
                         "message": resolved_client.detail,
                     },
-                }
+                },
             ).encode(),
             status_code=503,
             media_type="application/json",
@@ -495,7 +506,7 @@ async def passthrough_anthropic_messages(
                         "type": "api_error",
                         "message": "passthrough upstream not configured",
                     },
-                }
+                },
             ).encode(),
             status_code=503,
             media_type="application/json",
@@ -558,10 +569,18 @@ async def passthrough_anthropic_messages(
     # --- Forward. ---
     if stream_flag:
         return await _forward_streaming(
-            resolved_client, query_string, inbound_headers, body_to_send, on_status
+            resolved_client,
+            query_string,
+            inbound_headers,
+            body_to_send,
+            on_status,
         )
     return await _forward_once(
-        resolved_client, query_string, inbound_headers, body_to_send, on_status
+        resolved_client,
+        query_string,
+        inbound_headers,
+        body_to_send,
+        on_status,
     )
 
 
@@ -585,7 +604,10 @@ async def _forward_once(
         # No commit: a connection-level failure means the model never saw the block.
         return Response(
             content=json.dumps(
-                {"type": "error", "error": {"type": "api_error", "message": f"upstream error: {e}"}}
+                {
+                    "type": "error",
+                    "error": {"type": "api_error", "message": f"upstream error: {e}"},
+                },
             ).encode(),
             status_code=502,
             media_type="application/json",
@@ -622,7 +644,10 @@ async def _forward_streaming(
         # No commit: a connection-level failure means the model never saw the block.
         return Response(
             content=json.dumps(
-                {"type": "error", "error": {"type": "api_error", "message": f"upstream error: {e}"}}
+                {
+                    "type": "error",
+                    "error": {"type": "api_error", "message": f"upstream error: {e}"},
+                },
             ).encode(),
             status_code=502,
             media_type="application/json",

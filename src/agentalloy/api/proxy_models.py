@@ -80,7 +80,11 @@ class ProxyStreamChunk(BaseModel):
     choices: list[dict[str, Any]]
 
     def set_delta(
-        self, index: int, delta: ProxyStreamDelta, *, finish_reason: str | None = None
+        self,
+        index: int,
+        delta: ProxyStreamDelta,
+        *,
+        finish_reason: str | None = None,
     ) -> None:
         """Set or update the delta for a given choice index.
 

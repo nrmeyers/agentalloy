@@ -92,6 +92,7 @@ class Rebind:
         Repo-relative POSIX path of the rebinding site.
     line_start:
         1-indexed line number of the assignment.
+
     """
 
     class_qn: str
@@ -264,7 +265,7 @@ class RebindProcessor:
         if file_path.name == cs.INIT_PY:
             return cs.SEPARATOR_DOT.join([self.project_name] + list(relative_path.parent.parts))
         return cs.SEPARATOR_DOT.join(
-            [self.project_name] + list(relative_path.with_suffix("").parts)
+            [self.project_name] + list(relative_path.with_suffix("").parts),
         )
 
     def _iter_module_level_assignments(self, root_node: Node) -> list[Node]:
@@ -438,7 +439,9 @@ class RebindProcessor:
         return None, None
 
     def _resolve_identifier(
-        self, ident_node: Node, module_qn: str
+        self,
+        ident_node: Node,
+        module_qn: str,
     ) -> tuple[str | None, NodeType | None]:
         if ident_node.text is None:
             return None, None
@@ -461,7 +464,9 @@ class RebindProcessor:
         return None, None
 
     def _resolve_attribute_rhs(
-        self, attr_node: Node, module_qn: str
+        self,
+        attr_node: Node,
+        module_qn: str,
     ) -> tuple[str | None, NodeType | None]:
         head, tail = self._split_attribute(attr_node)
         if head is None or tail is None:

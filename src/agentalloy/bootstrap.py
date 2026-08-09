@@ -193,7 +193,7 @@ def _validate(skill: ParsedSystemSkill) -> list[str]:
         errors.append("category is required")
     elif skill.category not in _VALID_CATEGORIES:
         errors.append(
-            f"category '{skill.category}' is not valid (must be one of {sorted(_VALID_CATEGORIES)})"
+            f"category '{skill.category}' is not valid (must be one of {sorted(_VALID_CATEGORIES)})",
         )
 
     if not skill.canonical_name.strip():
@@ -205,7 +205,7 @@ def _validate(skill: ParsedSystemSkill) -> list[str]:
     for phase in skill.phase_scope:
         if phase not in _VALID_PHASES:
             errors.append(
-                f"phase_scope '{phase}' is not valid (must be one of {sorted(_VALID_PHASES)})"
+                f"phase_scope '{phase}' is not valid (must be one of {sorted(_VALID_PHASES)})",
             )
 
     if skill.always_apply and (skill.phase_scope or skill.category_scope):
@@ -215,7 +215,7 @@ def _validate(skill: ParsedSystemSkill) -> list[str]:
     if skill.deprecated and not skill.superseded_by:
         errors.append(
             "deprecated: true requires 'superseded_by' to be set — "
-            "a skill cannot be deprecated without a replacement"
+            "a skill cannot be deprecated without a replacement",
         )
 
     if skill.superseded_by and not re.match(r"^[a-z0-9-]+$", skill.superseded_by):

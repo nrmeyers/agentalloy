@@ -352,7 +352,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # self-heals between manual runs. Off by default; the container sets 300.
         if settings.code_index_refresh_seconds > 0:
             app.state.code_index_refresh_task = asyncio.create_task(
-                _code_index_refresh_loop(code_index_state, settings.code_index_refresh_seconds)
+                _code_index_refresh_loop(code_index_state, settings.code_index_refresh_seconds),
             )
         _ci_provider = get_code_index_state
         app.dependency_overrides[_ci_provider] = lambda: code_index_state
@@ -464,7 +464,8 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
 
     @app.exception_handler(InconsistentActiveVersionError)
     async def _inconsistent_version_handler(
-        _req: Request, err: InconsistentActiveVersionError
+        _req: Request,
+        err: InconsistentActiveVersionError,
     ) -> JSONResponse:
         body = {
             "code": "inconsistent_active_version",

@@ -30,7 +30,9 @@ class LuaTypeInferenceEngine:
         self.project_name = project_name
 
     def build_local_variable_type_map(
-        self, caller_node: TreeSitterNodeProtocol, module_qn: str
+        self,
+        caller_node: TreeSitterNodeProtocol,
+        module_qn: str,
     ) -> dict[str, str]:
         local_var_types: dict[str, str] = {}
         stack: list[TreeSitterNodeProtocol] = [caller_node]
@@ -79,7 +81,8 @@ class LuaTypeInferenceEngine:
         return names
 
     def _extract_function_calls(
-        self, assignment: TreeSitterNodeProtocol
+        self,
+        assignment: TreeSitterNodeProtocol,
     ) -> list[TreeSitterNodeProtocol]:
         calls: list[TreeSitterNodeProtocol] = []
         for child in assignment.children:
@@ -89,7 +92,9 @@ class LuaTypeInferenceEngine:
         return calls
 
     def _infer_lua_variable_type_from_value(
-        self, value_node: TreeSitterNodeProtocol, module_qn: str
+        self,
+        value_node: TreeSitterNodeProtocol,
+        module_qn: str,
     ) -> str | None:
         if value_node.type == cs.TS_LUA_FUNCTION_CALL:
             for child in value_node.children:

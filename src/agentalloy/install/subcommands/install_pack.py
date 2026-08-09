@@ -392,7 +392,7 @@ _VALID_PACK_TIERS = frozenset(
         "domain",  # application-layer domains (agents, ui-design, data-engineering)
         "protocol",  # wire-format / integration (graphql, webhooks, websockets)
         "workflow",  # SDD pipeline workflows (spec → design → plan → testgen → build → verify → deliver)
-    }
+    },
 )
 
 
@@ -414,12 +414,12 @@ def _read_pack_manifest(pack_dir: Path) -> tuple[dict[str, Any] | None, list[str
     tier = manifest.get("tier")
     if tier is None:
         errors.append(
-            f"pack.yaml missing required field: tier (must be one of {sorted(_VALID_PACK_TIERS)})"
+            f"pack.yaml missing required field: tier (must be one of {sorted(_VALID_PACK_TIERS)})",
         )
     elif tier not in _VALID_PACK_TIERS:
         errors.append(
             f"pack.yaml 'tier' value '{tier}' is not valid "
-            f"(must be one of {sorted(_VALID_PACK_TIERS)})"
+            f"(must be one of {sorted(_VALID_PACK_TIERS)})",
         )
 
     skills = manifest.get("skills") or []
@@ -455,14 +455,14 @@ def _read_pack_manifest(pack_dir: Path) -> tuple[dict[str, Any] | None, list[str
         if claimed_id and actual_id and str(claimed_id) != str(actual_id):
             errors.append(
                 f"skills[{i}] skill_id drift: manifest says '{claimed_id}', "
-                f"file '{fname}' has '{actual_id}'"
+                f"file '{fname}' has '{actual_id}'",
             )
         if isinstance(claimed_count, int):
             actual_count = len(data.get("fragments") or [])
             if actual_count != claimed_count:
                 errors.append(
                     f"skills[{i}] fragment_count drift: manifest says "
-                    f"{claimed_count}, file '{fname}' has {actual_count}"
+                    f"{claimed_count}, file '{fname}' has {actual_count}",
                 )
 
     return manifest, errors
@@ -668,7 +668,9 @@ def install_local_pack(
 
     # --- Gate 1: Schema + vocabulary validation (+ lint, when strict) ---
     schema_result: PackValidationResult = validate_pack_skills(
-        pack_dir, skills_entries, strict=strict
+        pack_dir,
+        skills_entries,
+        strict=strict,
     )
     if not schema_result.ok:
         return {
@@ -711,7 +713,9 @@ def install_local_pack(
     else:
         require_independent = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW") == "1"
         review_result = validate_review_verdicts(
-            pack_dir, skills_entries, require_independent=require_independent
+            pack_dir,
+            skills_entries,
+            require_independent=require_independent,
         )
         if not review_result.ok:
             return {
@@ -797,8 +801,12 @@ def install_local_pack(
         # T1: pass no_restart so ingest subprocess suppresses its own stop/restart.
         ingest_results.append(
             _ingest_yaml(
-                yaml_path, root, no_restart=no_restart, force=force_reingest, strict=strict
-            )
+                yaml_path,
+                root,
+                no_restart=no_restart,
+                force=force_reingest,
+                strict=strict,
+            ),
         )
 
     new_count = sum(1 for r in ingest_results if r["outcome"] == "ingested")
@@ -921,7 +929,7 @@ def install_local_pack(
             "skills_deprecated_updated": deprecated_updated_count,
             "ingest_failures": 0,
             "installed_at": int(time.time()),
-        }
+        },
     )
     state["installed_packs"] = packs
     install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
@@ -947,7 +955,9 @@ def install_local_pack(
 
         sink: dict[str, Any] = {}
         dedup_exit_code = run_bulk_reembed(
-            no_restart=no_restart, allow_duplicates=allow_duplicates, result_sink=sink
+            no_restart=no_restart,
+            allow_duplicates=allow_duplicates,
+            result_sink=sink,
         )
         dedup_hard_matches = sink.get("dedup_hard", [])
         dedup_soft_matches = sink.get("dedup_soft", [])
@@ -1282,7 +1292,7 @@ def install_pack(
             "skills_deprecated_updated": deprecated_updated_count,
             "ingest_failures": 0,
             "installed_at": int(time.time()),
-        }
+        },
     )
     state["installed_packs"] = packs
     install_state.record_step(state, STEP_NAME, extra={"pack": name})
@@ -1421,17 +1431,17 @@ def _render_human(result: dict[str, Any]) -> None:
         for match in result.get("dedup_hard_matches") or []:
             print_rich(
                 f"  HARD duplicate: '{match.get('incoming_skill_id')}' ~ "
-                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})"
+                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})",
             )
         for match in result.get("dedup_soft_matches") or []:
             print_rich(
                 f"  soft near-duplicate: '{match.get('incoming_skill_id')}' ~ "
-                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})"
+                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})",
             )
         if dedup_exit_code != 0:
             print_rich(
                 "  WARN: bulk reembed exited non-zero (dedup or embedding failure); "
-                "run `agentalloy reembed` to retry or inspect stderr for hard-duplicate matches."
+                "run `agentalloy reembed` to retry or inspect stderr for hard-duplicate matches.",
             )
     if failures:
         first_fail = next(

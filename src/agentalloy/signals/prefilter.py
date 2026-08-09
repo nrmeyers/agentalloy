@@ -274,6 +274,7 @@ def check_prefilter(
         signal_keywords: from workflow_skill.signal_keywords
         gate_spec: the exit_gates dict
         ctx: current predicate context
+
     """
     # Manual override via env var
     if os.environ.get("AGENTALLOY_FORCE_CHECK") == "1":

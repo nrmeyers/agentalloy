@@ -242,7 +242,8 @@ def score_from_logprobs(top_logprobs: dict[str, float]) -> float:
 def _parse_completion_logprobs(data: Any) -> dict[str, float]:
     """Extract the first generated token's {token: logprob} map from a
     llama.cpp /v1/completions response. Raises ValueError on any shape it does
-    not recognise — the caller converts that into a fail-open score."""
+    not recognise — the caller converts that into a fail-open score.
+    """
     if not isinstance(data, dict):
         raise ValueError(f"completion response not an object: {data!r}")
     choices: Any = data.get("choices")
@@ -280,7 +281,8 @@ def _parse_completion_logprobs(data: Any) -> dict[str, float]:
 class ScoreResult:
     """Outcome of scoring a candidate batch. ``scores`` aligns 1:1 with the
     input documents when ``outcome is HIT``; otherwise it is empty and the
-    caller falls through to deterministic selection."""
+    caller falls through to deterministic selection.
+    """
 
     outcome: LMAssistOutcome
     scores: list[float]
@@ -315,7 +317,8 @@ class FragmentScorer:
         # documents in a single batch.  Actual concurrency to the reranker server
         # is independently bounded by the shared semaphore (_rerank_semaphore).
         self._pool = ThreadPoolExecutor(
-            max_workers=max_candidates(), thread_name_prefix="lm-assist"
+            max_workers=max_candidates(),
+            thread_name_prefix="lm-assist",
         )
 
     def _score_one(self, task: str, document: str) -> float:
@@ -328,7 +331,9 @@ class FragmentScorer:
                 # Truncate to the runtime doc cap before prompt assembly — a prefill
                 # bound that keeps fat-corpus outliers inside the budget.
                 "prompt": build_prompt(
-                    task, document[: self._config.doc_cap_chars], instruct=self._config.instruct
+                    task,
+                    document[: self._config.doc_cap_chars],
+                    instruct=self._config.instruct,
                 ),
                 "max_tokens": 1,
                 "temperature": 0.0,
@@ -402,7 +407,7 @@ _recent_outcomes: deque[LMAssistOutcome] = deque(maxlen=_OUTCOME_WINDOW)
 # Outcomes that signal an unhealthy reranker: a timeout, a hard error, or a
 # latch-open DISABLED (the breaker tripped after repeated failures).
 _BAD_OUTCOMES = frozenset(
-    {LMAssistOutcome.TIMEOUT, LMAssistOutcome.ERROR, LMAssistOutcome.DISABLED}
+    {LMAssistOutcome.TIMEOUT, LMAssistOutcome.ERROR, LMAssistOutcome.DISABLED},
 )
 
 
@@ -420,7 +425,8 @@ def reset_outcome_window() -> None:
 def reranker_status() -> str | None:
     """Detail string when the recent Stage B window is timeout/error-dominant,
     else None. Returns None when Stage B is disabled (no real attempts ever run)
-    or the window is empty. Read-only — never makes a live reranker call."""
+    or the window is empty. Read-only — never makes a live reranker call.
+    """
     if not load_config().enabled:
         return None
     with _outcomes_lock:
@@ -446,7 +452,8 @@ _cache_built = False
 
 def _build_scorer_from_env() -> FragmentScorer | None:
     """Construct the scorer, or None when Stage B is disabled / mis-configured.
-    Never raises — a build failure logs one warning and disables the stage."""
+    Never raises — a build failure logs one warning and disables the stage.
+    """
     config = load_config()
     if not config.enabled:
         return None

@@ -117,12 +117,16 @@ class TypeInferenceEngine:
         return self._python_type_inference
 
     def build_local_variable_type_map(
-        self, caller_node: ASTNode, module_qn: str, language: cs.SupportedLanguage
+        self,
+        caller_node: ASTNode,
+        module_qn: str,
+        language: cs.SupportedLanguage,
     ) -> dict[str, str]:
         match language:
             case cs.SupportedLanguage.PYTHON:
                 return self.python_type_inference.build_local_variable_type_map(
-                    caller_node, module_qn
+                    caller_node,
+                    module_qn,
                 )
             case cs.SupportedLanguage.JS | cs.SupportedLanguage.TS | cs.SupportedLanguage.TSX:
                 return self.js_type_inference.build_local_variable_type_map(caller_node, module_qn)
@@ -135,7 +139,10 @@ class TypeInferenceEngine:
 
     def _resolve_class_name(self, class_name: str, module_qn: str) -> str | None:
         return resolve_class_name(
-            class_name, module_qn, self.import_processor, self.function_registry
+            class_name,
+            module_qn,
+            self.import_processor,
+            self.function_registry,
         )
 
     def _build_java_variable_type_map(self, caller_node: ASTNode, module_qn: str) -> dict[str, str]:

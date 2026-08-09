@@ -197,7 +197,11 @@ def _render_rerank_server(result: dict[str, Any]) -> None:
 
 
 def _start_llama_server(
-    model: str, ngl: int, timeout: float, args: argparse.Namespace, gpu_device: int | None = None
+    model: str,
+    ngl: int,
+    timeout: float,
+    args: argparse.Namespace,
+    gpu_device: int | None = None,
 ) -> int:
     model_path = install_state.user_data_dir() / "models" / model
     if not model_path.exists():

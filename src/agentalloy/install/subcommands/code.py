@@ -63,7 +63,8 @@ def _service_down_error(port: int, exc: Exception) -> int:
     print(f"ERROR: Cannot reach the agentalloy service on port {port}.", file=sys.stderr)
     print(f"CAUSE: {exc}", file=sys.stderr)
     print(
-        "FIX:   Start it with `agentalloy server-start` (or `agentalloy serve`).", file=sys.stderr
+        "FIX:   Start it with `agentalloy server-start` (or `agentalloy serve`).",
+        file=sys.stderr,
     )
     return 1
 
@@ -72,7 +73,8 @@ def _module_state_error(state: str | None) -> int:
     """ERROR/CAUSE/FIX for a reachable service whose code_index module is off."""
     if state == "unavailable":
         print(
-            "ERROR: The code-index module failed to load in the running service.", file=sys.stderr
+            "ERROR: The code-index module failed to load in the running service.",
+            file=sys.stderr,
         )
         print(
             "CAUSE: CODE_INDEX_ENABLED is on but the code-index dependencies are missing.",
@@ -181,7 +183,8 @@ def _http_error(exc: httpx.HTTPStatusError, *, slug: str | None = None) -> int:
     print(f"ERROR: Service returned {exc.response.status_code}.", file=sys.stderr)
     print(f"CAUSE: {detail}", file=sys.stderr)
     print(
-        "FIX:   See the cause above; `agentalloy code status` shows indexed repos.", file=sys.stderr
+        "FIX:   See the cause above; `agentalloy code status` shows indexed repos.",
+        file=sys.stderr,
     )
     return 1
 
@@ -235,7 +238,8 @@ def _run_index(args: argparse.Namespace) -> int:
 def _warn_governs(job: dict[str, Any]) -> None:
     """LOUD stderr warning (#527 B) when a job's GOVERNS-edge delta looks bad:
     more edges dropped than written, or any doc flagged suspicious. Silent
-    otherwise — most jobs never touch a decision doc."""
+    otherwise — most jobs never touch a decision doc.
+    """
     written = int(job.get("governs_written") or 0)
     dropped = int(job.get("governs_dropped") or 0)
     suspicious = job.get("governs_suspicious_docs") or []
@@ -279,7 +283,7 @@ def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
         if not as_json:
             print(
                 f"Indexed {job.get('slug')}: {job.get('symbol_count')} symbols, "
-                f"{job.get('edge_count')} edges, {job.get('embedding_count')} embeddings."
+                f"{job.get('edge_count')} edges, {job.get('embedding_count')} embeddings.",
             )
         _warn_governs(job)
         return 0
@@ -371,7 +375,7 @@ def _print_migrate_summary(body: dict[str, Any], *, quiet: bool) -> None:
     print(
         f"{prefix}: {total} registered repos — {body.get('current', 0)} already current, "
         f"{legacy} legacy, {pruned} pruned (gone long enough to be a deletion), "
-        f"{unreachable} unreachable (left alone), {busy} busy."
+        f"{unreachable} unreachable (left alone), {busy} busy.",
     )
     entries_raw = body.get("entries")
     entries: list[dict[str, Any]] = entries_raw if isinstance(entries_raw, list) else []
@@ -470,7 +474,7 @@ def _run_status(args: argparse.Namespace) -> int:
     for j in active:
         print(
             f"  {j.get('id')}  {j.get('slug')}  [{j.get('phase') or j.get('state')}] "
-            f"{float(j.get('progress') or 0.0):.1f}%"
+            f"{float(j.get('progress') or 0.0):.1f}%",
         )
     if recent_failures:
         print(f"Recent failures ({len(recent_failures)}):")
@@ -479,7 +483,7 @@ def _run_status(args: argparse.Namespace) -> int:
             first = err[0] if err else "(no error recorded)"
             print(
                 f"  {j.get('slug')}  [{j.get('state')} @ {j.get('phase') or '?'} "
-                f"{float(j.get('progress') or 0.0):.0f}%]  {first}"
+                f"{float(j.get('progress') or 0.0):.0f}%]  {first}",
             )
             print(f"    re-run: `agentalloy code index --force`  (job {j.get('id')})")
     return 0
@@ -512,7 +516,7 @@ def _run_search(args: argparse.Namespace) -> int:
         loc = f"{h.get('file_path')}:{h.get('start_line')}" if h.get("file_path") else "?"
         print(
             f"{i:2}. {h.get('qualified_name')}  [{h.get('kind')}]  {loc}  "
-            f"score={float(h.get('score') or 0.0):.3f}"
+            f"score={float(h.get('score') or 0.0):.3f}",
         )
     return 0
 
@@ -609,7 +613,7 @@ def _run_bundle(args: argparse.Namespace) -> int:
     items = bundle.get("items") or []
     print(
         f"Bundle for {bundle.get('repo')}: {len(items)} item(s), "
-        f"{bundle.get('total_chars')}/{bundle.get('budget_chars')} chars"
+        f"{bundle.get('total_chars')}/{bundle.get('budget_chars')} chars",
     )
     for it in items:
         loc = (
@@ -787,7 +791,7 @@ def _run_watch_toggle(args: argparse.Namespace, *, enabled: bool) -> int:
         elif not body.get("master_switch"):
             print(
                 f"Watch enrollment recorded for {slug}. The master switch "
-                "(CODE_INDEX_WATCH) is off, so no observer runs until it is enabled."
+                "(CODE_INDEX_WATCH) is off, so no observer runs until it is enabled.",
             )
         else:
             print(f"Watch enrollment recorded for {slug} (observer not started).")
@@ -886,7 +890,9 @@ def add_parser(
     index_p = sub.add_parser("index", help="Index a repository (async job on the service).")
     index_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
     index_p.add_argument(
-        "--force", action="store_true", help="Full rebuild, ignore content hashes."
+        "--force",
+        action="store_true",
+        help="Full rebuild, ignore content hashes.",
     )
     index_p.add_argument("--wait", action="store_true", help="Poll the job to completion.")
     index_p.add_argument(
@@ -930,7 +936,10 @@ def add_parser(
     bundle_p = sub.add_parser("bundle", help="Assemble a budgeted code context for a task.")
     bundle_p.add_argument("task", help="Natural-language task description.")
     bundle_p.add_argument(
-        "--budget", type=int, default=24000, help="Character budget (default 24000)."
+        "--budget",
+        type=int,
+        default=24000,
+        help="Character budget (default 24000).",
     )
     _add_common(bundle_p, repo_flag=True)
     bundle_p.set_defaults(func=_run_bundle)
@@ -946,7 +955,9 @@ def add_parser(
         help="Migrate all registered repos to the per-checkout store layout (upgrade runs this).",
     )
     migrate_p.add_argument(
-        "--dry-run", action="store_true", help="Classify every repo but change nothing."
+        "--dry-run",
+        action="store_true",
+        help="Classify every repo but change nothing.",
     )
     migrate_p.add_argument(
         "--wait",
@@ -967,28 +978,33 @@ def add_parser(
     migrate_p.set_defaults(func=_run_migrate_layout)
 
     enable_module_p = sub.add_parser(
-        "enable", help="Turn the code-index module on (CODE_INDEX_ENABLED=1)."
+        "enable",
+        help="Turn the code-index module on (CODE_INDEX_ENABLED=1).",
     )
     enable_module_p.set_defaults(func=_run_enable)
     disable_module_p = sub.add_parser(
-        "disable", help="Turn the code-index module off (CODE_INDEX_ENABLED=0)."
+        "disable",
+        help="Turn the code-index module off (CODE_INDEX_ENABLED=0).",
     )
     disable_module_p.set_defaults(func=_run_disable)
 
     watch_p = sub.add_parser(
-        "watch", help="Per-repo watch enrollment + the CODE_INDEX_WATCH master switch."
+        "watch",
+        help="Per-repo watch enrollment + the CODE_INDEX_WATCH master switch.",
     )
     watch_sub: argparse._SubParsersAction[argparse.ArgumentParser] = watch_p.add_subparsers(
-        dest="watch_action"
+        dest="watch_action",
     )
     enable_p = watch_sub.add_parser(
-        "enable", help="Enroll a repo for watching (observer starts if the master switch is on)."
+        "enable",
+        help="Enroll a repo for watching (observer starts if the master switch is on).",
     )
     enable_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
     _add_common(enable_p)
     enable_p.set_defaults(func=_run_watch_enable)
     disable_p = watch_sub.add_parser(
-        "disable", help="Unenroll a repo from watching (stops its observer immediately)."
+        "disable",
+        help="Unenroll a repo from watching (stops its observer immediately).",
     )
     disable_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
     _add_common(disable_p)

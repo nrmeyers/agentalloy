@@ -36,7 +36,8 @@ def _sha256(content: str) -> str:
 def _load_config(path: Path) -> dict[str, Any]:
     """Load existing openclaw.json or return an empty structure. Fail loud on
     unparseable content — overwriting a broken-but-real config would silently
-    destroy it."""
+    destroy it.
+    """
     if not path.exists():
         return {}
     try:
@@ -74,7 +75,7 @@ def render_config(port: int, existing: dict[str, Any] | None = None) -> dict[str
                 "name": "AgentAlloy Proxy",
                 "contextWindow": 128000,
                 "maxTokens": 8192,
-            }
+            },
         ],
     }
     models["providers"] = providers
@@ -109,6 +110,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     _ = root, force
     config_path = Path.home() / ".openclaw" / "openclaw.json"
@@ -134,5 +136,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(content),
             original_content=original_content,
             marker_key="openclaw.models.providers.agentalloy",
-        )
+        ),
     ]

@@ -68,7 +68,8 @@ def _first_match(pattern: str, text: str, group: int = 1) -> str | None:
 
 def _detect_os() -> dict[str, Any]:
     kind = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}.get(
-        platform.system(), platform.system().lower()
+        platform.system(),
+        platform.system().lower(),
     )
     result: dict[str, Any] = {
         "kind": kind,
@@ -209,7 +210,8 @@ def _detect_memory_gb() -> int | None:
 def _detect_disk_free_gb() -> int | None:
     """Return free disk on the root filesystem in GB. Uses stdlib so it doesn't
     parse `df` output (locale + multi-line + LVM quirks made the previous parser
-    fragile)."""
+    fragile).
+    """
     import shutil as _shutil
 
     try:
@@ -241,7 +243,7 @@ def _detect_gpu_linux() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                 "nvidia-smi",
                 "--query-gpu=memory.total",
                 "--format=csv,noheader,nounits",
-            ]
+            ],
         )
         if mem:
             for i, line in enumerate(mem.strip().splitlines()):
@@ -394,7 +396,7 @@ def _detect_cuda() -> str | None:
             "nvidia-smi",
             "--query-gpu=driver_version",
             "--format=csv,noheader",
-        ]
+        ],
     )
     if raw:
         return raw.splitlines()[0].strip() or None

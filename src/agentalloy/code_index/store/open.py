@@ -55,7 +55,10 @@ class CodeIndexPaths:
 
 
 def code_index_paths(
-    settings: Settings | None, slug: str, *, repo_path: str | None = None
+    settings: Settings | None,
+    slug: str,
+    *,
+    repo_path: str | None = None,
 ) -> CodeIndexPaths:
     """Resolve on-disk paths for ``slug`` (+ optional ``repo_path``).
 

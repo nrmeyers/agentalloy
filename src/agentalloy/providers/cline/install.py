@@ -40,7 +40,8 @@ def _sha256(content: str) -> str:
 
 def providers_json_path(data_dir: Path | None = None) -> Path:
     """Cline's provider store (``--data-dir`` layout: <dir>/settings/providers.json;
-    default user scope nests under ``~/.cline/data/``)."""
+    default user scope nests under ``~/.cline/data/``).
+    """
     if data_dir is not None:
         return data_dir / "settings" / "providers.json"
     return Path.home() / ".cline" / "data" / "settings" / "providers.json"
@@ -166,6 +167,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     Returns:
         List of WireRecord describing files written.
+
     """
     _ = root, force
     path = providers_json_path()
@@ -202,5 +204,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             content_sha256=_sha256(content),
             original_content=original_content,
             marker_key="cline.providers.openai-compatible",
-        )
+        ),
     ]

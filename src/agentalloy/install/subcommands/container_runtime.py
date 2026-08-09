@@ -73,7 +73,8 @@ def _runtime_is_functional(binary: str) -> bool:
 
 def _detect_functional_runtimes() -> list[str]:
     """Runtimes that are both present on PATH and functional, in preference
-    order (podman first, docker fallback)."""
+    order (podman first, docker fallback).
+    """
     return [
         candidate
         for candidate in ("podman", "docker")
@@ -139,6 +140,7 @@ def _pull_image(
     -------
     int
         Exit code (0 on success).
+
     """
     image = image_ref or _DEFAULT_IMAGE
 
@@ -217,14 +219,14 @@ def _pull_image(
             _print(f"  [red]Failed to pull image (exit {exc.returncode})[/red]")
             _print(
                 "  [dim]Remediation: Check network connectivity to ghcr.io, "
-                "or use --image-path for offline mode.[/dim]"
+                "or use --image-path for offline mode.[/dim]",
             )
             return exc.returncode
         except subprocess.TimeoutExpired:
             _print("  [red]Image pull timed out after 1500s[/red]")
             _print(
                 "  [dim]Remediation: Check network connectivity, "
-                "or use --image-path for offline mode.[/dim]"
+                "or use --image-path for offline mode.[/dim]",
             )
             return 1
 
@@ -248,6 +250,7 @@ def _ensure_volume(runtime: str) -> None:
     ------
     subprocess.CalledProcessError
         If the volume creation fails for a reason other than "already exists".
+
     """
     try:
         subprocess.run(
@@ -304,6 +307,7 @@ def _generate_entrypoint(packs: str) -> Path:
     -------
     Path
         Path to the generated entrypoint script (in the system temp directory).
+
     """
     script = _build_entrypoint_script(packs)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sh")  # noqa: SIM115 (file must persist for container mount)
@@ -569,7 +573,7 @@ def _build_entrypoint_script(packs: str) -> str:
                 "        INGESTED=$((INGESTED + 1))",
                 "    done",
                 '    write_progress "" "$INGESTED" "$TOTAL"',
-            ]
+            ],
         )
     else:
         # No explicit packs baked in — check the AGENTALLOY_PACKS env var
@@ -609,7 +613,7 @@ def _build_entrypoint_script(packs: str) -> str:
                 '        echo ">> No explicit packs — installing always-on packs"',
                 "        uv run agentalloy install-packs --no-restart",
                 "    fi",
-            ]
+            ],
         )
 
     lines.extend(
@@ -638,7 +642,7 @@ def _build_entrypoint_script(packs: str) -> str:
             "",
             "# Block on uvicorn — its exit is the container's exit.",
             "wait $UVICORN_PID",
-        ]
+        ],
     )
 
     return "\n".join(lines) + "\n"
@@ -653,6 +657,7 @@ def _cleanup_temp_entrypoint(entrypoint: Path) -> None:
     ----------
     entrypoint : Path
         Path to the entrypoint script to remove.
+
     """
     if entrypoint.exists():
         entrypoint.unlink()
@@ -732,6 +737,7 @@ def _run_container(
     -------
     int
         Exit code from the runtime command.
+
     """
     # mint=True always yields a value; assert keeps the env dict str-typed and
     # guarantees the container never boots with an empty ingest secret.
@@ -776,18 +782,18 @@ def _run_container(
         _print(
             "  [red]Projects root resolved to '/' — refusing to bind-mount the whole "
             "filesystem. Set AGENTALLOY_PROJECTS_ROOT to your code root (e.g. ~/dev); "
-            "phase state will be unreadable until you do.[/red]"
+            "phase state will be unreadable until you do.[/red]",
         )
     else:
         projects_mount = ["-v", f"{root}:{root}:rw"]
         _print(
             f"  [dim]Mounting projects root {root} (rw) so the proxy can read "
-            f".agentalloy/ phase state.[/dim]"
+            f".agentalloy/ phase state.[/dim]",
         )
         if root == Path(os.path.realpath(Path.home())):
             _print(
                 "  [dim]Tip: set AGENTALLOY_PROJECTS_ROOT to narrow the exposed tree "
-                "(e.g. ~/dev) instead of all of $HOME.[/dim]"
+                "(e.g. ~/dev) instead of all of $HOME.[/dim]",
             )
 
     image = image_ref or _DEFAULT_IMAGE
@@ -856,7 +862,7 @@ def _run_container(
                 f"  [red]Port bind failed — another container may be publishing "
                 f"port {port}.[/red]\n"
                 f"  [dim]Run `{runtime} ps -a` and remove conflicting containers, "
-                f"then re-run setup.[/dim]"
+                f"then re-run setup.[/dim]",
             )
         return exc.returncode
     except subprocess.TimeoutExpired:
@@ -891,6 +897,7 @@ def _list_conflicting_containers(
         Exact container name to search for. Default ``"agentalloy"``.
     port : int
         Host-side port to search for. Default ``47950``.
+
     """
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -1092,6 +1099,7 @@ def _wait_for_readiness(
     stream_logs : bool
         If True, stream container logs (including the GGUF model-download
         output) to the user during the polling loop. Defaults to True.
+
     """
     import json as _json
     import time as _time
@@ -1147,7 +1155,7 @@ def _wait_for_readiness(
             if state in ("exited", "dead"):
                 _print(
                     f"  [red]Container '{container_name}' {state} during bootstrap — "
-                    "aborting readiness wait.[/red]"
+                    "aborting readiness wait.[/red]",
                 )
                 tail = _tail_container_logs(runtime, container_name, tail_lines=15)
                 if tail:
@@ -1190,7 +1198,7 @@ def _wait_for_readiness(
                         "progress": (body.get("progress") or {}) if body is not None else {},
                         "extra": extra,
                         "elapsed": elapsed,
-                    }
+                    },
                 )
 
         if status == "ready":

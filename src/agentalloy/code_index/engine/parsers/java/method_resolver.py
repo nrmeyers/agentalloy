@@ -34,7 +34,10 @@ class JavaMethodResolverMixin:
 
     @abstractmethod
     def _rank_module_candidates(
-        self, candidates: list[str], class_qn: str, current_module_qn: str | None
+        self,
+        candidates: list[str],
+        class_qn: str,
+        current_module_qn: str | None,
     ) -> list[str]: ...
 
     @abstractmethod
@@ -53,7 +56,10 @@ class JavaMethodResolverMixin:
     def _lookup_variable_type(self, var_name: str, module_qn: str) -> str | None: ...
 
     def _resolve_java_object_type(
-        self, object_ref: str, local_var_types: dict[str, str], module_qn: str
+        self,
+        object_ref: str,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> str | None:
         if object_ref in local_var_types:
             return local_var_types[object_ref]
@@ -96,7 +102,9 @@ class JavaMethodResolverMixin:
         return parent_classes[0] if parent_classes else None
 
     def _resolve_static_or_local_method(
-        self, method_name: str, module_qn: str
+        self,
+        method_name: str,
+        module_qn: str,
     ) -> tuple[str, str] | None:
         return next(
             (
@@ -109,12 +117,17 @@ class JavaMethodResolverMixin:
         )
 
     def _resolve_instance_method(
-        self, object_type: str, method_name: str, module_qn: str
+        self,
+        object_type: str,
+        method_name: str,
+        module_qn: str,
     ) -> tuple[str, str] | None:
         resolved_type = self._resolve_java_type_name(object_type, module_qn)
 
         if method_result := self._find_method_with_any_signature(
-            resolved_type, method_name, module_qn
+            resolved_type,
+            method_name,
+            module_qn,
         ):
             return method_result
 
@@ -124,7 +137,10 @@ class JavaMethodResolverMixin:
         return self._find_interface_method(resolved_type, method_name, module_qn)
 
     def _find_method_with_any_signature(
-        self, class_qn: str, method_name: str, current_module_qn: str | None = None
+        self,
+        class_qn: str,
+        method_name: str,
+        current_module_qn: str | None = None,
     ) -> tuple[str, str] | None:
         if class_qn:
             if result := self._search_method_in_class(class_qn, method_name):
@@ -132,7 +148,9 @@ class JavaMethodResolverMixin:
 
         if class_qn and not class_qn.startswith(self.project_name):
             return self._search_method_in_alternate_modules(
-                class_qn, method_name, current_module_qn
+                class_qn,
+                method_name,
+                current_module_qn,
             )
 
         return None
@@ -150,16 +168,21 @@ class JavaMethodResolverMixin:
         return None
 
     def _search_method_in_alternate_modules(
-        self, class_qn: str, method_name: str, current_module_qn: str | None
+        self,
+        class_qn: str,
+        method_name: str,
+        current_module_qn: str | None,
     ) -> tuple[str, str] | None:
         suffixes = class_qn.split(cs.SEPARATOR_DOT)
         lookup_keys = [cs.SEPARATOR_DOT.join(suffixes[i:]) for i in range(len(suffixes))] or [
-            class_qn
+            class_qn,
         ]
 
         candidate_modules = self._collect_candidate_modules(lookup_keys)
         ranked_candidates = self._rank_module_candidates(
-            candidate_modules, class_qn, current_module_qn
+            candidate_modules,
+            class_qn,
+            current_module_qn,
         )
 
         simple_class_name = class_qn.split(cs.SEPARATOR_DOT)[-1]
@@ -196,24 +219,34 @@ class JavaMethodResolverMixin:
         guard_name=cs.GUARD_INHERITED_METHOD,
     )
     def _find_inherited_method(
-        self, class_qn: str, method_name: str, module_qn: str
+        self,
+        class_qn: str,
+        method_name: str,
+        module_qn: str,
     ) -> tuple[str, str] | None:
         if not (superclass_qn := self._get_superclass_name(class_qn)):
             return None
 
         if method_result := self._find_method_with_any_signature(
-            superclass_qn, method_name, module_qn
+            superclass_qn,
+            method_name,
+            module_qn,
         ):
             return method_result
 
         return self._find_inherited_method(superclass_qn, method_name, module_qn)
 
     def _find_interface_method(
-        self, class_qn: str, method_name: str, module_qn: str
+        self,
+        class_qn: str,
+        method_name: str,
+        module_qn: str,
     ) -> tuple[str, str] | None:
         for interface_qn in self._get_implemented_interfaces(class_qn):
             if method_result := self._find_method_with_any_signature(
-                interface_qn, method_name, module_qn
+                interface_qn,
+                method_name,
+                module_qn,
             ):
                 return method_result
 
@@ -255,34 +288,47 @@ class JavaMethodResolverMixin:
             return None
 
         return self._find_method_return_type_in_ast(
-            ctx.root_node, ctx.target_class_name, method_name, ctx.module_qn
+            ctx.root_node,
+            ctx.target_class_name,
+            method_name,
+            ctx.module_qn,
         )
 
     def _find_method_return_type_in_ast(
-        self, node: ASTNode, class_name: str, method_name: str, module_qn: str
+        self,
+        node: ASTNode,
+        class_name: str,
+        method_name: str,
+        module_qn: str,
     ) -> str | None:
         if node.type == cs.TS_CLASS_DECLARATION:
             if (name_node := node.child_by_field_name(cs.KEY_NAME)) and safe_decode_text(
-                name_node
+                name_node,
             ) == class_name:
                 if body_node := node.child_by_field_name(cs.FIELD_BODY):
                     return self._search_methods_in_class_body(body_node, method_name, module_qn)
 
         for child in node.children:
             if result := self._find_method_return_type_in_ast(
-                child, class_name, method_name, module_qn
+                child,
+                class_name,
+                method_name,
+                module_qn,
             ):
                 return result
 
         return None
 
     def _search_methods_in_class_body(
-        self, body_node: ASTNode, method_name: str, module_qn: str
+        self,
+        body_node: ASTNode,
+        method_name: str,
+        module_qn: str,
     ) -> str | None:
         for child in body_node.children:
             if child.type == cs.TS_METHOD_DECLARATION:
                 if (name_node := child.child_by_field_name(cs.KEY_NAME)) and safe_decode_text(
-                    name_node
+                    name_node,
                 ) == method_name:
                     if (type_node := child.child_by_field_name(cs.KEY_TYPE)) and (
                         return_type := safe_decode_text(type_node)
@@ -315,7 +361,10 @@ class JavaMethodResolverMixin:
         return None
 
     def _do_resolve_java_method_call(
-        self, call_node: ASTNode, local_var_types: dict[str, str], module_qn: str
+        self,
+        call_node: ASTNode,
+        local_var_types: dict[str, str],
+        module_qn: str,
     ) -> tuple[str, str] | None:
         if call_node.type != cs.TS_METHOD_INVOCATION:
             return None
@@ -345,7 +394,9 @@ class JavaMethodResolverMixin:
         logger.debug(ls.JAVA_RESOLVING_OBJ_TYPE, object=object_ref)
         if not (
             object_type := self._resolve_java_object_type(
-                str(object_ref), local_var_types, module_qn
+                str(object_ref),
+                local_var_types,
+                module_qn,
             )
         ):
             logger.debug(ls.JAVA_OBJ_TYPE_UNKNOWN, object=object_ref)

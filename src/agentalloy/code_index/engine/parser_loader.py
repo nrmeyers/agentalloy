@@ -78,7 +78,9 @@ def _try_load_from_submodule(lang_name: cs.SupportedLanguage) -> LanguageLoader:
 
 
 def _try_import_language(
-    module_path: str, attr_name: str, lang_name: cs.SupportedLanguage
+    module_path: str,
+    attr_name: str,
+    lang_name: cs.SupportedLanguage,
 ) -> LanguageLoader:
     try:
         module = importlib.import_module(module_path)
@@ -201,7 +203,8 @@ def _get_locals_pattern(lang_name: cs.SupportedLanguage) -> str | None:
 def _build_combined_import_pattern(lang_config: LanguageSpec) -> str:
     import_patterns = _build_query_pattern(lang_config.import_node_types, cs.CAPTURE_IMPORT)
     import_from_patterns = _build_query_pattern(
-        lang_config.import_from_node_types, cs.CAPTURE_IMPORT_FROM
+        lang_config.import_from_node_types,
+        cs.CAPTURE_IMPORT_FROM,
     )
 
     all_patterns: list[str] = []
@@ -234,13 +237,16 @@ def _create_language_queries(
     lang_name: cs.SupportedLanguage,
 ) -> LanguageQueries:
     function_patterns = lang_config.function_query or _build_query_pattern(
-        lang_config.function_node_types, cs.CAPTURE_FUNCTION
+        lang_config.function_node_types,
+        cs.CAPTURE_FUNCTION,
     )
     class_patterns = lang_config.class_query or _build_query_pattern(
-        lang_config.class_node_types, cs.CAPTURE_CLASS
+        lang_config.class_node_types,
+        cs.CAPTURE_CLASS,
     )
     call_patterns = lang_config.call_query or _build_query_pattern(
-        lang_config.call_node_types, cs.CAPTURE_CALL
+        lang_config.call_node_types,
+        cs.CAPTURE_CALL,
     )
     combined_import_patterns = _build_combined_import_pattern(lang_config)
 
@@ -280,7 +286,8 @@ def _process_language(
 
 
 def load_parsers() -> tuple[
-    dict[cs.SupportedLanguage, Parser], dict[cs.SupportedLanguage, LanguageQueries]
+    dict[cs.SupportedLanguage, Parser],
+    dict[cs.SupportedLanguage, LanguageQueries],
 ]:
     parsers: dict[cs.SupportedLanguage, Parser] = {}
     queries: dict[cs.SupportedLanguage, LanguageQueries] = {}

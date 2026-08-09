@@ -160,7 +160,8 @@ class DuckDBCodeGraphStore:
         if not read_only:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn: duckdb.DuckDBPyConnection | None = duckdb.connect(
-            self._db_path, read_only=read_only
+            self._db_path,
+            read_only=read_only,
         )
 
     @property
@@ -191,7 +192,9 @@ class DuckDBCodeGraphStore:
     # -- writes ------------------------------------------------------------------
 
     def replace_all(
-        self, symbols: Iterable[CodeSymbol], edges: Iterable[CodeEdge]
+        self,
+        symbols: Iterable[CodeSymbol],
+        edges: Iterable[CodeEdge],
     ) -> tuple[int, int]:
         """Replace the entire graph (DELETE + INSERT in one transaction).
 
@@ -233,7 +236,8 @@ class DuckDBCodeGraphStore:
 
     def upsert_edges(self, edges: Iterable[CodeEdge]) -> int:
         """Append edges. Edges have no natural key — incremental reindex first
-        clears a file's edges via :meth:`delete_for_files`, then re-inserts."""
+        clears a file's edges via :meth:`delete_for_files`, then re-inserts.
+        """
         rows = [_edge_params(e) for e in edges]
         if not rows:
             return 0
@@ -263,7 +267,8 @@ class DuckDBCodeGraphStore:
         self.conn.execute("BEGIN TRANSACTION")
         try:
             n_sym = self._scalar(
-                f"SELECT count(*) FROM symbols WHERE file_path IN ({placeholders})", paths
+                f"SELECT count(*) FROM symbols WHERE file_path IN ({placeholders})",
+                paths,
             )
             n_edge = self._scalar(
                 f"SELECT count(*) FROM edges WHERE file_path IN ({placeholders}) "
@@ -293,9 +298,11 @@ class DuckDBCodeGraphStore:
         returned unchanged, so an ambiguous abbreviation resolves to a miss rather
         than a wrong pick. LIKE metacharacters in ``fqn`` (notably ``_``, which
         identifiers contain) are escaped so ``proxy_signal`` cannot match
-        ``proxyXsignal``."""
+        ``proxyXsignal``.
+        """
         hit = self.conn.execute(
-            "SELECT 1 FROM symbols WHERE qualified_name = ? LIMIT 1", [fqn]
+            "SELECT 1 FROM symbols WHERE qualified_name = ? LIMIT 1",
+            [fqn],
         ).fetchone()
         if hit is not None:
             return fqn
@@ -337,7 +344,8 @@ class DuckDBCodeGraphStore:
     def callers(self, fqn: str) -> list[CallSite]:
         """Symbols that CALL ``fqn``. ``line`` is the call-site line in the
         caller's file (edge ``line_start``); file resolved via the denormalized
-        ``symbols.file_path`` with the edge's own file as fallback."""
+        ``symbols.file_path`` with the edge's own file as fallback.
+        """
         fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
@@ -387,7 +395,8 @@ class DuckDBCodeGraphStore:
 
         The store's only other symbol getter is exact-PK :meth:`symbol`; this is
         the by-name lookup the decision-linkage tier-2 resolver needs. ``name`` is
-        unindexed, so this is a scan — acceptable at per-repo scale."""
+        unindexed, so this is a scan — acceptable at per-repo scale.
+        """
         rows = self.conn.execute(
             "SELECT qualified_name, kind FROM symbols "
             "WHERE name = ? AND kind != 'MarkdownDoc' ORDER BY qualified_name",
@@ -400,9 +409,10 @@ class DuckDBCodeGraphStore:
 
         Mirrors ``symbols_by_name`` with the ``kind != 'MarkdownDoc'`` guard
         inverted. Cheap: the ``idx_symbols_kind`` index on ``symbols(kind)``
-        makes this a sub-millisecond read at per-repo scale."""
+        makes this a sub-millisecond read at per-repo scale.
+        """
         rows = self.conn.execute(
-            "SELECT qualified_name FROM symbols WHERE kind = 'MarkdownDoc' ORDER BY qualified_name"
+            "SELECT qualified_name FROM symbols WHERE kind = 'MarkdownDoc' ORDER BY qualified_name",
         ).fetchall()
         return [str(r[0]) for r in rows]
 
@@ -410,7 +420,8 @@ class DuckDBCodeGraphStore:
         """Decisions that GOVERN ``fqn`` — the ``callers()`` shape with the
         ``GOVERNS`` edge kind. Reads ``e.src`` (the decision chunk) and hydrates
         its heading (``symbols.name``) and body (``symbols.source_code``). One hop,
-        not transitive: a decision about ``fqn`` does not govern its callees."""
+        not transitive: a decision about ``fqn`` does not govern its callees.
+        """
         fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
@@ -437,7 +448,8 @@ class DuckDBCodeGraphStore:
         """Decisions governing any symbol defined in ``file_paths`` — the
         file-scoped analogue of :meth:`governing_decisions`. One indexed join
         (`edges GOVERNS ⋈ symbols dst ON dst.file_path ∈ files`), `DISTINCT` so a
-        decision governing several touched files appears once."""
+        decision governing several touched files appears once.
+        """
         paths = list(file_paths)
         if not paths:
             return []
@@ -497,7 +509,8 @@ class DuckDBCodeGraphStore:
     def delete_govern_edges_for_doc(self, doc_path: str) -> int:
         """Drop every ``GOVERNS`` edge rooted at ``doc_path`` (edges carry
         ``file_path`` = the decision doc). Doc-granular, so re-derivation matches
-        the file-granularity of :meth:`delete_for_files`. Returns rows removed."""
+        the file-granularity of :meth:`delete_for_files`. Returns rows removed.
+        """
         n = self._scalar(
             "SELECT count(*) FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
             [doc_path],
@@ -514,7 +527,8 @@ class DuckDBCodeGraphStore:
         Used by the derive-first/swap-second guard in ``_index_decisions``
         (#527 A): the caller must know how many edges existed BEFORE deciding
         whether a zero-edge re-derivation is an intentional prune or a
-        suspicious data loss — so this must not delete."""
+        suspicious data loss — so this must not delete.
+        """
         n = self._scalar(
             "SELECT count(*) FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
             [doc_path],
@@ -565,7 +579,11 @@ class DuckDBCodeGraphStore:
         return {str(r[0]): int(r[1]) for r in rows}
 
     def list_files(
-        self, *, prefix: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        *,
+        prefix: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[str]:
         params: list[object] = []
         where = "WHERE file_path IS NOT NULL"
@@ -628,7 +646,7 @@ class DuckDBCodeGraphStore:
 
     def content_hashes(self) -> dict[str, str]:
         rows = self.conn.execute(
-            "SELECT qualified_name, content_hash FROM symbols WHERE content_hash IS NOT NULL"
+            "SELECT qualified_name, content_hash FROM symbols WHERE content_hash IS NOT NULL",
         ).fetchall()
         return {str(r[0]): str(r[1]) for r in rows}
 

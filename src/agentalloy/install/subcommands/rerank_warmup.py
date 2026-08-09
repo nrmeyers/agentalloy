@@ -102,7 +102,8 @@ def _run(args: argparse.Namespace) -> int:
 def _warmup_all_slots(base: str, parallel: int) -> int:
     """Fire ``parallel`` concurrent /v1/completions so every llama.cpp slot
     compiles its graph (graph compilation is per-slot on first inference).
-    Returns the count of successful warmups; failures are best-effort."""
+    Returns the count of successful warmups; failures are best-effort.
+    """
     with ThreadPoolExecutor(max_workers=parallel) as pool:
 
         def _warmup_one_slot(_i: int) -> float | None:
@@ -129,7 +130,8 @@ def _wait_for_health(base: str, timeout_s: float) -> bool:
 def _warmup_request(base: str) -> float | None:
     """Fire one tiny /v1/completions to compile the model graph. Returns elapsed
     seconds on success, None on failure. Failures are non-fatal — the breaker
-    handles persistent reranker problems at compose time."""
+    handles persistent reranker problems at compose time.
+    """
     payload: dict[str, Any] = {
         "prompt": "warmup",
         "max_tokens": 1,

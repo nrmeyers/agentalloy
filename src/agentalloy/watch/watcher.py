@@ -176,7 +176,10 @@ def run_watcher(config: WatchConfig) -> None:
     observer.schedule(handler, str(watch_path), recursive=True)
     observer.start()
     _log.info(
-        "Watching %s for harness=%s profile=%s", watch_path, config.harness, config.profile_name
+        "Watching %s for harness=%s profile=%s",
+        watch_path,
+        config.harness,
+        config.profile_name,
     )
 
     stop_event = threading.Event()

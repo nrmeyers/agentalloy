@@ -109,7 +109,8 @@ class _FailureLatch:
                 # Escalate: first open uses the base cooldown (cycle 0), each
                 # subsequent re-open doubles it up to the cap.
                 self._current_cooldown = min(
-                    self._cooldown * (2**self._open_cycles), _MAX_COOLDOWN_SECONDS
+                    self._cooldown * (2**self._open_cycles),
+                    _MAX_COOLDOWN_SECONDS,
                 )
                 self._open_cycles += 1
                 self._opened_at = time.monotonic()
@@ -123,7 +124,8 @@ class _FailureLatch:
 
 class _LatchedReranker:
     """Wraps a scorer with the failure latch. Returns [] when the latch is open
-    or the scorer fails — the caller treats an empty score list as "no rerank"."""
+    or the scorer fails — the caller treats an empty score list as "no rerank".
+    """
 
     def __init__(self, inner: Reranker) -> None:
         self._inner = inner
@@ -176,7 +178,7 @@ class OnnxReranker:
             raise ImportError(
                 "OnnxReranker requires the optional 'rerank' dependencies. "
                 "Install them with: uv pip install 'agentalloy[rerank]' "
-                "(provides onnxruntime + tokenizers)."
+                "(provides onnxruntime + tokenizers).",
             ) from exc
 
         model_path = os.path.join(self._model_dir, "model.onnx")

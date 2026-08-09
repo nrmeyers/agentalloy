@@ -196,7 +196,9 @@ def adopt_and_wire(
             _write_phase_atomic(root, "intake")
         except Exception:
             logger.debug(
-                "phase seed to intake skipped for %s (store unavailable)", root, exc_info=True
+                "phase seed to intake skipped for %s (store unavailable)",
+                root,
+                exc_info=True,
             )
 
     result = _wire_harness_core(harness, port=port, root=root, scope="repo")

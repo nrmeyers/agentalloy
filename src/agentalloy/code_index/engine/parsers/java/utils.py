@@ -58,7 +58,10 @@ def get_class_context_from_qn(
     target_class_name = parts[-1]
 
     root_node = get_root_node_from_module_qn(
-        module_qn, module_qn_to_file_path, ast_cache, min_parts=1
+        module_qn,
+        module_qn_to_file_path,
+        ast_cache,
+        min_parts=1,
     )
     if root_node is None:
         return None
@@ -164,7 +167,8 @@ def _extract_type_parameters(class_node: ASTNode) -> list[str]:
 
 
 def extract_from_modifiers_node(
-    node: ASTNode, allowed_modifiers: frozenset[str]
+    node: ASTNode,
+    allowed_modifiers: frozenset[str],
 ) -> MethodModifiersAndAnnotations:
     result = MethodModifiersAndAnnotations()
     modifiers_node = next((child for child in node.children if child.type == cs.TS_MODIFIERS), None)

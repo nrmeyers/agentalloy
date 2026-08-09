@@ -314,7 +314,7 @@ def _render_human(result: dict[str, Any]) -> None:
     if result.get("clean_room_excludes"):
         print_rich(
             "  [yellow]Clean-room:[/yellow] global ~/.claude/CLAUDE.md excluded from this repo "
-            "[dim](suppresses ALL global directives here, not just conflicting ones)[/dim]"
+            "[dim](suppresses ALL global directives here, not just conflicting ones)[/dim]",
         )
 
     for ci in result.get("code_index_wiring") or []:
@@ -724,7 +724,9 @@ def _run(args: argparse.Namespace) -> int:
             # live in .claude/settings.json — written together in a single record so
             # unwire reverses them as one and neither captures the other as "original".
             settings_rec = _write_claude_settings(
-                cwd, statusline=(mode == "full"), clean_room=clean_room
+                cwd,
+                statusline=(mode == "full"),
+                clean_room=clean_room,
             )
             if settings_rec is not None:
                 extra.append(settings_rec)
