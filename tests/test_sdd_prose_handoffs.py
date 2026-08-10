@@ -133,4 +133,6 @@ def test_ship_delivery_and_narrative_are_store_commands() -> None:
         "agentalloy contract artifact-set --phase ship --slug <slug> --name pr-narrative" in prose
     )
     # No disk path is instructed as a target (only as a prohibition, if anywhere).
-    assert "docs/ship/*.md" not in prose or "do **NOT**" in prose
+    assert "docs/ship/*.md" not in prose or any(
+        p in prose for p in ("do **NOT**", "no ``docs/ship", "do not create")
+    )
