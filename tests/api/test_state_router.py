@@ -1154,7 +1154,8 @@ class TestArchiveAll:
         body = resp.json()
         assert body["phase"] == "spec"
         assert body["slug"] == "my-task"
-        assert body["name"] == "spec.md"
+        # set_artifact canonicalizes .md -> .artifact for store-backed phases.
+        assert body["name"] == "spec.artifact"
         assert body["content"] == "# The spec"
 
     def test_get_artifact_not_found(
@@ -1172,7 +1173,7 @@ class TestArchiveAll:
         state_store.set_artifact("design", "feat", "plan.md", "active content")
         # Mark it archived (status='archived')
         state_store.conn.execute(
-            "UPDATE sdd_artifact SET status='archived' WHERE slug='feat' AND name='plan.md'"
+            "UPDATE sdd_artifact SET status='archived' WHERE slug='feat' AND name='plan.artifact'"
         )
 
         resp = state_client.get("/state/artifact/design/feat/plan.md")

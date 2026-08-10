@@ -64,11 +64,9 @@ class Contract:
     related_contracts: list[str]
     created_at: datetime | None
     body: str
-    # Workflow route chosen at intake: "full" (spec→design→build→qa→ship) or
-    # "fast" (sdd-fast→qa→ship). Authoritative routing signal: the intake→next
-    # transition reads this field (via _intake_route_hint) to branch the phase
-    # graph, falling back to contract-folder presence only when no intake
-    # contract is readable.
+    # Workflow route chosen at intake (for backward compatibility with older
+    # tooling). Routing is now determined by the downstream contract's phase
+    # (see ``_intake_route_hint`` in skill_loader.py), not this field.
     route: str = "full"
 
 

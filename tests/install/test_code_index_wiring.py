@@ -115,7 +115,86 @@ class TestWireBlock:
         assert ciw.SENTINEL_BEGIN in content
 
 
-class TestLegacyMigration:
+class TestDetectTargetHarness:
+    """Harness-aware target detection for each harness type."""
+
+    def test_codex_returns_none_without_config(self, tmp_path: Path) -> None:
+        """codex without .codex/config.toml returns None."""
+        assert ciw.detect_target(tmp_path, harness="codex") is None
+
+    def test_codex_returns_config_when_exists(self, tmp_path: Path) -> None:
+        """codex returns .codex/config.toml when it exists."""
+        (tmp_path / ".codex").mkdir()
+        (tmp_path / ".codex/config.toml").write_text("[wire]\n")
+        assert ciw.detect_target(tmp_path, harness="codex") == tmp_path / ".codex/config.toml"
+
+    def test_qwen_code_returns_none_without_config(self, tmp_path: Path) -> None:
+        """qwen-code without .qwen/settings.json returns None."""
+        assert ciw.detect_target(tmp_path, harness="qwen-code") is None
+
+    def test_qwen_code_returns_config_when_exists(self, tmp_path: Path) -> None:
+        """qwen-code returns .qwen/settings.json when it exists."""
+        (tmp_path / ".qwen").mkdir()
+        (tmp_path / ".qwen/settings.json").write_text("{}")
+        assert ciw.detect_target(tmp_path, harness="qwen-code") == tmp_path / ".qwen/settings.json"
+
+    def test_hermes_agent_returns_none_without_config(self, tmp_path: Path) -> None:
+        """hermes-agent without .hermes/config.yaml returns None."""
+        assert ciw.detect_target(tmp_path, harness="hermes-agent") is None
+
+    def test_hermes_agent_returns_config_when_exists(self, tmp_path: Path) -> None:
+        """hermes-agent returns .hermes/config.yaml when it exists."""
+        (tmp_path / ".hermes").mkdir()
+        (tmp_path / ".hermes/config.yaml").write_text("model:\n  name: test\n")
+        assert (
+            ciw.detect_target(tmp_path, harness="hermes-agent") == tmp_path / ".hermes/config.yaml"
+        )
+
+    def test_openclaw_returns_none(self, tmp_path: Path) -> None:
+        """openclaw is home-scoped, so detect_target returns None."""
+        assert ciw.detect_target(tmp_path, harness="openclaw") is None
+
+    def test_continue_closed_returns_none(self, tmp_path: Path) -> None:
+        """continue-closed is home-scoped, so detect_target returns None."""
+        assert ciw.detect_target(tmp_path, harness="continue-closed") is None
+
+    def test_continue_local_returns_none(self, tmp_path: Path) -> None:
+        """continue-local is home-scoped, so detect_target returns None."""
+        assert ciw.detect_target(tmp_path, harness="continue-local") is None
+
+    def test_copilot_cli_returns_shared_target(self, tmp_path: Path) -> None:
+        """copilot-cli falls back to shared targets."""
+        (tmp_path / ".github").mkdir(parents=True)
+        (tmp_path / ".github/copilot-instructions.md").write_text("# Copilot\n")
+        assert (
+            ciw.detect_target(tmp_path, harness="copilot-cli")
+            == tmp_path / ".github/copilot-instructions.md"
+        )
+
+    def test_copilot_cli_no_target_returns_none(self, tmp_path: Path) -> None:
+        """copilot-cli with no shared target returns None."""
+        assert ciw.detect_target(tmp_path, harness="copilot-cli") is None
+
+    def test_cursor_with_dedicated_returns_none(self, tmp_path: Path) -> None:
+        """cursor without .cursor/rules returns None (shared targets only)."""
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        assert ciw.detect_target(tmp_path, harness="cursor") == tmp_path / "CLAUDE.md"
+
+    def test_windsurf_with_dedicated_returns_none(self, tmp_path: Path) -> None:
+        """windsurf without .windsurf/ returns None (shared targets only)."""
+        (tmp_path / ".windsurfrules").write_text("# Rules\n")
+        assert ciw.detect_target(tmp_path, harness="windsurf") == tmp_path / ".windsurfrules"
+
+    def test_no_harness_defaults_to_claude_md(self, tmp_path: Path) -> None:
+        """No harness → CLAUDE.md as default."""
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        assert ciw.detect_target(tmp_path) == tmp_path / "CLAUDE.md"
+
+    def test_cline_returns_shared_target(self, tmp_path: Path) -> None:
+        """cline falls back to shared targets like .clinerules."""
+        (tmp_path / ".clinerules").write_text("# Rules\n")
+        assert ciw.detect_target(tmp_path, harness="cline") == tmp_path / ".clinerules"
+
     def test_legacy_block_replaced_in_place(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

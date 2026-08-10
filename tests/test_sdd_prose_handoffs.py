@@ -45,7 +45,7 @@ _BACKWARD: dict[str, list[str]] = {
         "phase set spec",
     ],
     "sdd-fast.yaml": ["phase set spec"],
-    "sdd-deliver-and-ship.yaml": ["phase set build"],
+    "sdd-deliver-and-ship.yaml": [],  # terminal — no backward route; reset is user-driven via intake
     "sdd-add-skill.yaml": ["phase set intake"],  # bail: the ask was a code change
     "sdd-flow.yaml": [],  # no backward routes — flow is a terminal exploration lane
 }
@@ -107,3 +107,32 @@ def test_self_drive_language_present() -> None:
         prose = _prose(name).lower()
         assert "advance yourself" in prose, name
         assert "surface it" in prose, name
+
+
+def test_qa_verdict_is_store_command_not_disk_path() -> None:
+    # Regression for the "agent writes to disk" failure (#552): the qa exit
+    # gate is store-backed (`phase: qa, name: *.artifact`), so the prose must
+    # instruct the agent to record the verdict with `agentalloy contract
+    # artifact-set --phase qa` — never to create a `docs/qa/*.md` file. A disk
+    # write here is invisible to the gate and leaves qa stuck on "no exit
+    # artifact".
+    prose = _prose("sdd-verify-and-review.yaml")
+    assert "agentalloy contract artifact-set --phase qa" in prose
+    assert "docs/qa/*.md" in prose  # present only as the explicit prohibition
+    # The prohibiting sentence must forbid (not instruct) the disk path.
+    assert "does NOT read a" in prose or "do not create" in prose.lower() or "do **NOT**" in prose
+
+
+def test_ship_delivery_and_narrative_are_store_commands() -> None:
+    # The ship skill's two artifacts (delivery, pr-narrative) are store-backed
+    # (`phase: ship, name: *.artifact`); the prose must name the store verb for
+    # both, not a `docs/ship/*.md` path.
+    prose = _prose("sdd-deliver-and-ship.yaml")
+    assert "agentalloy contract artifact-set --phase ship --slug <slug> --name delivery" in prose
+    assert (
+        "agentalloy contract artifact-set --phase ship --slug <slug> --name pr-narrative" in prose
+    )
+    # No disk path is instructed as a target (only as a prohibition, if anywhere).
+    assert "docs/ship/*.md" not in prose or any(
+        p in prose for p in ("do **NOT**", "no ``docs/ship", "do not create")
+    )

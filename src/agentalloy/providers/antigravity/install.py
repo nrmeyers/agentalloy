@@ -7,6 +7,7 @@ AgentAlloy skill-context prose for Antigravity CLI.
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 from agentalloy.install.sentinel_utils import replace_marked_block
@@ -66,6 +67,14 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         content = f"{_SENTINEL_BEGIN}\n{instruction_content}\n{_SENTINEL_END}\n"
 
     target_path.write_text(content, encoding="utf-8")
+
+    # Wire the code-index block (runtime-gated: only when service is enabled).
+    try:
+        from agentalloy.install.code_index_wiring import maybe_wire
+
+        maybe_wire(root, port, harness="antigravity")
+    except (OSError, ValueError) as exc:  # noqa: BLE001
+        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
 
     return [
         WireRecord(

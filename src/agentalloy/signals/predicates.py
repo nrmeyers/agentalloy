@@ -1312,6 +1312,41 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
     return PredicateResult.MET
 
 
+def eval_merged_status(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """MET when the PR for a ship task has been merged.
+
+    Checks the ``pr_lifecycle`` table in the state store for a non-null
+    ``merged_at`` value on the current task slug.
+
+    Slug resolution: uses ``args['task_slug']`` if provided, otherwise
+    resolves the active work-item slug for the phase (defaults to
+    ``ctx.current_phase``, which should be ``"ship"``).
+
+    This is the ship exit gate that blocks advancement until the CI
+    watcher confirms the PR has merged.
+    """
+    slug = args.get("task_slug")
+    if slug is None:
+        phase = args.get("phase") or ctx.current_phase
+        if phase is None:
+            return PredicateResult.UNKNOWN
+        slug = ctx.resolve_active_slug(phase)
+    if slug is None:
+        return PredicateResult.UNKNOWN
+
+    store = ctx.store
+    if store is None:
+        return PredicateResult.UNKNOWN
+
+    try:
+        info = store.get_pr_lifecycle(slug)
+        if info is None:
+            return PredicateResult.UNKNOWN
+        return PredicateResult.MET if info.get("merged_at") else PredicateResult.NOT_MET
+    except Exception:
+        return PredicateResult.UNKNOWN
+
+
 PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResult]] = {
     "artifact_exists": eval_artifact_exists,
     "artifact_absent": eval_artifact_absent,
@@ -1332,6 +1367,7 @@ PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResu
     "build_contracts_cover_tasks": eval_build_contracts_cover_tasks,
     "build_contract_tag_focus": eval_build_contract_tag_focus,
     "scope_touched_in_diff": eval_scope_touched_in_diff,
+    "merged_status": eval_merged_status,
 }
 
 

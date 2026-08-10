@@ -1,10 +1,10 @@
 """T1 — ship-completion ask (phase-boundary-confirmation).
 
-When delivery has landed (phase==ship and a docs/ship/<slug>.md record exists),
-the signal layer emits a deterministic confirm directive telling the agent to ask
-the user whether to reset to intake — not left to skip-able ship prose. The
-directive rides the advisory injection seam under a distinct [agentalloy-confirm]
-label and never writes the phase file.
+When delivery has landed (phase==ship and a delivery artifact exists in the
+store), the signal layer emits a deterministic confirm directive telling the
+agent to ask the user whether to reset to intake — not left to skip-able ship
+prose. The directive rides the advisory injection seam under a distinct
+[agentalloy-confirm] label and never writes the phase file.
 """
 
 from __future__ import annotations
@@ -39,51 +39,83 @@ def _req(text: str = "continue") -> ProxyRequest:
     )
 
 
-def _set_phase(tmp: Path, phase: str) -> None:
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    seed_phase(tmp, phase)
+def _scoped_store(tmp: Path):
+    """The bound process store, re-scoped to ``tmp`` exactly like the signal
+    layer reads it (repo slug + stream id). Phase/cursor/contract/artifact rows
+    seeded here are what ``evaluate_signal`` sees for this repo root."""
+    from agentalloy.api.state_router import scoped_state_store
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    return scoped_state_store(store, tmp)
 
 
-def _ship_record(tmp: Path, slug: str = "some-feature") -> None:
-    d = tmp / "docs" / "ship"
+def _seed_delivery(
+    tmp_path: Path,
+    slug: str = "some-feature",
+    *,
+    delivery: bool = True,
+    phase: str = "ship",
+) -> None:
+    """Seed ship-phase state the way the product writes it: phase row in the
+    store, work-item cursor, contract, and (optionally) the ``delivery``
+    artifact — all in the repo+stream scope ``evaluate_signal`` reads."""
+    d = tmp_path / ".agentalloy"
     d.mkdir(exist_ok=True, parents=True)
-    (d / f"{slug}.md").write_text("# Ship\n")
+    seed_phase(tmp_path, phase)
+    (d / "cursor").write_text(slug, encoding="utf-8")
+    view = _scoped_store(tmp_path)
+    view.put_contract(
+        slug,
+        phase=phase,
+        slug=slug,
+        route="full",
+        scope_touches=[],
+        scope_avoids=[],
+        success_criteria=[],
+        body=f"# {slug}\n\nbody\n",
+    )
+    if delivery:
+        view.set_artifact(phase, slug, "delivery", f"# Ship record for {slug}\n")
 
 
 async def test_confirm_emitted_when_ship_and_record_exists(tmp_path: Path):
-    _set_phase(tmp_path, "ship")
-    _ship_record(tmp_path)
+    _seed_delivery(tmp_path)
     sig = await evaluate_signal(_req(), tmp_path)
-    assert sig.confirm_directives, "ship + delivery record must emit a confirm directive"
+    assert sig.confirm_directives, "ship + delivery artifact must emit a confirm directive"
     joined = "\n".join(sig.confirm_directives).lower()
     assert "intake" in joined and "ask" in joined
 
 
 async def test_no_confirm_on_ship_without_record(tmp_path: Path):
-    _set_phase(tmp_path, "ship")  # entered ship, no delivery record yet
+    _seed_delivery(tmp_path, delivery=False)  # ship phase, no delivery artifact yet
     sig = await evaluate_signal(_req(), tmp_path)
-    assert not sig.confirm_directives, "no prompt mid-delivery, before the record exists"
+    assert not sig.confirm_directives, "no prompt mid-delivery, before the artifact exists"
 
 
 async def test_no_confirm_when_not_ship(tmp_path: Path):
-    _set_phase(tmp_path, "build")
-    _ship_record(tmp_path)  # a stale record from a prior item must not trigger in build
+    # A stale delivery artifact from a prior item must not trigger in build
+    _seed_delivery(tmp_path, phase="build")
+    _scoped_store(tmp_path).set_artifact(
+        "ship",
+        "some-feature",
+        "delivery",
+        "# Ship record",
+    )
     sig = await evaluate_signal(_req(), tmp_path)
     assert not sig.confirm_directives
 
 
 async def test_confirm_persists_across_ship_turns(tmp_path: Path):
-    _set_phase(tmp_path, "ship")
-    _ship_record(tmp_path)
+    _seed_delivery(tmp_path)
     first = await evaluate_signal(_req(), tmp_path)
     second = await evaluate_signal(_req("still here"), tmp_path)
     assert first.confirm_directives and second.confirm_directives, "must not vanish after one turn"
 
 
 async def test_confirm_does_not_write_phase(tmp_path: Path):
-    _set_phase(tmp_path, "ship")
-    _ship_record(tmp_path)
+    _seed_delivery(tmp_path)
     await evaluate_signal(_req(), tmp_path)
     assert _read_phase(tmp_path) == "ship", "no auto-reset"
 

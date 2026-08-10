@@ -11,6 +11,7 @@ diverge.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -129,4 +130,14 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     _ = force
     records = _wire_proxy_hermes_agent(port, root, scope="repo")
-    return [WireRecord.from_dict(r) for r in records]
+    records = [WireRecord.from_dict(r) for r in records]
+
+    # Wire the code-index block (runtime-gated: only when service is enabled).
+    try:
+        from agentalloy.install.code_index_wiring import maybe_wire
+
+        maybe_wire(root, port, harness="hermes-agent")
+    except (OSError, ValueError) as exc:  # noqa: BLE001
+        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
+
+    return records

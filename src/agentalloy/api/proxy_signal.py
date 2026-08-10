@@ -1156,6 +1156,7 @@ async def evaluate_signal(
     confirm_directives = _boundary_confirm_directives(
         cwd,
         phase,
+        artifact_slug=contract_slug,
         new_session=new_session,
         # Same carrier gate as `new_session`/`announce`: a background tool-less
         # request must not fire or burn any marker (orientation-carrier-request-race).
@@ -1268,6 +1269,7 @@ def _boundary_confirm_directives(
     cwd: Path,
     phase: str | None,
     *,
+    artifact_slug: str | None = None,
     new_session: bool,
     phase_changed: bool = False,
     transitioned_by: str | None = None,
@@ -1279,10 +1281,11 @@ def _boundary_confirm_directives(
     single coherent directive list — at most one prompt, never two conflicting
     MUST blocks:
 
-    - **T1 ship completion** — once delivery has landed (``phase == "ship"`` and a
-      ``docs/ship/*.md`` record exists, the same artifact the ship exit-gate
-      checks), ask whether to reset to intake, instead of sitting idle until the
-      user raises it.
+    - **T1 ship completion** — when phase==ship and a ``delivery`` artifact
+      exists in the store for the current work-item slug, emit a confirm
+      directive asking the user whether to reset to intake.  This fires
+      mid-workflow, *before* merge — the agent confirms delivery is complete
+      before the watcher is engaged.
     - **T2 new-session resume** — when a *new* session (its key not yet oriented
       for this phase) resumes on a non-intake phase, confirm that phase is correct
       before adopting it: the per-repo phase file is contended by concurrent
@@ -1319,19 +1322,41 @@ def _boundary_confirm_directives(
             ]
         return []
 
-    ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))
+    # T1 ship completion — check store for a delivery artifact.
+    # Ship writes the ``delivery`` artifact to the store (not disk).
+    # If it exists, emit a confirm directive asking the user whether to reset
+    # to intake. This fires every ship turn (ship is terminal — never self-advances).
+    if phase == "ship" and artifact_slug is not None:
+        store = _banner_store(cwd)  # repo+stream-scoped handle, soft (None on outage)
+        if store is not None:
+            try:
+                delivery = store.get_artifact("ship", artifact_slug, "delivery", status="active")
+                if delivery is not None and delivery.get("content"):
+                    return [
+                        "Delivery landed — ASK the user whether to reset to intake.",
+                    ]
+            except Exception:
+                logger.debug("Delivery artifact check failed (ship completion)", exc_info=True)
+
+    # Ship watcher emits reset markers via lifecycle.set_merged() →
+    # .agentalloy/reset-to-intake-<slug>.pending. The proxy picks these up
+    # via the intake-phase new_session path (the watcher sets phase=ship,
+    # the reset marker tells the agent to ask the user, then LLM runs
+    # `agentalloy phase set intake`).
+
     swept = bool(
         phase_changed and session_key and transitioned_by and transitioned_by != session_key,
     )
 
     if new_session:
-        if ship_landed:
+        if phase == "ship":
             return [
-                "You are resuming a NEW session and the phase is `ship` with delivery "
-                "already recorded. First CONFIRM with the user that `ship` is the right "
-                "phase to be on; if it is, ASK whether they are ready to reset to intake "
-                "for the next work item (`agentalloy phase set intake`). Do NOT change "
-                "the phase on your own initiative — wait for their answer.",
+                "You are resuming a NEW session and the phase is `ship`. First "
+                "CONFIRM with the user that `ship` is the right phase to be on; "
+                "if it is, check for a reset marker file in `.agentalloy/` — if one "
+                "exists, ASK whether they are ready to reset to intake for the next "
+                "work item (`agentalloy phase set intake`). Do NOT change the phase "
+                "on your own initiative — wait for their answer.",
             ]
         return [
             f"You are resuming a NEW session on phase `{phase}` (not intake). Before "
@@ -1341,13 +1366,13 @@ def _boundary_confirm_directives(
         ]
 
     if swept:
-        if ship_landed:
+        if phase == "ship":
             return [
                 "The phase changed to `ship` since your last turn here — a different "
-                "concurrent session on this repo advanced it, not this one — and "
-                "delivery is already recorded (a docs/ship/ record exists). First "
+                "concurrent session on this repo advanced it, not this one. First "
                 "CONFIRM with the user that `ship` is the right phase to be on; if it "
-                "is, ASK whether they are ready to reset to intake for the next work "
+                "is, check for a reset marker file in `.agentalloy/` — if one exists, "
+                "ASK whether they are ready to reset to intake for the next work "
                 "item (`agentalloy phase set intake`). Do NOT change the phase on your "
                 "own initiative — wait for their answer.",
             ]
@@ -1358,13 +1383,6 @@ def _boundary_confirm_directives(
             "this phase's work. Do NOT change the phase on your own initiative.",
         ]
 
-    if ship_landed:
-        return [
-            "Delivery has landed (a docs/ship/ record exists). Before anything else, "
-            "ASK the user whether they are ready to reset to intake for the next work "
-            "item (`agentalloy phase set intake`). Do NOT reset on your own initiative "
-            "— wait for their answer.",
-        ]
     return []
 
 

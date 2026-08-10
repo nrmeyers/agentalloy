@@ -199,11 +199,11 @@ def test_decide_transition_no_advisory_at_terminal_phase(tmp_path: Path):
 # the build's code and tests.
 _SDD_FAST_GATE = {
     "all_of": [
-        {"artifact_exists": {"phase": "sdd-fast", "name": "*.md"}},
+        {"artifact_exists": {"phase": "sdd-fast", "name": "*.artifact"}},
         {
             "artifact_contains": {
                 "phase": "sdd-fast",
-                "name": "*.md",
+                "name": "*.artifact",
                 "sections": ["Acceptance Criteria", "Approach", "Test Cases"],
             }
         },
@@ -214,18 +214,15 @@ _SDD_FAST_GATE = {
 
 
 def _seed_fast_artifacts(tmp_path: Path, *, sections: list[str]) -> None:
-    fast = tmp_path / "docs" / "fast"
-    fast.mkdir(parents=True)
     body = "\n".join(f"## {s}\n\ncontent\n" for s in sections)
-    (fast / "task.md").write_text(body, encoding="utf-8")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "impl.py").write_text("x = 1\n", encoding="utf-8")
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_impl.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
 
-    # Store: create if needed and insert the sdd-fast artifact
-    # (post-migration: artifact_exists/artifact_contains read the store, not disk).
+    # Store: create if needed and insert the sdd-fast artifact (store-backed).
+    # Lifecycle artifacts live ONLY in the store — no docs/fast/ disk stub.
     db = tmp_path / "test_state.db"
     if not db.exists():
         store = DuckDBStateStore(db)
@@ -239,7 +236,7 @@ def _seed_fast_artifacts(tmp_path: Path, *, sections: list[str]) -> None:
         f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
         VALUES ('{repo}', 'sdd-fast-01-task', '01-task', '[]', NULL, 'sdd-fast', 'active', CURRENT_TIMESTAMP)"""
     )
-    store.set_artifact("sdd-fast", "01-task", "task.md", body)
+    store.set_artifact("sdd-fast", "01-task", "task.artifact", body)
     store.close()
 
 

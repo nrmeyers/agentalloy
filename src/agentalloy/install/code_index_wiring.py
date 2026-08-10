@@ -88,18 +88,53 @@ def build_block(slug: str, port: int) -> str:
     return _BLOCK_TEMPLATE.format(slug=slug, port=port)
 
 
+# Mapping of harness registry keys to their dedicated carrier file in the repo.
+# Home-scoped harnesses (openclaw, continue-closed, continue-local) are
+# intentionally omitted: their config lives in the user's home directory,
+# not the repo root, so detect_target() returns None for them.
+_HARNESS_CARRIERS: dict[str, str] = {
+    "claude-code": ".claude/settings.local.json",
+    "cursor": ".cursor/rules/agentalloy.mdc",
+    "cline": ".clinerules",
+    "windsurf": ".windsurf/rules/agentalloy.md",
+    "github-copilot": ".github/copilot-instructions.md",
+    "copilot-cli": ".github/copilot-instructions.md",
+    "aider": ".agentalloy-aider-instructions.md",
+    "opencode": ".opencode/system-prompt.md",
+    "codex": ".codex/config.toml",
+    "qwen-code": ".qwen/settings.json",
+    "hermes-agent": ".hermes/config.yaml",
+}
+
+
 def detect_target(root: Path, harness: str | None = None) -> Path | None:
     """The file the NEW block goes to — tool markers outrank shared CLAUDE.md.
 
-    Returns ``None`` when no suitable target exists (e.g. the harness is not
-    ``claude-code`` and no harness-specific config file exists).
+    For harnesses with a known dedicated carrier file, returns that file if it
+    exists in the repo root (the caller will create it if missing).  Falls back
+    to shared targets (GEMINI.md, CLAUDE.md, etc.) when the dedicated carrier
+    is absent.  Returns ``None`` for harnesses without a carrier (home-scoped
+    tools like openclaw, continue-closed, continue-local).
+
+    When no harness is specified, also checks for ``.cursor`` and ``.windsurf``
+    directories (the original behaviour) to detect tool-specific carriers.
     """
-    if (root / ".cursor").is_dir() or (root / ".cursorrules").exists():
-        return root / ".cursor/rules/agentalloy-code-index.mdc"
-    # Windsurf — dedicated file takes priority over shared fallback
-    if (root / ".windsurf").is_dir():
-        return root / ".windsurf/rules/agentalloy.md"
-    # Shared targets (in detection priority order)
+    # 0. Harness-agnostic directory checks (when no harness is specified).
+    #     .cursor/.cursorrules → dedicated .mdc file.
+    #     .windsurf → dedicated .md file (not the shared fallback).
+    if harness is None:
+        if (root / ".cursor").is_dir() or (root / ".cursorrules").exists():
+            return root / ".cursor/rules/agentalloy-code-index.mdc"
+        if (root / ".windsurf").is_dir():
+            return root / ".windsurf/rules/agentalloy.md"
+
+    # 1. Dedicated carrier for this harness (repo-local config file)
+    if harness and harness in _HARNESS_CARRIERS:
+        dedicated = root / _HARNESS_CARRIERS[harness]
+        if dedicated.exists():
+            return dedicated
+
+    # 2. Shared targets (in detection priority order)
     for rel in (
         "GEMINI.md",
         ".clinerules",
@@ -112,7 +147,8 @@ def detect_target(root: Path, harness: str | None = None) -> Path | None:
     ):
         if (root / rel).exists():
             return root / rel
-    # Only default to CLAUDE.md when the harness is claude-code (or unknown).
+
+    # 3. Only default to CLAUDE.md when the harness is claude-code (or unknown).
     # For other harnesses, don't create a Claude Code carrier file.
     if harness is not None and harness != "claude-code":
         return None

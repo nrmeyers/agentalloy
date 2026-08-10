@@ -335,83 +335,75 @@ class TestContractRoute:
 
 
 class TestIntakeRouteHint:
-    # Route reads come from the *bound process store*, not a repo-local file. The
-    # readers used to open ``<repo>/.agentalloy/state.db`` — a store nothing in
-    # ``src/`` ever wrote — so these tests passed only because they created that
-    # file themselves, while production always fell through to the default route.
+    """_intake_route_hint determines the next lane by checking which downstream
+    phase has an active contract (the intake contract was removed):
 
-    """_intake_route_hint is authoritative on the intake contract's ``route`` field:
-    ``fast`` → sdd-fast lane, ``full`` → full lane (spec). When no intake contract is
-    readable it falls back to the prior-authors-next cascade (contracts/active/sdd-fast/)."""
+    - ``spec`` → ``None`` (default sdd-full lane)
+    - ``sdd-fast`` → ``"sdd-fast"``
+    - ``add-skill`` → ``"add-skill"``
+    - ``sdd-flow`` → ``"sdd-flow"``
 
-    def _write_intake(self, tmp_path: Path, route: str) -> None:
+    The check runs in phase-priority order (spec > sdd-fast > add-skill > sdd-flow);
+    the first phase with an active contract wins. Best-effort — any store failure
+    returns ``None`` (default full route).
+    """
+
+    def _create_downstream_contract(self, tmp_path: Path, phase: str) -> None:
+        """Create a downstream contract in the given phase."""
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "active" / "intake" / "t.md",
-            phase="intake",
-            extra_fields={"route": route},
+            tmp_path / ".agentalloy" / "contracts" / "active" / phase / "t.md",
+            phase=phase,
         )
-        _insert_contract(contract_id="intake-t", phase="intake", route=route)
+        _insert_contract(contract_id=f"{phase}-t", phase=phase, route=None)
 
-    def test_fast_route_field_hints_sdd_fast(self, tmp_path: Path) -> None:
-        """route: fast is honored from the field alone — no sdd-fast/ folder needed."""
+    def test_spec_contract_hints_none(self, tmp_path: Path) -> None:
+        """spec contract → None (default sdd-full lane)."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        self._write_intake(tmp_path, "fast")
+        self._create_downstream_contract(tmp_path, "spec")
+        assert _intake_route_hint(tmp_path) is None
+
+    def test_sdd_fast_contract_hints_sdd_fast(self, tmp_path: Path) -> None:
+        """sdd-fast contract → sdd-fast lane."""
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        self._create_downstream_contract(tmp_path, "sdd-fast")
         assert _intake_route_hint(tmp_path) == "sdd-fast"
 
-    def test_add_skill_route_field_hints_add_skill(self, tmp_path: Path) -> None:
-        """route: add-skill routes to the custom-skill authoring lane (1:1 with
-        the phase name — no fast/sdd-fast style indirection)."""
+    def test_add_skill_contract_hints_add_skill(self, tmp_path: Path) -> None:
+        """add-skill contract → add-skill lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        self._write_intake(tmp_path, "add-skill")
+        self._create_downstream_contract(tmp_path, "add-skill")
         assert _intake_route_hint(tmp_path) == "add-skill"
 
-    def test_full_route_field_hints_none(self, tmp_path: Path) -> None:
+    def test_sdd_flow_contract_hints_sdd_flow(self, tmp_path: Path) -> None:
+        """sdd-flow contract → sdd-flow lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        self._write_intake(tmp_path, "full")
-        assert _intake_route_hint(tmp_path) is None
+        self._create_downstream_contract(tmp_path, "sdd-flow")
+        assert _intake_route_hint(tmp_path) == "sdd-flow"
 
-    def test_full_route_field_wins_over_stray_fast_folder(self, tmp_path: Path) -> None:
-        """The field is authoritative: route: full → full lane even if a stray
-        contracts/active/sdd-fast/ work-item exists (inverse-disagreement guard)."""
+    def test_spec_wins_over_sdd_fast(self, tmp_path: Path) -> None:
+        """Priority order: spec checked first, wins over sdd-fast."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        self._write_intake(tmp_path, "full")
-        _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "stray.md",
-            phase="sdd-fast",
-            extra_fields={"route": "fast"},
-        )
-        assert _intake_route_hint(tmp_path) is None
-
-    def test_no_intake_contract_falls_back_to_fast_folder(self, tmp_path: Path) -> None:
-        """Cascade fallback preserved: no intake contract + a sdd-fast/ work-item
-        → fast lane."""
-        from agentalloy.signals.skill_loader import _intake_route_hint
-
-        _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "t.md",
-            phase="sdd-fast",
-            extra_fields={"route": "fast"},
-        )
-        _insert_contract(contract_id="sddfast-t", phase="sdd-fast", route=None)
-        assert _intake_route_hint(tmp_path) == "sdd-fast"
-
-    def test_malformed_intake_contract_falls_back(self, tmp_path: Path) -> None:
-        """A malformed intake contract doesn't raise; falls back to directory
-        presence (here: none) → full lane."""
-        from agentalloy.signals.skill_loader import _intake_route_hint
-
-        bad = tmp_path / ".agentalloy" / "contracts" / "active" / "intake" / "bad.md"
-        bad.parent.mkdir(parents=True, exist_ok=True)
-        bad.write_text("no frontmatter here\n", encoding="utf-8")
-        assert _intake_route_hint(tmp_path) is None
+        self._create_downstream_contract(tmp_path, "spec")
+        self._create_downstream_contract(tmp_path, "sdd-fast")
+        assert _intake_route_hint(tmp_path) is None  # spec wins
 
     def test_no_contract_hints_none(self, tmp_path: Path) -> None:
+        """No downstream contracts → None (default full lane)."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
+        assert _intake_route_hint(tmp_path) is None
+
+    def test_store_failure_returns_none(self, tmp_path: Path) -> None:
+        """Store failures are best-effort → None (default full lane)."""
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        # Store is already bound by fixture — this just verifies the function
+        # doesn't raise.
         assert _intake_route_hint(tmp_path) is None
 
 

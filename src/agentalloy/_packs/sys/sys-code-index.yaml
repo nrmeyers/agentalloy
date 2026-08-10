@@ -8,12 +8,13 @@ domain_tags:
   - code-index
 always_apply: false
 phase_scope:
+  - spec
   - design
   - build
   - qa
 category_scope: null
 author: agentalloy
-change_summary: "golden default: phase-scoped pull commands for the local code index; availability-gated proxy-side"
+change_summary: "add knowledge-graph CLI (why/related) and spec to phase_scope"
 raw_prose: |
   # Code index
 
@@ -28,3 +29,12 @@ raw_prose: |
     `agentalloy code callers <changed-fqn> --depth 3`
 
   Results include file:line — read those files rather than re-searching.
+
+  - **knowledge-graph** — find the design decisions behind a symbol:
+    `agentalloy knowledge why <fqn>` · `agentalloy knowledge related "<query>"`
+
+    The knowledge-graph is a decision layer riding on the code-index graph.
+    It surfaces the rationale behind why code was written a certain way. Use
+    it when you're modifying code and want to understand the original design
+    intent, when you need to trace which decisions govern a particular symbol,
+    or when you're researching related decisions about a topic.
