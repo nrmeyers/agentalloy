@@ -6,7 +6,6 @@ Handles CRUD on the ``pr_lifecycle`` table in the state store.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from agentalloy.storage.state_store import process_store
@@ -121,4 +120,5 @@ class LifecycleManager:
     @staticmethod
     def _now_iso() -> str:
         from datetime import datetime
+
         return datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")

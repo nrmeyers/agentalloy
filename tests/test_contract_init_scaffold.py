@@ -195,18 +195,16 @@ class TestScaffoldPhaseDocs:
         assert created == []
         assert not (tmp_path / "docs" / "design").exists()
 
-    def test_qa_scaffolds_slug_named_doc_with_headings(self, tmp_path: Path) -> None:
-        # Regression for B4: the qa gate glob `docs/qa/*.artifact` (bare `*`) previously
-        # concretized to None and scaffolded nothing. It must seed docs/qa/<slug>.artifact.
-        # qa is now store-backed (migrated from *.md to *.artifact), so scaffolding
-        # produces a .artifact file with the expected headings.
+    def test_qa_scaffolds_nothing_post_migration(self, tmp_path: Path) -> None:
+        # qa is store-backed (phase/name gate, no path glob): its verdict is
+        # recorded via `agentalloy contract artifact-set --phase qa`, never a
+        # disk stub. Post-migration `_scaffold_phase_docs` must therefore
+        # produce no docs/qa/ tree at all — lifecycle artifacts live only in
+        # the store, and a disk write here would be an invisible orphan the
+        # qa exit gate never reads.
         created = _scaffold_phase_docs("qa", "big-calendar-ui", tmp_path)
-        doc = tmp_path / "docs" / "qa" / "big-calendar-ui.artifact"
-        assert doc.exists()
-        text = doc.read_text()
-        assert "## Checks" in text
-        assert "## Review" in text
-        assert created == ["docs/qa/big-calendar-ui.artifact"]
+        assert created == []
+        assert not (tmp_path / "docs" / "qa").exists()
 
     def test_spec_scaffolds_nothing_post_migration(self, tmp_path: Path) -> None:
         # Same reasoning as design above — spec's exit gate is store-backed now.

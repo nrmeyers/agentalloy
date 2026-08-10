@@ -1156,6 +1156,7 @@ async def evaluate_signal(
     confirm_directives = _boundary_confirm_directives(
         cwd,
         phase,
+        artifact_slug=contract_slug,
         new_session=new_session,
         # Same carrier gate as `new_session`/`announce`: a background tool-less
         # request must not fire or burn any marker (orientation-carrier-request-race).
@@ -1268,6 +1269,7 @@ def _boundary_confirm_directives(
     cwd: Path,
     phase: str | None,
     *,
+    artifact_slug: str | None = None,
     new_session: bool,
     phase_changed: bool = False,
     transitioned_by: str | None = None,
@@ -1279,9 +1281,11 @@ def _boundary_confirm_directives(
     single coherent directive list — at most one prompt, never two conflicting
     MUST blocks:
 
-    - **T1 ship completion** — REMOVED. The ship watcher handles post-merge reset
-      prompts via marker files in ``.agentalloy/``. The old file-based trigger
-      (``docs/ship/*.md``) fired mid-workflow, not after merge.
+    - **T1 ship completion** — when phase==ship and a ``delivery`` artifact
+      exists in the store for the current work-item slug, emit a confirm
+      directive asking the user whether to reset to intake.  This fires
+      mid-workflow, *before* merge — the agent confirms delivery is complete
+      before the watcher is engaged.
     - **T2 new-session resume** — when a *new* session (its key not yet oriented
       for this phase) resumes on a non-intake phase, confirm that phase is correct
       before adopting it: the per-repo phase file is contended by concurrent
@@ -1317,6 +1321,22 @@ def _boundary_confirm_directives(
                 "solutions. The user will approve and advance the phase.",
             ]
         return []
+
+    # T1 ship completion — check store for a delivery artifact.
+    # Ship writes the ``delivery`` artifact to the store (not disk).
+    # If it exists, emit a confirm directive asking the user whether to reset
+    # to intake. This fires every ship turn (ship is terminal — never self-advances).
+    if phase == "ship" and artifact_slug is not None:
+        store = _banner_store(cwd)  # repo+stream-scoped handle, soft (None on outage)
+        if store is not None:
+            try:
+                delivery = store.get_artifact("ship", artifact_slug, "delivery", status="active")
+                if delivery is not None and delivery.get("content"):
+                    return [
+                        "Delivery landed — ASK the user whether to reset to intake.",
+                    ]
+            except Exception:
+                logger.debug("Delivery artifact check failed (ship completion)", exc_info=True)
 
     # Ship watcher emits reset markers via lifecycle.set_merged() →
     # .agentalloy/reset-to-intake-<slug>.pending. The proxy picks these up

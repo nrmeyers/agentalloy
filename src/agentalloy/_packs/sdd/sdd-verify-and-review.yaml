@@ -143,12 +143,21 @@ raw_prose: |
   Then sweep for dead code the change orphaned — list it, and ask before
   deleting anything you didn't add.
 
-  ## 4. Record the verdict
+  ## 4. Record the verdict to the qa artifact (store, not disk)
 
-  Write the verdict to the **qa artifact** with `## Checks` (the suite, lint,
-  and type results) and `## Review` (the findings + the spec/non-goals verdict).
-  A clean report — green bar, every AC met, no open Critical or required finding
-  — clears the way to ship.
+  The qa exit gate is store-backed — it does NOT read a `docs/qa/*.md` file on
+  disk. You MUST record the verdict with `agentalloy contract artifact-set`,
+  naming it `qa` (the store canonicalizes the bare name to
+  `qa.artifact`, matching the gate's `*.artifact` glob):
+
+  ```
+  agentalloy contract artifact-set --phase qa --slug <slug> --name qa --body-file -
+  ```
+
+  Pipe in a markdown body with a `# <slug>` top line, then `## Checks` (the
+  suite, lint, and type results — green bar) and `## Review` (findings labelled
+  by severity + the spec/non-goals/drift verdict). A clean report — green bar,
+  every AC met, no open Critical or required finding — clears the way to ship.
 
   On a clean report, seed **ship's work-item** in the data store before you go:
 

@@ -35,6 +35,12 @@ from typing import Any, cast
 
 import duckdb
 
+from agentalloy.storage.artifact_naming import (
+    ARTIFACT_EXT,
+    LEGACY_ARTIFACT_EXT,
+    STORE_BACKED_PHASES,
+)
+
 logger = logging.getLogger(__name__)
 
 # The bucket every row landed in before task 11.  ``_repo()`` used to return
@@ -589,7 +595,6 @@ class DuckDBStateStore:
         from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
             ARTIFACT_EXT,
             LEGACY_ARTIFACT_EXT,
-            STORE_BACKED_PHASES,
         )
 
         phases_sql = ",".join(f"'{p}'" for p in sorted(STORE_BACKED_PHASES))
@@ -1487,9 +1492,22 @@ class DuckDBStateStore:
 
         New inserts default to ``status='active'``; updates preserve the
         existing status so an archived artifact stays archived when rewritten.
+
+        For store-backed phases (spec/design/plan/qa/ship/sdd-fast) the
+        ``name`` is canonicalized to the ``.artifact`` suffix on write (see
+        :func:`artifact_naming.canonicalize_artifact_name`), so a gate's
+        ``name: "*.artifact"`` glob always matches the stored row. Legacy
+        ``.md`` names from pre-migration callers are repaired here rather than
+        rejected; disk-deliverable phases (``src/**``, ``tests/**``) are
+        untouched.
         """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            canonicalize_artifact_name,
+        )
+
+        name = canonicalize_artifact_name(phase, name)
         repo = self._repo()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         existing = self.conn.execute(
@@ -1534,6 +1552,11 @@ class DuckDBStateStore:
             "slug=?",
             "name=?",
         ]
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            canonicalize_artifact_name,
+        )
+
+        name = canonicalize_artifact_name(phase, name)
         params: list[Any] = [self._repo(), phase, slug, name]
         if status != "all":
             conditions.append("status=?")
@@ -1595,6 +1618,12 @@ class DuckDBStateStore:
             for r in rows
         ]
         if name_glob is not None:
+            from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+                is_legacy_artifact_name,
+            )
+
+            if is_legacy_artifact_name(name_glob):  # legacy '*.md' glob -> '*.artifact'
+                name_glob = name_glob[: -len(LEGACY_ARTIFACT_EXT)] + ARTIFACT_EXT
             results = [r for r in results if fnmatch.fnmatch(r["name"], name_glob)]
         return results
 
@@ -1605,6 +1634,11 @@ class DuckDBStateStore:
         """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            canonicalize_artifact_name,
+        )
+
+        name = canonicalize_artifact_name(phase, name)
         repo = self._repo()
         result = self.conn.execute(
             "UPDATE sdd_artifact SET status='archived', updated_at=? "
@@ -1847,8 +1881,18 @@ class DuckDBStateStore:
             "INSERT INTO ci_telemetry (repo, stream_id, pr_url, check_name, "
             "check_status, check_conclusion, started_at, completed_at, url, captured_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (repo, sid, pr_url, check_name, check_status, check_conclusion,
-             started_at, completed_at, url, datetime.now()),
+            (
+                repo,
+                sid,
+                pr_url,
+                check_name,
+                check_status,
+                check_conclusion,
+                started_at,
+                completed_at,
+                url,
+                datetime.now(),
+            ),
         )
 
     def list_ci_telemetry(self, pr_url: str) -> list[dict[str, Any]]:
@@ -1927,11 +1971,19 @@ class DuckDBStateStore:
                 "paused_reason=EXCLUDED.paused_reason, "
                 "updated_at=EXCLUDED.updated_at",
                 (
-                    repo, sid, task_slug,
-                    merged["pr_url"], merged["auto_merge"], merged["merged_at"],
-                    merged["watcher_started"], merged["watcher_stopped"],
-                    merged["ci_failures"], merged["paused"], merged["paused_reason"],
-                    now, now,
+                    repo,
+                    sid,
+                    task_slug,
+                    merged["pr_url"],
+                    merged["auto_merge"],
+                    merged["merged_at"],
+                    merged["watcher_started"],
+                    merged["watcher_stopped"],
+                    merged["ci_failures"],
+                    merged["paused"],
+                    merged["paused_reason"],
+                    now,
+                    now,
                 ),
             )
         else:
@@ -1939,8 +1991,16 @@ class DuckDBStateStore:
             sets: list[str] = []
             vals: list[Any] = []
 
-            for field in ("pr_url", "auto_merge", "merged_at", "watcher_started",
-                          "watcher_stopped", "ci_failures", "paused", "paused_reason"):
+            for field in (
+                "pr_url",
+                "auto_merge",
+                "merged_at",
+                "watcher_started",
+                "watcher_stopped",
+                "ci_failures",
+                "paused",
+                "paused_reason",
+            ):
                 val = kwargs.get(field)
                 if val is not None:
                     sets.append(f"{field}=?")

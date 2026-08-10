@@ -6,7 +6,6 @@ After merge is detected, asks the user if they want to reset to intake.
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 from typing import Any
 

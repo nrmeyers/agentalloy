@@ -36,6 +36,32 @@ signal_keywords:
   - start spec
   - begin work
   - next phase
+# Intake writes the DOWNSTREAM contract (spec / sdd-fast / add-skill / sdd-flow
+# via `agentalloy contract init --phase <phase>`); this scaffold remains for the
+# workflow-skill contract_template contract (customize validation + the
+# `contract init --phase intake` legacy path) and documents the work-item shape
+# the agent authors in every lane.
+contract_template: |
+  ---
+  phase: intake
+  task_slug: {{task_slug}}
+  route: {{route}}
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## What the user actually wants
+  <one-paragraph restatement>
+
+  ## Proposed route
+  <full SDD, sdd-fast, add-skill, or flow, and why>
 
 category_scope: [process]
 author: agentalloy
