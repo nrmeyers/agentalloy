@@ -1546,6 +1546,11 @@ class DuckDBStateStore:
         *,
         status: str = "active",
     ) -> dict[str, Any] | None:
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            canonicalize_artifact_name,
+        )
+
+        name = canonicalize_artifact_name(phase, name)
         conditions = [
             "repo=?",
             "phase=?",
@@ -1624,7 +1629,15 @@ class DuckDBStateStore:
 
             if is_legacy_artifact_name(name_glob):  # legacy '*.md' glob -> '*.artifact'
                 name_glob = name_glob[: -len(LEGACY_ARTIFACT_EXT)] + ARTIFACT_EXT
-            results = [r for r in results if fnmatch.fnmatch(r["name"], name_glob)]
+                globs = [name_glob]
+            elif "*" in name_glob or "?" in name_glob or name_glob.endswith(ARTIFACT_EXT):
+                globs = [name_glob]
+            else:
+                # A bare logical name ("delivery", "solution") matches both the
+                # canonical row (delivery.artifact) and the bare row the lesson
+                # artifact is deliberately stored under (see canonicalize_artifact_name).
+                globs = [name_glob, name_glob + ARTIFACT_EXT]
+            results = [r for r in results if any(fnmatch.fnmatch(r["name"], g) for g in globs)]
         return results
 
     def archive_artifact(self, phase: str, slug: str, name: str) -> bool:

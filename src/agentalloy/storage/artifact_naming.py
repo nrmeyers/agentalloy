@@ -40,8 +40,18 @@ def canonicalize_artifact_name(phase: str, name: str) -> str:
     what was written, and legacy ``.md`` rows are repaired on write rather than
     re-broken. Phases outside ``STORE_BACKED_PHASES`` are returned unchanged —
     they are disk deliverables (e.g. ``src/**``) and must not be renamed.
+
+    The lesson artifact (``name="solution"``) is a special case: it is stored
+    under the bare name so it does NOT match the qa exit gate's ``*.artifact``
+    glob (which would require ``## Checks``/``## Review`` sections on its
+    content).
     """
     if phase not in STORE_BACKED_PHASES:
+        return name
+    # The lesson artifact (solution) is intentionally NOT canonicalized —
+    # the qa exit gate's *.artifact glob would then sweep it up and demand
+    # ## Checks/## Review of its content, breaking the gate.
+    if name == "solution":
         return name
     stem = name
     if is_legacy_artifact_name(stem):
