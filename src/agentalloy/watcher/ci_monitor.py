@@ -6,10 +6,10 @@ Captures results to the ci_telemetry table.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,6 @@ class CICheckMonitor:
                 logger.warning("gh pr checks failed: %s", result.stderr.strip())
                 return False, 0
 
-            import json
             checks_data = json.loads(result.stdout)
             checks = checks_data if isinstance(checks_data, list) else []
 
@@ -139,7 +138,6 @@ class CICheckMonitor:
                 logger.warning("glab mr show failed: %s", result.stderr.strip())
                 return False, 0
 
-            import json
             mr_data = json.loads(result.stdout)
             status = mr_data.get("pipeline", {}).get("status", "pending")
 
