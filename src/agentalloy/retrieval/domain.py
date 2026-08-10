@@ -712,7 +712,7 @@ def retrieve_domain_candidates(
         dense_hits = vector_store.search_similar(
             query_vec,
             categories=_pool_categories(),
-            phases=None,
+            phases=[phase],
             deprecated_skill_ids=deprecated_ids,
             domain_tags=contract_tags,
             k=pool_size,
