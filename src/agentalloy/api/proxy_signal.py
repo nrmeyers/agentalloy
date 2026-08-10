@@ -1279,10 +1279,9 @@ def _boundary_confirm_directives(
     single coherent directive list — at most one prompt, never two conflicting
     MUST blocks:
 
-    - **T1 ship completion** — once delivery has landed (``phase == "ship"`` and a
-      ``docs/ship/*.md`` record exists, the same artifact the ship exit-gate
-      checks), ask whether to reset to intake, instead of sitting idle until the
-      user raises it.
+    - **T1 ship completion** — REMOVED. The ship watcher handles post-merge reset
+      prompts via marker files in ``.agentalloy/``. The old file-based trigger
+      (``docs/ship/*.md``) fired mid-workflow, not after merge.
     - **T2 new-session resume** — when a *new* session (its key not yet oriented
       for this phase) resumes on a non-intake phase, confirm that phase is correct
       before adopting it: the per-repo phase file is contended by concurrent
@@ -1319,19 +1318,25 @@ def _boundary_confirm_directives(
             ]
         return []
 
-    ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))
+    # Ship watcher emits reset markers via lifecycle.set_merged() →
+    # .agentalloy/reset-to-intake-<slug>.pending. The proxy picks these up
+    # via the intake-phase new_session path (the watcher sets phase=ship,
+    # the reset marker tells the agent to ask the user, then LLM runs
+    # `agentalloy phase set intake`).
+
     swept = bool(
         phase_changed and session_key and transitioned_by and transitioned_by != session_key,
     )
 
     if new_session:
-        if ship_landed:
+        if phase == "ship":
             return [
-                "You are resuming a NEW session and the phase is `ship` with delivery "
-                "already recorded. First CONFIRM with the user that `ship` is the right "
-                "phase to be on; if it is, ASK whether they are ready to reset to intake "
-                "for the next work item (`agentalloy phase set intake`). Do NOT change "
-                "the phase on your own initiative — wait for their answer.",
+                "You are resuming a NEW session and the phase is `ship`. First "
+                "CONFIRM with the user that `ship` is the right phase to be on; "
+                "if it is, check for a reset marker file in `.agentalloy/` — if one "
+                "exists, ASK whether they are ready to reset to intake for the next "
+                "work item (`agentalloy phase set intake`). Do NOT change the phase "
+                "on your own initiative — wait for their answer.",
             ]
         return [
             f"You are resuming a NEW session on phase `{phase}` (not intake). Before "
@@ -1341,13 +1346,13 @@ def _boundary_confirm_directives(
         ]
 
     if swept:
-        if ship_landed:
+        if phase == "ship":
             return [
                 "The phase changed to `ship` since your last turn here — a different "
-                "concurrent session on this repo advanced it, not this one — and "
-                "delivery is already recorded (a docs/ship/ record exists). First "
+                "concurrent session on this repo advanced it, not this one. First "
                 "CONFIRM with the user that `ship` is the right phase to be on; if it "
-                "is, ASK whether they are ready to reset to intake for the next work "
+                "is, check for a reset marker file in `.agentalloy/` — if one exists, "
+                "ASK whether they are ready to reset to intake for the next work "
                 "item (`agentalloy phase set intake`). Do NOT change the phase on your "
                 "own initiative — wait for their answer.",
             ]
@@ -1358,13 +1363,6 @@ def _boundary_confirm_directives(
             "this phase's work. Do NOT change the phase on your own initiative.",
         ]
 
-    if ship_landed:
-        return [
-            "Delivery has landed (a docs/ship/ record exists). Before anything else, "
-            "ASK the user whether they are ready to reset to intake for the next work "
-            "item (`agentalloy phase set intake`). Do NOT reset on your own initiative "
-            "— wait for their answer.",
-        ]
     return []
 
 

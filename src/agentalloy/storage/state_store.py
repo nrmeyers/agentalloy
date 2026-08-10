@@ -137,6 +137,56 @@ CREATE TABLE IF NOT EXISTS sdd_artifact (
 
 CREATE INDEX IF NOT EXISTS idx_sdd_artifact_phase
     ON sdd_artifact (repo, phase);
+
+CREATE TABLE IF NOT EXISTS pr_narrative (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    task_slug          TEXT NOT NULL,
+    pr_url             TEXT,
+    body               TEXT NOT NULL,
+    created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo, stream_id, task_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_narrative_task
+    ON pr_narrative (repo, stream_id, task_slug);
+
+CREATE TABLE IF NOT EXISTS ci_telemetry (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    pr_url             TEXT NOT NULL,
+    check_name         TEXT NOT NULL,
+    check_status       TEXT NOT NULL,
+    check_conclusion   TEXT,
+    started_at         TEXT,
+    completed_at       TEXT,
+    url                TEXT,
+    captured_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ci_telemetry_pr
+    ON ci_telemetry (repo, stream_id, pr_url);
+
+CREATE TABLE IF NOT EXISTS pr_lifecycle (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    task_slug          TEXT NOT NULL,
+    pr_url             TEXT,
+    auto_merge         INTEGER DEFAULT 0,
+    merged_at          TEXT,
+    watcher_started    TEXT,
+    watcher_stopped    TEXT,
+    ci_failures        INTEGER DEFAULT 0,
+    paused             INTEGER DEFAULT 0,
+    paused_reason      TEXT,
+    created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo, stream_id, task_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_lifecycle_task
+    ON pr_lifecycle (repo, stream_id, task_slug);
 """
 
 # State kinds and their properties
@@ -558,6 +608,12 @@ class DuckDBStateStore:
         # approval rows are rewritten; re-approval is 06a's intended single
         # observable effect for any repo mid-flight.
         logger.debug("sdd_artifact legacy .md names migrated to .artifact")
+
+        # Ship-phase tables: pr_narrative, ci_telemetry, pr_lifecycle
+        # The DDL at the top of migrate() creates them via CREATE TABLE IF NOT EXISTS.
+        # On first boot the tables are created with full schema + indexes.
+        # On subsequent boots CREATE TABLE IF NOT EXISTS is a no-op.
+        logger.debug("pr_narrative / ci_telemetry / pr_lifecycle schema ensured via DDL")
 
     # -- read / write --------------------------------------------------------
 
@@ -1731,6 +1787,207 @@ class DuckDBStateStore:
         contract_deleted = contract_count[0][0] if contract_count else 0
 
         return state_deleted + contract_deleted
+
+    # -- ship-phase tables ---------------------------------------------------
+
+    def upsert_pr_narrative(
+        self,
+        task_slug: str,
+        body: str,
+        pr_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Upsert a PR narrative body for a shipped task."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo, sid = self._repo(), self._sid()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            "INSERT INTO pr_narrative (repo, stream_id, task_slug, body, pr_url, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (repo, stream_id, task_slug) "
+            "DO UPDATE SET body=EXCLUDED.body, pr_url=EXCLUDED.pr_url, updated_at=EXCLUDED.updated_at",
+            (repo, sid, task_slug, body, pr_url, now),
+        )
+        return {"repo": repo, "task_slug": task_slug, "updated_at": now}
+
+    def get_pr_narrative(self, task_slug: str) -> dict[str, Any] | None:
+        """Get the PR narrative for a task, or None if not found."""
+        repo, sid = self._repo(), self._sid()
+        row = self.conn.execute(
+            "SELECT repo, task_slug, pr_url, body, created_at, updated_at "
+            "FROM pr_narrative WHERE repo=? AND stream_id=? AND task_slug=?",
+            (repo, sid, task_slug),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "repo": row[0],
+            "task_slug": row[1],
+            "pr_url": row[2],
+            "body": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+
+    def record_ci_check(
+        self,
+        pr_url: str,
+        check_name: str,
+        check_status: str,
+        check_conclusion: str | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        url: str | None = None,
+    ) -> None:
+        """Record a single CI check result for telemetry."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo, sid = self._repo(), self._sid()
+        self.conn.execute(
+            "INSERT INTO ci_telemetry (repo, stream_id, pr_url, check_name, "
+            "check_status, check_conclusion, started_at, completed_at, url, captured_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (repo, sid, pr_url, check_name, check_status, check_conclusion,
+             started_at, completed_at, url, datetime.now()),
+        )
+
+    def list_ci_telemetry(self, pr_url: str) -> list[dict[str, Any]]:
+        """Get all CI telemetry for a PR URL, ordered by capture time."""
+        repo, sid = self._repo(), self._sid()
+        rows = self.conn.execute(
+            "SELECT pr_url, check_name, check_status, check_conclusion, "
+            "started_at, completed_at, url, captured_at "
+            "FROM ci_telemetry WHERE repo=? AND stream_id=? AND pr_url=? "
+            "ORDER BY captured_at DESC",
+            (repo, sid, pr_url),
+        ).fetchall()
+        return [
+            {
+                "pr_url": r[0],
+                "check_name": r[1],
+                "check_status": r[2],
+                "check_conclusion": r[3],
+                "started_at": r[4],
+                "completed_at": r[5],
+                "url": r[6],
+                "captured_at": r[7],
+            }
+            for r in rows
+        ]
+
+    def upsert_pr_lifecycle(
+        self,
+        task_slug: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Upsert PR lifecycle state. Sets fields that are non-None, leaves others unchanged."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo, sid = self._repo(), self._sid()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Build the UPSERT: always upsert with new values, but use COALESCE
+        # logic to preserve existing values for fields not being updated.
+        # We do this by reading the current row first, merging, then writing.
+        row = self.conn.execute(
+            "SELECT repo, task_slug, pr_url, auto_merge, merged_at, "
+            "watcher_started, watcher_stopped, ci_failures, paused, paused_reason "
+            "FROM pr_lifecycle WHERE repo=? AND stream_id=? AND task_slug=?",
+            (repo, sid, task_slug),
+        ).fetchone()
+
+        if row is None:
+            # New row — insert all columns explicitly so ON CONFLICT works
+            # with DuckDB's PK constraint.
+            defaults = {
+                "pr_url": None,
+                "auto_merge": 0,
+                "merged_at": None,
+                "watcher_started": None,
+                "watcher_stopped": None,
+                "ci_failures": 0,
+                "paused": 0,
+                "paused_reason": None,
+            }
+            merged = {**defaults, **kwargs}
+            self.conn.execute(
+                "INSERT INTO pr_lifecycle "
+                "(repo, stream_id, task_slug, pr_url, auto_merge, merged_at, "
+                "watcher_started, watcher_stopped, ci_failures, paused, paused_reason, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (repo, stream_id, task_slug) DO UPDATE SET "
+                "pr_url=EXCLUDED.pr_url, "
+                "auto_merge=EXCLUDED.auto_merge, "
+                "merged_at=EXCLUDED.merged_at, "
+                "watcher_started=EXCLUDED.watcher_started, "
+                "watcher_stopped=EXCLUDED.watcher_stopped, "
+                "ci_failures=EXCLUDED.ci_failures, "
+                "paused=EXCLUDED.paused, "
+                "paused_reason=EXCLUDED.paused_reason, "
+                "updated_at=EXCLUDED.updated_at",
+                (
+                    repo, sid, task_slug,
+                    merged["pr_url"], merged["auto_merge"], merged["merged_at"],
+                    merged["watcher_started"], merged["watcher_stopped"],
+                    merged["ci_failures"], merged["paused"], merged["paused_reason"],
+                    now, now,
+                ),
+            )
+        else:
+            # Existing row — merge in new values, only for non-None kwargs
+            sets: list[str] = []
+            vals: list[Any] = []
+
+            for field in ("pr_url", "auto_merge", "merged_at", "watcher_started",
+                          "watcher_stopped", "ci_failures", "paused", "paused_reason"):
+                val = kwargs.get(field)
+                if val is not None:
+                    sets.append(f"{field}=?")
+                    vals.append(val)
+
+            sets.append("updated_at=?")
+            vals.append(now)
+            vals.extend([repo, sid, task_slug])
+
+            sql = (
+                f"UPDATE pr_lifecycle SET {', '.join(sets)} "
+                "WHERE repo=? AND stream_id=? AND task_slug=?"
+            )
+            self.conn.execute(sql, vals)
+
+        return {
+            "repo": repo,
+            "task_slug": task_slug,
+            "updated_at": now,
+        }
+
+    def get_pr_lifecycle(self, task_slug: str) -> dict[str, Any] | None:
+        """Get PR lifecycle state for a task, or None if not found."""
+        repo, sid = self._repo(), self._sid()
+        row = self.conn.execute(
+            "SELECT repo, task_slug, pr_url, auto_merge, merged_at, "
+            "watcher_started, watcher_stopped, ci_failures, paused, paused_reason, "
+            "created_at, updated_at "
+            "FROM pr_lifecycle WHERE repo=? AND stream_id=? AND task_slug=?",
+            (repo, sid, task_slug),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "repo": row[0],
+            "task_slug": row[1],
+            "pr_url": row[2],
+            "auto_merge": row[3],
+            "merged_at": row[4],
+            "watcher_started": row[5],
+            "watcher_stopped": row[6],
+            "ci_failures": row[7],
+            "paused": row[8],
+            "paused_reason": row[9],
+            "created_at": row[10],
+            "updated_at": row[11],
+        }
 
 
 def open_state_store(

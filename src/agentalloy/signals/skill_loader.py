@@ -875,19 +875,16 @@ def _load_workflow_prose_override(skill_id: str, cwd: Path) -> tuple[str | None,
     )
 
 
-def _read_intake_route(project_root: Path) -> str | None:
-    """The ``route`` field declared by the intake contract, or ``None``.
+def _intake_route_hint(project_root: Path) -> str | None:
+    """Next-phase hint when leaving intake — determined by the downstream contract.
 
-    Queries the store for active intake contracts and returns the newest one's
-    ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
-    failure returns ``None``. Never raises.
+    After the intake contract was removed, route is encoded in **which downstream
+    phase has an active contract**: ``spec`` → ``sdd-full`` (``None`` → default),
+    ``sdd-fast`` → ``sdd-fast``, ``add-skill`` → ``add-skill``, ``sdd-flow`` →
+    ``sdd-flow``. Best-effort; any read failure returns ``None`` (default full
+    route).
 
     Reads the *bound* process store rather than opening a handle of its own.
-    This used to open ``<repo>/.agentalloy/state.db`` — a store nothing in
-    ``src/`` has ever written, so intake routing silently always took the
-    default route, and the open *created* an empty file in every repo it
-    touched. Opening a second writer against the real store is not an option
-    either: the service holds the DuckDB write lock.
     """
     try:
         from agentalloy.storage.state_store import process_store
@@ -895,47 +892,12 @@ def _read_intake_route(project_root: Path) -> str | None:
         store = process_store()
         if store is None:
             return None
-        contracts = store.list_contracts(phase="intake", status="active")
-        if not contracts:
-            return None
-        # Return the most recently updated contract's route
-        newest = max(contracts, key=lambda c: c.get("updated_at", ""))
-        return newest.get("route")
-    except Exception:
-        return None
-
-
-def _intake_route_hint(project_root: Path) -> str | None:
-    """Next-phase hint when leaving intake — the intake contract's ``route`` rules.
-
-    Routing is authoritative on the intake contract's ``route`` field: ``fast``
-    selects the compressed ``sdd-fast`` lane, ``full`` (the default) advances the
-    linear graph intake → spec. The field is trusted directly — intake's exit gate
-    is route-agnostic, so the destination phase composes against whatever work-item
-    exists.
-
-    When no intake contract is readable, fall back to the store: the presence of
-    an active sdd-fast work-item selects the fast route. Best-effort; any read
-    failure falls back to the default full route.
-    """
-    route = _read_intake_route(project_root)
-    if route == "fast":
-        return "sdd-fast"
-    if route == "add-skill":
-        return "add-skill"
-    if route == "full":
-        return None
-
-    # No readable intake contract: fall back to store-presence (cascade).
-    try:
-        from agentalloy.storage.state_store import process_store
-
-        store = process_store()
-        if store is None:
-            return None
-        fast_contracts = store.list_contracts(phase="sdd-fast", status="active")
-        if fast_contracts:
-            return "sdd-fast"
+        for phase in ("spec", "sdd-fast", "add-skill", "sdd-flow"):
+            contracts = store.list_contracts(phase=phase, status="active")
+            if contracts:
+                if phase == "spec":
+                    return None  # None = default sdd-full lane
+                return phase
     except Exception:
         pass
     return None

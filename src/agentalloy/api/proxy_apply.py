@@ -320,7 +320,10 @@ async def _compose_block(
     tier2_result: ComposedResult | EmptyResult | None = None
     domain_req: ComposeRequest | None = None
     decision_block = ""
-    if signal.announce_cursor and signal.current_contract:
+    # Gate: never inject domain skills during intake — intake only needs
+    # workflow prose (Tier 1). Domain skills fire once intake exits and
+    # the agent is actually working in a downstream phase.
+    if signal.announce_cursor and signal.current_contract and signal.phase != "intake":
         contract: Contract | None = None
         try:
             # Store-first: load contract from the DuckDB state store using the id.

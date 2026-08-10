@@ -92,16 +92,27 @@ raw_prose: |
   - **how it was verified** — link the spec acceptance, the design, and the QA
     report so a reviewer can trace the chain instead of reconstructing it.
 
+  Store the PR narrative in the data store (not on disk):
+
+  ```
+  agentalloy contract artifact-set --phase ship --slug <slug> --name pr-narrative --body-file -
+  ```
+
   A reviewer should be able to approve from the narrative plus the diff, without
   spelunking the history.
 
   ## 3. Record the delivery
 
-  Write the ship artifact with `## Summary` (what shipped, the PR link, the
-  release-notes or changelog entry) and `## Rollback` (how to reverse this exact
-  change — the revert commit, the flag to flip, any data migration to undo). The
-  PR is external and ephemeral; this record persists in the repo. Update the
-  changelog or release notes to the repo's own convention.
+  Write the ship artifact in the data store with `## Summary` (what shipped, the PR
+  link, the release-notes or changelog entry) and `## Rollback` (how to reverse this
+  exact change — the revert commit, the flag to flip, any data migration to undo):
+
+  ```
+  agentalloy contract artifact-set --phase ship --slug <slug> --name delivery --body-file -
+  ```
+
+  The ship artifact persists in the data store — no ``docs/ship/*.md`` file. Update
+  the changelog or release notes to the repo's own convention.
 
   ## 4. Reversibility scales with risk
 
@@ -113,28 +124,33 @@ raw_prose: |
   rolling back the moment one trips. Don't build that apparatus for a change a
   plain revert already covers.
 
-  ## 5. After it lands
+  ## 5. After it lands — automated watcher
 
-  Confirm the merge is healthy: the change is live, no new errors, the critical
-  path still works. If something's wrong, it's the same loop as everywhere —
-  route by cause (`agentalloy phase set build` for a defect, which earns a
-  regression test on the way back through), don't hotfix blind.
+  The watcher opens the PR, monitors CI, and detects merge — all automatically.
+  After writing the PR narrative, the proxy starts the watcher for you. It:
+
+  - Opens the PR with the narrative from the data store
+  - Polls CI every 60 seconds
+  - Captures all CI results to telemetry (queryable via ``agentalloy telemetry show``)
+  - After 5 CI failures, pauses and notifies you
+  - Detects when the PR merges (via VCS API)
+  - After merge, asks you whether to reset to intake
+
+  You do NOT need to run any watcher commands. The proxy handles everything.
 
   ## 6. Close it out
 
   Ship is terminal — unlike every other phase, it does **not** self-advance.
-  Once the delivery record is written and the merge is healthy, the work is
-  done: **stay in `ship`** and tell the user it shipped. But do not then go
-  quiet and wait to be prompted — **the moment delivery lands, explicitly ask
-  the user whether they're ready to reset to intake for the next work item.**
-  Ask every time; a small model that "stays in ship" and skips the ask is the
-  exact failure this guards against. The one transition out is back to the top,
-  and it's the user's call, not yours: when they say go, reset the lifecycle with
-  `agentalloy phase set intake` so the next session opens fresh. Phase advance
-  ends this session; the next phase begins in a fresh one, and `agentalloy resume`
-  rebuilds context. **Never reset on
-  your own initiative** — a green CI run or a successful merge is not permission;
-  only the user's explicit yes is. Ask, then wait for the answer.
+  Once the watcher confirms the merge and you've confirmed you're ready to reset
+  to intake, the work is done: **stay in `ship`** and tell the user it shipped.
+  Do not then go quiet and wait to be prompted — explicitly ask the user whether
+  they're ready to reset to intake for the next work item. The one transition out
+  is back to the top, and it's the user's call, not yours: when they say go, reset
+  the lifecycle with `agentalloy phase set intake` so the next session opens fresh.
+  Phase advance ends this session; the next phase begins in a fresh one, and
+  `agentalloy resume` rebuilds context. **Never reset on your own initiative** —
+  a green CI run or a successful merge is not permission; only the user's explicit
+  yes is. Ask, then wait for the answer.
 
   ## Not this
 

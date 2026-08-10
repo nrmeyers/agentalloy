@@ -150,12 +150,14 @@ raw_prose: |
   A clean report — green bar, every AC met, no open Critical or required finding
   — clears the way to ship.
 
-  On a clean report, seed **ship's work-item** before you go:
+  On a clean report, seed **ship's work-item** in the data store before you go:
 
-      agentalloy contract init --phase ship --slug <task-slug>
+  ```
+  agentalloy contract artifact-set --phase ship --slug <slug> --name work-item --body-file -
+  ```
 
-  Fill `domain_tags` with the *delivery surface* (release, changelog, migration,
-  rollout — whatever shipping this touches) and write the body as what to ship
+  Fill the body with the *delivery surface* (release, changelog, migration,
+  rollout — whatever shipping this touches) and write it as what to ship
   and how to make it reversible. That body is ship's retrieval prompt, so
   delivery opens already primed.
 
