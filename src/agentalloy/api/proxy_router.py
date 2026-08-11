@@ -638,6 +638,7 @@ def _stream_upstream_response(
                     yield chunk
             if not has_finish_reason:
                 yield _CORRECTIVE_CHUNK
+                yield 'data: [DONE]\n\n'
             _finish_received()
         except httpx.HTTPStatusError as exc:
             logger.warning("Upstream streaming HTTP status error: %s", exc)
