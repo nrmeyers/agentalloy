@@ -135,7 +135,7 @@ def test_streaming_relays_sse_bytes(tmp_path: Path) -> None:
     """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
     captured: dict[str, Any] = {}
     sse = b'event: response.completed\ndata: {"type": "response.completed"}\n\n'
-    correction = b'{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
+    correction = b'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\n'
     app = _make_app(captured, sse=sse)
     with (
         patch(_SIGNAL, return_value=_no_compose_signal()),

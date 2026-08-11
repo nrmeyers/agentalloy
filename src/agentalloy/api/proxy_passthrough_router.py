@@ -804,14 +804,18 @@ async def _forward_streaming(
     # (2xx-gated inside on_status) so a 529 stream open never burns the cadence.
     on_status(upstream.status_code)
 
-    _CORRECTIVE_CHUNK = json.dumps(
-        {
-            "id": "chatcmpl-passthrough",
-            "object": "chat.completion.chunk",
-            "created": 0,
-            "model": "passthrough",
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        },
+    _CORRECTIVE_CHUNK = (
+        'data: '
+        + json.dumps(
+            {
+                "id": "chatcmpl-passthrough",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "passthrough",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+        )
+        + '\n\n'
     ).encode()
 
     async def relay() -> AsyncIterator[bytes]:

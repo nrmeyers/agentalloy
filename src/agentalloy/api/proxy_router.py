@@ -605,14 +605,18 @@ def _stream_upstream_response(
                 repo=telemetry.repo,
             )
 
-        _CORRECTIVE_CHUNK = json.dumps(
-            {
-                "id": "chatcmpl-proxy",
-                "object": "chat.completion.chunk",
-                "created": 0,
-                "model": "proxy",
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            },
+        _CORRECTIVE_CHUNK = (
+            'data: '
+            + json.dumps(
+                {
+                    "id": "chatcmpl-proxy",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "proxy",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                },
+            )
+            + '\n\n'
         )
 
         try:
