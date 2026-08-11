@@ -89,11 +89,11 @@ def build_block(slug: str, port: int) -> str:
 
 
 # Mapping of harness registry keys to their dedicated carrier file in the repo.
-# Home-scoped harnesses (openclaw, continue-closed, continue-local) are
-# intentionally omitted: their config lives in the user's home directory,
-# not the repo root, so detect_target() returns None for them.
+# Proxy-wired harnesses (claude-code, qwen-code, codex) are omitted — they
+# receive context per-turn via the AgentAlloy proxy, so no markdown block is
+# written. Home-scoped harnesses (openclaw, continue-closed, continue-local)
+# are also omitted: their config lives in the user's home directory.
 _HARNESS_CARRIERS: dict[str, str] = {
-    "claude-code": ".claude/settings.local.json",
     "cursor": ".cursor/rules/agentalloy.mdc",
     "cline": ".clinerules",
     "windsurf": ".windsurf/rules/agentalloy.md",
@@ -101,9 +101,7 @@ _HARNESS_CARRIERS: dict[str, str] = {
     "copilot-cli": ".github/copilot-instructions.md",
     "aider": ".agentalloy-aider-instructions.md",
     "opencode": ".opencode/system-prompt.md",
-    "codex": ".codex/config.toml",
-    "qwen-code": ".qwen/settings.json",
-    "hermes-agent": ".hermes/config.yaml",
+    "hermes-agent": "AGENTS.md",
 }
 
 
