@@ -347,7 +347,7 @@ def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Pat
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
     """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
     sse = b"event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n"
-    correction = b'{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
+    correction = b'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
     captured: dict[str, Any] = {}
     app = _make_app(captured, sse=sse)
     with (

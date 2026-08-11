@@ -319,7 +319,7 @@ class TestProxyStreaming:
     async def test_stream_missing_finish_reason_injected(self) -> None:
         """Correction injected when stream has no finish_reason."""
         sse_data = 'data: {"id":"test","object":"chat.completion.chunk"}\n\n'
-        correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
+        correction = 'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
 
         async def _aiter_raw():
             yield sse_data.encode()
@@ -348,7 +348,7 @@ class TestProxyStreaming:
 
     async def test_stream_no_finish_reason_injected(self) -> None:
         """Correction injected for empty stream."""
-        correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
+        correction = 'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
 
         async def _aiter_raw():
             return
