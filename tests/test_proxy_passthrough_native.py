@@ -343,7 +343,9 @@ def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Pat
 
 
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
+    """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
     sse = b"event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n"
+    correction = b'{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
     captured: dict[str, Any] = {}
     app = _make_app(captured, sse=sse)
     with (
@@ -354,8 +356,9 @@ def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
             f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body(stream=True)
         )
     assert resp.status_code == 200
-    assert resp.content == sse
     assert resp.headers["content-type"].startswith("text/event-stream")
+    assert sse in resp.content
+    assert correction in resp.content
 
 
 # --------------------------------------------------------------------------- #

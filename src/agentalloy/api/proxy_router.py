@@ -484,6 +484,67 @@ def _emit_llm_error(
 # ---------------------------------------------------------------------------
 
 
+def _sse_chunk_has_finish_reason(text: str) -> bool:
+    """Scan an SSE text chunk for a ``finish_reason`` field in choices.
+
+    SSE chunks arrive as ``data: {json}\\n\\n`` or ``data: [DONE]\\n\\n``.
+    The iterator may split chunks mid-byte, so we scan for ``data: {`` and
+    try parsing the JSON object.
+
+    Args:
+        text: The SSE chunk text.
+
+    Returns:
+        ``True`` if any JSON object in *text* carries a ``finish_reason`` key.
+
+    """
+    # Fast path: strip the SSE prefix and try parsing the JSON.
+    stripped = text.strip()
+    if stripped.startswith("data: "):
+        try:
+            obj = json.loads(stripped[6:])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fallback: scan for ``data: {`` and try parsing the JSON object.
+    # This handles SSE chunks split mid-byte by the iterator.
+    search_start = 0
+    while True:
+        idx = text.find("data: {", search_start)
+        if idx == -1:
+            break
+        brace_end = text.find("\n", idx + 6)
+        if brace_end == -1:
+            brace_end = len(text)
+        try:
+            obj = json.loads(text[idx + 6 : brace_end])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        search_start = idx + 1
+
+    # Final fallback: try parsing the text directly as JSON (no SSE prefix).
+    # This handles raw JSON fragments that may have been relayed without the
+    # ``data: `` prefix.
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict) and obj.get("choices"):
+            for choice in obj["choices"]:
+                if isinstance(choice, dict) and "finish_reason" in choice:
+                    return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return False
+
+
 def _stream_upstream_response(
     upstream: httpx.AsyncClient,
     chat_url: str,
@@ -544,6 +605,16 @@ def _stream_upstream_response(
                 repo=telemetry.repo,
             )
 
+        _CORRECTIVE_CHUNK = json.dumps(
+            {
+                "id": "chatcmpl-proxy",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "proxy",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+        )
+
         try:
             async with upstream.stream("POST", chat_url, json=payload) as resp:
                 on_status(resp.status_code)
@@ -555,9 +626,14 @@ def _stream_upstream_response(
                     )
                     _finish_error(f"Upstream returned HTTP {resp.status_code}")
                     return
+                has_finish_reason = False
                 async for chunk in resp.aiter_text():
                     usage_scanner.feed(chunk)
+                    if _sse_chunk_has_finish_reason(chunk):
+                        has_finish_reason = True
                     yield chunk
+            if not has_finish_reason:
+                yield _CORRECTIVE_CHUNK
             _finish_received()
         except httpx.HTTPStatusError as exc:
             logger.warning("Upstream streaming HTTP status error: %s", exc)

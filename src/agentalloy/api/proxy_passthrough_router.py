@@ -621,6 +621,67 @@ async def _forward_once(
     )
 
 
+def _chunk_has_finish_reason(text: str) -> bool:
+    """Scan an SSE text chunk for a ``finish_reason`` field in choices.
+
+    SSE chunks arrive as ``data: {json}\\n\\n`` or ``data: [DONE]\\n\\n``.
+    The iterator may split chunks mid-byte, so we scan for ``data: {`` and
+    try parsing the JSON object.
+
+    Args:
+        text: The decoded SSE chunk text.
+
+    Returns:
+        ``True`` if any JSON object in *text* carries a ``finish_reason`` key.
+
+    """
+    # Fast path: strip the SSE prefix and try parsing the JSON.
+    stripped = text.strip()
+    if stripped.startswith("data: "):
+        try:
+            obj = json.loads(stripped[6:])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fallback: scan for ``data: {`` and try parsing the JSON object.
+    # This handles SSE chunks split mid-byte by the iterator.
+    search_start = 0
+    while True:
+        idx = text.find("data: {", search_start)
+        if idx == -1:
+            break
+        brace_end = text.find("\n", idx + 6)
+        if brace_end == -1:
+            brace_end = len(text)
+        try:
+            obj = json.loads(text[idx + 6 : brace_end])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        search_start = idx + 1
+
+    # Final fallback: try parsing the text directly as JSON (no SSE prefix).
+    # This handles raw JSON fragments that may have been relayed without the
+    # ``data: `` prefix.
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict) and obj.get("choices"):
+            for choice in obj["choices"]:
+                if isinstance(choice, dict) and "finish_reason" in choice:
+                    return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return False
+
+
 async def _forward_streaming(
     client: AnthropicPassthroughClient,
     query_string: str,
@@ -657,12 +718,28 @@ async def _forward_streaming(
     # (2xx-gated inside on_status) so a 529 stream open never burns the cadence.
     on_status(upstream.status_code)
 
+    _CORRECTIVE_CHUNK = json.dumps(
+        {
+            "id": "chatcmpl-passthrough",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "passthrough",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        },
+    ).encode()
+
     async def relay() -> AsyncIterator[bytes]:
+        has_finish_reason = False
         try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
+            async for raw in upstream.aiter_raw():
+                text = raw.decode("utf-8", errors="replace")
+                if _chunk_has_finish_reason(text):
+                    has_finish_reason = True
+                yield raw
         finally:
             await cm.__aexit__(None, None, None)
+        if not has_finish_reason:
+            yield _CORRECTIVE_CHUNK
 
     return StreamingResponse(
         relay(),

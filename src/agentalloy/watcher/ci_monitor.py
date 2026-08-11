@@ -60,7 +60,14 @@ class CICheckMonitor:
 
     def _gh_poll(self, pr_url: str) -> tuple[bool, int]:
         """Poll CI checks via GitHub CLI."""
-        cmd = ["gh", "pr", "checks", pr_url.split("/")[-1], "--json", "name,state,status,conclusion,startedAt,completedAt,url"]
+        cmd = [
+            "gh",
+            "pr",
+            "checks",
+            pr_url.split("/")[-1],
+            "--json",
+            "name,state,status,conclusion,startedAt,completedAt,url",
+        ]
 
         try:
             result = subprocess.run(
@@ -107,8 +114,12 @@ class CICheckMonitor:
             if not all_green:
                 fail_count = self._lifecycle.increment_ci_failures()
                 if fail_count >= self._max_failures:
-                    logger.warning("CI failure limit reached (%d/%d) for task %r",
-                                   fail_count, self._max_failures, self._lifecycle.task_slug)
+                    logger.warning(
+                        "CI failure limit reached (%d/%d) for task %r",
+                        fail_count,
+                        self._max_failures,
+                        self._lifecycle.task_slug,
+                    )
 
             return all_green, total
 
@@ -155,8 +166,12 @@ class CICheckMonitor:
             if not all_green:
                 fail_count = self._lifecycle.increment_ci_failures()
                 if fail_count >= self._max_failures:
-                    logger.warning("CI failure limit reached (%d/%d) for task %r",
-                                   fail_count, self._max_failures, self._lifecycle.task_slug)
+                    logger.warning(
+                        "CI failure limit reached (%d/%d) for task %r",
+                        fail_count,
+                        self._max_failures,
+                        self._lifecycle.task_slug,
+                    )
 
             return all_green, total
 

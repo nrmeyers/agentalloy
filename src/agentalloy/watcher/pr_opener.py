@@ -68,11 +68,17 @@ class PRManager:
     ) -> str | None:
         """Open a PR via GitHub CLI."""
         cmd = [
-            "gh", "pr", "create",
-            "--head", branch,
-            "--base", base_branch,
-            "--title", title,
-            "--body", body,
+            "gh",
+            "pr",
+            "create",
+            "--head",
+            branch,
+            "--base",
+            base_branch,
+            "--title",
+            title,
+            "--body",
+            body,
         ]
 
         try:
@@ -132,11 +138,17 @@ class PRManager:
     ) -> str | None:
         """Open a MR via GitLab CLI."""
         cmd = [
-            "glab", "mr", "create",
-            "--source-branch", branch,
-            "--target-branch", base_branch,
-            "--title", title,
-            "--description", body,
+            "glab",
+            "mr",
+            "create",
+            "--source-branch",
+            branch,
+            "--target-branch",
+            base_branch,
+            "--title",
+            title,
+            "--description",
+            body,
         ]
 
         if auto_merge:
