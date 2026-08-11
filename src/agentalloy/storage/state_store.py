@@ -24,6 +24,7 @@ import copy
 import fnmatch
 import json
 import logging
+import os
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
@@ -2061,6 +2062,137 @@ class DuckDBStateStore:
             "created_at": row[10],
             "updated_at": row[11],
         }
+
+    # -- scoped cursor helpers -------------------------------------------------
+    # The "cursor" kind already supports a ``session_key`` parameter on
+    # ``read`` / ``write`` / ``delete``.  These thin wrappers expose the
+    # per-session cursor semantics used by the task / phase / proxy layers.
+
+    def get_scoped_cursor(self, session_key: str) -> str | None:
+        """Return the per-session cursor value, or ``None`` when unset."""
+        return self.read("cursor", session_key=session_key)
+
+    def set_scoped_cursor(self, session_key: str, value: str) -> StateWriteResult:
+        """Store a per-session cursor value."""
+        return self.write("cursor", value, session_key=session_key)
+
+    def _delete_scoped_cursor(self, session_key: str) -> bool:
+        """Remove a per-session cursor.  Returns ``True`` when a row existed."""
+        repo = self._repo()
+        sid = self._sid()
+        cur = self.conn.execute(
+            "DELETE FROM sdd_state WHERE repo=? AND stream_id=? AND kind='cursor' AND session_key=?",
+            (repo, sid, session_key),
+        )
+        rows = cur.fetchall()
+        return bool(rows) and rows[0][0] > 0
+
+    # -- contract helpers ------------------------------------------------------
+
+    def list_contracts_for_phase(self, phase: str) -> list[dict[str, Any]]:
+        """List active contracts for a phase, ordered by ``contract_id`` (filename order)."""
+        params: list[Any] = [self._repo(), self._sid(), phase]
+        sql = (
+            "SELECT contract_id, phase, slug, work_item, route, "
+            "domain_tags, scope_touches, scope_avoids, success_criteria, "
+            "status, supersedes, created_at, updated_at, body, stream_id "
+            "FROM sdd_contract WHERE repo=? AND stream_id=? AND phase=? AND status='active' "
+            "ORDER BY contract_id ASC"
+        )
+        rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_contract(row) for row in rows]
+
+    def migrate_disk_contracts(self, roots: list[str]) -> dict[str, Any]:
+        """Migrate disk-based ``.agentalloy/contracts/`` files into the store, then delete them.
+
+        Scans each root for ``contracts/active/<phase>/*.md`` and
+        ``contracts/archive/<phase>/*.md``.  Each file's YAML front-matter
+        is parsed and written into the store via :meth:`put_contract`.
+        All migrated files and their empty parent directories are deleted.
+
+        Returns ``{migrated: int, errors: int, details: [str]}``.
+        """
+        import glob as glob_mod
+        import os
+
+        import yaml
+
+        migrated = 0
+        errors = 0
+        details: list[str] = []
+
+        for root in roots:
+            for location in ("active", "archive"):
+                pattern = os.path.join(root, ".agentalloy", "contracts", location, "*", "*.md")
+                files = sorted(glob_mod.glob(pattern))
+                for fpath in files:
+                    try:
+                        with open(fpath, encoding="utf-8") as fh:
+                            raw = fh.read()
+                        front = raw.split("---", 2)
+                        meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}
+
+                        contract_id = (
+                            meta.get("contract_id") or meta.get("id") or meta.get("slug", "")
+                        )
+                        slug = meta.get("slug") or contract_id
+                        phase = meta.get("phase") or self._get_phase_from_path(fpath, location)
+                        work_item = meta.get("work_item") or meta.get("description", "")
+                        body = front[2].strip() if len(front) >= 3 else raw.strip()
+
+                        if not contract_id:
+                            # Generate one from filename
+                            contract_id = os.path.splitext(os.path.basename(fpath))[0]
+
+                        self.put_contract(
+                            contract_id,
+                            phase=phase,
+                            slug=slug or contract_id,
+                            work_item=work_item,
+                            body=body,
+                        )
+                        os.remove(fpath)
+                        migrated += 1
+                        details.append(
+                            f"migrated {contract_id} ({location}/{os.path.basename(fpath)})"
+                        )
+                    except Exception as exc:
+                        errors += 1
+                        details.append(f"error migrating {fpath}: {exc}")
+
+            # Prune empty directories left behind
+            for location in ("active", "archive"):
+                base = os.path.join(root, ".agentalloy", "contracts", location)
+                self._prune_empty_dirs(base)
+            contracts_base = os.path.join(root, ".agentalloy", "contracts")
+            self._prune_empty_dirs(contracts_base)
+
+        return {"migrated": migrated, "errors": errors, "details": details}
+
+    @staticmethod
+    def _get_phase_from_path(fpath: str, location: str) -> str:
+        """Derive phase name from ``contracts/<location>/<phase>/*.md``."""
+        parts = Path(fpath).parts
+        try:
+            idx = parts.index("contracts")
+            return parts[idx + 2]  # contracts/<location>/<phase>
+        except (ValueError, IndexError):
+            return "active"
+
+    @staticmethod
+    def _prune_empty_dirs(dirpath: str) -> None:
+        """Walk up from *dirpath* removing empty directories."""
+        if not os.path.isdir(dirpath):
+            return
+        d = dirpath
+        while True:
+            if not os.path.isdir(d) or os.listdir(d):
+                break
+            parent = os.path.dirname(d)
+            if parent == d:
+                break  # reached root
+            os.rmdir(d)
+            d = parent
 
 
 def open_state_store(

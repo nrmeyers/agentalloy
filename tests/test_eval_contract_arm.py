@@ -10,7 +10,7 @@ from eval import run_poc
 from eval.compare_runs import load_run, paired_deltas
 from eval.domain_tasks import DOMAIN_CONTRACT_TAGS, DOMAIN_TASKS
 
-from agentalloy.contracts import parse_contract
+from agentalloy.contracts import parse_contract_text
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "eval" / "contracts"
 
@@ -28,7 +28,7 @@ def test_fixture_set_covers_every_domain_task() -> None:
 def test_fixtures_parse_and_match_the_tag_map() -> None:
     by_id = {t.task_id: t for t in DOMAIN_TASKS}
     for path in sorted(_FIXTURES.glob("*.md")):
-        contract = parse_contract(path)
+        contract = parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem)
         task = by_id[path.stem]
         assert contract.task_slug == task.task_id
         assert contract.phase == task.phase
@@ -43,8 +43,11 @@ def test_contract_payload_matches_proxy_tier2_shape() -> None:
     from agentalloy.api.compose_models import compose_request_from_contract
 
     task = DOMAIN_TASKS[0]
+    path = _FIXTURES / f"{task.task_id}.md"
     req = compose_request_from_contract(
-        parse_contract(_FIXTURES / f"{task.task_id}.md"), legs="domain", k=4
+        parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem),
+        legs="domain",
+        k=4,
     )
     payload = req.model_dump(mode="json")
     assert payload["legs"] == "domain"

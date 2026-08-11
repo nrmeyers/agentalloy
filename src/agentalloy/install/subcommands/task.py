@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
@@ -66,27 +66,30 @@ def _store_cursor(cid: str, root: Path) -> None:
     _write_cursor_atomic(root, cid, cli_session_key())
 
 
-def _ordered_contracts(root: Path, phase: str) -> list[Path]:
-    """All contracts in ``.agentalloy/contracts/<phase>/`` ordered by filename.
+def _ordered_contracts(root: Path, phase: str) -> list[dict[str, Any]]:
+    """All active contracts for *phase*, ordered by filename (contract_id).
 
-    Filename order (not mtime) so the worklist is stable and design-controlled
-    via numeric prefixes. Delegates to the shared
-    :func:`agentalloy.contracts.ordered_contracts_for_phase` — the single ordering
-    definition also used by phase-entry cursor seeding (``first_workitem_id``).
+    Delegates to the state store.  Returns a list of dicts with at least
+    ``contract_id`` (the filename stem without ``.md``).
     """
-    from agentalloy.contracts import ordered_contracts_for_phase
+    access = phase_access(root)
+    try:
+        rows = access.contracts_handle().list_contracts(phase=phase, status="active")
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    # Sort by contract_id to preserve filename ordering (01-foo, 02-bar, …).
+    return sorted(rows, key=lambda r: str(r.get("contract_id", "")))
 
-    return ordered_contracts_for_phase(root, phase)
 
-
-def _cursor_id(phase: str, contract: Path) -> str:
+def _cursor_id(phase: str, contract: dict[str, Any]) -> str:
     """Contracts-relative posix id stored in ``.agentalloy/cursor``.
 
     Carries the ``active/`` prefix so it resolves against the tree layout
     (``.agentalloy/contracts/active/<phase>/``) — the single format shared with
     ``first_workitem_id`` and ``resolve_current_contract``.
     """
-    return f"active/{phase}/{contract.name}"
+    return f"active/{phase}/{contract['contract_id']}.md"
 
 
 def run_task_next(root: Path) -> dict[str, object]:
@@ -98,7 +101,7 @@ def run_task_next(root: Path) -> dict[str, object]:
     if not contracts:
         return {"ok": False, "message": f"No contracts under .agentalloy/contracts/{phase}/."}
 
-    names = [c.name for c in contracts]
+    names = [f"{c['contract_id']}.md" for c in contracts]
     cursor = _read_cursor(root, cli_session_key())
     current_name = cursor.rsplit("/", 1)[-1] if cursor else None
     # No/unknown cursor → start at the first task.
@@ -119,7 +122,8 @@ def run_task_start(slug: str, root: Path) -> dict[str, object]:
         return {"ok": False, "message": "No active phase."}
     contracts = _ordered_contracts(root, phase)
     for c in contracts:
-        if slug in (c.stem, c.name):
+        cid_val = c["contract_id"]
+        if slug in (cid_val, f"{cid_val}.md"):
             cid = _cursor_id(phase, c)
             _store_cursor(cid, root)
             return {"ok": True, "cursor": cid}

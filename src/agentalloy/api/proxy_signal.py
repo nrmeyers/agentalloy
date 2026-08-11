@@ -230,28 +230,49 @@ def _resolve_current_contract(
     (e.g. ``01-cache``). The path component is deprecated and always ``None``;
     consumers should load the contract from the store using the id.
 
-    Resolution reads the cursor value (``.agentalloy/cursor``) and treats it as
-    the contract's store key.  The cursor is seeded to the phase's first work-item
-    on entry and advanced by ``agentalloy task next``.
-
-    Falls back to the filesystem resolver when the cursor value is not found in
-    the store (backward-compat for repos that haven't migrated their contracts).
+    Resolution reads the cursor value (scoped then shared) and treats it as
+    the contract's store key.  The cursor is seeded to the phase's first
+    work-item on entry and advanced by ``agentalloy task next``.
     """
-    from agentalloy.contracts import resolve_current_contract as _fs_resolve
     from agentalloy.signals.skill_loader import ensure_migrated
 
     ensure_migrated(cwd)
 
-    # Try store-first resolution via the cursor value
+    # Try scoped cursor first, then shared cursor
     cursor_val = _read_cursor(cwd, session_key)
+    if not cursor_val:
+        cursor_val = _read_cursor(cwd, None)
+
     if cursor_val:
         # The cursor value is the contract_id (store key).
-        # Return it directly — the compose path loads from the store.
-        return cursor_val, None
+        # Containment guard: reject path-traversal values like "../../../etc/passwd".
+        # A valid contract_id must not escape the project root.
+        if ".." in cursor_val or cursor_val.startswith("/"):
+            # Treat as invalid — fall through to the first-active-fallback below.
+            pass
+        else:
+            return cursor_val, None
 
-    # Fallback: filesystem resolution for repos without store-backed contracts
-    cid, _fs_path = _fs_resolve(cwd, phase, session_key)
-    return cid, None  # path deprecated — consumers load from store via cid
+    # No cursor — fall back to the first active contract for the phase.
+    # Strict fail-safe: ≥2 contracts with no cursor → stay silent (don't guess).
+    try:
+        from agentalloy.signals.skill_loader import (  # noqa: PLC0415
+            _phase_view,
+        )
+
+        view = _phase_view(cwd)
+        if view is not None:
+            rows = view.list_contracts(phase=phase, status="active")
+            if rows:
+                rows_sorted = sorted(rows, key=lambda r: str(r.get("contract_id", "")))
+                if len(rows_sorted) == 1:
+                    return rows_sorted[0]["contract_id"], None
+                # ≥2 contracts, no cursor → strict resolver returns silent
+                return None, None
+    except Exception:  # noqa: BLE001 — fail-soft
+        pass
+
+    return None, None
 
 
 # Per-phase banner status line — the declarative core of the per-turn recency banner,

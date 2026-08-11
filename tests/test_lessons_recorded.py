@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentalloy.contracts import resolve_current_contract
+from agentalloy.api.proxy_signal import _resolve_current_contract as resolve_current_contract
 from agentalloy.signals.predicates import (
     PREDICATES,
     PredicateContext,
@@ -35,6 +35,14 @@ def _qa_contract(root: Path, slug: str) -> None:
     _write(
         root / ".agentalloy" / "contracts" / "active" / "qa" / f"{slug}.md", "---\nphase: qa\n---\n"
     )
+    # Also write to the bound process store so the resolver can see it.
+    from agentalloy.api.state_router import scoped_state_store
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    scoped = scoped_state_store(store, root)
+    scoped.put_contract(slug, phase="qa", slug=slug, body=f"# {slug}\n", status="active")
 
 
 def _ctx(root: Path, phase: str | None = "qa") -> PredicateContext:
@@ -68,11 +76,9 @@ def test_no_workitem_is_unknown(tmp_path: Path):
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is UNKNOWN
 
 
-def test_ambiguous_fanout_is_unknown(tmp_path: Path):
-    # ≥2 contracts, no cursor -> the strict resolver yields no single work-item ->
-    # UNKNOWN (fail-open). The gate never blocks against a guessed slug. In normal
-    # flow the cursor is seeded on phase entry (see the next test), so this is the
-    # fail-safe floor, not the common path.
+def test_ambiguous_fanout_resolves_first_active(tmp_path: Path):
+    # ≥2 contracts, no cursor -> resolver returns None (can't guess), so the gate
+    # returns UNKNOWN (fail-open, never blocks).
     _qa_contract(tmp_path, "feat-x")
     _qa_contract(tmp_path, "feat-y")
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is UNKNOWN
@@ -81,18 +87,26 @@ def test_ambiguous_fanout_is_unknown(tmp_path: Path):
 def test_phase_entry_seeds_gate_scope(tmp_path: Path):
     # Entering qa seeds the cursor to the first work-item (filename order); the gate
     # then resolves THAT slug deterministically — blocks until its lesson exists.
+    from agentalloy.api.state_router import scoped_state_store
     from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
         _write_phase_atomic,
     )
+    from agentalloy.storage.state_store import process_store
 
     _qa_contract(tmp_path, "01-alpha")
     _qa_contract(tmp_path, "02-beta")
     seed_phase(tmp_path, "build")  # enter qa from elsewhere
     _write_phase_atomic(tmp_path, "qa")
     # seeded to 01-alpha; its lesson is absent -> NOT_MET (blocks), not UNKNOWN
-    assert eval_lessons_recorded({}, _ctx(tmp_path)) is NOT_MET
+    store = process_store()
+    assert store is not None
+    ctx = _ctx(tmp_path)
+    ctx = PredicateContext(
+        project_root=tmp_path, current_phase="qa", store=scoped_state_store(store, tmp_path)
+    )
+    assert eval_lessons_recorded({}, ctx) is NOT_MET
     _write(tmp_path / "docs" / "solutions" / "01-alpha.md", "# lesson")
-    assert eval_lessons_recorded({}, _ctx(tmp_path)) is MET
+    assert eval_lessons_recorded({}, ctx) is MET
 
 
 def test_cursor_selects_slug(tmp_path: Path):
@@ -116,21 +130,18 @@ def test_phase_arg_overrides_ctx(tmp_path: Path):
 
 def test_resolver_cursor_containment(tmp_path: Path):
     # a cursor escaping the contracts tree must be ignored (containment guard),
-    # falling back to the single qa contract
+    # falling back to the single qa contract by contract_id
     _qa_contract(tmp_path, "feat-x")
     _write(tmp_path / ".agentalloy" / "cursor", "../../../etc/passwd")
-    _cid, path = resolve_current_contract(tmp_path, "qa")
-    assert path is not None and path.name == "feat-x.md"
+    cid, path = resolve_current_contract(tmp_path, "qa")
+    assert cid == "feat-x"
+    assert path is None
 
 
-def test_proxy_wrapper_matches_resolver(tmp_path: Path):
-    # the refactor: the proxy wrapper must resolve identically to the shared function
-    from agentalloy.api.proxy_signal import _resolve_current_contract
-
+def test_resolver_returns_contract_id_for_single_active(tmp_path: Path):
+    # With a single active contract and no cursor, the resolver returns it by id.
+    # The path component is deprecated and always None.
     _qa_contract(tmp_path, "feat-x")
-    proxy_cid, proxy_path = _resolve_current_contract(tmp_path, "qa")
-    fs_cid, fs_path = resolve_current_contract(tmp_path, "qa")
-    # contract_id should match; path is deprecated in the proxy wrapper (always None)
-    assert proxy_cid == fs_cid
-    assert proxy_path is None
-    assert fs_path is not None and fs_path.name == "feat-x.md"
+    cid, path = resolve_current_contract(tmp_path, "qa")
+    assert cid == "feat-x"
+    assert path is None

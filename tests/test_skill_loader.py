@@ -490,91 +490,91 @@ def test_build_predicate_context_empty_file_events(tmp_path: Path) -> None:
 
 
 class TestRuntimeStateRelocation:
-    """Proxy-exclusive cadence keys relocate out of the repo when
-    AGENTALLOY_RUNTIME_STATE_DIR is set; ``cursor`` (host-CLI shared) never
-    moves. Per-turn writes inside the repo trip harness file-watchers."""
+    """Cadence keys (composed, cursor, etc.) are now store-only.
 
-    def test_relocated_key_writes_outside_repo(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from agentalloy.api.proxy_context import encode_proj_token
+    The old env-var-based relocation to ``AGENTALLOY_RUNTIME_STATE_DIR``
+    and disk fallbacks are sunset. These tests verify the current store-backed
+    behavior: writes go to the bound process store, reads come from the same
+    store, and ``_state_view(None)`` means no writes happen.
+    """
+
+    def test_composed_writes_to_store(self, tmp_path: Path) -> None:
+        """_write_composed_atomic writes to the bound process store."""
         from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        state_root = tmp_path / "runtime-state"
-        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(state_root))
 
         _write_composed_atomic(repo, "build/thing.md")
 
+        # No disk file — cadence is store-only.
         assert not (repo / ".agentalloy" / "composed").exists()
-        relocated = state_root / encode_proj_token(repo) / "composed"
-        assert relocated.exists()
+        # Read comes back from the bound store.
         assert _read_composed(repo) == "build/thing.md"
 
-    def test_cursor_stays_in_repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_cursor_writes_to_store(self, tmp_path: Path) -> None:
+        """_write_cursor_atomic writes to the bound process store, not disk."""
         from agentalloy.signals.skill_loader import _read_cursor, _write_cursor_atomic
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
 
         _write_cursor_atomic(repo, "build/thing.md")
 
-        assert (repo / ".agentalloy" / "cursor").exists()
+        # No disk file — cursor is store-only.
+        assert not (repo / ".agentalloy" / "cursor").exists()
         assert _read_cursor(repo) == "build/thing.md"
 
-    def test_legacy_in_repo_value_read_then_cleaned_on_write(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_composed_overwrites_in_store(self, tmp_path: Path) -> None:
+        """Subsequent writes replace the prior value in the store."""
         from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
 
-        repo = tmp_path / "repo"
-        (repo / ".agentalloy").mkdir(parents=True)
-        (repo / ".agentalloy" / "composed").write_text("spec/thing.md\n")
-        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
-
-        # Pre-relocation cadence survives the move...
-        assert _read_composed(repo) == "spec/thing.md"
-        # ...and the next write migrates it out and removes the repo copy.
-        _write_composed_atomic(repo, "build/thing.md")
-        assert not (repo / ".agentalloy" / "composed").exists()
-        assert _read_composed(repo) == "build/thing.md"
-
-    def test_unset_env_keeps_repo_local_behavior(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
-
-        monkeypatch.delenv("AGENTALLOY_RUNTIME_STATE_DIR", raising=False)
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        _write_composed_atomic(repo, "intake/thing.md")
+        _write_composed_atomic(repo, "spec/thing.md")
+        assert _read_composed(repo) == "spec/thing.md"
 
-        assert (repo / ".agentalloy" / "composed").exists()
-        assert _read_composed(repo) == "intake/thing.md"
+        _write_composed_atomic(repo, "build/thing.md")
+        assert _read_composed(repo) == "build/thing.md"
+        assert not (repo / ".agentalloy" / "composed").exists()
 
-    def test_clear_state_removes_both_locations(
+    def test_no_store_drops_cadence_writes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """When no store is bound, cadence writes are silently dropped."""
+        from agentalloy.signals.skill_loader import _read_composed, _write_composed_atomic
+        from agentalloy.storage.state_store import bind_process_store, process_store
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        # Unbind the store temporarily
+        bound = process_store()
+        bind_process_store(None)
+        try:
+            _write_composed_atomic(repo, "build/thing.md")
+            assert _read_composed(repo) is None
+        finally:
+            # Restore the original store
+            bind_process_store(bound)
+
+    def test_clear_state_removes_legacy_disk_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_clear_state removes legacy disk copies best-effort; cadence is
+        now store-only so the store path is the authoritative one."""
         from agentalloy.signals.skill_loader import (
             _clear_state,
-            _read_state,
-            _write_state_atomic,
         )
 
         repo = tmp_path / "repo"
         (repo / ".agentalloy").mkdir(parents=True)
-        (repo / ".agentalloy" / "composed").write_text("old\n")
-        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
-        _write_state_atomic(repo, "composed", "new")
-        # Recreate a stray legacy copy, then clear must remove both.
         (repo / ".agentalloy" / "composed").write_text("stale\n")
 
         _clear_state(repo, "composed")
 
-        assert _read_state(repo, "composed") is None
+        # Legacy disk copy removed.
         assert not (repo / ".agentalloy" / "composed").exists()
 
 
@@ -592,6 +592,7 @@ def _legacy_contract(root: Path, rel: str, phase: str) -> Path:
 
 def test_ensure_migrated_moves_and_rewrites_cursor(tmp_path: Path) -> None:
     from agentalloy.signals.skill_loader import ensure_migrated
+    from agentalloy.storage.state_store import process_store
 
     _legacy_contract(tmp_path, "build/01-a.md", "build")
     _legacy_contract(tmp_path, "flat.md", "spec")
@@ -599,18 +600,29 @@ def test_ensure_migrated_moves_and_rewrites_cursor(tmp_path: Path) -> None:
 
     moved = ensure_migrated(tmp_path)
 
-    assert moved == 2
-    assert (tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "01-a.md").is_file()
-    assert (tmp_path / ".agentalloy" / "contracts" / "active" / "spec" / "flat.md").is_file()
-    # Cursor followed the move into the tree.
+    # Step 1: flat→tree (2 files), Step 2: tree→store (2 contracts) = 4 total.
+    assert moved == 4
+    # Flat layout moved to tree on disk, then tree → store (disk files removed).
+    assert not (tmp_path / ".agentalloy" / "contracts" / "build" / "01-a.md").is_file()
+    assert not (tmp_path / ".agentalloy" / "contracts" / "flat.md").is_file()
+    # Store now holds the contracts (queried via the bound process store).
+    store = process_store()
+    assert store is not None
+    contracts = store.list_contracts()
+    ids = {c["contract_id"] for c in contracts}
+    assert "01-a" in ids
+    assert "flat" in ids
+    # Cursor follows the move into the store (no disk file).
+    # The cursor value is the store key, not a disk path.
     assert (tmp_path / ".agentalloy" / "cursor").read_text().strip() == "active/build/01-a.md"
 
 
 def test_ensure_migrated_noop_when_already_tree(tmp_path: Path) -> None:
     from agentalloy.signals.skill_loader import ensure_migrated
 
-    _legacy_contract(tmp_path, "active/build/01-a.md", "build")  # already migrated
-    assert ensure_migrated(tmp_path) == 0
+    _legacy_contract(tmp_path, "active/build/01-a.md", "build")  # already tree layout
+    # tree→store migration still runs: 0 flat + 1 store = 1
+    assert ensure_migrated(tmp_path) == 1
 
 
 def test_ensure_migrated_noop_when_no_contracts(tmp_path: Path) -> None:

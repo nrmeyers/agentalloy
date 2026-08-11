@@ -15,6 +15,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,22 +50,70 @@ def _get_client() -> StateClient:
 def _active_design_slug(project_root: Path) -> str | None:
     """The active design work-item slug, for stamping onto a new build contract.
 
-    Reads the design cursor via the canonical resolver but accepts it only when it
-    resolves into ``contracts/design/`` (phase-strict). ``None`` when no single
-    design work-item resolves.
+    Resolves via: store cursor (scoped then shared) → first active design
+    contract in store. Returns the slug when the contract_id points at a
+    known active design contract, ``None`` otherwise.
     """
-    from agentalloy.contracts import active_dir, resolve_current_contract
     from agentalloy.signals.skill_loader import (
         cli_session_key,
     )
 
-    _cid, path = resolve_current_contract(project_root, "design", cli_session_key())
-    if path is None:
+    session_key = cli_session_key()
+
+    # Try cursor (scoped then shared) from store
+    cursor_val: str | None = None
+    try:
+        from agentalloy.signals.skill_loader import _state_view
+
+        view = _state_view(project_root)
+        if view is not None:
+            if session_key:
+                with contextlib.suppress(Exception):
+                    cursor_val = view.read("cursor", session_key=session_key)
+            if cursor_val is None:
+                with contextlib.suppress(Exception):
+                    cursor_val = view.read("cursor", session_key=None)
+    except Exception:
+        pass
+
+    if cursor_val is not None:
+        # Cursor points to a path like "active/design/01-foo.md" or contract_id
+        # Normalise to just the contract_id
+        if "/" in cursor_val:
+            parts = cursor_val.rsplit("/", 1)
+            path_part = parts[0]  # e.g. "active/design"
+            file_part = parts[1].replace(".md", "")  # e.g. "01-foo"
+            # Validate it points to a design contract
+            if path_part == "active/design":
+                cursor_val = file_part
+            else:
+                # Cross-phase cursor → None
+                return None
+        # cursor_val is already a contract_id; validate it exists in store
+        try:
+            view = _state_view(project_root)
+            if view is not None:
+                rows = view.list_contracts(phase="design", slug=cursor_val, status="active")
+                if rows:
+                    return cursor_val
+        except Exception:
+            pass
+        # Cursor points to non-existent contract → None
         return None
-    design_dir = active_dir(project_root, "design").resolve()
-    if not path.resolve().is_relative_to(design_dir):
-        return None
-    return path.stem
+
+    # No cursor: only return the slug when there's exactly one active design contract in store
+    try:
+        from agentalloy.signals.skill_loader import _state_view
+
+        view = _state_view(project_root)
+        if view is not None:
+            rows = view.list_contracts(phase="design", status="active")
+            if len(rows) == 1:
+                return rows[0]["contract_id"]
+    except Exception:
+        pass
+
+    return None
 
 
 def _inject_work_item(content: str, slug: str | None) -> str:

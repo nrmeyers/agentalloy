@@ -254,31 +254,35 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
         # gate can diff what changed *during* the phase. Fail-soft: a git failure
         # leaves the marker untouched and the predicate fails open (UNKNOWN).
         _record_phase_start_ref(project_root)
-        from agentalloy.contracts import first_workitem_id
-
         # Clear stale scoped cursors from the old phase, then seed the shared cursor
         # (the universal per-phase default any session falls back to; per-session
         # `task start`/`task next` layer scoped cursors on top — see cursor_state_name).
         _clear_all_cursors(project_root)
-        seed = first_workitem_id(project_root, phase)
+        # Derive the first work-item from the store (same ordering as the old
+        # ``first_workitem_id`` — contract_id is the numeric filename stem).
+        try:
+            rows = view.list_contracts(phase=phase, status="active")
+            if rows:
+                rows_sorted = sorted(rows, key=lambda r: str(r.get("contract_id", "")))
+                seed = f"active/{phase}/{rows_sorted[0]['contract_id']}.md"
+            else:
+                seed = None
+        except Exception:  # noqa: BLE001 — fail-soft: leave cursor unset
+            seed = None
         if seed:
             _write_cursor_atomic(project_root, seed)
 
         # Auto-archive on intake: any non-intake → intake transition ends a work
         # cycle, so sweep the just-completed cycle's live contracts into
         # archive/<phase>/ before the next cycle starts writing into active/.
-        # Mirrors the CLI path in install/subcommands/phase.py (same guards,
-        # same try/except for graceful degradation). This is an in-process path,
-        # so it goes through the store handle rather than the HTTP client —
-        # `test_signals_module_no_state_client_import` enforces that.
+        # This is an in-process path, so it goes through the store handle rather
+        # than the HTTP client — `test_signals_module_no_state_client_import`
+        # enforces that.
         if phase == "intake" and prev is not None and prev != "intake":
-            from agentalloy.contracts import apply_contracts_migration, plan_archive
-
             try:
                 view.archive_all()
             except Exception:
                 logger.warning("archive_all failed — store archiving skipped in proxy path")
-            apply_contracts_migration(plan_archive(project_root))
 
 
 # ---------------------------------------------------------------------------
@@ -525,99 +529,131 @@ def cli_session_key() -> str | None:
 def _read_cursor(project_root: Path, session_key: str | None = None) -> str | None:
     """Read the current work-item cursor, session-scoped when a key is given.
 
-    Reads the scoped file (``cursor.<hash>``) first, then falls back to the shared
-    ``cursor``. The value is a contract id relative to ``.agentalloy/contracts/``
-    (e.g. ``build/cache-write.md``). ``None`` means no explicit cursor — the proxy
-    falls back to the phase's incoming contract.
+    Reads from the store (where the cursor is now recorded after migration);
+    disk fallback is sunset — no fallback.
     """
-    from agentalloy.contracts import cursor_state_name
-
-    name = cursor_state_name(session_key)
-    if name != "cursor":
-        scoped = _read_state(project_root, name)
-        if scoped is not None:
-            return scoped
-    return _read_state(project_root, "cursor")
+    view = _state_view(project_root)
+    if view is None:
+        return None
+    try:
+        return view.read("cursor", session_key=session_key)
+    except Exception:
+        return None
 
 
 def _write_cursor_atomic(project_root: Path, cursor: str, session_key: str | None = None) -> None:
     """Atomically set the current work-item cursor (advanced by ``task next``).
 
-    Writes the session-scoped file when a key is known, else the shared one —
-    scoped-only, so a session never clobbers another's cursor (Bug C).
+    Writes to the store (disk fallback is sunset). Session-scoped when a key
+    is given, else the shared cursor — scoped-only, so a session never
+    clobbers another's cursor (Bug C).
     """
-    from agentalloy.contracts import cursor_state_name
-
-    _write_state_atomic(project_root, cursor_state_name(session_key), cursor)
-
-
-def _has_legacy_contract_layout(contracts_root: Path) -> bool:
-    """Cheap check for any legacy flat-layout indicator (fast path for the auto
-    migrate). True when flat ``*.md`` sit in the contracts root, a legacy
-    per-phase dir exists, ``archive/`` holds flat ``*.md``, or ``_superseded/``
-    exists. Once migrated, all of these are gone and this returns False.
-    """
-    if not contracts_root.is_dir():
-        return False
-    if any(contracts_root.glob("*.md")):
-        return True
-    for d in ("intake", "spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill"):
-        if (contracts_root / d).is_dir():
-            return True
-    if (contracts_root / "_superseded").is_dir():
-        return True
-    archive = contracts_root / "archive"
-    return archive.is_dir() and any(archive.glob("*.md"))
+    view = _state_view(project_root)
+    if view is None:
+        return
+    try:
+        view.write("cursor", cursor, session_key=session_key)
+    except Exception:
+        logger.warning("cursor write failed for %s", project_root, exc_info=True)
 
 
 def ensure_migrated(project_root: Path) -> int:
-    """Auto-migrate legacy flat contracts into the tree on first read.
+    """Auto-migrate legacy flat contracts into the store on first read.
 
-    Idempotent and cheap: returns immediately when no legacy indicator is
-    present (the steady state after one migration). On the first read of an
-    unmigrated repo it relocates every placeable contract into
-    ``active/<phase>/`` + ``archive/<phase>/`` and rewrites any cursor that
-    pointed at a moved file. Best-effort — never raises into the signal path;
-    a failure just leaves the repo as-is (the reader then sees the old files as
-    before). Returns the number of files moved.
+    Handles two migration steps in sequence:
+    1. **Flat → tree**: moves contracts from ``contracts/<phase>/*.md`` and
+       ``contracts/*.md`` into ``contracts/active/<phase>/*.md`` on disk.
+    2. **Tree → store**: delegates to :meth:`DuckDBStateStore.migrate_disk_contracts`
+       which writes every tree-layout contract into the DuckDB store and
+       removes the now-redundant disk files.
+
+    Returns the total number of files migrated across both steps.
+    Best-effort — never raises into the signal path.
     """
-    from agentalloy.contracts import (
-        apply_contracts_migration,
-        contracts_root,
-        cursor_after_migration,
-        plan_contracts_migration,
-    )
+    import yaml
 
-    root = contracts_root(project_root)
-    if not _has_legacy_contract_layout(root):
-        return 0
+    from agentalloy.storage.state_store import open_state_store
+
+    contracts_root = project_root / ".agentalloy" / "contracts"
+    flat_migrated = 0
+
+    # ── Step 1: flat → tree on disk ──────────────────────────────────────
+    if contracts_root.is_dir():
+        # Collect files that are NOT already under active/ or archive/
+        for pattern_root in ("*", "*/*.md"):
+            for fpath in sorted(contracts_root.glob(pattern_root)):
+                if not fpath.is_file():
+                    continue
+                parts = fpath.relative_to(contracts_root).parts
+                # Skip if already in active/archive
+                if len(parts) >= 2 and parts[0] in ("active", "archive"):
+                    continue
+                try:
+                    raw = fpath.read_text(encoding="utf-8")
+                    front = raw.split("---", 2)
+                    meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}
+                    phase = meta.get("phase") or (
+                        parts[0]
+                        if len(parts) == 2 and parts[0] not in ("active", "archive")
+                        else "active"
+                    )
+                    dest = contracts_root / "active" / phase / fpath.name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(raw, encoding="utf-8")
+                    fpath.unlink()
+                    flat_migrated += 1
+                except Exception:
+                    pass  # best-effort
+
+        # Update cursor if it points to a flat path
+        cursor_file = project_root / ".agentalloy" / "cursor"
+        try:
+            old_cursor = cursor_file.read_text().strip()
+            if (
+                old_cursor
+                and "/" in old_cursor
+                and old_cursor.split("/")[0] not in ("active", "archive")
+            ):
+                # Flat cursor like "build/01-a.md" → "active/build/01-a.md"
+                parts = old_cursor.split("/")
+                new_cursor = "active/" + old_cursor
+                cursor_file.write_text(new_cursor)
+        except Exception:
+            pass
+
+    # ── Step 2: tree → store ─────────────────────────────────────────────
+    from agentalloy.api.state_router import _repo_key_for, _stream_key_for
+    from agentalloy.storage.state_store import bind_process_store, process_store
+
+    db_path = project_root / ".agentalloy" / "state.db"
+
+    # Reuse an already-bound store (e.g. from test fixtures) so announce /
+    # composed / cursor state seeded by the test remains readable.  Fall back
+    # to opening a new store when nothing is bound (e.g. CLI paths).
+    bound = process_store()
+    store = bound if bound is not None else open_state_store(db_path)
+
     try:
-        plan = plan_contracts_migration(project_root)
-        if not plan.moves:
-            return 0
-        done = apply_contracts_migration(plan)
-        if not done:
-            return 0
-        # Follow the moves: rewrite the shared cursor and every scoped cursor.
-        names = ["cursor"]
-        with contextlib.suppress(OSError):
-            names += [f.name for f in (project_root / ".agentalloy").glob("cursor.*")]
-        for name in names:
-            val = _read_state(project_root, name)
-            new = cursor_after_migration(val, done, root)
-            if new is not None and new != val:
-                _write_state_atomic(project_root, name, new)
-        logger.info("auto-migrated %d contract(s) into the tree layout under %s", len(done), root)
-        if plan.collisions:
+        # Scope to project_root so writes and reads match _state_view
+        scoped = store.for_repo(
+            _repo_key_for(str(project_root)), stream_id=_stream_key_for(str(project_root))
+        )
+        result = scoped.migrate_disk_contracts([str(project_root)])
+        store_migrated = result.get("migrated", 0)
+        if store_migrated:
+            logger.info("auto-migrated %d contract(s) into the store", store_migrated)
+        collisions = result.get("errors", 0)
+        if collisions:
             logger.warning(
-                "contracts migration: %d file(s) left in place (destination "
-                "already occupied) — run `agentalloy contracts migrate` to review",
-                len(plan.collisions),
+                "contracts migration: %d error(s) — run `agentalloy contracts migrate` to review",
+                collisions,
             )
-        return len(done)
+        # Bind the scoped store so _state_view / _phase_view can read it
+        bind_process_store(scoped)
+        return flat_migrated + store_migrated
     except Exception:
-        logger.debug("auto-migrate skipped (non-fatal)", exc_info=True)
-        return 0
+        logger.debug("auto-migrate store step skipped (non-fatal)", exc_info=True)
+        return flat_migrated
 
 
 def _clear_all_cursors(project_root: Path) -> None:
@@ -627,6 +663,11 @@ def _clear_all_cursors(project_root: Path) -> None:
     per-session cursor from the old phase cannot bleed its work-item into the new
     one — the scoped file resolves by filename, not by phase. Never raises.
     """
+    # Clear the store (disk fallback is sunset).
+    view = _state_view(project_root)
+    if view is not None:
+        with contextlib.suppress(Exception):
+            view.clear("cursor", all_sessions=True)
     _clear_state(project_root, "cursor")
     with contextlib.suppress(OSError):
         for f in (project_root / ".agentalloy").glob("cursor.*"):
@@ -635,17 +676,31 @@ def _clear_all_cursors(project_root: Path) -> None:
 
 
 def _read_composed(project_root: Path) -> str | None:
-    """Read the last-composed cursor from ``.agentalloy/composed``.
+    """Read the last-composed cursor from the store (disk fallback removed).
 
     Records the cursor whose Tier 2 (domain) block was last injected. Tier 2
-    fires once per work-item: when ``composed != cursor``.
+    fires once per work-item: when ``composed != cursor``.  Reads from the
+    store first (where the cursor is now recorded after migration); the disk
+    path is sunset — no fallback.
     """
-    return _read_state(project_root, "composed")
+    view = _state_view(project_root)
+    if view is None:
+        return None
+    try:
+        return view.read("composed")
+    except Exception:
+        return None
 
 
 def _write_composed_atomic(project_root: Path, cursor: str) -> None:
     """Atomically record *cursor* as the last-composed work-item (Tier 2 cadence)."""
-    _write_state_atomic(project_root, "composed", cursor)
+    view = _state_view(project_root)
+    if view is None:
+        return
+    try:
+        view.write("composed", cursor)
+    except Exception:
+        logger.warning("composed write failed for %s", project_root, exc_info=True)
 
 
 def _read_banner_turn(project_root: Path) -> tuple[str | None, str | None, int]:

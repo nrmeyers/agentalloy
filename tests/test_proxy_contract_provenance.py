@@ -24,7 +24,7 @@ from agentalloy.api.proxy_apply import (
     _merge_compose_telemetry,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.api.proxy_signal import SignalResult
-from agentalloy.contracts import parse_contract
+from agentalloy.contracts import parse_contract_text
 from agentalloy.storage.telemetry_store import open_telemetry_store
 from tests.test_proxy_passthrough_native import (
     _SIGNAL,
@@ -45,11 +45,27 @@ Implement the consumer-group worker loop.
 """
 
 
-def _seed_contract(tmp_path: Path) -> Path:
+def _seed_contract(tmp_path: Path) -> tuple[Path, Any]:
+    """Write a contract to disk and the store, returning (contract_id, store)."""
+    from agentalloy.contracts import parse_contract_text
+    from agentalloy.storage.state_store import open_state_store
+
     path = tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "provenance-probe.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_CONTRACT_MD)
-    return path
+
+    # Also write to the store so proxy_apply.py can look it up
+    contract = parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem)
+    store = open_state_store(tmp_path / ".agentalloy" / "state.db")
+    store.put_contract(
+        contract.contract_id,
+        phase=contract.phase,
+        slug=contract.task_slug,
+        body=contract.body,
+        domain_tags=contract.domain_tags,
+        status="active",
+    )
+    return path, store
 
 
 def _result(task: str = "t") -> ComposedResult:
@@ -70,7 +86,8 @@ def _result(task: str = "t") -> ComposedResult:
 
 
 def test_merge_populates_contract_fields_from_tier2_request(tmp_path: Path) -> None:
-    contract = parse_contract(_seed_contract(tmp_path))
+    path, _ = _seed_contract(tmp_path)
+    contract = parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem)
     req = compose_request_from_contract(contract, legs="domain", k=2)
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, _result(), req)
     assert tel.contract_id == contract.contract_id
@@ -86,7 +103,8 @@ def test_merge_leaves_contract_fields_null_without_request() -> None:
 def test_merge_ignores_request_when_tier2_compose_failed(tmp_path: Path) -> None:
     # The request was built but the compose leg threw (tier2 result is None):
     # no skills were injected, so the row must not claim contract provenance.
-    contract = parse_contract(_seed_contract(tmp_path))
+    path, _ = _seed_contract(tmp_path)
+    contract = parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem)
     req = compose_request_from_contract(contract, legs="domain", k=2)
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, None, req)
     assert tel.contract_id is None
@@ -106,6 +124,8 @@ def test_merge_free_text_request_has_no_contract_fields() -> None:
 
 
 def _cursor_signal(tmp_path: Path, contract_path: Path) -> SignalResult:
+    # current_contract must be the contract_id (not the file path) so proxy_apply.py
+    # can look it up in the store via store.get_contract(signal.current_contract).
     return SignalResult(
         should_compose=True,
         phase="build",
@@ -117,20 +137,34 @@ def _cursor_signal(tmp_path: Path, contract_path: Path) -> SignalResult:
         session_source="header",
         task="t",
         announce_cursor=True,
-        current_contract=str(contract_path),
+        current_contract=contract_path.stem,
     )
 
 
 def test_e2e_contract_scoped_row_carries_contract_provenance(tmp_path: Path) -> None:
-    contract_path = _seed_contract(tmp_path)
+    contract_path, provenance_store = _seed_contract(tmp_path)
     captured: dict[str, Any] = {}
-    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
-        app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as tele_store:
+        app = _make_app_with_store(captured, tele_store, orchestrator=_orchestrator("WF"))
         signal = _cursor_signal(tmp_path, contract_path)
-        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+
+        # Patch _compose_block so it uses the provenance store (disk fallback is
+        # sunset; the route never passes a state store to apply_signal).
+        from agentalloy.api.proxy_apply import _compose_block as _real_compose_block
+
+        async def _patched_compose_block(signal, orchestrator, store=None):
+            if store is None:
+                store = provenance_store
+            return await _real_compose_block(signal, orchestrator, store=store)
+
+        with (
+            patch(_SIGNAL, return_value=signal),
+            patch("agentalloy.api.proxy_apply._compose_block", _patched_compose_block),
+            TestClient(app) as client,
+        ):
             resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
         assert resp.status_code == 200
-        rows = store.query_traces(limit=10)
+        rows = tele_store.query_traces(limit=10)
         assert len(rows) == 1
         row = rows[0]
         assert row.status == "proxy_composed"

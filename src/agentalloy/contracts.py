@@ -34,10 +34,9 @@ from __future__ import annotations
 import contextlib
 import fnmatch
 import hashlib
-import shutil
+import json
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, cast
 
 import yaml
@@ -252,6 +251,27 @@ def parse_ac_headings(markdown: str) -> list[dict[str, Any]]:
     return results
 
 
+def _json_load_list(val: Any) -> list[str]:
+    """Parse a JSON string or Python list into a list of strings."""
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            return [str(t) for t in parsed] if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return [str(t) for t in (val or [])]
+
+
+def _json_load_any(val: Any) -> Any:
+    """Parse a JSON string into its Python value, or pass through."""
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return val
+    return val
+
+
 def contract_from_row(row: dict[str, Any]) -> Contract:
     """Construct a :class:`Contract` from a store row dict.
 
@@ -266,25 +286,31 @@ def contract_from_row(row: dict[str, Any]) -> Contract:
     elif isinstance(raw_ts, datetime):
         created_at = raw_ts
 
-    domain_tags = row.get("domain_tags") or []
-    scope_touches = row.get("scope_touches") or []
-    scope_avoids = row.get("scope_avoids") or []
-    success_criteria_raw = row.get("success_criteria") or []
+    domain_tags = _json_load_list(row.get("domain_tags"))
+    scope_touches = _json_load_list(row.get("scope_touches"))
+    scope_avoids = _json_load_list(row.get("scope_avoids"))
+    success_criteria_raw = _json_load_any(row.get("success_criteria"))
+    if not isinstance(success_criteria_raw, list):
+        success_criteria_raw = []
 
     route = str(row.get("route") or "full").strip().lower()
     if route not in ("full", "fast", "add-skill"):
-        route = "full"
+        raise ContractMalformed(
+            f"Contract 'route' must be 'full', 'fast', or 'add-skill', got '{route}'",
+        )
+
+    success_criteria = _normalize_success_criteria(success_criteria_raw)
 
     return Contract(
         contract_id=str(row["contract_id"]),
         phase=str(row["phase"]),
         task_slug=str(row.get("slug", "")),
-        domain_tags=[str(t) for t in domain_tags],
+        domain_tags=domain_tags,
         scope=ContractScope(
-            touches=[str(g) for g in scope_touches],
-            avoids=[str(g) for g in scope_avoids],
+            touches=scope_touches,
+            avoids=scope_avoids,
         ),
-        success_criteria=_normalize_success_criteria(success_criteria_raw),
+        success_criteria=success_criteria,
         related_contracts=[],
         created_at=created_at,
         body=str(row.get("body") or ""),
@@ -401,317 +427,3 @@ def cursor_state_name(session_key: str | None) -> str:
         return "cursor"
     digest = hashlib.sha1(session_key.encode()).hexdigest()[:16]
     return f"cursor.{digest}"
-
-
-# ---------------------------------------------------------------------------
-# Backward-compat filesystem helpers
-#
-# Retained for consumers outside the compose path (predicates, CLI, skill_loader)
-# that will be migrated in later tasks. The compose/proxy reader path uses the
-# store exclusively (contract_id-based).
-# ---------------------------------------------------------------------------
-
-
-def safe_contract_path(
-    path_str: str,
-    project_root: Path | None = None,
-) -> tuple[Path | None, Path | None]:
-    """Validate a user-supplied contract path is contained under ``.agentalloy/contracts/``.
-
-    Returns ``(resolved_path, project_root)`` on success, ``(None, None)`` on failure.
-    """
-    try:
-        resolved = Path(path_str).resolve()
-    except OSError:
-        return None, None
-
-    if not resolved.is_file():
-        return None, None
-
-    contracts_root: Path | None = None
-    for ancestor in resolved.parents:
-        if ancestor.name == ".agentalloy":
-            contracts_root = ancestor / "contracts"
-            break
-    if contracts_root is None:
-        return None, None
-
-    derived_root = contracts_root.parent.parent
-
-    if project_root is not None:
-        try:
-            project_resolved = project_root.resolve()
-        except OSError:
-            return None, None
-        try:
-            resolved.relative_to(project_resolved)
-        except ValueError:
-            return None, None
-        derived_root = project_resolved
-
-    try:
-        resolved.relative_to(contracts_root.resolve())
-    except (ValueError, OSError):
-        return None, None
-
-    return resolved, derived_root
-
-
-def contracts_root(project_root: Path) -> Path:
-    """The ``.agentalloy/contracts`` directory for *project_root*."""
-    return project_root / ".agentalloy" / "contracts"
-
-
-def active_dir(project_root: Path, phase: str) -> Path:
-    """Where live contracts for *phase* belong: ``contracts/active/<phase>/``."""
-    return contracts_root(project_root) / "active" / phase
-
-
-def archive_dir(project_root: Path, phase: str) -> Path:
-    """Where completed contracts for *phase* belong: ``contracts/archive/<phase>/``."""
-    return contracts_root(project_root) / "archive" / phase
-
-
-def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return all .agentalloy/contracts/active/<phase>/*.md sorted newest-first by mtime."""
-    contracts_dir = active_dir(project_root, phase)
-    if not contracts_dir.is_dir():
-        return []
-    files = [f for f in contracts_dir.glob("*.md") if f.is_file()]
-    return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
-
-
-def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return contracts/<phase>/*.md in FILENAME order (``01-``, ``02-``, …)."""
-    contracts_dir = active_dir(project_root, phase)
-    if not contracts_dir.is_dir():
-        return []
-    return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
-
-
-def first_workitem_id(project_root: Path, phase: str) -> str | None:
-    """The first work-item of ``phase`` (filename order) as a cursor id."""
-    contract_files = ordered_contracts_for_phase(project_root, phase)
-    if not contract_files:
-        return None
-    return f"active/{phase}/{contract_files[0].name}"
-
-
-def _read_contract_phase(path: Path) -> str | None:
-    """Best-effort read of a contract's ``phase`` frontmatter field."""
-    try:
-        data, _ = _split_frontmatter(path.read_text(encoding="utf-8"))
-    except (OSError, ContractMalformed):
-        return None
-    phase = data.get("phase")
-    if isinstance(phase, str) and phase.strip():
-        return phase.strip()
-    return None
-
-
-@dataclass(frozen=True)
-class ContractMove:
-    """A single planned relocation of a contract file into the tree."""
-
-    src: Path
-    dst: Path
-    archived: bool
-
-
-@dataclass(frozen=True)
-class MigrationPlan:
-    """The side-effect-free result of planning a legacy → tree migration."""
-
-    moves: list[ContractMove]
-    collisions: list[tuple[Path, Path]]
-    unreadable: list[Path]
-
-    @property
-    def is_empty(self) -> bool:
-        return not (self.moves or self.collisions or self.unreadable)
-
-
-def plan_contracts_migration(project_root: Path) -> MigrationPlan:
-    """Plan the move of a repo's legacy-layout contracts into the tree."""
-    root = contracts_root(project_root)
-    moves: list[ContractMove] = []
-    collisions: list[tuple[Path, Path]] = []
-    unreadable: list[Path] = []
-    claimed: dict[Path, Path] = {}
-
-    if not root.is_dir():
-        return MigrationPlan(moves, collisions, unreadable)
-
-    for src in sorted(root.rglob("*.md")):
-        if not src.is_file():
-            continue
-        parts = src.relative_to(root).parts
-        top = parts[0]
-
-        if top == "active":
-            continue
-        if top == "archive" and len(parts) >= 3:
-            continue
-
-        phase = _read_contract_phase(src)
-        if phase is None:
-            unreadable.append(src)
-            continue
-
-        archived = top in ("archive", "_superseded")
-        base = archive_dir(project_root, phase) if archived else active_dir(project_root, phase)
-        dst = base / src.name
-
-        if dst == src:
-            continue
-
-        if dst in claimed or (dst.exists() and dst.resolve() != src.resolve()):
-            collisions.append((src, dst))
-            continue
-
-        claimed[dst] = src
-        moves.append(ContractMove(src=src, dst=dst, archived=archived))
-
-    return MigrationPlan(moves=moves, collisions=collisions, unreadable=unreadable)
-
-
-def apply_contracts_migration(plan: MigrationPlan) -> list[ContractMove]:
-    """Execute a plan's ``moves`` on disk, returning the moves performed."""
-    done: list[ContractMove] = []
-    for mv in plan.moves:
-        if not mv.src.exists():
-            continue
-        mv.dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(mv.src), str(mv.dst))
-        done.append(mv)
-    return done
-
-
-def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: Path) -> str | None:
-    """Return the cursor value rewritten to follow a migration, or unchanged."""
-    if not cursor:
-        return cursor
-    for mv in moves:
-        try:
-            old_rel = mv.src.relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if old_rel == cursor:
-            return mv.dst.relative_to(root).as_posix()
-    return cursor
-
-
-def plan_archive(
-    project_root: Path,
-    *,
-    phase: str | None = None,
-    slug: str | None = None,
-) -> MigrationPlan:
-    """Plan moving live contracts from ``active/<phase>/`` to ``archive/<phase>/``."""
-    root = contracts_root(project_root)
-    active_root = root / "active"
-    moves: list[ContractMove] = []
-    collisions: list[tuple[Path, Path]] = []
-    claimed: dict[Path, Path] = {}
-
-    if not active_root.is_dir():
-        return MigrationPlan(moves, collisions, [])
-
-    phase_dirs = (
-        [active_root / phase] if phase else [d for d in active_root.iterdir() if d.is_dir()]
-    )
-    for pdir in sorted(phase_dirs):
-        if not pdir.is_dir():
-            continue
-        ph = pdir.name
-        for src in sorted(pdir.glob("*.md")):
-            if not src.is_file():
-                continue
-            if slug is not None and src.stem != slug:
-                continue
-            dst = archive_dir(project_root, ph) / src.name
-            if dst in claimed or (dst.exists() and dst.resolve() != src.resolve()):
-                collisions.append((src, dst))
-                continue
-            claimed[dst] = src
-            moves.append(ContractMove(src=src, dst=dst, archived=True))
-
-    return MigrationPlan(moves=moves, collisions=collisions, unreadable=[])
-
-
-def _read_cursor_value(project_root: Path, session_key: str | None = None) -> str | None:
-    """Read the work-item cursor (a contracts-relative id)."""
-    names = [cursor_state_name(session_key)]
-    if names[0] != "cursor":
-        names.append("cursor")
-    for name in names:
-        try:
-            raw = (project_root / ".agentalloy" / name).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        value = raw.strip()
-        if value:
-            return value
-    return None
-
-
-def resolve_current_contract(
-    project_root: Path,
-    phase: str,
-    session_key: str | None = None,
-) -> tuple[str | None, Path | None]:
-    """Resolve the current work-item contract for ``phase``.
-
-    Returns ``(contract_id, abs_path)`` where ``contract_id`` is the
-    contracts-relative posix path and ``abs_path`` is the file to use.
-    """
-    cr = (project_root / ".agentalloy" / "contracts").resolve()
-    cursor = _read_cursor_value(project_root, session_key)
-    if cursor:
-        candidate = (cr / cursor).resolve()
-        if candidate.is_file() and candidate.is_relative_to(cr):
-            return candidate.relative_to(cr).as_posix(), candidate
-
-    in_phase = list_contracts_for_phase(project_root, phase)
-    if len(in_phase) != 1:
-        return None, None
-    only = in_phase[0].resolve()
-    return only.relative_to(cr).as_posix(), only
-
-
-def latest_contract(project_root: Path, phase: str | None = None) -> Path | None:
-    """Most recently modified contract (optionally filtered by phase)."""
-    if phase:
-        files = list_contracts_for_phase(project_root, phase)
-        return files[0] if files else None
-
-    active_root = contracts_root(project_root) / "active"
-    if not active_root.is_dir():
-        return None
-
-    all_files: list[Path] = []
-    for phase_dir in active_root.iterdir():
-        if phase_dir.is_dir():
-            all_files.extend(f for f in phase_dir.glob("*.md") if f.is_file())
-
-    if not all_files:
-        return None
-
-    return max(all_files, key=lambda f: f.stat().st_mtime)
-
-
-def parse_contract(path: Path) -> Contract:
-    """Read and validate a contract file from the filesystem.
-
-    Backward-compat wrapper: derives ``contract_id`` from the filename stem.
-    Raises ContractMalformed on errors.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ContractMalformed(f"Cannot read contract file {path}: {exc}") from exc
-
-    # Derive contract_id from filename stem (without .md extension)
-    contract_id = path.stem
-
-    return parse_contract_text(text, contract_id=contract_id)

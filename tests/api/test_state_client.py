@@ -332,33 +332,54 @@ class TestTaskRouting:
         d.mkdir(parents=True, exist_ok=True)
         for n in names:
             (d / f"{n}.md").write_text(f"---\nphase: {phase}\n---\n# {n}\n")
+        # Also write contracts into the bound process store so _ordered_contracts can see them.
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        assert store is not None, "no state store bound — is _bound_state_store active?"
+        scoped = scoped_state_store(store, root)
+        for n in names:
+            scoped.put_contract(n, phase=phase, slug=n, body=f"# {n}\n", status="active")
 
     def test_task_next_writes_the_cursor_file_when_service_down(self, tmp_path: Path) -> None:
+        from agentalloy.api.state_router import scoped_state_store
         from agentalloy.install.subcommands.task import run_task_next
+        from agentalloy.storage.state_store import process_store
 
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
         result = run_task_next(tmp_path)
         assert result["ok"] is True
         assert result["cursor"] == "active/build/01-cache.md"
-        # Verify file was written
-        cursor_file = tmp_path / ".agentalloy" / "cursor"
-        assert cursor_file.exists()
+        # Cursor is now stored in the DuckDB store (scoped to tmp_path), not disk.
+        store = process_store()
+        assert store is not None
+        view = scoped_state_store(store, tmp_path)
+        assert view.read("cursor") == "active/build/01-cache.md"
 
     def test_task_next_returns_service_result_when_up(self, tmp_path: Path) -> None:
-        """When the service is up, task next routes through HTTP."""
+        """When the service is up, task next routes cursor write through HTTP."""
+        from agentalloy.api.state_router import scoped_state_store
         from agentalloy.install.subcommands.task import run_task_next
+        from agentalloy.storage.state_store import process_store
 
         # Seed two contracts and set cursor to the first so "next" advances to
         # the second — this exercises the index+1 path.
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
+        # _read_cursor now reads from the store (not disk), so seed both.
         cursor_file = tmp_path / ".agentalloy" / "cursor"
         cursor_file.write_text("active/build/01-cache.md", encoding="utf-8")
+        store = process_store()
+        assert store is not None
+        view = scoped_state_store(store, tmp_path)
+        view.write("cursor", "active/build/01-cache.md")
 
         with patch.object(StateClient, "is_running", return_value=True):
             with patch.object(StateClient, "set_cursor") as mock_set_cursor:
-                mock_set_cursor.return_value = {"cursor": "active/build/02-api.md"}
+                mock_set_cursor.return_value = None
                 result = run_task_next(tmp_path)
                 assert result["ok"] is True
+                # run_task_next returns the computed cursor, not the service result.
                 assert result["cursor"] == "active/build/02-api.md"
                 mock_set_cursor.assert_called_once_with("active/build/02-api.md")
 

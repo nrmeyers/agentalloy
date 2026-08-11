@@ -930,6 +930,60 @@ async def write_cursor(
 
 
 # ---------------------------------------------------------------------------
+# Scoped cursor endpoints — per-session cursors (task / phase / proxy)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/cursors/{session_key}",
+    response_model=StateWriteResponse | StateConflictInfo,
+    responses={
+        409: {"model": StateConflictInfo, "description": "Lease conflict"},
+    },
+    summary="Set a per-session cursor",
+)
+async def write_scoped_cursor(
+    session_key: str,
+    req: StateWriteRequest,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateWriteResponse | StateConflictInfo:
+    result = await asyncio.to_thread(store.set_scoped_cursor, session_key, req.value)
+    http_status, response = _write_result_to_response(result)
+    if http_status != 200:
+        raise HTTPException(
+            status_code=409,
+            detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
+        )
+    return response  # type: ignore[return-value]
+
+
+@router.get(
+    "/cursors/{session_key}",
+    response_model=StateReadResponse,
+    summary="Get a per-session cursor",
+)
+async def read_scoped_cursor(
+    session_key: str,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateReadResponse:
+    value = await asyncio.to_thread(store.get_scoped_cursor, session_key)
+    return StateReadResponse(kind="cursor", value=value)
+
+
+@router.delete(
+    "/cursors/{session_key}",
+    response_model=StateReadResponse,
+    summary="Delete a per-session cursor",
+)
+async def delete_scoped_cursor(
+    session_key: str,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateReadResponse:
+    await asyncio.to_thread(store._delete_scoped_cursor, session_key)
+    return StateReadResponse(kind="cursor", value=None)
+
+
+# ---------------------------------------------------------------------------
 # POST /state/approve
 # ---------------------------------------------------------------------------
 
@@ -1233,3 +1287,49 @@ async def set_artifact(
                 await asyncio.to_thread(store.update_contract, req.slug, success_criteria=merged)
 
     return ArtifactResponse(**row)
+
+
+# ---------------------------------------------------------------------------
+# GET /phases/{phase}/contracts — list contracts for a phase (ordered by
+# contract_id, which preserves filename/numeric ordering)
+# ---------------------------------------------------------------------------
+
+
+@contract_router.get(
+    "/phases/{phase}/contracts",
+    response_model=ContractListResponse,
+    summary="List active contracts for a phase",
+)
+async def list_contracts_for_phase(
+    phase: str,
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> ContractListResponse:
+    rows = await asyncio.to_thread(store.list_contracts_for_phase, phase)
+    return ContractListResponse(
+        contracts=[_contract_row_to_response(row) for row in rows],
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /state/migrate-disk-contracts — one-shot migration of legacy .md
+# contract files into the store (upgrade hook)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/migrate-disk-contracts",
+    summary="Migrate disk-based contract files into the store",
+)
+async def migrate_disk_contracts(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> dict[str, Any]:
+    """Migrate legacy ``.agentalloy/contracts/`` files into the store.
+
+    Returns ``{"migrated": int, "errors": int, "details": [str]}``.
+    """
+    result = await asyncio.to_thread(
+        store.migrate_disk_contracts,
+        [str(root)],
+    )
+    return result
