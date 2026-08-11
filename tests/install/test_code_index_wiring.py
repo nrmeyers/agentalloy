@@ -118,37 +118,32 @@ class TestWireBlock:
 class TestDetectTargetHarness:
     """Harness-aware target detection for each harness type."""
 
-    def test_codex_returns_none_without_config(self, tmp_path: Path) -> None:
-        """codex without .codex/config.toml returns None."""
+    def test_codex_returns_none_no_dedicated_carrier(self, tmp_path: Path) -> None:
+        """codex has no dedicated carrier (proxy-wired) → None when no shared target."""
         assert ciw.detect_target(tmp_path, harness="codex") is None
 
-    def test_codex_returns_config_when_exists(self, tmp_path: Path) -> None:
-        """codex returns .codex/config.toml when it exists."""
-        (tmp_path / ".codex").mkdir()
-        (tmp_path / ".codex/config.toml").write_text("[wire]\n")
-        assert ciw.detect_target(tmp_path, harness="codex") == tmp_path / ".codex/config.toml"
+    def test_codex_falls_to_shared_when_target_exists(self, tmp_path: Path) -> None:
+        """codex falls through to shared targets when no dedicated carrier exists."""
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        assert ciw.detect_target(tmp_path, harness="codex") == tmp_path / "CLAUDE.md"
 
-    def test_qwen_code_returns_none_without_config(self, tmp_path: Path) -> None:
-        """qwen-code without .qwen/settings.json returns None."""
+    def test_qwen_code_returns_none_no_dedicated_carrier(self, tmp_path: Path) -> None:
+        """qwen-code has no dedicated carrier (proxy-wired) → None when no shared target."""
         assert ciw.detect_target(tmp_path, harness="qwen-code") is None
 
-    def test_qwen_code_returns_config_when_exists(self, tmp_path: Path) -> None:
-        """qwen-code returns .qwen/settings.json when it exists."""
-        (tmp_path / ".qwen").mkdir()
-        (tmp_path / ".qwen/settings.json").write_text("{}")
-        assert ciw.detect_target(tmp_path, harness="qwen-code") == tmp_path / ".qwen/settings.json"
+    def test_qwen_code_falls_to_shared_when_target_exists(self, tmp_path: Path) -> None:
+        """qwen-code falls through to shared targets when no dedicated carrier exists."""
+        (tmp_path / "AGENTS.md").write_text("# Agents\n")
+        assert ciw.detect_target(tmp_path, harness="qwen-code") == tmp_path / "AGENTS.md"
 
-    def test_hermes_agent_returns_none_without_config(self, tmp_path: Path) -> None:
-        """hermes-agent without .hermes/config.yaml returns None."""
+    def test_hermes_agent_returns_none_without_agents(self, tmp_path: Path) -> None:
+        """hermes-agent maps to AGENTS.md; returns None when it doesn't exist."""
         assert ciw.detect_target(tmp_path, harness="hermes-agent") is None
 
-    def test_hermes_agent_returns_config_when_exists(self, tmp_path: Path) -> None:
-        """hermes-agent returns .hermes/config.yaml when it exists."""
-        (tmp_path / ".hermes").mkdir()
-        (tmp_path / ".hermes/config.yaml").write_text("model:\n  name: test\n")
-        assert (
-            ciw.detect_target(tmp_path, harness="hermes-agent") == tmp_path / ".hermes/config.yaml"
-        )
+    def test_hermes_agent_returns_agents_md(self, tmp_path: Path) -> None:
+        """hermes-agent returns AGENTS.md when it exists."""
+        (tmp_path / "AGENTS.md").write_text("# Agents\n")
+        assert ciw.detect_target(tmp_path, harness="hermes-agent") == tmp_path / "AGENTS.md"
 
     def test_openclaw_returns_none(self, tmp_path: Path) -> None:
         """openclaw is home-scoped, so detect_target returns None."""

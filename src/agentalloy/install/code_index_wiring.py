@@ -92,8 +92,13 @@ def build_block(slug: str, port: int) -> str:
 # Home-scoped harnesses (openclaw, continue-closed, continue-local) are
 # intentionally omitted: their config lives in the user's home directory,
 # not the repo root, so detect_target() returns None for them.
+#
+# Proxy-wired harnesses (claude-code, qwen-code, codex) are excluded: they
+# receive context per-turn via the AgentAlloy proxy — no markdown block is
+# written. hermes-agent is dual: proxy wiring + markdown injection into
+# AGENTS.md (repo-scoped); .hermes/config.yaml is a YAML config file that
+# must not receive prose.
 _HARNESS_CARRIERS: dict[str, str] = {
-    "claude-code": ".claude/settings.local.json",
     "cursor": ".cursor/rules/agentalloy.mdc",
     "cline": ".clinerules",
     "windsurf": ".windsurf/rules/agentalloy.md",
@@ -101,9 +106,7 @@ _HARNESS_CARRIERS: dict[str, str] = {
     "copilot-cli": ".github/copilot-instructions.md",
     "aider": ".agentalloy-aider-instructions.md",
     "opencode": ".opencode/system-prompt.md",
-    "codex": ".codex/config.toml",
-    "qwen-code": ".qwen/settings.json",
-    "hermes-agent": ".hermes/config.yaml",
+    "hermes-agent": "AGENTS.md",
 }
 
 
