@@ -696,6 +696,7 @@ def _upgrade_native(
 
     _migrate_code_index_layout(actions, warnings, show_progress=show_progress)
     _import_state_files(actions, warnings, show_progress=show_progress)
+    _migrate_disk_contracts(actions, warnings, show_progress=show_progress)
     return actions, warnings
 
 
@@ -841,6 +842,73 @@ def _import_state_files(actions: list[str], warnings: list[str], *, show_progres
                 )
     if migrated:
         actions.append(f"migrated phase state into the store ({migrated} repos)")
+
+
+def _migrate_disk_contracts(
+    actions: list[str],
+    warnings: list[str],
+    *,
+    show_progress: bool,
+) -> None:
+    """Migrate legacy ``.agentalloy/contracts/`` files into the state store.
+
+    Runs AFTER ``_import_state_files`` so the service is already up and the
+    corpus is consistent.  Unconditional and un-prompted: taking the update
+    *is* the consent.
+
+    Only runs when the previous version was earlier than 8.17.0 (the version
+    that introduced the contract store).  Non-fatal: if migration fails the
+    files stay on disk and the callers fall back to the file mirror.
+    """
+    from agentalloy.install import release_check
+
+    try:
+        prev_version = release_check.current_version()
+    except Exception:  # noqa: BLE001
+        prev_version = None
+
+    # Guard: only run the migration for versions earlier than 8.17.0.
+    # 8.17.0 introduced sdd_contract; anything older needs migration.
+    if prev_version and prev_version >= "8.17.0":
+        return
+
+    # Filter to repos that actually hold a contracts directory.
+    roots = [
+        r for r in _repos_with_state_files() if (Path(r) / ".agentalloy" / "contracts").is_dir()
+    ]
+    if not roots:
+        return
+
+    from agentalloy.api.state_client import StateClient, StateClientError
+
+    client = StateClient()
+    total_migrated = 0
+    with progress_activity("migrating disk contracts into the store", enabled=show_progress):
+        for root in roots:
+            try:
+                result = client.migrate_disk_contracts(repo_root=root)
+                migrated = result.get("migrated", 0)
+                errors = result.get("errors", 0)
+                details = result.get("details", [])
+                total_migrated += migrated
+                if errors:
+                    warnings.append(
+                        f"disk contract migration for {root}: {migrated} migrated, "
+                        f"{errors} errors — {details[-1] if details else ''}"
+                    )
+                elif migrated:
+                    actions.append(f"migrated {migrated} disk contracts for {root}")
+            except StateClientError as exc:
+                warnings.append(
+                    f"disk contract migration skipped for {root} ({exc}) — "
+                    "the file mirror still works; re-run `agentalloy upgrade`",
+                )
+            except Exception as exc:  # noqa: BLE001 — never fail an upgrade
+                logger.debug("disk contract migration failed for %s", root, exc_info=True)
+                warnings.append(
+                    f"disk contract migration skipped for {root} ({exc!r}) — "
+                    "the file mirror still works; re-run `agentalloy upgrade`",
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -235,12 +235,28 @@ def _resolve_workitem_slug_for(store: Any, project_root: Path, phase: str) -> st
     ``.agentalloy/cursor`` file; then the sole active contract in ``phase``;
     else ``None``.
     """
+    import yaml as _yaml
+
     in_phase: list[dict[str, Any]] = []
     if store is not None and hasattr(store, "list_contracts"):
         try:
             in_phase = store.list_contracts(phase=phase, status="active") or []
         except Exception:
             in_phase = []
+
+    # When no store provides contracts, fall back to the disk contracts tree.
+    if not in_phase:
+        contracts_dir = project_root / ".agentalloy" / "contracts" / "active" / phase
+        if contracts_dir.is_dir():
+            for fpath in sorted(contracts_dir.glob("*.md")):
+                try:
+                    content = fpath.read_text(encoding="utf-8")
+                    front = content.split("---", 2)
+                    meta = _yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}
+                    slug = meta.get("slug") or fpath.stem
+                    in_phase.append({"slug": slug, "contract_id": slug, "phase": phase})
+                except Exception:
+                    pass
 
     raw = ""
     if store is not None and hasattr(store, "read"):
@@ -775,10 +791,8 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     """MET when the current task has recorded a compound-engineering lesson.
 
     Resolves the active work-item slug for the phase (``args['phase']`` or, by
-    default, ``ctx.current_phase``) via the canonical
-    :func:`agentalloy.contracts.resolve_current_contract` — cursor-first, then the
-    sole contract for the phase, else no single work-item — and checks for
-    ``docs/solutions/<slug>.md``.
+    default, ``ctx.current_phase``) via the store cursor — scoped then shared —
+    and checks for ``docs/solutions/<slug>.md``.
 
     Slug-scoped on purpose. A bare ``artifact_exists: docs/solutions/*.md`` would
     be MET forever by the first lesson ever written (the stale-file no-op), so it
@@ -800,17 +814,17 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     carry ``## Checks``/``## Review``, so a ``.md``-suffixed lesson would make
     writing the lesson break the very gate it sits beside.
     """
-    from agentalloy.contracts import (
-        resolve_current_contract,  # lazy: keep signals free of import cost
-    )
-
     phase = args.get("phase") or ctx.current_phase
     if phase is None:
         return PredicateResult.UNKNOWN
-    _cid, contract_path = resolve_current_contract(ctx.project_root, str(phase), ctx.session_key)
-    if contract_path is None:
+
+    # Use the standard slug resolution path (store-first, disk-fallback) so
+    # tests that bind a store handle get store-backed behavior without mocking
+    # the remote API client.
+    slug = ctx.resolve_active_slug(phase)
+    if slug is None:
         return PredicateResult.UNKNOWN
-    slug = contract_path.stem
+
     rows = _list_store_artifacts(ctx, phase=LESSON_PHASE, name_glob=LESSON_NAME, slug=slug)
     if rows:
         return PredicateResult.MET

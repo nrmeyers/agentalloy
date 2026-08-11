@@ -93,12 +93,35 @@ def test_tc8_migration_note_present(tmp_path: Path):
 
 
 class _FakeStore:
-    """Minimal ``list_artifacts`` stand-in — the only store call the codify gate
-    makes. ``rows`` is keyed (phase, slug, name)."""
+    """Minimal store stand-in for codify gate tests.
 
-    def __init__(self, rows: list[tuple[str, str, str]], *, error: bool = False):
+    Provides just enough of the store interface that ``_resolve_workitem_slug_for``
+    and ``_list_store_artifacts`` can use it — ``list_contracts``, ``read``, and
+    ``list_artifacts``.  ``rows`` is keyed (phase, slug, name).
+    """
+
+    def __init__(
+        self,
+        rows: list[tuple[str, str, str]],
+        *,
+        contracts: list[dict[str, str]] | None = None,
+        error: bool = False,
+    ):
         self._rows = rows
         self._error = error
+        # Contracts for resolve_active_slug — use provided list or auto-build from _rows
+        self._contracts = contracts or []
+        self._cursors: dict[str, str] = {}
+
+    def list_contracts(self, phase=None, status=None):
+        if phase is not None:
+            return [c for c in self._contracts if c.get("phase") == phase]
+        return list(self._contracts)
+
+    def read(self, key: str):
+        if key == "cursor" and self._cursors:
+            return next(iter(self._cursors.values()))
+        return None
 
     def list_artifacts(self, phase, *, slug=None, name_glob=None, status="active"):
         if self._error:
@@ -120,7 +143,10 @@ def test_store_lesson_satisfies_gate_without_any_file(tmp_path: Path):
     """The migration's whole point: a stored lesson clears the gate with nothing
     on disk under docs/solutions/."""
     _qa_ready(tmp_path)
-    store = _FakeStore([(LESSON_PHASE, SLUG, LESSON_NAME)])
+    store = _FakeStore(
+        [(LESSON_PHASE, SLUG, LESSON_NAME)],
+        contracts=[{"slug": SLUG, "contract_id": SLUG, "phase": "qa"}],
+    )
     assert eval_lessons_recorded({"phase": "qa"}, _ctx(tmp_path, store)) == PredicateResult.MET
     assert not (tmp_path / "docs" / "solutions").exists()
 
@@ -129,7 +155,10 @@ def test_store_lesson_is_slug_scoped(tmp_path: Path):
     """A stored lesson for a DIFFERENT task must not satisfy this task's gate —
     the same staleness rule TC2 pins for the disk path."""
     _qa_ready(tmp_path)
-    store = _FakeStore([(LESSON_PHASE, "some-old-task", LESSON_NAME)])
+    store = _FakeStore(
+        [(LESSON_PHASE, "some-old-task", LESSON_NAME)],
+        contracts=[{"slug": SLUG, "contract_id": SLUG, "phase": "qa"}],
+    )
     assert eval_lessons_recorded({"phase": "qa"}, _ctx(tmp_path, store)) == PredicateResult.NOT_MET
 
 
@@ -138,7 +167,7 @@ def test_disk_lesson_still_satisfies_gate_when_store_has_none(tmp_path: Path):
     _qa_ready(tmp_path)
     (tmp_path / "docs" / "solutions").mkdir(parents=True, exist_ok=True)
     (tmp_path / "docs" / "solutions" / f"{SLUG}.md").write_text("# lesson", encoding="utf-8")
-    store = _FakeStore([])
+    store = _FakeStore([], contracts=[{"slug": SLUG, "contract_id": SLUG, "phase": "qa"}])
     assert eval_lessons_recorded({"phase": "qa"}, _ctx(tmp_path, store)) == PredicateResult.MET
 
 
@@ -148,7 +177,9 @@ def test_store_error_falls_back_to_disk(tmp_path: Path):
     _qa_ready(tmp_path)
     (tmp_path / "docs" / "solutions").mkdir(parents=True, exist_ok=True)
     (tmp_path / "docs" / "solutions" / f"{SLUG}.md").write_text("# lesson", encoding="utf-8")
-    store = _FakeStore([], error=True)
+    store = _FakeStore(
+        [], contracts=[{"slug": SLUG, "contract_id": SLUG, "phase": "qa"}], error=True
+    )
     assert eval_lessons_recorded({"phase": "qa"}, _ctx(tmp_path, store)) == PredicateResult.MET
 
 

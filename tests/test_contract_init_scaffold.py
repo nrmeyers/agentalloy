@@ -229,20 +229,59 @@ class TestWorkItemStamp:
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
 
+    def _wire_store(self, tmp_path: Path) -> None:
+        """Create a DuckDB store, bind it, and seed design contracts from disk."""
+        from agentalloy.api.state_router import _repo_key_for, _stream_key_for
+        from agentalloy.storage.state_store import bind_process_store, open_state_store
+
+        store = open_state_store(tmp_path / ".agentalloy" / "state.db")
+        # Scope to the test's tmp_path so writes and reads match
+        scoped = store.for_repo(
+            _repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path))
+        )
+        bind_process_store(scoped)
+        # Seed contracts from disk into store
+        contracts_dir = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
+        if contracts_dir.is_dir():
+            for md_file in sorted(contracts_dir.glob("*.md")):
+                content = md_file.read_text()
+                front = content.split("---", 2)
+                meta = {}
+                if len(front) >= 3:
+                    import yaml
+
+                    meta = yaml.safe_load(front[1]) or {}
+                slug = meta.get("task_slug", md_file.stem)
+                scoped.put_contract(
+                    md_file.stem,
+                    phase="design",
+                    slug=slug,
+                    body=front[2].strip() if len(front) >= 3 else content.strip(),
+                )
+        # Seed cursor from disk into store
+        cursor_file = tmp_path / ".agentalloy" / "cursor"
+        if cursor_file.is_file():
+            cursor_val = cursor_file.read_text().strip()
+            if cursor_val:
+                scoped.write("cursor", cursor_val)
+
     def test_active_design_slug_from_sole_contract(self, tmp_path: Path) -> None:
         self._seed_design(tmp_path, "knowledge-module")
+        self._wire_store(tmp_path)
         assert _active_design_slug(tmp_path) == "knowledge-module"
 
     def test_active_design_slug_none_when_ambiguous(self, tmp_path: Path) -> None:
         # Two design items, no cursor → can't attribute → None (caller omits stamp).
         self._seed_design(tmp_path, "a")
         self._seed_design(tmp_path, "b")
+        self._wire_store(tmp_path)
         assert _active_design_slug(tmp_path) is None
 
     def test_active_design_slug_honors_cursor(self, tmp_path: Path) -> None:
         self._seed_design(tmp_path, "a")
         self._seed_design(tmp_path, "b")
         (tmp_path / ".agentalloy" / "cursor").write_text("active/design/b.md")
+        self._wire_store(tmp_path)
         assert _active_design_slug(tmp_path) == "b"
 
     def test_active_design_slug_rejects_cross_phase_cursor(self, tmp_path: Path) -> None:
@@ -253,6 +292,7 @@ class TestWorkItemStamp:
         ship.mkdir(parents=True)
         (ship / "other.md").write_text("---\nphase: ship\n---\n\n# other\n")
         (tmp_path / ".agentalloy" / "cursor").write_text("active/ship/other.md")
+        self._wire_store(tmp_path)
         assert _active_design_slug(tmp_path) is None  # not under contracts/active/design/
 
     def test_inject_adds_work_item_after_task_slug(self) -> None:

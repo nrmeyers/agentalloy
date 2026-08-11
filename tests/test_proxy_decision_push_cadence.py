@@ -30,6 +30,7 @@ from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
+from agentalloy.storage.state_store import DuckDBStateStore
 
 
 class _FakeOrch(ComposeOrchestrator):
@@ -118,6 +119,24 @@ def _seed(tmp_path: Path) -> DuckDBCodeGraphStore:
     return s
 
 
+def _seed_state(tmp_path: Path, contract_id: str) -> DuckDBStateStore:
+    """Create a DuckDBStateStore with a single contract seeded."""
+    s = DuckDBStateStore(tmp_path / "state.duck")
+    s.open()
+    s.migrate()
+    s.put_contract(
+        contract_id,
+        phase="design",
+        slug="t",
+        domain_tags=[],
+        scope_touches=["pkg/a.py"],
+        scope_avoids=[],
+        success_criteria=[],
+        body="body\n",
+    )
+    return s
+
+
 def _wire(
     monkeypatch: pytest.MonkeyPatch,
     store: DuckDBCodeGraphStore | None,
@@ -152,19 +171,25 @@ def _signal(tmp_path: Path, *, announce_cursor: bool) -> SignalResult:
     )
 
 
+@pytest.mark.asyncio
 async def test_push_present_on_cursor_entry_turn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    store = _seed(tmp_path)
-    seen = _wire(monkeypatch, store, available=True)
-    block = await _compose_block(_signal(tmp_path, announce_cursor=True), _FakeOrch("DOMAIN"))
+    code_store = _seed(tmp_path)
+    signal = _signal(tmp_path, announce_cursor=True)
+    contract_id = str(tmp_path / "c.md")
+    state_store = _seed_state(tmp_path, contract_id)
+    seen = _wire(monkeypatch, code_store, available=True)
+    block = await _compose_block(signal, _FakeOrch("DOMAIN"), store=state_store)
     assert "DOMAIN" in block.text  # domain leg still composes
     assert "# Decisions governing this work" in block.text  # + the push, additively
     assert "Why foo" in block.text
     assert seen["roles"] == ["reader"]  # AC9: opened read-only, no corpus write
-    store.close()
+    code_store.close()
+    state_store.close()
 
 
+@pytest.mark.asyncio
 async def test_no_push_on_non_entry_turn(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """TC1b — a mid-work-item turn (cursor unchanged) skips the whole Tier-2
     channel, so neither the domain leg nor the decision push fire."""
@@ -176,18 +201,23 @@ async def test_no_push_on_non_entry_turn(monkeypatch: pytest.MonkeyPatch, tmp_pa
     store.close()
 
 
+@pytest.mark.asyncio
 async def test_byte_identical_when_index_unavailable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC 6/9 additivity: an unavailable index composes the exact same text as a
     run with the decision push stubbed out entirely — the path only ever adds."""
+    signal = _signal(tmp_path, announce_cursor=True)
+    contract_id = str(tmp_path / "c.md")
+    state_store = _seed_state(tmp_path, contract_id)
     seen = _wire(monkeypatch, None, available=False)
-    with_gate = await _compose_block(_signal(tmp_path, announce_cursor=True), _FakeOrch("DOMAIN"))
+    with_gate = await _compose_block(signal, _FakeOrch("DOMAIN"), store=state_store)
 
     # Baseline: decision path forced to a no-op, everything else identical.
     monkeypatch.setattr(proxy_apply, "_compose_decision_push", lambda *a, **k: "")
-    baseline = await _compose_block(_signal(tmp_path, announce_cursor=True), _FakeOrch("DOMAIN"))
+    baseline = await _compose_block(signal, _FakeOrch("DOMAIN"), store=state_store)
 
     assert with_gate.text == baseline.text
     assert "# Decisions governing this work" not in with_gate.text
     assert seen["open"] == 0  # unavailable -> never opened
+    state_store.close()

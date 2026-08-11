@@ -252,11 +252,11 @@ class HttpReranker:
         resp = self._client.post("/v1/rerank", json=payload)
         resp.raise_for_status()
         data: Any = resp.json()
-        results: Any = data.get("results") if isinstance(data, dict) else None
+        results: Any = data.get("results") if isinstance(data, dict) else None  # type: ignore[assignment]
         if not isinstance(results, list):
             raise ValueError(f"rerank response missing 'results' list: {data!r}")
         scores = [0.0] * len(passages)
-        for item in results:
+        for item in results:  # type: ignore[assignment]
             if not isinstance(item, dict):
                 raise ValueError(f"rerank result is not a mapping: {item!r}")
             item_dict = cast(dict[str, Any], item)

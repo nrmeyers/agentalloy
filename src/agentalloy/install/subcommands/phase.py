@@ -378,17 +378,14 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     # archive/<phase>/ before the next cycle starts writing into active/.
     if current is not None and current != "intake" and phase == "intake":
         from agentalloy.api.state_client import StateClient
-        from agentalloy.contracts import apply_contracts_migration, plan_archive
 
         try:
             client = StateClient()
             client.archive_all()
         except Exception:
             logger.warning("archive_all failed — store archiving skipped")
-        apply_contracts_migration(plan_archive(root))
 
     if current != phase:
-        from agentalloy.contracts import first_workitem_id
         from agentalloy.signals.skill_loader import (
             _clear_all_cursors,
             _write_cursor_atomic,
@@ -396,7 +393,17 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
         # Clear stale scoped cursors, then seed the shared cursor for the new phase.
         _clear_all_cursors(root)
-        seed = first_workitem_id(root, phase)
+        # Derive the first work-item from the store (same ordering as the old
+        # ``first_workitem_id`` — contract_id is the numeric filename stem).
+        seed: str | None = None
+        try:
+            access = phase_access(root)
+            rows = access.contracts_handle().list_contracts(phase=phase, status="active")
+            if rows:
+                rows_sorted = sorted(rows, key=lambda r: str(r.get("contract_id", "")))
+                seed = f"active/{phase}/{rows_sorted[0]['contract_id']}.md"
+        except StateClientError:
+            pass  # fail-soft: leave cursor unset
         if seed:
             _write_cursor_atomic(root, seed)
     return {**data, "blocked": False}

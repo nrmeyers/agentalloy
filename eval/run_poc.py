@@ -150,12 +150,16 @@ def call_compose_from_contract(
     sends for a real build contract (contract_tags steer BM25 + the soft tag
     filter; contract_path lands in telemetry)."""
     from agentalloy.api.compose_models import compose_request_from_contract
-    from agentalloy.contracts import parse_contract
+    from agentalloy.contracts import parse_contract_text
 
     path = CONTRACTS_ROOT / f"{task.task_id}.md"
     if not path.exists():
         raise FileNotFoundError(f"contract fixture missing: {path}")
-    req = compose_request_from_contract(parse_contract(path), legs="domain", k=k)
+    req = compose_request_from_contract(
+        parse_contract_text(path.read_text(encoding="utf-8"), contract_id=path.stem),
+        legs="domain",
+        k=k,
+    )
     return _post_compose(client, req.model_dump(mode="json"))
 
 

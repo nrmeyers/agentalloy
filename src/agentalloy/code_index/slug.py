@@ -67,7 +67,7 @@ def slugify_repo(name: str) -> str:
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 
 
-def parse_git_remote(url: str) -> tuple[str, str, str] | None:
+def parse_git_remote(url: str | None) -> tuple[str, str, str] | None:
     """Parse any git remote URL into ``(host, org, repo)``; None if unparseable.
 
     Generalizes the old GitHub-only parsing to arbitrary hosts (GitLab,
@@ -85,7 +85,7 @@ def parse_git_remote(url: str) -> tuple[str, str, str] | None:
     >>> parse_git_remote("https://gitlab.com/team/backend/repo.git")
     ('gitlab.com', 'team/backend', 'repo')
     """
-    if not isinstance(url, str):
+    if url is None:
         return None
     candidate = url.strip()
     if not candidate:

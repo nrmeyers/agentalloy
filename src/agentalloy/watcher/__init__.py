@@ -136,7 +136,7 @@ def start_watcher(
                 lifecycle.update_pr_url(pr_url)
 
                 # Phase 2: Poll CI
-                while not handle._stop_event.is_set():
+                while not handle._stop_event.is_set():  # pyright: ignore[reportPrivateUsage]
                     all_green, check_count = monitor.poll_once(pr_url)
 
                     if all_green and check_count > 0:
@@ -156,7 +156,7 @@ def start_watcher(
 
                     # Sleep in small increments so we can interrupt
                     for _ in range(ci_interval * 10):
-                        if handle._stop_event.is_set():
+                        if handle._stop_event.is_set():  # pyright: ignore[reportPrivateUsage]
                             break
                         time.sleep(0.1)
             else:
@@ -165,12 +165,12 @@ def start_watcher(
         except Exception:
             logger.exception("Watcher crashed for task %r", task_slug)
         finally:
-            handle._running = False
+            handle._running = False  # pyright: ignore[reportPrivateUsage]
             _running_watchers.pop(task_slug, None)
 
-    handle._thread = threading.Thread(target=_run, name=f"watcher-{task_slug}", daemon=True)
-    handle._running = True
-    handle._thread.start()
+    handle._thread = threading.Thread(target=_run, name=f"watcher-{task_slug}", daemon=True)  # pyright: ignore[reportPrivateUsage]
+    handle._running = True  # pyright: ignore[reportPrivateUsage]
+    handle._thread.start()  # pyright: ignore[reportPrivateUsage]
     return handle
 
 

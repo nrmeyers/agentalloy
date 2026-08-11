@@ -326,8 +326,6 @@ async def _compose_block(
     if signal.announce_cursor and signal.current_contract and signal.phase != "intake":
         contract: Contract | None = None
         try:
-            # Store-first: load contract from the DuckDB state store using the id.
-            # Falls back to filesystem parsing for backward compatibility.
             if store is not None:
                 from agentalloy.contracts import contract_from_row
 
@@ -335,15 +333,10 @@ async def _compose_block(
                 if row is not None:
                     contract = contract_from_row(row)
                 else:
-                    # Store lookup failed — fall through to filesystem parsing
                     logger.debug(
-                        "Contract %r not in store, falling back to filesystem",
+                        "Contract %r not in store",
                         signal.current_contract,
                     )
-            if contract is None:
-                from agentalloy.contracts import parse_contract
-
-                contract = parse_contract(Path(signal.current_contract))
         except Exception:
             logger.warning("Tier 2 contract parse failed -- passing through", exc_info=True)
 

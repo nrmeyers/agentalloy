@@ -28,7 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.install.sentinel_utils import remove_sentinel_block, replace_marked_block
@@ -178,10 +178,12 @@ def service_module_status(port: int) -> str | None:
     try:
         req = urllib.request.Request(f"{service_base_url(port)}/health", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
-            body = cast(dict[str, Any], json.loads(resp.read()))
+            body = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
-    modules = body.get("modules") if isinstance(body, dict) else None
+    if not isinstance(body, dict):
+        return None
+    modules = body.get("modules")
     if isinstance(modules, dict):
         state = modules.get("code_index")
         return state if isinstance(state, str) else None
@@ -193,12 +195,12 @@ def registry_slugs(port: int) -> list[str] | None:
     try:
         req = urllib.request.Request(f"{service_base_url(port)}/code/repos", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
-            body = cast(list[dict[str, Any]], json.loads(resp.read()))
+            raw = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
-    if not isinstance(body, list):
+    if not isinstance(raw, list):
         return None
-    return [str(r["slug"]) for r in body if isinstance(r, dict) and "slug" in r]
+    return [str(r["slug"]) for r in raw if isinstance(r, dict) and "slug" in r]
 
 
 def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
@@ -212,8 +214,10 @@ def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            body = cast(dict[str, Any], json.loads(resp.read()))
+            body = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(body, dict):
         return None
     return body
 

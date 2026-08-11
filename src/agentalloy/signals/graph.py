@@ -25,7 +25,9 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agentalloy.code_index.slug import repo_slug
 from agentalloy.signals.gates import evaluate_phase_gate
-from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase
+from agentalloy.signals.skill_loader import (
+    _load_workflow_skill_for_phase,  # noqa: PLC0415  # pyright: ignore[reportPrivateUsage]
+)
 from agentalloy.storage.state_store import (
     LEASED_KINDS,
     DuckDBStateStore,
@@ -205,7 +207,8 @@ def load_graph_state(store: DuckDBStateStore, key: ThreadKey) -> PhaseGraphState
         return None
     if not isinstance(data, dict):
         return None
-    return PhaseGraphState(**{k: data[k] for k in PhaseGraphState.__annotations__ if k in data})
+    # pyright: ignore[reportUnknownArgumentType] — LangGraph PhaseGraphState stubs have unknown param types
+    return PhaseGraphState(**{k: data[k] for k in PhaseGraphState.__annotations__ if k in data})  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +242,8 @@ class RoutingOutcome:
     lane: str
     advisories: list[str]
     reason: str = ""
-    gates_met: list[str] = field(default_factory=list)
-    gates_unmet: list[str] = field(default_factory=list)
+    gates_met: list[str] = field(default_factory=list)  # type: ignore[assignment]
+    gates_unmet: list[str] = field(default_factory=list)  # type: ignore[assignment]
     qwen_calls: int = 0
 
 
@@ -324,8 +327,8 @@ def _route_step(
                         lm_client=None,
                         target_phase=to_phase,
                     )
-                    gates_met = [e.gate_name for e in decision.gates_met]
-                    gates_unmet = [e.gate_name for e in decision.gates_unmet]
+                    gates_met = [e.gate_name for e in decision.gates_met]  # type: ignore[assignment]
+                    gates_unmet = [e.gate_name for e in decision.gates_unmet]  # type: ignore[assignment]
                     qwen_calls = decision.qwen_calls
             except Exception:
                 _log.debug(
@@ -407,7 +410,7 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
     """
     g = StateGraph[PhaseGraphState](PhaseGraphState)
     for phase in _PHASE_GRAPH:
-        g.add_node(phase, _node(phase))
+        g.add_node(phase, _node(phase))  # pyright: ignore[reportUnknownMemberType]
     g.add_edge(START, "intake")  # entrypoint — intake is the front door
 
     def _advance(state: PhaseGraphState) -> str:
@@ -418,9 +421,9 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
             return phase
         return nxt
 
-    g.add_conditional_edges(
+    g.add_conditional_edges(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         "intake",
-        lambda s: s.get("lane", "sdd-full"),
+        lambda s: s.get("lane", "sdd-full"),  # type: ignore[arg-type]
         {lane: entry for lane, entry in _LANE_ENTRY.items()},
     )
     for phase, nxt in _PHASE_GRAPH.items():
@@ -450,7 +453,9 @@ def phase_graph() -> CompiledStateGraph[PhaseGraphState, None, PhaseGraphState, 
     """
     global _graph_compilation
     if _graph_compilation is None:
-        _graph_compilation = build_phase_graph().compile(checkpointer=MemorySaver())
+        _graph_compilation = build_phase_graph().compile(  # pyright: ignore[reportUnknownMemberType]
+            checkpointer=MemorySaver()
+        )
     return _graph_compilation
 
 

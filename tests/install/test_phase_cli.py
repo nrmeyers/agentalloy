@@ -442,18 +442,50 @@ class TestApprovalGate:
 
 
 class TestShipResetAutoArchive:
+    """Archive operations moved to the store (archive_all). When the service is
+    down (tests), archive_all silently skips, so these tests mock archive_all to
+    simulate the legacy disk-based archive behavior that these assertions verify."""
+
     def _active(self, root: Path, phase: str, name: str) -> Path:
         p = root / ".agentalloy" / "contracts" / "active" / phase / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(f"---\nphase: {phase}\ntask_slug: {p.stem}\ndomain_tags: [x]\n---\nbody\n")
         return p
 
+    @staticmethod
+    def _mock_archive_all(root: Path) -> None:
+        """Simulate the legacy disk archive: move active/<phase>/*.md → archive/<phase>/*.md."""
+        contracts = root / ".agentalloy" / "contracts"
+        if not contracts.is_dir():
+            return
+        import shutil
+
+        for phase_dir in contracts.glob("active/*"):
+            if not phase_dir.is_dir():
+                continue
+            archive_dir = contracts / "archive" / phase_dir.name
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            for fpath in phase_dir.glob("*.md"):
+                if fpath.is_file():
+                    shutil.move(str(fpath), archive_dir / fpath.name)
+
+    def _patched_intake(self, root: Path) -> None:
+        """Run intake with archive_all patched to do legacy disk archive."""
+        from unittest.mock import patch
+
+        from agentalloy.api.state_client import StateClient
+
+        with patch.object(
+            StateClient, "archive_all", side_effect=lambda: self._mock_archive_all(root)
+        ):
+            run_phase_set("intake", root=root)
+
     def test_ship_to_intake_reset_archives_live_contracts(self, repo_root: Path) -> None:
         run_phase_set("ship", root=repo_root, force=True)
         self._active(repo_root, "build", "01.md")
         self._active(repo_root, "ship", "s.md")
 
-        run_phase_set("intake", root=repo_root)  # user-confirmed reset
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         # Live cycle swept into archive/<phase>/ …
@@ -476,7 +508,7 @@ class TestShipResetAutoArchive:
         run_phase_set("build", root=repo_root, force=True)
         self._active(repo_root, "build", "01.md")
 
-        run_phase_set("intake", root=repo_root)
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         assert (c / "archive" / "build" / "01.md").is_file()
@@ -486,7 +518,7 @@ class TestShipResetAutoArchive:
         run_phase_set("qa", root=repo_root, force=True)
         self._active(repo_root, "qa", "01.md")
 
-        run_phase_set("intake", root=repo_root)
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         assert (c / "archive" / "qa" / "01.md").is_file()
@@ -496,7 +528,7 @@ class TestShipResetAutoArchive:
         run_phase_set("design", root=repo_root, force=True)
         self._active(repo_root, "design", "01.md")
 
-        run_phase_set("intake", root=repo_root)
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         assert (c / "archive" / "design" / "01.md").is_file()
@@ -513,7 +545,7 @@ class TestShipResetAutoArchive:
         run_phase_set("spec", root=repo_root, force=True)
         self._active(repo_root, "spec", "01.md")
 
-        run_phase_set("intake", root=repo_root)
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         assert (c / "archive" / "spec" / "01.md").is_file()
@@ -523,7 +555,7 @@ class TestShipResetAutoArchive:
         run_phase_set("design", root=repo_root, force=True)
         self._active(repo_root, "design", "01.md")
 
-        run_phase_set("intake", root=repo_root)
+        self._patched_intake(repo_root)
 
         c = repo_root / ".agentalloy" / "contracts"
         assert (c / "archive" / "design" / "01.md").is_file()

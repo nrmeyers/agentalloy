@@ -256,21 +256,18 @@ class TestPRManager:
 
     def test_detect_gh(self, tmp_path: Path) -> None:
         """When gh is on PATH, detects it."""
-
         pm = PRManager(store=None, lifecycle=MagicMock(), project_root=tmp_path)
         with patch("shutil.which", return_value="/usr/bin/gh"):
             assert pm.vcs_type == "gh"
 
     def test_detect_glab(self, tmp_path: Path) -> None:
         """When glab is on PATH (no gh), detects it."""
-
         pm = PRManager(store=None, lifecycle=MagicMock(), project_root=tmp_path)
         with patch("shutil.which", side_effect=lambda cmd: "glab" if cmd == "glab" else None):
             assert pm.vcs_type == "glab"
 
     def test_detect_none(self, tmp_path: Path) -> None:
         """When neither is on PATH, returns None."""
-
         pm = PRManager(store=None, lifecycle=MagicMock(), project_root=tmp_path)
         with patch("shutil.which", return_value=None):
             assert pm.vcs_type is None
@@ -288,7 +285,6 @@ class TestResetPrompter:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Writes a reset marker file."""
-
         store = _make_store(tmp_path)
 
         lm = LifecycleManager(store=store, task_slug="add-telemetry")
