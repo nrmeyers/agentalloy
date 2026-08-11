@@ -60,7 +60,14 @@ class CICheckMonitor:
 
     def _gh_poll(self, pr_url: str) -> tuple[bool, int]:
         """Poll CI checks via GitHub CLI."""
-        cmd = ["gh", "pr", "checks", pr_url.split("/")[-1], "--json", "name,state,status,conclusion,startedAt,completedAt,url"]
+        cmd = [
+            "gh",
+            "pr",
+            "checks",
+            pr_url.split("/")[-1],
+            "--json",
+            "name,state,status,conclusion,startedAt,completedAt,url",
+        ]
 
         try:
             result = subprocess.run(
@@ -74,24 +81,24 @@ class CICheckMonitor:
                 return False, 0
 
             checks_data = json.loads(result.stdout)
-            checks = checks_data if isinstance(checks_data, list) else []
+            checks = checks_data if isinstance(checks_data, list) else []  # type: ignore[assignment]
 
-            total = len(checks)
+            total = len(checks)  # type: ignore[arg-type]
             all_green = True
 
-            for check in checks:
-                status = check.get("state", "")
-                conclusion = check.get("conclusion")
+            for check in checks:  # type: ignore[assignment]
+                status = check.get("state", "")  # type: ignore[assignment]
+                conclusion = check.get("conclusion")  # type: ignore[assignment]
 
                 # Record to telemetry
                 self._store.record_ci_check(
                     pr_url=pr_url,
-                    check_name=check.get("name", ""),
+                    check_name=check.get("name", ""),  # type: ignore[assignment]
                     check_status=status,
                     check_conclusion=conclusion,
-                    started_at=check.get("startedAt"),
-                    completed_at=check.get("completedAt"),
-                    url=check.get("url"),
+                    started_at=check.get("startedAt"),  # type: ignore[assignment]
+                    completed_at=check.get("completedAt"),  # type: ignore[assignment]
+                    url=check.get("url"),  # type: ignore[assignment]
                 )
 
                 # Determine if this check is green
@@ -101,14 +108,18 @@ class CICheckMonitor:
                     pass  # skip doesn't count as failure
                 else:
                     all_green = False
-                    logger.debug("Check %r is %s/%s", check.get("name"), status, conclusion)
+                    logger.debug("Check %r is %s/%s", check.get("name"), status, conclusion)  # type: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
             # Track failures
             if not all_green:
                 fail_count = self._lifecycle.increment_ci_failures()
                 if fail_count >= self._max_failures:
-                    logger.warning("CI failure limit reached (%d/%d) for task %r",
-                                   fail_count, self._max_failures, self._lifecycle.task_slug)
+                    logger.warning(
+                        "CI failure limit reached (%d/%d) for task %r",
+                        fail_count,
+                        self._max_failures,
+                        self._lifecycle.task_slug,
+                    )
 
             return all_green, total
 
@@ -155,8 +166,12 @@ class CICheckMonitor:
             if not all_green:
                 fail_count = self._lifecycle.increment_ci_failures()
                 if fail_count >= self._max_failures:
-                    logger.warning("CI failure limit reached (%d/%d) for task %r",
-                                   fail_count, self._max_failures, self._lifecycle.task_slug)
+                    logger.warning(
+                        "CI failure limit reached (%d/%d) for task %r",
+                        fail_count,
+                        self._max_failures,
+                        self._lifecycle.task_slug,
+                    )
 
             return all_green, total
 

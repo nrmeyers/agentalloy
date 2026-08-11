@@ -55,6 +55,7 @@ def _active_design_slug(project_root: Path) -> str | None:
     known active design contract, ``None`` otherwise.
     """
     from agentalloy.signals.skill_loader import (
+        _state_view,
         cli_session_key,
     )
 
@@ -63,8 +64,6 @@ def _active_design_slug(project_root: Path) -> str | None:
     # Try cursor (scoped then shared) from store
     cursor_val: str | None = None
     try:
-        from agentalloy.signals.skill_loader import _state_view
-
         view = _state_view(project_root)
         if view is not None:
             if session_key:
@@ -103,8 +102,6 @@ def _active_design_slug(project_root: Path) -> str | None:
 
     # No cursor: only return the slug when there's exactly one active design contract in store
     try:
-        from agentalloy.signals.skill_loader import _state_view
-
         view = _state_view(project_root)
         if view is not None:
             rows = view.list_contracts(phase="design", status="active")

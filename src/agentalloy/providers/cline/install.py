@@ -102,7 +102,7 @@ def extract_upstream(root: Path, data_dir: Path | None = None) -> Upstream | Non
         return None
 
     def _settings_of(key: object) -> dict[str, Any] | None:
-        entry = cast(dict[str, Any], providers.get(key))  # type: ignore[arg-type]
+        entry = providers.get(key)
         settings = entry.get("settings") if isinstance(entry, dict) else None
         return settings if isinstance(settings, dict) else None
 

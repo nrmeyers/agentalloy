@@ -409,7 +409,9 @@ def _store_artifact_status(
 
     for gate_phase, name in _extract_artifact_exists_store_specs(exit_gates):
         try:
-            rows = store.list_artifacts(gate_phase, slug=slug, name_glob=name) if store else []
+            rows = (  # type: ignore[assignment]
+                store.list_artifacts(gate_phase, slug=slug, name_glob=name) if store else []
+            )
         except Exception:
             rows = []
         if rows:
@@ -1070,7 +1072,7 @@ async def evaluate_signal(
             input_state = initial_phase_graph_state(phase=phase, lane=lane)
             graph = phase_graph()
             config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType]
+            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
             to_phase = result.get("phase") if result else None
 
             # Gate evaluation still runs via _route_step for advisories/gates_met

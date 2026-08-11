@@ -591,15 +591,15 @@ def ensure_migrated(project_root: Path) -> int:
                 try:
                     raw = fpath.read_text(encoding="utf-8")
                     front = raw.split("---", 2)
-                    meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}
-                    phase = meta.get("phase") or (
+                    meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}  # type: ignore[assignment]
+                    phase = meta.get("phase") or (  # type: ignore[assignment]
                         parts[0]
                         if len(parts) == 2 and parts[0] not in ("active", "archive")
                         else "active"
                     )
-                    dest = contracts_root / "active" / phase / fpath.name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_text(raw, encoding="utf-8")
+                    dest = contracts_root / "active" / phase / fpath.name  # type: ignore[assignment]
+                    dest.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[assignment]
+                    dest.write_text(raw, encoding="utf-8")  # type: ignore[assignment]
                     fpath.unlink()
                     flat_migrated += 1
                 except Exception:

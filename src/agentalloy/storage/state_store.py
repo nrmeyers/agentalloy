@@ -2130,25 +2130,30 @@ class DuckDBStateStore:
                         with open(fpath, encoding="utf-8") as fh:
                             raw = fh.read()
                         front = raw.split("---", 2)
-                        meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}
+                        meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}  # type: ignore[assignment]
 
-                        contract_id = (
+                        # pyright: ignore[reportUnknownMemberType] — yaml.safe_load returns Any
+                        contract_id: str = (
                             meta.get("contract_id") or meta.get("id") or meta.get("slug", "")
+                        ) or ""
+                        slug: str = meta.get("slug") or contract_id
+                        phase: str = (
+                            meta.get("phase")
+                            or self._get_phase_from_path(fpath, location)
+                            or "active"
                         )
-                        slug = meta.get("slug") or contract_id
-                        phase = meta.get("phase") or self._get_phase_from_path(fpath, location)
-                        work_item = meta.get("work_item") or meta.get("description", "")
+                        work_item: str = meta.get("work_item") or meta.get("description", "")
                         body = front[2].strip() if len(front) >= 3 else raw.strip()
 
                         if not contract_id:
                             # Generate one from filename
                             contract_id = os.path.splitext(os.path.basename(fpath))[0]
 
-                        self.put_contract(
-                            contract_id,
-                            phase=phase,
-                            slug=slug or contract_id,
-                            work_item=work_item,
+                        self.put_contract(  # type: ignore[reportUnknownArgumentType]
+                            str(contract_id),
+                            phase=str(phase),
+                            slug=str(slug or contract_id),
+                            work_item=str(work_item),
                             body=body,
                         )
                         os.remove(fpath)
