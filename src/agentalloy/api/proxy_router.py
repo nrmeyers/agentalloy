@@ -505,7 +505,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
             obj = json.loads(stripped[6:])
             if isinstance(obj, dict) and obj.get("choices"):
                 for choice in obj["choices"]:
-                    if isinstance(choice, dict) and "finish_reason" in choice:
+                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
+                    if fr is not None:
                         return True
         except (json.JSONDecodeError, ValueError):
             pass
@@ -524,7 +525,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
             obj = json.loads(text[idx + 6 : brace_end])
             if isinstance(obj, dict) and obj.get("choices"):
                 for choice in obj["choices"]:
-                    if isinstance(choice, dict) and "finish_reason" in choice:
+                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
+                    if fr is not None:
                         return True
         except (json.JSONDecodeError, ValueError):
             pass
@@ -537,7 +539,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
         obj = json.loads(stripped)
         if isinstance(obj, dict) and obj.get("choices"):
             for choice in obj["choices"]:
-                if isinstance(choice, dict) and "finish_reason" in choice:
+                fr = choice.get("finish_reason") if isinstance(choice, dict) else None
+                if fr is not None:
                     return True
     except (json.JSONDecodeError, ValueError):
         pass
