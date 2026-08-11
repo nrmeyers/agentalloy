@@ -28,7 +28,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 
@@ -130,12 +130,12 @@ def _slug_from_registry(port: int, abspath: Path) -> str | None:
         with _make_client(port) as client:
             resp = client.get("/code/repos")
             resp.raise_for_status()
-            rows: list[dict[str, Any]] = cast(list[dict[str, Any]], resp.json())
+            rows = resp.json()
     except (httpx.HTTPError, ValueError):
         return None
     if not isinstance(rows, list):
         return None
-    for row in rows:
+    for row in rows:  # type: ignore[reportUnnecessaryIsInstance]
         if not isinstance(row, dict):
             continue
         rp, slug = row.get("repo_path"), row.get("slug")

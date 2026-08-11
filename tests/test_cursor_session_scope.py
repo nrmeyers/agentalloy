@@ -12,10 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.contracts import (
-    cursor_state_name,
-    resolve_current_contract,
-)
+from agentalloy.api.proxy_signal import _resolve_current_contract as resolve_current_contract
+from agentalloy.contracts import cursor_state_name
 from agentalloy.install.subcommands.task import run_task_start
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _clear_all_cursors,
@@ -39,6 +37,21 @@ def _seed(root: Path, phase: str, names: list[str]) -> None:
         (d / f"{n}.md").write_text(
             f"---\nphase: {phase}\ntask_slug: {n}\ndomain_tags: [pytest]\n---\n# {n}\nbody\n"
         )
+    # Write contracts into the bound process store so _ordered_contracts can see them.
+    from agentalloy.api.state_router import scoped_state_store
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    scoped = scoped_state_store(store, root)
+    for n in names:
+        scoped.put_contract(
+            n,
+            phase=phase,
+            slug=n,
+            body=f"# {n}\nbody\n",
+            status="active",
+        )
 
 
 class TestCursorStateName:
@@ -60,15 +73,15 @@ class TestScopedReadWrite:
         (tmp_path / ".agentalloy").mkdir()
         _write_cursor_atomic(tmp_path, "active/build/x.md", _KEY_A)
         assert _read_cursor(tmp_path, _KEY_A) == "active/build/x.md"
-        # Backing file is the scoped one, not the shared cursor.
-        assert (tmp_path / ".agentalloy" / cursor_state_name(_KEY_A)).is_file()
+        # No disk file — store is the only source now.
         assert not (tmp_path / ".agentalloy" / "cursor").exists()
 
-    def test_read_falls_back_to_shared(self, tmp_path: Path) -> None:
+    def test_scoped_read_no_shared_fallback(self, tmp_path: Path) -> None:
+        # Scoped read with no scoped value returns None — no shared fallback
+        # in the store path (the resolver does the shared fallback).
         (tmp_path / ".agentalloy").mkdir()
         _write_cursor_atomic(tmp_path, "active/build/shared.md", None)  # shared
-        # A keyed reader with no scoped file falls back to the shared value.
-        assert _read_cursor(tmp_path, _KEY_A) == "active/build/shared.md"
+        assert _read_cursor(tmp_path, _KEY_A) is None
 
     def test_scoped_wins_over_shared(self, tmp_path: Path) -> None:
         (tmp_path / ".agentalloy").mkdir()
@@ -81,7 +94,7 @@ class TestScopedReadWrite:
         # The regression: A's cursor must not be visible to B.
         (tmp_path / ".agentalloy").mkdir()
         _write_cursor_atomic(tmp_path, "active/build/a-work.md", _KEY_A)
-        # B has no scoped file and no shared file → None, NOT a-work.
+        # B has no scoped row → None, NOT a-work.
         assert _read_cursor(tmp_path, _KEY_B) is None
 
 
@@ -95,10 +108,12 @@ class TestResolveWithSessionKey:
         assert cid_a == "active/build/01-cache.md"
         assert cid_b == "active/build/03-log.md"
 
-    def test_keyless_fanout_is_strict_none(self, tmp_path: Path) -> None:
-        # No scoped file, no shared cursor, ≥2 contracts → the resolver never guesses.
+    def test_keyless_fanout_strict_no_cursor(self, tmp_path: Path) -> None:
+        # No scoped file, no shared cursor, ≥2 contracts → strict resolver
+        # returns None (don't guess).
         _seed(tmp_path, "build", ["01-cache", "02-api"])
-        assert resolve_current_contract(tmp_path, "build", _KEY_A) == (None, None)
+        cid, _ = resolve_current_contract(tmp_path, "build", _KEY_A)
+        assert cid is None
 
 
 class TestClearAndTransition:

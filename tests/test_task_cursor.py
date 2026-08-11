@@ -34,6 +34,15 @@ def _seed(root: Path, phase: str, names: list[str]) -> None:
         (d / f"{n}.md").write_text(
             f"---\nphase: {phase}\ntask_slug: {n}\ndomain_tags: [pytest]\n---\n# {n}\nbody\n"
         )
+    # Also write contracts into the bound process store so _ordered_contracts can see them.
+    from agentalloy.api.state_router import scoped_state_store
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    scoped = scoped_state_store(store, root)
+    for n in names:
+        scoped.put_contract(n, phase=phase, slug=n, body=f"# {n}\nbody\n", status="active")
 
 
 def test_task_next_walks_in_filename_order(tmp_path: Path) -> None:
@@ -77,18 +86,17 @@ def test_resolve_current_contract_single_item_phase(tmp_path: Path) -> None:
     # Exactly one contract (the single-item incoming work-item) → compose it.
     _seed(tmp_path, "spec", ["the-feature"])
     cid, path = _resolve_current_contract(tmp_path, "spec")
-    assert cid == "active/spec/the-feature.md"
+    assert cid == "the-feature"
     # Path component is deprecated — always None; consumers load from store via cid
     assert path is None
 
 
-def test_resolve_current_contract_fanout_is_strict_none(tmp_path: Path) -> None:
-    # ≥2 contracts, no cursor → strict (None, None): the resolver never guesses.
-    # In normal flow the cursor is seeded on phase entry (see the seeding tests
-    # below); this asserts the fail-safe floor when a cursor is somehow absent.
+def test_resolve_current_contract_fanout_strict_no_cursor(tmp_path: Path) -> None:
+    # ≥2 contracts, no cursor → strict resolver returns None (don't guess).
     _seed(tmp_path, "build", ["01-cache", "02-api", "03-log"])
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid is None and path is None
+    assert cid is None
+    assert path is None
     # ...an explicit cursor resolves the pointed-at work-item.
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
@@ -117,6 +125,14 @@ def _seed_qa_contract(root: Path, slug: str) -> None:
     (qa / f"{slug}.md").write_text(
         f"---\nphase: qa\ntask_slug: {slug}\ndomain_tags: [pytest]\n---\n# {slug}\nbody\n"
     )
+    # Also write to the bound process store.
+    from agentalloy.api.state_router import scoped_state_store
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    scoped = scoped_state_store(store, root)
+    scoped.put_contract(slug, phase="qa", slug=slug, body=f"# {slug}\nbody\n", status="active")
 
 
 def test_phase_transition_seeds_cursor_proxy_path(tmp_path: Path) -> None:

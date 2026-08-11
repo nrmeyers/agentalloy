@@ -592,6 +592,23 @@ def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
 def _set_state(tmp_path: Path, name: str, value: str) -> None:
     d = tmp_path / ".agentalloy"
     d.mkdir(exist_ok=True)
+    # Store-first: composed and cursor are now read from the state store, not disk.
+    if name in ("composed", "cursor"):
+        from agentalloy.api.state_router import _repo_key_for, _stream_key_for
+        from agentalloy.storage.state_store import process_store
+
+        # Write to the already-bound store (from _bound_state_store fixture),
+        # scoped to the same repo/stream key that ensure_migrated uses.
+        store = process_store()
+        if store is not None:
+            scoped = store.for_repo(
+                _repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path))
+            )
+            if name == "composed":
+                scoped.write("composed", value)
+            else:  # cursor
+                scoped.write("cursor", value, session_key=None)
+            return
     (d / name).write_text(f"{value}\n")
 
 
@@ -620,12 +637,13 @@ class TestTier2Cadence:
         assert result.announce is True  # Tier 1
         assert result.announce_cursor is True  # Tier 2
         assert result.current_contract is not None
-        assert result.current_contract.endswith("active/build/01-cache.md")
+        # Contract id is now the store key (slug), not a disk path.
+        assert result.current_contract == "01-cache"
         # Tier 2 cadence is recorded as a pending marker; evaluate_signal no longer
         # writes `.agentalloy/composed` — the injection path commits it post-delivery.
         from agentalloy.signals.skill_loader import _read_composed
 
-        assert result.pending_composed == "active/build/01-cache.md"
+        assert result.pending_composed == "01-cache"
         assert _read_composed(tmp_path) is None
 
     def test_tier2_quiet_after_compose(self, tmp_path: Path) -> None:
@@ -633,7 +651,7 @@ class TestTier2Cadence:
         _set_phase(tmp_path, "build")
         _seed_contract(tmp_path, "build", "01-cache")
         _set_announced(tmp_path, "build")
-        _set_state(tmp_path, "composed", "active/build/01-cache.md")
+        _set_state(tmp_path, "composed", "01-cache")
         result = self._run(tmp_path)
         assert result.should_compose is False
         assert result.announce is False
@@ -646,13 +664,13 @@ class TestTier2Cadence:
         _seed_contract(tmp_path, "build", "01-cache")
         _seed_contract(tmp_path, "build", "02-api")
         _set_announced(tmp_path, "build")
-        _set_state(tmp_path, "composed", "active/build/01-cache.md")
-        _set_state(tmp_path, "cursor", "active/build/02-api.md")
+        _set_state(tmp_path, "composed", "01-cache")
+        _set_state(tmp_path, "cursor", "02-api")
         result = self._run(tmp_path)
         assert result.should_compose is True
         assert result.announce is False
         assert result.announce_cursor is True
-        assert result.current_contract.endswith("active/build/02-api.md")
+        assert result.current_contract == "02-api"
 
     def test_tier2_silent_on_uncursored_fanout(self, tmp_path: Path) -> None:
         # Strict resolver (Outcome B): ≥2 contracts with NO cursor → Tier 2 stays
@@ -675,12 +693,12 @@ class TestTier2Cadence:
         _seed_contract(tmp_path, "build", "01-cache")
         _seed_contract(tmp_path, "build", "02-api")
         _set_announced(tmp_path, "build")  # Tier 1 already announced → quiet
-        _set_state(tmp_path, "cursor", "active/build/01-cache.md")  # seeded on entry
+        _set_state(tmp_path, "cursor", "01-cache")  # seeded on entry
         result = self._run(tmp_path)
         assert result.announce is False  # Tier 1 stays quiet
         assert result.announce_cursor is True  # Tier 2 fires on the seeded work-item
         assert result.current_contract is not None
-        assert result.current_contract.endswith("active/build/01-cache.md")
+        assert result.current_contract == "01-cache"
 
 
 def _gates_with_sections() -> dict[str, Any]:

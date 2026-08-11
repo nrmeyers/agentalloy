@@ -10,6 +10,7 @@ exits non-zero with a message naming the service, and nothing is written.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import urllib.error
@@ -170,6 +171,34 @@ class StateClient:
         """Set the work-item cursor via the service."""
         return self._post("/state/cursor", {"value": value})
 
+    def set_scoped_cursor(self, session_key: str, value: str) -> dict[str, Any]:
+        """Set a per-session cursor via the service."""
+        return self._post(f"/state/cursors/{session_key}", {"value": value})
+
+    def get_scoped_cursor(self, session_key: str) -> str | None:
+        """Get a per-session cursor via the service."""
+        try:
+            resp = urllib.request.urlopen(
+                self._url(f"/state/cursors/{session_key}"),
+                timeout=self._timeout,
+            )
+            body = json.loads(resp.read().decode())
+        except (urllib.error.URLError, OSError):
+            return None
+        if isinstance(body, dict):
+            value = body.get("value")
+            return None if value is None else str(value)
+        return None
+
+    def delete_scoped_cursor(self, session_key: str) -> None:
+        """Delete a per-session cursor via the service."""
+        req = urllib.request.Request(
+            self._url(f"/state/cursors/{session_key}"),
+            method="DELETE",
+        )
+        with contextlib.suppress(urllib.error.URLError, OSError):
+            urllib.request.urlopen(req, timeout=self._timeout)
+
     # -- read operations -------------------------------------------------
 
     def get_state(self, kind: str) -> str | None:
@@ -306,6 +335,39 @@ class StateClient:
             resp = urllib.request.urlopen(url, timeout=self._timeout)
             data = json.loads(resp.read().decode())
             return data.get("contracts", [])
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def list_contracts_for_phase(self, phase: str) -> list[dict[str, Any]]:
+        """List active contracts for a phase, ordered by contract_id (filename order)."""
+        url = self._url(f"/contracts/phases/{phase}/contracts")
+        try:
+            resp = urllib.request.urlopen(url, timeout=self._timeout)
+            data = json.loads(resp.read().decode())
+            return data.get("contracts", [])
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def migrate_disk_contracts(
+        self,
+        *,
+        repo_root: str | None = None,
+    ) -> dict[str, Any]:
+        """Migrate disk-based ``.agentalloy/contracts/`` files into the store."""
+        req = urllib.request.Request(
+            self._url("/state/migrate-disk-contracts", repo_root=repo_root),
+            data=b"{}",
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+            return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
