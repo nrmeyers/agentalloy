@@ -37,7 +37,7 @@ from agentalloy.api.proxy_apply import (
     apply_signal,
     commit_outcome,
 )
-from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token
+from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token, read_upstream
 from agentalloy.api.proxy_injection import (
     inject_into_anthropic_messages,
     inject_into_anthropic_system_prompt,
@@ -431,6 +431,73 @@ async def _maybe_inject(
     return injected_payload, outcome, signal
 
 
+# ---------------------------------------------------------------------------
+# System-message normalization (non-Anthropic upstreams)
+#
+# Claude Code sends `{"role": "system"}` entries INSIDE `messages` (the
+# system-reminder carrying available agent types), not just in the top-level
+# `system` field.  api.anthropic.com accepts that; Anthropic-compatible shims
+# in front of a local model (llama.cpp, LM Studio, …) map such an entry onto a
+# chat-template system message that is no longer at position 0, and many
+# templates hard-fail on it:
+#
+#     Jinja Exception: System message must be at the beginning.
+#
+# Rewriting the role to "user" leaves the content and its position untouched
+# and renders through every template.  This is a compatibility shim for a
+# harness payload shape, not a fix for a defect on either side: against a
+# permissive upstream it is inert.
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_HOST = "api.anthropic.com"
+
+
+def _normalize_nonleading_system(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite ``role == "system"`` messages after index 0 to ``role == "user"``.
+
+    Returns the SAME object when there is nothing to rewrite (identity ==
+    unchanged), a NEW payload otherwise. A system message AT index 0 is left
+    alone — every template accepts that one.
+    """
+    raw = payload.get("messages")
+    if not isinstance(raw, list):
+        return payload
+    messages = cast("list[Any]", raw)
+
+    changed = False
+    out: list[Any] = []
+    for i, msg in enumerate(messages):
+        if i > 0 and isinstance(msg, dict) and cast("dict[str, Any]", msg).get("role") == "system":
+            out.append({**cast("dict[str, Any]", msg), "role": "user"})
+            changed = True
+        else:
+            out.append(msg)
+    if not changed:
+        return payload
+    return {**payload, "messages": out}
+
+
+def _should_normalize_system(
+    project_dir: Path | None,
+    client: AnthropicPassthroughClient,
+) -> bool:
+    """Whether to apply :func:`_normalize_nonleading_system` for this request.
+
+    A per-repo ``normalize_system:`` in ``.agentalloy/upstream`` wins in either
+    direction. Absent that, normalization is ON for every upstream host except
+    ``api.anthropic.com`` — the first-party API is the one consumer known to
+    accept the harness's shape verbatim, and every other Anthropic-compatible
+    endpoint (local shim or third-party cloud) is the class this protects.
+    """
+    if project_dir is not None:
+        upstream_file = read_upstream(project_dir)
+        if upstream_file.kind == "valid" and upstream_file.upstream is not None:
+            override = upstream_file.upstream.normalize_system
+            if override is not None:
+                return override
+    return httpx.URL(client.upstream_base_url).host != _ANTHROPIC_HOST
+
+
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:
     """Filter upstream response headers for relay. Drops hop-by-hop, length, and
     (when the body was decoded by httpx) the now-wrong content-encoding. The
@@ -531,6 +598,7 @@ async def passthrough_anthropic_messages(
     # is NOT recorded as delivered, and re-fires on the harness retry. Default no-op
     # covers the verbatim-forward path (nothing composed).
     on_status: Callable[[int], None] = _noop_status
+    injected_payload: dict[str, Any] | None = None
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
@@ -544,6 +612,7 @@ async def passthrough_anthropic_messages(
                 vector_store=vector_store,
                 phase_telemetry=phase_telemetry,
             )
+            injected_payload = injected
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
             # Set unconditionally on a successful compose: the on_status seam now
@@ -565,6 +634,23 @@ async def passthrough_anthropic_messages(
         except Exception:
             logger.warning("passthrough compose/inject failed; forwarding original", exc_info=True)
             body_to_send = raw_body
+            injected_payload = None
+
+    # --- Normalize non-leading system messages for non-Anthropic upstreams. ---
+    # Its own try/except, deliberately OUTSIDE the compose block: a failure there
+    # falls back to `raw_body`, which still carries the shape this rewrite exists
+    # to remove. Runs on the composed payload when there is one, on the original
+    # otherwise (most background turns compose nothing yet still carry the shape).
+    # A non-JSON body was never parsed and stays verbatim.
+    if payload is not None:
+        try:
+            if _should_normalize_system(project_dir, resolved_client):
+                base = injected_payload if injected_payload is not None else payload
+                normalized = _normalize_nonleading_system(base)
+                if normalized is not base:
+                    body_to_send = json.dumps(normalized).encode("utf-8")
+        except Exception:
+            logger.warning("system-message normalization failed; forwarding as-is", exc_info=True)
 
     # --- Forward. ---
     if stream_flag:

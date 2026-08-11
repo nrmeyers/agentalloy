@@ -106,11 +106,16 @@ class Upstream:
     *name* of the environment variable holding the upstream API key (never the
     secret itself — the proxy resolves it from its own process env at request
     time, so no credential is written into the repo).
+
+    ``normalize_system`` overrides the Anthropic passthrough's system-message
+    normalization (see ``_should_normalize_system``): ``None`` means "decide by
+    upstream host", ``True``/``False`` force it on/off.
     """
 
     url: str
     model: str
     key_env: str | None = None
+    normalize_system: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +145,7 @@ def read_upstream(cwd: Path) -> UpstreamFile:
         url: http://host:port/v1
         model: some-model
         key_env: OPENAI_API_KEY   # optional; env-var name, not the secret
+        normalize_system: true    # optional; force system-message normalization
 
     Returns an :class:`UpstreamFile` indicating one of three states:
 
@@ -179,7 +185,15 @@ def read_upstream(cwd: Path) -> UpstreamFile:
     key_env_raw = data.get("key_env")
     key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
 
+    normalize_raw = data.get("normalize_system")
+    normalize_system = normalize_raw if isinstance(normalize_raw, bool) else None
+
     return UpstreamFile(
         kind="valid",
-        upstream=Upstream(url=url.rstrip("/"), model=model, key_env=key_env),
+        upstream=Upstream(
+            url=url.rstrip("/"),
+            model=model,
+            key_env=key_env,
+            normalize_system=normalize_system,
+        ),
     )
