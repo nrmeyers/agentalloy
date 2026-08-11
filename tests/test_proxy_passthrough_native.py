@@ -921,7 +921,10 @@ def test_per_repo_upstream_wins_over_lifespan_default(tmp_path: Path) -> None:
     second affected surface with the same defect shape."""
     stub = start_upstream_stub()
     try:
-        _write_upstream(tmp_path, f"url: {stub.base_url}/v1\nmodel: claude-local\n")
+        _write_upstream(
+            tmp_path,
+            f"claude-code:\n  url: {stub.base_url}/v1\n  model: claude-local\n",
+        )
         wrong_default = AnthropicPassthroughClient(
             upstream_base_url="http://should-not-be-reached.invalid"
         )
@@ -955,7 +958,7 @@ def test_no_credential_injected_when_key_env_present(tmp_path: Path) -> None:
     try:
         _write_upstream(
             tmp_path,
-            f"url: {stub.base_url}/v1\nmodel: claude-local\nkey_env: SOME_UNSET_UPSTREAM_KEY\n",
+            f"claude-code:\n  url: {stub.base_url}/v1\n  model: claude-local\n  key_env: SOME_UNSET_UPSTREAM_KEY\n",
         )
         app = create_app(use_default_lifespan=False)
         app.state.anthropic_passthrough_client = None
@@ -1060,8 +1063,12 @@ def test_normalize_gate_respects_per_repo_override(tmp_path: Path) -> None:
     local = AnthropicPassthroughClient(upstream_base_url="http://127.0.0.1:60011")
     anthropic = AnthropicPassthroughClient(upstream_base_url="https://api.anthropic.com")
 
-    upstream.write_text("url: http://127.0.0.1:60011/v1\nmodel: m\nnormalize_system: false\n")
+    upstream.write_text(
+        "claude-code:\n  url: http://127.0.0.1:60011/v1\n  model: m\n  normalize_system: false\n"
+    )
     assert _should_normalize_system(tmp_path, local) is False
 
-    upstream.write_text("url: https://api.anthropic.com\nmodel: m\nnormalize_system: true\n")
+    upstream.write_text(
+        "claude-code:\n  url: https://api.anthropic.com\n  model: m\n  normalize_system: true\n"
+    )
     assert _should_normalize_system(tmp_path, anthropic) is True

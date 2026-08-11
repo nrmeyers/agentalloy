@@ -122,21 +122,30 @@ def _try_auto_wire(cwd: Path) -> None:
     if not harnesses:
         return
 
-    upstream_url = upstream_model = key_env = None
-    upstream_file = main_root / ".agentalloy" / "upstream"
-    if upstream_file.exists():
-        import yaml
+    from agentalloy.api.proxy_context import (
+        _PASSTHROUGH_HARNESS_KEYS,
+        CHAT_UPSTREAM_HARNESS,
+        read_upstream,
+    )
 
-        data = yaml.safe_load(upstream_file.read_text(encoding="utf-8")) or {}
-        if isinstance(data, dict):
-            upstream_url = data.get("url")
-            upstream_model = data.get("model")
-            key_env = data.get("key_env")
+    # Upstreams are per-repo, per-harness. Mirror each harness's own entry so a
+    # new worktree starts with the same forwarding targets -- and the same
+    # surface isolation -- as the main checkout: a passthrough harness copies
+    # only its own explicit entry (else nothing, defaulting to its protocol
+    # endpoint); a chat harness copies the shared chat scope.
+    def _mirror_upstream(harness: str) -> tuple[str | None, str | None, str | None]:
+        scope = harness if harness in _PASSTHROUGH_HARNESS_KEYS else CHAT_UPSTREAM_HARNESS
+        result = read_upstream(main_root, harness=scope)
+        if result.kind == "valid" and result.upstream is not None:
+            up = result.upstream
+            return up.url, up.model, up.key_env
+        return None, None, None
 
     lifecycle_mode = _read_lifecycle_mode(main_root)
     port = resolve_port(None)
 
     for harness in harnesses:
+        upstream_url, upstream_model, key_env = _mirror_upstream(harness)
         adopt_and_wire(
             harness,
             cwd,

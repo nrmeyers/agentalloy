@@ -222,8 +222,10 @@ proxy and CLI. Safe to inspect; edit only via `agentalloy` commands. Not a
 secret store, and git-excluded by `agentalloy add`.
 
 - `phase` — the repo's active lifecycle phase (e.g. `intake`, `build`).
-- `upstream` — where the proxy forwards LLM traffic for this repo
-  (URL/model/key-env-name only; never a credential).
+- `upstream` — where the proxy forwards LLM traffic for this repo, declared
+  **per harness** (a YAML map keyed by harness; URL/model/key-env-name only,
+  never a credential). An entry adopted for one harness never affects another:
+  the native passthrough surfaces read only their own harness's entry.
 - `config` — per-repo lifecycle mode.
 - `contracts/` — **legacy.** Work-item contracts and phase artifacts live in the
   AgentAlloy state store, not here. A `contracts/` directory in this repo is a

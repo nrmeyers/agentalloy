@@ -32,7 +32,11 @@ from fastapi.responses import StreamingResponse
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import InjectOutcome, apply_signal
-from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token
+from agentalloy.api.proxy_context import (
+    RESPONSES_PASSTHROUGH_HARNESS,
+    UpstreamFile,
+    decode_proj_token,
+)
 from agentalloy.api.proxy_injection import (
     inject_into_responses_input,
     inject_into_responses_instructions,
@@ -210,10 +214,12 @@ async def passthrough_openai_responses(
     query_string = request.url.query
     inbound_headers = request.headers
 
-    # Per-repo .agentalloy/upstream (captured by `agentalloy add`) wins over the
-    # lifespan-scoped default client -- the root cause of #505: `add codex
-    # --upstream-url` wrote this file and reported it as in effect, but this
-    # route forwarded to the process-wide RESPONSES_UPSTREAM_URL regardless.
+    # Per-repo, per-harness .agentalloy/upstream (captured by `agentalloy add`)
+    # wins over the lifespan-scoped default client -- the root cause of #505:
+    # `add codex --upstream-url` wrote this file and reported it as in effect,
+    # but this route forwarded to the process-wide RESPONSES_UPSTREAM_URL
+    # regardless. Only a `codex`-scoped entry is honored here; a chat harness's
+    # upstream can never redirect Codex.
     try:
         project_dir = decode_proj_token(token)
     except ValueError:
@@ -224,6 +230,7 @@ async def passthrough_openai_responses(
             project_dir,
             client,
             _CLIENT_CACHE_ATTR,
+            harness=RESPONSES_PASSTHROUGH_HARNESS,
         )
     else:
         resolved_client = client

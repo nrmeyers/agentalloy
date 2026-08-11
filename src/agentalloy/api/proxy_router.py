@@ -181,13 +181,18 @@ def _resolve_upstream(
     """Resolve ``(client, chat_completions_url, model)`` for a request.
 
     A per-repo ``.agentalloy/upstream`` (captured by ``agentalloy add``) wins:
-    the proxy adopts the harness's own upstream, forwarding to
-    ``<url>/chat/completions`` with the API key read from the named env var at
-    request time. Otherwise falls back to the global lifespan-scoped client
-    (``default_client``, posting the relative ``/v1/chat/completions``).
-    Returns ``UpstreamFile(kind="error")`` when the per-repo file is
-    malformed, ``None`` when neither resolves — the caller then 503s.
+    the proxy adopts the harness's own upstream (the shared *chat* scope — the
+    first non-passthrough entry), forwarding to ``<url>/chat/completions`` with
+    the API key read from the named env var at request time. Otherwise it falls
+    back to the lifespan-scoped global client (``default_client``) — **deprecated**
+    last-resort only; upstream is meant to be per-repo, per-harness and the
+    global fallback is scheduled for removal (see docs/proxy-architecture.md).
+    Returns ``UpstreamFile(kind="error")`` when the per-repo file is malformed,
+    ``None`` when neither resolves — the caller then 503s.
     """
+    # Per-repo chat-scope upstream is the source of truth. read_upstream(cwd)
+    # with harness=None resolves the shared chat scope (legacy flat files fold in
+    # there), so a chat repo always gets its declared upstream.
     result = read_upstream(cwd)
     if result.kind == "valid" and result.upstream is not None:
         api_key = os.environ.get(result.upstream.key_env) if result.upstream.key_env else None
@@ -195,7 +200,7 @@ def _resolve_upstream(
         return client, f"{result.upstream.url}/chat/completions", result.upstream.model
     if result.kind == "error":
         return result
-    # "absent" or "valid" without upstream — fall through to global
+    # DEPRECATED: absent per-repo chat upstream → global lifespan-scoped client.
     if default_client is not None:
         return default_client, "/v1/chat/completions", default_model
     return None
@@ -221,9 +226,10 @@ def resolve_passthrough_client(
     cwd: Path,
     default_client: AnthropicPassthroughClient | None,
     cache_attr: str,
+    *,
+    harness: str,
 ) -> AnthropicPassthroughClient | UpstreamFile | None:
-    """Resolve the ``AnthropicPassthroughClient`` for this request (Anthropic
-    Messages and OpenAI Responses passthrough surfaces).
+    """Resolve the ``AnthropicPassthroughClient`` for this request's *harness*.
 
     Mirrors ``_resolve_upstream``'s per-repo-wins precedence but returns a
     cached client rather than an ``(httpx.AsyncClient, url, model)`` tuple —
@@ -232,15 +238,16 @@ def resolve_passthrough_client(
     headers), so this is kept as its own small function rather than unified
     with ``_resolve_upstream``.
 
-    A per-repo ``.agentalloy/upstream`` (captured by ``agentalloy add``) wins:
-    the proxy adopts the harness's own upstream as the passthrough base URL
-    (its ``/v1`` suffix stripped — see ``_passthrough_base_url``). Otherwise
-    falls back to ``default_client`` (the lifespan-scoped client built from
-    global settings). Returns ``None`` only when neither resolves.
+    Upstreams are **per-repo, per-harness**. This surface resolves the entry
+    recorded for *harness* only (``read_upstream(cwd, harness=harness)``). A
+    chat-scope legacy ``.agentalloy/upstream`` — or an upstream adopted for any
+    other harness — is never used here: a native passthrough falls back to its
+    protocol-destination default (``default_client``) unless an *explicit*
+    per-harness entry was captured for it (intentional chaining).
 
     ``Upstream.key_env`` plays NO role here: the passthrough surfaces are
     auth-transparent by design, forwarding the caller's own ``authorization``/
-    ``x-api-key`` header verbatim. A per-repo override changes only the
+    ``x-api-key`` header verbatim. A per-harness override changes only the
     destination and must never inject a credential of its own.
 
     ``cache_attr`` is the ``app.state`` attribute name the per-base-url client
@@ -248,7 +255,7 @@ def resolve_passthrough_client(
     distinct per surface so the Anthropic and Responses passthroughs never
     share a cache dict.
     """
-    result = read_upstream(cwd)
+    result = read_upstream(cwd, harness=harness)
     if result.kind == "valid" and result.upstream is not None:
         base_url = _passthrough_base_url(result.upstream.url)
         cache: dict[str, AnthropicPassthroughClient] | None = getattr(app.state, cache_attr, None)

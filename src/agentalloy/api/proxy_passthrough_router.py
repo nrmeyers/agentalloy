@@ -37,7 +37,12 @@ from agentalloy.api.proxy_apply import (
     apply_signal,
     commit_outcome,
 )
-from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token, read_upstream
+from agentalloy.api.proxy_context import (
+    ANTHROPIC_PASSTHROUGH_HARNESS,
+    UpstreamFile,
+    decode_proj_token,
+    read_upstream,
+)
 from agentalloy.api.proxy_injection import (
     inject_into_anthropic_messages,
     inject_into_anthropic_system_prompt,
@@ -483,14 +488,15 @@ def _should_normalize_system(
 ) -> bool:
     """Whether to apply :func:`_normalize_nonleading_system` for this request.
 
-    A per-repo ``normalize_system:`` in ``.agentalloy/upstream`` wins in either
-    direction. Absent that, normalization is ON for every upstream host except
-    ``api.anthropic.com`` — the first-party API is the one consumer known to
-    accept the harness's shape verbatim, and every other Anthropic-compatible
-    endpoint (local shim or third-party cloud) is the class this protects.
+    A per-repo ``normalize_system:`` under this harness's entry in
+    ``.agentalloy/upstream`` wins in either direction. Absent that, normalization
+    is ON for every upstream host except ``api.anthropic.com`` — the first-party
+    API is the one consumer known to accept the harness's shape verbatim, and
+    every other Anthropic-compatible endpoint (local shim or third-party cloud)
+    is the class this protects.
     """
     if project_dir is not None:
-        upstream_file = read_upstream(project_dir)
+        upstream_file = read_upstream(project_dir, harness=ANTHROPIC_PASSTHROUGH_HARNESS)
         if upstream_file.kind == "valid" and upstream_file.upstream is not None:
             override = upstream_file.upstream.normalize_system
             if override is not None:
@@ -542,6 +548,7 @@ async def passthrough_anthropic_messages(
             project_dir,
             client,
             _CLIENT_CACHE_ATTR,
+            harness=ANTHROPIC_PASSTHROUGH_HARNESS,
         )
     else:
         resolved_client = client

@@ -52,6 +52,42 @@ class TestCaptureUpstream:
         assert add.capture_upstream("claude-code", tmp_path) is None
         assert read_upstream(tmp_path).kind == "absent"
 
+    def test_adding_chat_harness_never_captures_claude(self, tmp_path: Path) -> None:
+        # Adopting a local upstream for a chat harness must NOT redirect Claude.
+        add.capture_upstream(
+            "qwen-code",
+            tmp_path,
+            upstream_url="http://h:9000/v1",
+            upstream_model="mannix",
+        )
+        assert read_upstream(tmp_path, harness="qwen-code").kind == "valid"
+        assert read_upstream(tmp_path, harness="claude-code").kind == "absent"
+        # The chat scope (harness=None) still sees the chat harness.
+        chat = read_upstream(tmp_path)
+        assert chat.kind == "valid" and chat.upstream is not None
+        assert chat.upstream.url == "http://h:9000/v1"
+
+    def test_each_harness_keeps_its_own_entry(self, tmp_path: Path) -> None:
+        add.capture_upstream(
+            "qwen-code", tmp_path, upstream_url="http://local:1/v1", upstream_model="m1"
+        )
+        add.capture_upstream(
+            "claude-code",
+            tmp_path,
+            upstream_url="https://api.anthropic.com",
+            upstream_model="c1",
+        )
+        qwen = read_upstream(tmp_path, harness="qwen-code")
+        claude = read_upstream(tmp_path, harness="claude-code")
+        assert qwen.kind == "valid" and qwen.upstream is not None
+        assert qwen.upstream.url == "http://local:1/v1"
+        assert claude.kind == "valid" and claude.upstream is not None
+        assert claude.upstream.url == "https://api.anthropic.com"
+        # Chat scope resolves the chat harness, never claude-code's entry.
+        chat = read_upstream(tmp_path)
+        assert chat.kind == "valid" and chat.upstream is not None
+        assert chat.upstream.url == "http://local:1/v1"
+
 
 class TestAddRun:
     def test_add_hermes_captures_and_wires(

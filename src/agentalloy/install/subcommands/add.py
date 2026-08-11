@@ -21,7 +21,12 @@ from typing import Any, cast
 
 import yaml
 
-from agentalloy.api.proxy_context import UPSTREAM_FILE, Upstream
+from agentalloy.api.proxy_context import (
+    _PASSTHROUGH_HARNESS_KEYS,
+    CHAT_UPSTREAM_HARNESS,
+    UPSTREAM_FILE,
+    Upstream,
+)
 from agentalloy.install import state as install_state
 from agentalloy.providers import REGISTRY
 
@@ -74,6 +79,30 @@ def add_parser(
     p.set_defaults(func=_run)
 
 
+def _load_upstream_map(path: Path) -> dict[str, Any]:
+    """Load the per-harness upstream map, migrating a legacy flat file.
+
+    A legacy ``.agentalloy/upstream`` (``url``/``model`` at the top level) is
+    folded under :data:`CHAT_UPSTREAM_HARNESS` so it keeps satisfying the chat
+    surface while never capturing a passthrough harness. The map is keyed by
+    harness: adopting one harness never clobbers another's entry.
+    """
+    data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if isinstance(raw, dict):
+                data = dict(raw)
+        except yaml.YAMLError:
+            data = {}
+        if isinstance(data.get("url"), str):
+            flat: dict[str, Any] = {"url": data["url"], "model": data.get("model")}
+            if isinstance(data.get("key_env"), str):
+                flat["key_env"] = data["key_env"]
+            data = {CHAT_UPSTREAM_HARNESS: flat}
+    return data
+
+
 def capture_upstream(
     harness: str,
     root: Path,
@@ -85,11 +114,14 @@ def capture_upstream(
     """Adopt *harness*'s upstream into ``<root>/.agentalloy/upstream``.
 
     Reads the harness's own config (its ``HarnessSpec.upstream_extractor``) with
-    the optional CLI overrides on top, and records ``{url, model, key_env}`` so the
-    proxy forwards there for this repo. Writes nothing and returns ``None`` when no
-    upstream can be determined — e.g. claude-code, whose auth-transparent Anthropic
-    passthrough forwards the caller's own key and so has nothing to adopt. Shared by
-    ``add`` and the deprecated ``wire`` so both are transparent interceptors.
+    the optional CLI overrides on top, and records ``{url, model, key_env}``
+    under *harness*'s own key so each harness carries its own forwarding target.
+    Writes nothing and returns ``None`` when no upstream can be determined —
+    e.g. claude-code, whose auth-transparent Anthropic passthrough forwards the
+    caller's own key to Anthropic and so has nothing to adopt by default (an
+    explicit ``--upstream-url``/``--upstream-model`` opts into chaining and is
+    recorded under ``claude-code`` only). Shared by ``add`` and the deprecated
+    ``wire`` so both are transparent interceptors.
     """
     spec = REGISTRY.get(harness)
     extractor = spec.upstream_extractor if spec else None
@@ -103,10 +135,17 @@ def capture_upstream(
     upstream = Upstream(url=url.rstrip("/"), model=model, key_env=kenv)
     path = root / UPSTREAM_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, str] = {"url": upstream.url, "model": upstream.model}
+
+    data = _load_upstream_map(path)
+    if harness not in _PASSTHROUGH_HARNESS_KEYS:
+        # A newly adopted chat harness supersedes any legacy/previous chat-scope
+        # entry — a repo keeps exactly one chat forwarding target.
+        data.pop(CHAT_UPSTREAM_HARNESS, None)
+    entry: dict[str, str] = {"url": upstream.url, "model": upstream.model}
     if upstream.key_env:
-        payload["key_env"] = upstream.key_env
-    install_state._atomic_write(path, yaml.safe_dump(payload, sort_keys=False))
+        entry["key_env"] = upstream.key_env
+    data[harness] = entry
+    install_state._atomic_write(path, yaml.safe_dump(data, sort_keys=False))
     return upstream
 
 

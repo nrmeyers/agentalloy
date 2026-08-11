@@ -491,7 +491,10 @@ def _write_upstream(root: Path, text: str) -> None:
 def test_per_repo_upstream_wins_over_lifespan_default(tmp_path: Path) -> None:
     stub = start_upstream_stub()
     try:
-        _write_upstream(tmp_path, f"url: {stub.base_url}/v1\nmodel: local-model\n")
+        _write_upstream(
+            tmp_path,
+            f"codex:\n  url: {stub.base_url}/v1\n  model: local-model\n",
+        )
         wrong_default = AnthropicPassthroughClient(
             upstream_base_url="http://should-not-be-reached.invalid"
         )
@@ -522,7 +525,7 @@ def test_no_credential_injected_when_key_env_present(tmp_path: Path) -> None:
     try:
         _write_upstream(
             tmp_path,
-            f"url: {stub.base_url}/v1\nmodel: local-model\nkey_env: SOME_UNSET_UPSTREAM_KEY\n",
+            f"codex:\n  url: {stub.base_url}/v1\n  model: local-model\n  key_env: SOME_UNSET_UPSTREAM_KEY\n",
         )
         app = create_app(use_default_lifespan=False)
         app.state.responses_passthrough_client = None
