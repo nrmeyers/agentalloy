@@ -132,8 +132,10 @@ def test_forwards_verbatim_when_nothing_composes(tmp_path: Path) -> None:
 
 
 def test_streaming_relays_sse_bytes(tmp_path: Path) -> None:
+    """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
     captured: dict[str, Any] = {}
     sse = b'event: response.completed\ndata: {"type": "response.completed"}\n\n'
+    correction = b'{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
     app = _make_app(captured, sse=sse)
     with (
         patch(_SIGNAL, return_value=_no_compose_signal()),
@@ -145,7 +147,8 @@ def test_streaming_relays_sse_bytes(tmp_path: Path) -> None:
         )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert resp.content == sse
+    assert sse in resp.content
+    assert correction in resp.content
 
 
 def test_banner_injects_into_last_user_item(tmp_path: Path) -> None:

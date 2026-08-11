@@ -25,7 +25,9 @@ from agentalloy.api.compose_models import ComposedResult, LatencyBreakdown
 from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.api.proxy_passthrough_router import (
     _flatten_text_field,
+    _normalize_nonleading_system,
     _payload_system_prompt_sha,
+    _should_normalize_system,
 )
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
@@ -343,7 +345,9 @@ def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Pat
 
 
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
+    """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
     sse = b"event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n"
+    correction = b'{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
     captured: dict[str, Any] = {}
     app = _make_app(captured, sse=sse)
     with (
@@ -354,8 +358,9 @@ def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
             f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body(stream=True)
         )
     assert resp.status_code == 200
-    assert resp.content == sse
     assert resp.headers["content-type"].startswith("text/event-stream")
+    assert sse in resp.content
+    assert correction in resp.content
 
 
 # --------------------------------------------------------------------------- #
@@ -979,3 +984,84 @@ def test_falls_back_to_default_when_no_per_repo_upstream(tmp_path: Path) -> None
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
     assert resp.status_code == 200
     assert json.loads(captured["body"]) == _anthropic_body()
+
+
+# --------------------------------------------------------------------------- #
+# Non-leading system-message normalization (non-Anthropic upstreams)
+# --------------------------------------------------------------------------- #
+
+
+def _body_with_trailing_system() -> dict[str, Any]:
+    """Claude Code's real shape: a `role: "system"` entry inside `messages`."""
+    body = _anthropic_body()
+    body["messages"] = [
+        {"role": "user", "content": "the real task"},
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": "<system-reminder>x</system-reminder>"}],
+        },
+    ]
+    return body
+
+
+def test_nonleading_system_message_rewritten_to_user(tmp_path: Path) -> None:
+    """A system message after index 0 is forwarded as a user message: local
+    chat templates reject a system message that is not at the beginning."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)  # upstream host "mock-upstream" -> normalization on
+    with (
+        patch(_SIGNAL, return_value=SignalResult(should_compose=False)),
+        TestClient(app) as client,
+    ):
+        resp = client.post(
+            f"/proj/{_token(tmp_path)}/v1/messages", json=_body_with_trailing_system()
+        )
+    assert resp.status_code == 200
+    sent = json.loads(captured["body"])
+    assert [m["role"] for m in sent["messages"]] == ["user", "user"]
+    # Content and position untouched — only the role changed.
+    assert sent["messages"][1]["content"] == [
+        {"type": "text", "text": "<system-reminder>x</system-reminder>"}
+    ]
+    assert sent["system"] == "SYSTEM-CACHED-BLOCK"
+
+
+def test_leading_system_message_left_alone(tmp_path: Path) -> None:
+    """A system message AT index 0 renders through every template — untouched."""
+    captured: dict[str, Any] = {}
+    app = _make_app(captured)
+    body = _anthropic_body()
+    body["messages"] = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
+    with (
+        patch(_SIGNAL, return_value=SignalResult(should_compose=False)),
+        TestClient(app) as client,
+    ):
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
+    assert resp.status_code == 200
+    assert json.loads(captured["body"]) == body
+
+
+def test_normalize_returns_same_object_when_nothing_to_rewrite() -> None:
+    payload = _anthropic_body()
+    assert _normalize_nonleading_system(payload) is payload
+    assert _normalize_nonleading_system({"messages": "not-a-list"}) == {"messages": "not-a-list"}
+
+
+def test_normalize_gate_defaults_by_upstream_host(tmp_path: Path) -> None:
+    anthropic = AnthropicPassthroughClient(upstream_base_url="https://api.anthropic.com")
+    local = AnthropicPassthroughClient(upstream_base_url="http://127.0.0.1:60011")
+    assert _should_normalize_system(tmp_path, anthropic) is False
+    assert _should_normalize_system(tmp_path, local) is True
+
+
+def test_normalize_gate_respects_per_repo_override(tmp_path: Path) -> None:
+    (tmp_path / ".agentalloy").mkdir()
+    upstream = tmp_path / ".agentalloy" / "upstream"
+    local = AnthropicPassthroughClient(upstream_base_url="http://127.0.0.1:60011")
+    anthropic = AnthropicPassthroughClient(upstream_base_url="https://api.anthropic.com")
+
+    upstream.write_text("url: http://127.0.0.1:60011/v1\nmodel: m\nnormalize_system: false\n")
+    assert _should_normalize_system(tmp_path, local) is False
+
+    upstream.write_text("url: https://api.anthropic.com\nmodel: m\nnormalize_system: true\n")
+    assert _should_normalize_system(tmp_path, anthropic) is True

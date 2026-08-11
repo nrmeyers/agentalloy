@@ -37,7 +37,7 @@ from agentalloy.api.proxy_apply import (
     apply_signal,
     commit_outcome,
 )
-from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token
+from agentalloy.api.proxy_context import UpstreamFile, decode_proj_token, read_upstream
 from agentalloy.api.proxy_injection import (
     inject_into_anthropic_messages,
     inject_into_anthropic_system_prompt,
@@ -431,6 +431,73 @@ async def _maybe_inject(
     return injected_payload, outcome, signal
 
 
+# ---------------------------------------------------------------------------
+# System-message normalization (non-Anthropic upstreams)
+#
+# Claude Code sends `{"role": "system"}` entries INSIDE `messages` (the
+# system-reminder carrying available agent types), not just in the top-level
+# `system` field.  api.anthropic.com accepts that; Anthropic-compatible shims
+# in front of a local model (llama.cpp, LM Studio, …) map such an entry onto a
+# chat-template system message that is no longer at position 0, and many
+# templates hard-fail on it:
+#
+#     Jinja Exception: System message must be at the beginning.
+#
+# Rewriting the role to "user" leaves the content and its position untouched
+# and renders through every template.  This is a compatibility shim for a
+# harness payload shape, not a fix for a defect on either side: against a
+# permissive upstream it is inert.
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_HOST = "api.anthropic.com"
+
+
+def _normalize_nonleading_system(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite ``role == "system"`` messages after index 0 to ``role == "user"``.
+
+    Returns the SAME object when there is nothing to rewrite (identity ==
+    unchanged), a NEW payload otherwise. A system message AT index 0 is left
+    alone — every template accepts that one.
+    """
+    raw = payload.get("messages")
+    if not isinstance(raw, list):
+        return payload
+    messages = cast("list[Any]", raw)
+
+    changed = False
+    out: list[Any] = []
+    for i, msg in enumerate(messages):
+        if i > 0 and isinstance(msg, dict) and cast("dict[str, Any]", msg).get("role") == "system":
+            out.append({**cast("dict[str, Any]", msg), "role": "user"})
+            changed = True
+        else:
+            out.append(msg)
+    if not changed:
+        return payload
+    return {**payload, "messages": out}
+
+
+def _should_normalize_system(
+    project_dir: Path | None,
+    client: AnthropicPassthroughClient,
+) -> bool:
+    """Whether to apply :func:`_normalize_nonleading_system` for this request.
+
+    A per-repo ``normalize_system:`` in ``.agentalloy/upstream`` wins in either
+    direction. Absent that, normalization is ON for every upstream host except
+    ``api.anthropic.com`` — the first-party API is the one consumer known to
+    accept the harness's shape verbatim, and every other Anthropic-compatible
+    endpoint (local shim or third-party cloud) is the class this protects.
+    """
+    if project_dir is not None:
+        upstream_file = read_upstream(project_dir)
+        if upstream_file.kind == "valid" and upstream_file.upstream is not None:
+            override = upstream_file.upstream.normalize_system
+            if override is not None:
+                return override
+    return httpx.URL(client.upstream_base_url).host != _ANTHROPIC_HOST
+
+
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:
     """Filter upstream response headers for relay. Drops hop-by-hop, length, and
     (when the body was decoded by httpx) the now-wrong content-encoding. The
@@ -531,6 +598,7 @@ async def passthrough_anthropic_messages(
     # is NOT recorded as delivered, and re-fires on the harness retry. Default no-op
     # covers the verbatim-forward path (nothing composed).
     on_status: Callable[[int], None] = _noop_status
+    injected_payload: dict[str, Any] | None = None
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
@@ -544,6 +612,7 @@ async def passthrough_anthropic_messages(
                 vector_store=vector_store,
                 phase_telemetry=phase_telemetry,
             )
+            injected_payload = injected
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
             # Set unconditionally on a successful compose: the on_status seam now
@@ -565,6 +634,23 @@ async def passthrough_anthropic_messages(
         except Exception:
             logger.warning("passthrough compose/inject failed; forwarding original", exc_info=True)
             body_to_send = raw_body
+            injected_payload = None
+
+    # --- Normalize non-leading system messages for non-Anthropic upstreams. ---
+    # Its own try/except, deliberately OUTSIDE the compose block: a failure there
+    # falls back to `raw_body`, which still carries the shape this rewrite exists
+    # to remove. Runs on the composed payload when there is one, on the original
+    # otherwise (most background turns compose nothing yet still carry the shape).
+    # A non-JSON body was never parsed and stays verbatim.
+    if payload is not None:
+        try:
+            if _should_normalize_system(project_dir, resolved_client):
+                base = injected_payload if injected_payload is not None else payload
+                normalized = _normalize_nonleading_system(base)
+                if normalized is not base:
+                    body_to_send = json.dumps(normalized).encode("utf-8")
+        except Exception:
+            logger.warning("system-message normalization failed; forwarding as-is", exc_info=True)
 
     # --- Forward. ---
     if stream_flag:
@@ -621,6 +707,67 @@ async def _forward_once(
     )
 
 
+def _chunk_has_finish_reason(text: str) -> bool:
+    """Scan an SSE text chunk for a ``finish_reason`` field in choices.
+
+    SSE chunks arrive as ``data: {json}\\n\\n`` or ``data: [DONE]\\n\\n``.
+    The iterator may split chunks mid-byte, so we scan for ``data: {`` and
+    try parsing the JSON object.
+
+    Args:
+        text: The decoded SSE chunk text.
+
+    Returns:
+        ``True`` if any JSON object in *text* carries a ``finish_reason`` key.
+
+    """
+    # Fast path: strip the SSE prefix and try parsing the JSON.
+    stripped = text.strip()
+    if stripped.startswith("data: "):
+        try:
+            obj = json.loads(stripped[6:])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fallback: scan for ``data: {`` and try parsing the JSON object.
+    # This handles SSE chunks split mid-byte by the iterator.
+    search_start = 0
+    while True:
+        idx = text.find("data: {", search_start)
+        if idx == -1:
+            break
+        brace_end = text.find("\n", idx + 6)
+        if brace_end == -1:
+            brace_end = len(text)
+        try:
+            obj = json.loads(text[idx + 6 : brace_end])
+            if isinstance(obj, dict) and obj.get("choices"):
+                for choice in obj["choices"]:
+                    if isinstance(choice, dict) and "finish_reason" in choice:
+                        return True
+        except (json.JSONDecodeError, ValueError):
+            pass
+        search_start = idx + 1
+
+    # Final fallback: try parsing the text directly as JSON (no SSE prefix).
+    # This handles raw JSON fragments that may have been relayed without the
+    # ``data: `` prefix.
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict) and obj.get("choices"):
+            for choice in obj["choices"]:
+                if isinstance(choice, dict) and "finish_reason" in choice:
+                    return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return False
+
+
 async def _forward_streaming(
     client: AnthropicPassthroughClient,
     query_string: str,
@@ -657,12 +804,28 @@ async def _forward_streaming(
     # (2xx-gated inside on_status) so a 529 stream open never burns the cadence.
     on_status(upstream.status_code)
 
+    _CORRECTIVE_CHUNK = json.dumps(
+        {
+            "id": "chatcmpl-passthrough",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "passthrough",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        },
+    ).encode()
+
     async def relay() -> AsyncIterator[bytes]:
+        has_finish_reason = False
         try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
+            async for raw in upstream.aiter_raw():
+                text = raw.decode("utf-8", errors="replace")
+                if _chunk_has_finish_reason(text):
+                    has_finish_reason = True
+                yield raw
         finally:
             await cm.__aexit__(None, None, None)
+        if not has_finish_reason:
+            yield _CORRECTIVE_CHUNK
 
     return StreamingResponse(
         relay(),

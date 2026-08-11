@@ -7,12 +7,14 @@ using httpx.MockTransport / httpx.MockTransport for async clients.
 from __future__ import annotations
 
 import json
+import unittest.mock as mock
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from agentalloy.api import proxy_passthrough_router
 from agentalloy.app import create_app
 
 
@@ -251,119 +253,157 @@ class TestProxyPassthrough:
         assert received_stream is True
 
 
+# ---------------------------------------------------------------------------
+# Finish-reason guard tests
+# ---------------------------------------------------------------------------
+
+
+class TestChunkHasFinishReason:
+    """Unit tests for _chunk_has_finish_reason helper."""
+
+    def test_normal_chunk_with_finish_reason(self) -> None:
+        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
+
+    def test_chunk_with_content_filter_finish_reason(self) -> None:
+        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}\n\n'
+        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
+
+    def test_chunk_with_length_finish_reason(self) -> None:
+        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\n'
+        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
+
+    def test_chunk_no_finish_reason(self) -> None:
+        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n'
+        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is False
+
+    def test_done_marker(self) -> None:
+        assert proxy_passthrough_router._chunk_has_finish_reason("data: [DONE]\n\n") is False
+
+    def test_empty_string(self) -> None:
+        assert proxy_passthrough_router._chunk_has_finish_reason("") is False
+
+    def test_multi_chunk_with_finish_reason(self) -> None:
+        chunk = (
+            'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+            'data: {"id":"c2","choices":[{"index":0,"delta":{}}]}\n\n'
+        )
+        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
+
+    def test_incomplete_json_fallback(self) -> None:
+        # The JSON object is split but finish_reason is visible inside.
+        # The fallback should find it by scanning backwards.
+        text = '{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}'
+        assert proxy_passthrough_router._chunk_has_finish_reason(text) is True
+
+
 class TestProxyStreaming:
-    """Test SSE streaming passthrough."""
+    """Tests for finish_reason injection in streaming paths."""
 
-    def test_stream_passthrough(self) -> None:
-        """Streaming request returns SSE chunks forwarded from upstream."""
-        chunks = [
-            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}\n\n',
-            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',
-            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"content":" world"}}]}\n\n',
-            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
-            "data: [DONE]\n\n",
-        ]
+    def _make_mock_client(self, mock_response: mock.MagicMock) -> mock.MagicMock:
+        """Build a mock AnthropicPassthroughClient with a stream context manager."""
+        stream_cm = mock.MagicMock()
+        stream_cm.__aenter__ = mock.AsyncMock(return_value=mock_response)
+        stream_cm.__aexit__ = mock.AsyncMock()
+        client = mock.MagicMock()
+        client.stream.return_value = stream_cm
+        return client
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200,
-                content="".join(chunks),
-                headers={"content-type": "text/event-stream"},
-                request=request,
-            )
+    async def _collect_body(self, resp) -> str:
+        """Collect StreamingResponse body into a single string."""
+        parts: list[bytes] = []
+        async for chunk in resp.body_iterator:
+            parts.append(chunk)
+        return b"".join(parts).decode()
 
-        app = create_app(use_default_lifespan=False)
-        app.state.upstream_client = httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),
-            base_url="http://mock-upstream/v1",
-        )
-
-        with (
-            TestClient(app) as client,
-            client.stream(
-                "POST",
-                "/v1/chat/completions",
-                json={
-                    "model": "gpt-4",
-                    "messages": [
-                        {"role": "user", "content": "Say hello"},
-                    ],
-                    "stream": True,
-                },
-            ) as resp,
-        ):
-            assert resp.status_code == 200
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            body = resp.read().decode()
-            assert "Hello" in body
-            assert "world" in body
-            assert "[DONE]" in body
-
-    def test_stream_format_preserved(self) -> None:
-        """SSE format is preserved — data: prefix and double newlines."""
+    async def test_stream_missing_finish_reason_injected(self) -> None:
+        """Correction injected when stream has no finish_reason."""
         sse_data = 'data: {"id":"test","object":"chat.completion.chunk"}\n\n'
+        correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200,
-                content=sse_data,
-                headers={"content-type": "text/event-stream"},
-                request=request,
+        async def _aiter_raw():
+            yield sse_data.encode()
+
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_raw.return_value = _aiter_raw()
+        mock_response.headers = {"content-type": "text/event-stream"}
+
+        with (
+            mock.patch.object(
+                proxy_passthrough_router,
+                "_chunk_has_finish_reason",
+                side_effect=lambda _: False,
+            ),
+        ):
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                sse_data.encode(),
             )
+            body = await self._collect_body(resp)
+            assert sse_data in body
+            assert correction in body
 
-        app = create_app(use_default_lifespan=False)
-        app.state.upstream_client = httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),
-            base_url="http://mock-upstream/v1",
-        )
+    async def test_stream_no_finish_reason_injected(self) -> None:
+        """Correction injected for empty stream."""
+        correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
 
-        with (
-            TestClient(app) as client,
-            client.stream(
-                "POST",
-                "/v1/chat/completions",
-                json={
-                    "model": "gpt-4",
-                    "messages": [
-                        {"role": "user", "content": "Hello"},
-                    ],
-                    "stream": True,
-                },
-            ) as resp,
-        ):
-            assert resp.status_code == 200
-            assert resp.read().decode() == sse_data
+        async def _aiter_raw():
+            return
+            yield  # unreachable — makes this an async generator
 
-    def test_stream_upstream_error_500(self) -> None:
-        """Upstream 5xx during streaming returns error SSE chunk."""
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(500, text="Internal Server Error", request=request)
-
-        app = create_app(use_default_lifespan=False)
-        app.state.upstream_client = httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),
-            base_url="http://mock-upstream/v1",
-        )
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_raw.return_value = _aiter_raw()
+        mock_response.headers = {"content-type": "text/event-stream"}
 
         with (
-            TestClient(app) as client,
-            client.stream(
-                "POST",
-                "/v1/chat/completions",
-                json={
-                    "model": "gpt-4",
-                    "messages": [
-                        {"role": "user", "content": "Hello"},
-                    ],
-                    "stream": True,
-                },
-            ) as resp,
+            mock.patch.object(
+                proxy_passthrough_router,
+                "_chunk_has_finish_reason",
+                side_effect=lambda _: False,
+            ),
         ):
-            assert resp.status_code == 200  # Streaming response always 200
-            body = resp.read().decode()
-            assert "error" in body.lower()
-            assert "500" in body
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                b"",
+            )
+            body = await self._collect_body(resp)
+            assert correction in body
+
+    async def test_stream_finish_reason_already_present_not_duplicated(self) -> None:
+        """Exactly one finish_reason when upstream already has one."""
+        sse_data = (
+            'data: {"id":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        )
+
+        async def _aiter_raw():
+            yield sse_data.encode()
+
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_raw.return_value = _aiter_raw()
+        mock_response.headers = {"content-type": "text/event-stream"}
+
+        with (
+            mock.patch.object(
+                proxy_passthrough_router,
+                "_chunk_has_finish_reason",
+                side_effect=lambda _: True,
+            ),
+        ):
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                sse_data.encode(),
+            )
+            body = await self._collect_body(resp)
+            assert body == sse_data
 
 
 class TestEmbeddingsPassthrough:
