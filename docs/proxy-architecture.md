@@ -72,19 +72,36 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 
 ### Upstream LLM
 
-Configured in `~/.config/agentalloy/.env`:
+### Upstream (per-repo, per-harness)
 
+There is **no global upstream**. The forwarding target is resolved per repo, per
+harness from `agentalloy add <harness>`'s `.agentalloy/upstream` — a YAML map
+keyed by harness name, so the upstream adopted for one harness is never used by
+another:
+
+```yaml
+claude-code:            # native Anthropic passthrough (optional)
+  url: https://api.anthropic.com
+  model: claude-3-5-sonnet
+qwen-code:              # OpenAI chat-completions harness
+  url: http://100.115.181.90:60011/v1
+  model: mannix-coder-q6
+  key_env: OPENAI_API_KEY
 ```
-UPSTREAM_URL=http://localhost:8080/v1
-UPSTREAM_MODEL=your-model-name
-UPSTREAM_API_KEY=***
-```
 
-- `UPSTREAM_URL` — base URL of the generative LLM provider (OpenAI-compatible `/v1` endpoint) the proxy forwards chat completions to. No default (empty until configured); point it at your model runner or a hosted provider — **not** the embedding server on `47951`. The example above is a local OpenAI-compatible runner.
-- `UPSTREAM_MODEL` — model name to forward requests to
-- `UPSTREAM_API_KEY` — API key for the upstream provider (optional for local runners)
+- **Claude Code** (Anthropic passthrough) reads only the `claude-code:` entry;
+  absent one it defaults to `ANTHROPIC_UPSTREAM_URL` (`https://api.anthropic.com`)
+  and forwards the caller's own credential. A chat harness's upstream (or a
+  legacy flat file) can never redirect it.
+- **Codex** (Responses passthrough) reads only the `codex:` entry; absent one it
+  defaults to `RESPONSES_UPSTREAM_URL` (`https://api.openai.com`).
+- **OpenAI chat-completions** harnesses share the repo's *chat* scope (the first
+  non-passthrough entry); with none present the surface 503s rather than falling
+  back to anything global.
 
-These `.env` values are the **global fallback**. A per-repo upstream captured by `agentalloy add <harness>` is written to that repo's `.agentalloy/upstream` and **wins** over them for requests from that repo — so one machine can forward different repos to different models. These are set during `agentalloy setup` (or per repo via `agentalloy add`) and read by the proxy at startup. The harness never sees any of these values — it only talks to `localhost:47950`.
+The harness never sees any of these values — it only talks to `localhost:47950`.
+`key_env` is read by the proxy from its own process env at request time; no
+credential is written into the repo.
 
 ### Working Directory
 
@@ -184,11 +201,21 @@ Wiring sets **only** `ANTHROPIC_BASE_URL` and **never** `ANTHROPIC_API_KEY`. Set
 
 Confirmed from live traffic: an account-authenticated Claude Code (OAuth, `anthropic-beta: …oauth-2025-04-20…`, no `x-api-key`) attaches its credential to a custom `ANTHROPIC_BASE_URL`, and a passthrough proxy forwards it to `api.anthropic.com` successfully. Proxy-only is therefore viable for everyone, including account users. On that basis the hook path has since been **removed entirely** — the proxy is the sole transport for Claude Code.
 
-### Configurable upstream
+### Claude Code upstream
 
-The global default upstream target is `ANTHROPIC_UPSTREAM_URL` (default `https://api.anthropic.com`), built once at lifespan startup. Because it is configurable, the proxy can be chained — e.g. Claude Code → AgentAlloy → another proxy → Anthropic — so a user who already occupies `ANTHROPIC_BASE_URL` with another passthrough proxy can keep both.
-
-A per-repo `.agentalloy/upstream` (captured by `agentalloy add --upstream-url`) wins over that default, resolved per request by `resolve_passthrough_client` (`proxy_router.py`, shared with the Responses passthrough — see [responses-surface.md](responses-surface.md#upstream)) and cached per adopted base URL on `app.state.anthropic_passthrough_client_cache`. `key_env` plays no role here: this surface stays auth-transparent regardless of which upstream is in effect.
+`ANTHROPIC_UPSTREAM_URL` (default `https://api.anthropic.com`) is the built-in
+destination for the Anthropic passthrough. Because it is configurable, the proxy
+can be chained — Claude Code → AgentAlloy → another proxy → Anthropic — so a user
+who already occupies `ANTHROPIC_BASE_URL` with another passthrough proxy can keep
+both. An explicit per-repo `claude-code:` entry in `.agentalloy/upstream`
+(captured by `agentalloy add claude-code --upstream-url`) overrides it for that
+repo, resolved per request by `resolve_passthrough_client` (`proxy_router.py`,
+shared with the Responses passthrough — see
+[responses-surface.md](responses-surface.md#upstream)) and cached per adopted
+base URL on `app.state.anthropic_passthrough_client_cache`. No other harness's
+entry is consulted, so a chat harness's upstream can never redirect Claude Code.
+`key_env` plays no role here: this surface stays auth-transparent regardless of
+which upstream is in effect.
 
 ### Streaming
 

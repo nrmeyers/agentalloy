@@ -12,7 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -21,6 +21,24 @@ from agentalloy.api.proxy_models import ProxyRequest
 logger = logging.getLogger(__name__)
 
 UPSTREAM_FILE = Path(".agentalloy") / "upstream"
+
+# Per-harness upstream scoping. Each harness records its own forwarding target in
+# ``.agentalloy/upstream``, stored as a YAML map keyed by harness name. The native
+# passthrough surfaces read ONLY their own harness's entry, so an upstream adopted
+# for an OpenAI-compatible harness (qwen/cline/aider/…) can never redirect Claude
+# Code or Codex away from their protocol-destination defaults.
+ANTHROPIC_PASSTHROUGH_HARNESS = "claude-code"
+RESPONSES_PASSTHROUGH_HARNESS = "codex"
+# Harness keys that own their own upstream and are excluded from the shared
+# chat-completions scope.
+_PASSTHROUGH_HARNESS_KEYS = frozenset(
+    {ANTHROPIC_PASSTHROUGH_HARNESS, RESPONSES_PASSTHROUGH_HARNESS}
+)
+# Sentinel key for the OpenAI chat-completions surface. Every non-passthrough
+# harness in a repo shares one chat forwarding target; a legacy flat
+# ``.agentalloy/upstream`` (pre-namespacing) is folded here on read/migrate so
+# it keeps satisfying the chat surface while never capturing a passthrough.
+CHAT_UPSTREAM_HARNESS = "__chat__"
 
 
 def encode_proj_token(project_dir: Path | str) -> str:
@@ -137,22 +155,61 @@ class UpstreamFile:
     detail: str | None = None
 
 
-def read_upstream(cwd: Path) -> UpstreamFile:
-    """Read the captured upstream from *cwd*/.agentalloy/upstream.
+def _parse_upstream_entry(entry: dict[str, object], path: Path) -> UpstreamFile:
+    """Parse a single harness's upstream mapping into an ``UpstreamFile``.
 
-    The file is YAML written by ``agentalloy add <harness>``::
+    Mirrors the pre-namespacing validation: ``url`` and ``model`` are required,
+    ``key_env``/``normalize_system`` are optional. A missing/invalid ``url`` or
+    ``model`` is an error (never silently absent).
+    """
+    url = entry.get("url")
+    model = entry.get("model")
+    if not isinstance(url, str) or not url or not isinstance(model, str) or not model:
+        return UpstreamFile(kind="error", detail=f"{path} missing required url/model")
 
-        url: http://host:port/v1
-        model: some-model
-        key_env: OPENAI_API_KEY   # optional; env-var name, not the secret
-        normalize_system: true    # optional; force system-message normalization
+    key_env_raw = entry.get("key_env")
+    key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
+    normalize_raw = entry.get("normalize_system")
+    normalize_system = normalize_raw if isinstance(normalize_raw, bool) else None
 
-    Returns an :class:`UpstreamFile` indicating one of three states:
+    return UpstreamFile(
+        kind="valid",
+        upstream=Upstream(
+            url=url.rstrip("/"),
+            model=model,
+            key_env=key_env,
+            normalize_system=normalize_system,
+        ),
+    )
 
-    * ``kind == "absent"`` — no per-repo upstream configured.
-    * ``kind == "valid"`` — file parsed successfully with :attr:`upstream` set.
-    * ``kind == "error"`` — file exists but is malformed or missing required
-      keys; :attr:`detail` contains a human-readable reason.
+
+def read_upstream(cwd: Path, *, harness: str | None = None) -> UpstreamFile:
+    """Read the captured upstream for *harness* from ``cwd/.agentalloy/upstream``.
+
+    The file is YAML, written by ``agentalloy add <harness>`` as a map keyed by
+    harness so each harness carries its own forwarding target::
+
+        claude-code:                 # native Anthropic passthrough (optional)
+          url: https://api.anthropic.com
+          model: claude-3-sonnet
+        qwen-code:                   # OpenAI chat-completions harness
+          url: http://100.115.181.90:60011/v1
+          model: mannix-coder-q6
+          key_env: OPENAI_API_KEY
+
+    Args:
+        cwd: The project (repo) directory.
+        harness: The harness whose upstream is wanted. ``None`` (or
+            :data:`CHAT_UPSTREAM_HARNESS`) selects the repo's shared *chat*
+            scope — the first non-passthrough-harness entry. A legacy flat file
+            (``url``/``model`` at the top level) is read as the chat scope and is
+            **never** returned for a passthrough harness, so an upstream adopted
+            by a chat harness can't redirect Claude Code / Codex.
+
+    Returns an :class:`UpstreamFile`:
+    * ``kind == "absent"`` — no entry for *harness* (use the default).
+    * ``kind == "valid"`` — *harness* has ``upstream``.
+    * ``kind == "error"`` — the file (or the harness's entry) is malformed.
 
     Never raises on a bad file — a per-repo override must never take down the
     proxy.
@@ -174,26 +231,26 @@ def read_upstream(cwd: Path) -> UpstreamFile:
     if not isinstance(parsed, dict):
         logger.warning("%s is not a YAML mapping", path)
         return UpstreamFile(kind="error", detail=f"{path} is not a YAML mapping")
-    data = cast("dict[str, object]", parsed)
+    data = cast("dict[str, Any]", parsed)
 
-    url = data.get("url")
-    model = data.get("model")
-    if not isinstance(url, str) or not url or not isinstance(model, str) or not model:
-        logger.warning("%s missing required url/model", path)
-        return UpstreamFile(kind="error", detail=f"{path} missing required url/model")
+    # Legacy flat shape (url/model at the top level) = a chat/generic upstream.
+    # It satisfies the chat surface but must never override a passthrough.
+    if "url" in data and isinstance(data["url"], str):
+        if harness in _PASSTHROUGH_HARNESS_KEYS:
+            return UpstreamFile(kind="absent")
+        return _parse_upstream_entry(data, path)
 
-    key_env_raw = data.get("key_env")
-    key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
-
-    normalize_raw = data.get("normalize_system")
-    normalize_system = normalize_raw if isinstance(normalize_raw, bool) else None
-
-    return UpstreamFile(
-        kind="valid",
-        upstream=Upstream(
-            url=url.rstrip("/"),
-            model=model,
-            key_env=key_env,
-            normalize_system=normalize_system,
-        ),
-    )
+    # Namespaced shape: mapping of harness -> {url, model, key_env, ...}.
+    requested = harness
+    if requested is None or requested == CHAT_UPSTREAM_HARNESS:
+        requested = next(
+            (key for key in data if key not in _PASSTHROUGH_HARNESS_KEYS), None
+        )
+        if requested is None:
+            return UpstreamFile(kind="absent")
+    entry = data.get(requested)
+    if entry is None:
+        return UpstreamFile(kind="absent")
+    if not isinstance(entry, dict):
+        return UpstreamFile(kind="error", detail=f"{path}[{requested}] is not a mapping")
+    return _parse_upstream_entry(cast("dict[str, object]", entry), path)

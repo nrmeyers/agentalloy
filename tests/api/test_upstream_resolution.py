@@ -75,6 +75,42 @@ class TestReadUpstream:
         assert result.kind == "error"
         assert result.detail is not None
 
+    def test_namespaced_reads_own_harness(self, tmp_path: Path) -> None:
+        _write_upstream(
+            tmp_path,
+            "claude-code:\n  url: https://api.anthropic.com\n  model: c1\n"
+            "qwen-code:\n  url: http://h:9000/v1\n  model: m1\n  key_env: OPENAI_API_KEY\n",
+        )
+        claude = read_upstream(tmp_path, harness="claude-code")
+        assert claude.kind == "valid" and claude.upstream is not None
+        assert claude.upstream.url == "https://api.anthropic.com"
+        assert claude.upstream.model == "c1"
+
+        qwen = read_upstream(tmp_path, harness="qwen-code")
+        assert qwen.kind == "valid" and qwen.upstream is not None
+        assert qwen.upstream.url == "http://h:9000/v1"
+        assert qwen.upstream.key_env == "OPENAI_API_KEY"
+
+        # Chat scope resolves the first non-passthrough harness's entry.
+        chat = read_upstream(tmp_path)  # harness=None => chat scope
+        assert chat.kind == "valid" and chat.upstream is not None
+        assert chat.upstream.model == "m1"
+
+    def test_passthrough_harness_needs_its_own_entry(self, tmp_path: Path) -> None:
+        # Only a chat harness is present — the passthrough must NOT see it.
+        _write_upstream(tmp_path, "qwen-code:\n  url: http://h:9000/v1\n  model: mannix\n")
+        claude = read_upstream(tmp_path, harness="claude-code")
+        assert claude.kind == "absent"
+        codex = read_upstream(tmp_path, harness="codex")
+        assert codex.kind == "absent"
+
+    def test_legacy_flat_is_chat_scope_only(self, tmp_path: Path) -> None:
+        # A pre-namespacing flat file satisfies the chat surface but never a passthrough.
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: mannix\n")
+        assert read_upstream(tmp_path).kind == "valid"
+        assert read_upstream(tmp_path, harness="claude-code").kind == "absent"
+        assert read_upstream(tmp_path, harness="codex").kind == "absent"
+
 
 def _fake_app() -> types.SimpleNamespace:
     return types.SimpleNamespace(state=types.SimpleNamespace())
@@ -131,31 +167,66 @@ class TestPassthroughBaseUrl:
 
 class TestResolvePassthroughClient:
     def test_per_repo_wins_and_strips_v1(self, tmp_path: Path) -> None:
-        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\n")
+        # An explicit claude-code scoped entry opts into chaining.
+        _write_upstream(tmp_path, "claude-code:\n  url: http://h:9000/v1\n  model: qwen\n")
         app = _fake_app()
         default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
-        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
         assert resolved is not None
         assert resolved is not default
         assert resolved.upstream_base_url == "http://h:9000"
         assert "http://h:9000" in app.state.test_client_cache
 
+    def test_flat_chat_upstream_never_captures_passthrough(self, tmp_path: Path) -> None:
+        # A legacy flat (chat-scope) upstream must NOT redirect Claude Code.
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\n")
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
+        assert resolved is default
+        assert app.state.__dict__.get("test_client_cache") in (None, {})
+
+    def test_other_harness_upstream_never_captures_passthrough(self, tmp_path: Path) -> None:
+        # A chat harness's local upstream must never redirect the Claude passthrough.
+        _write_upstream(tmp_path, "qwen-code:\n  url: http://h:9000/v1\n  model: mannix\n")
+        app = _fake_app()
+        default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
+        assert resolved is default
+
     def test_falls_back_to_default_client(self, tmp_path: Path) -> None:
         app = _fake_app()
         default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
-        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
         assert resolved is default
 
     def test_none_when_neither_resolves(self, tmp_path: Path) -> None:
         app = _fake_app()
-        assert resolve_passthrough_client(app, tmp_path, None, "test_client_cache") is None
+        assert (
+            resolve_passthrough_client(
+                app, tmp_path, None, "test_client_cache", harness="claude-code"
+            )
+            is None
+        )
 
     def test_reuses_cached_client_for_same_base_url(self, tmp_path: Path) -> None:
-        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\n")
+        _write_upstream(tmp_path, "claude-code:\n  url: http://h:9000/v1\n  model: qwen\n")
         app = _fake_app()
         default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
-        c1 = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
-        c2 = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        c1 = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
+        c2 = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
         assert c1 is c2
 
     def test_key_env_never_used_to_build_a_credential(self, tmp_path: Path) -> None:
@@ -163,9 +234,14 @@ class TestResolvePassthroughClient:
         # the passthrough surfaces -- they forward the caller's own header
         # verbatim. Resolving must not raise or attempt to read the env var,
         # and the resulting client carries no bearer of its own.
-        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: qwen\nkey_env: SOME_UNSET_VAR\n")
+        _write_upstream(
+            tmp_path,
+            "claude-code:\n  url: http://h:9000/v1\n  model: qwen\n  key_env: SOME_UNSET_VAR\n",
+        )
         app = _fake_app()
-        resolved = resolve_passthrough_client(app, tmp_path, None, "test_client_cache")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, None, "test_client_cache", harness="claude-code"
+        )
         assert resolved is not None
         assert resolved.upstream_base_url == "http://h:9000"
 
@@ -173,10 +249,12 @@ class TestResolvePassthroughClient:
         """Malformed upstream yields UpstreamFile(kind="error"), not default_client."""
         from agentalloy.api.proxy_context import UpstreamFile
 
-        _write_upstream(tmp_path, "url: [unclosed\n")
+        _write_upstream(tmp_path, "claude-code:\n  url: http://h/v1\n")  # no model
         app = _fake_app()
         default = AnthropicPassthroughClient(upstream_base_url="http://default-upstream")
-        resolved = resolve_passthrough_client(app, tmp_path, default, "test_client_cache")
+        resolved = resolve_passthrough_client(
+            app, tmp_path, default, "test_client_cache", harness="claude-code"
+        )
         assert isinstance(resolved, UpstreamFile)
         assert resolved.kind == "error"
         assert resolved.detail is not None
