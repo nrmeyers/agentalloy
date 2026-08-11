@@ -6,7 +6,6 @@ using httpx.MockTransport / httpx.MockTransport for async clients.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import unittest.mock as mock
 from typing import Any
@@ -317,7 +316,7 @@ class TestProxyStreaming:
             parts.append(chunk)
         return b"".join(parts).decode()
 
-    def test_stream_missing_finish_reason_injected(self) -> None:
+    async def test_stream_missing_finish_reason_injected(self) -> None:
         """Correction injected when stream has no finish_reason."""
         sse_data = 'data: {"id":"test","object":"chat.completion.chunk"}\n\n'
         correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
@@ -337,25 +336,23 @@ class TestProxyStreaming:
                 side_effect=lambda _: False,
             ),
         ):
-            resp = asyncio.get_event_loop().run_until_complete(
-                proxy_passthrough_router._forward_streaming(
-                    self._make_mock_client(mock_response),
-                    "test",
-                    {},
-                    sse_data.encode(),
-                )
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                sse_data.encode(),
             )
-            body = asyncio.get_event_loop().run_until_complete(self._collect_body(resp))
+            body = await self._collect_body(resp)
             assert sse_data in body
             assert correction in body
 
-    def test_stream_no_finish_reason_injected(self) -> None:
+    async def test_stream_no_finish_reason_injected(self) -> None:
         """Correction injected for empty stream."""
         correction = '{"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}'
 
         async def _aiter_raw():
             return
-            yield  # noqa: unreachable
+            yield  # unreachable — makes this an async generator
 
         mock_response = mock.MagicMock()
         mock_response.status_code = 200
@@ -369,18 +366,16 @@ class TestProxyStreaming:
                 side_effect=lambda _: False,
             ),
         ):
-            resp = asyncio.get_event_loop().run_until_complete(
-                proxy_passthrough_router._forward_streaming(
-                    self._make_mock_client(mock_response),
-                    "test",
-                    {},
-                    b"",
-                )
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                b"",
             )
-            body = asyncio.get_event_loop().run_until_complete(self._collect_body(resp))
+            body = await self._collect_body(resp)
             assert correction in body
 
-    def test_stream_finish_reason_already_present_not_duplicated(self) -> None:
+    async def test_stream_finish_reason_already_present_not_duplicated(self) -> None:
         """Exactly one finish_reason when upstream already has one."""
         sse_data = (
             'data: {"id":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
@@ -401,15 +396,13 @@ class TestProxyStreaming:
                 side_effect=lambda _: True,
             ),
         ):
-            resp = asyncio.get_event_loop().run_until_complete(
-                proxy_passthrough_router._forward_streaming(
-                    self._make_mock_client(mock_response),
-                    "test",
-                    {},
-                    sse_data.encode(),
-                )
+            resp = await proxy_passthrough_router._forward_streaming(
+                self._make_mock_client(mock_response),
+                "test",
+                {},
+                sse_data.encode(),
             )
-            body = asyncio.get_event_loop().run_until_complete(self._collect_body(resp))
+            body = await self._collect_body(resp)
             assert body == sse_data
 
 
