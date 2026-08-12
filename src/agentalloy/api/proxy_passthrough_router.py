@@ -606,6 +606,7 @@ async def passthrough_anthropic_messages(
     # covers the verbatim-forward path (nothing composed).
     on_status: Callable[[int], None] = _noop_status
     injected_payload: dict[str, Any] | None = None
+    signal = None  # Initialize for tool call interception
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
@@ -660,6 +661,10 @@ async def passthrough_anthropic_messages(
             logger.warning("system-message normalization failed; forwarding as-is", exc_info=True)
 
     # --- Forward. ---
+    # Pass phase and pause_mode for tool call interception
+    phase = signal.phase if signal else None
+    pause_mode = signal.paused_mode if signal else False
+
     if stream_flag:
         return await _forward_streaming(
             resolved_client,
@@ -667,6 +672,8 @@ async def passthrough_anthropic_messages(
             inbound_headers,
             body_to_send,
             on_status,
+            phase=phase,
+            pause_mode=pause_mode,
         )
     return await _forward_once(
         resolved_client,
@@ -674,6 +681,8 @@ async def passthrough_anthropic_messages(
         inbound_headers,
         body_to_send,
         on_status,
+        phase=phase,
+        pause_mode=pause_mode,
     )
 
 
@@ -684,6 +693,8 @@ async def _forward_once(
     body: bytes,
     on_status: Callable[[int], None] = lambda _status: None,
     path: str = _UPSTREAM_PATH,
+    phase: str | None = None,
+    pause_mode: bool = False,
 ) -> Response:
     try:
         upstream = await client.forward(
@@ -706,8 +717,31 @@ async def _forward_once(
             media_type="application/json",
         )
     on_status(upstream.status_code)
+
+    # Intercept gated tool calls in the response
+    response_content = upstream.content
+    if phase and not pause_mode:
+        try:
+            response_json = json.loads(response_content)
+            if isinstance(response_json, dict) and "content" in response_json:
+                content_blocks = response_json.get("content", [])
+                if isinstance(content_blocks, list):
+                    from agentalloy.providers.base import intercept_gated_tool_calls
+                    modified_blocks, was_modified = intercept_gated_tool_calls(
+                        content_blocks, phase, pause_mode=pause_mode
+                    )
+                    if was_modified:
+                        response_json["content"] = modified_blocks
+                        response_content = json.dumps(response_json).encode("utf-8")
+                        logger.info(
+                            "intercepted gated tool calls in phase %s", phase
+                        )
+        except (json.JSONDecodeError, KeyError):
+            # Not JSON or unexpected structure — forward as-is
+            pass
+
     return Response(
-        content=upstream.content,
+        content=response_content,
         status_code=upstream.status_code,
         headers=_response_headers(upstream.headers, decoded_body=True),
         media_type=upstream.headers.get("content-type"),
@@ -785,6 +819,8 @@ async def _forward_streaming(
     body: bytes,
     on_status: Callable[[int], None] = lambda _status: None,
     path: str = _UPSTREAM_PATH,
+    phase: str | None = None,
+    pause_mode: bool = False,
 ) -> Response | StreamingResponse:
     # Enter the stream manually so we can read the upstream status + headers
     # before constructing the StreamingResponse, then relay raw bytes.
@@ -828,6 +864,12 @@ async def _forward_streaming(
         + '\n\n'
     ).encode()
 
+    # For streaming, tool call interception is complex (need to parse SSE chunks).
+    # For now, skip interception in streaming mode — the tool definitions are still
+    # stripped from the request, so the LLM shouldn't call gated tools anyway.
+    # Non-streaming interception handles the common case.
+    # TODO: Add streaming interception for defense-in-depth.
+
     async def relay() -> AsyncIterator[bytes]:
         has_finish_reason = False
         try:
@@ -840,7 +882,7 @@ async def _forward_streaming(
             await cm.__aexit__(None, None, None)
         if not has_finish_reason:
             yield _CORRECTIVE_CHUNK
-            yield 'data: [DONE]\n\n'.encode()
+            yield b'data: [DONE]\n\n'
 
     return StreamingResponse(
         relay(),
