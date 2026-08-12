@@ -419,10 +419,7 @@ def _init(args: argparse.Namespace) -> int:
     body_override = getattr(args, "body", None)
     body_file = getattr(args, "body_file", None)
     if body_file is not None:
-        if body_file == "-":
-            body_override = sys.stdin.read()
-        else:
-            body_override = Path(body_file).read_text()
+        body_override = sys.stdin.read() if body_file == "-" else Path(body_file).read_text()
     if body_override is not None:
         # Replace just the body portion (after frontmatter) of the template
         fm_end = content.find("\n---\n", 4)
