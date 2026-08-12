@@ -606,6 +606,7 @@ async def passthrough_anthropic_messages(
     # covers the verbatim-forward path (nothing composed).
     on_status: Callable[[int], None] = _noop_status
     injected_payload: dict[str, Any] | None = None
+    signal = None  # Initialize for tool call interception
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
