@@ -226,6 +226,11 @@ def add_parser(
     _add_project_root_flag(p_status)
     p_status.set_defaults(func=_run_status)
 
+    # approve (alias — delegates to the top-level approve command)
+    from agentalloy.install.subcommands.approve import add_subparser as _add_approve_subparser
+
+    _add_approve_subparser(sub)
+
     # Default action (no subcommand) = status
     _add_project_root_flag(p)
     p.set_defaults(func=_run_status)

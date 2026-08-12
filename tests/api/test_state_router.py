@@ -1198,9 +1198,9 @@ class TestArchiveAll:
         self, state_client: TestClient, state_store: DuckDBStateStore
     ) -> None:
         """TC5 — PUT /state/artifact with phase=spec parses AC headings into contract."""
-        # Create a spec contract first
+        # Create a spec contract first (contract_id = phase/slug)
         state_store.put_contract(
-            "test-ac-slug",
+            "spec/test-ac-slug",
             phase="spec",
             slug="test-ac-slug",
             body="# Test contract",
@@ -1219,7 +1219,7 @@ class TestArchiveAll:
         assert resp.status_code == 200
 
         # Verify contract was updated with structured ACs
-        contract = state_store.get_contract("test-ac-slug")
+        contract = state_store.get_contract("spec/test-ac-slug")
         assert contract is not None
         criteria = contract.get("success_criteria") or []
         assert len(criteria) == 3
@@ -1233,7 +1233,7 @@ class TestArchiveAll:
     ) -> None:
         """TC6 — PUT /state/artifact with non-spec phase does not parse AC headings."""
         state_store.put_contract(
-            "test-no-ac",
+            "build/test-no-ac",
             phase="build",
             slug="test-no-ac",
             body="# Build contract",
@@ -1251,7 +1251,7 @@ class TestArchiveAll:
         assert resp.status_code == 200
 
         # Contract should not have ACs parsed from artifact
-        contract = state_store.get_contract("test-no-ac")
+        contract = state_store.get_contract("build/test-no-ac")
         assert contract is not None
         criteria = contract.get("success_criteria") or []
         assert len(criteria) == 0
