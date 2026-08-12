@@ -1452,6 +1452,104 @@ async def proxy_chat_completions(
     )
 
     _commit(resp.status_code)
+
+    # Intercept gated tool calls in the response (OpenAI format)
+    current_phase = signal_result.phase if signal_result else None
+    pause_mode = signal_result.paused_mode if signal_result else False
+    if current_phase and not pause_mode:
+        try:
+            choices = body.get("choices", [])
+            if choices and isinstance(choices, list):
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    message = first_choice.get("message", {})
+                    if isinstance(message, dict):
+                        tool_calls = message.get("tool_calls")
+                        if tool_calls and isinstance(tool_calls, list):
+                            from agentalloy.providers.base import (
+                                GATED_TOOL_NAMES,
+                                SHELL_TOOL_NAMES,
+                                build_instructive_denial_message,
+                                _command_writes_to_code,
+                                _command_advances_phase_without_approval,
+                            )
+                            # Check if any tool calls are gated
+                            gated_indices = []
+                            for i, tc in enumerate(tool_calls):
+                                if isinstance(tc, dict):
+                                    fn = tc.get("function", {})
+                                    if isinstance(fn, dict):
+                                        fn_name = fn.get("name", "")
+                                        # Check direct write tools
+                                        if fn_name in GATED_TOOL_NAMES:
+                                            gated_indices.append((i, fn_name))
+                                        # Check shell commands
+                                        elif fn_name in SHELL_TOOL_NAMES:
+                                            args_str = fn.get("arguments", "{}")
+                                            try:
+                                                import json
+                                                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                                command = args.get("command", "")
+                                                # Check writes to code
+                                                if _command_writes_to_code(command):
+                                                    gated_indices.append((i, fn_name))
+                                                # Check phase advance without approval
+                                                elif _command_advances_phase_without_approval(command, current_phase):
+                                                    gated_indices.append((i, fn_name))
+                                            except (json.JSONDecodeError, AttributeError):
+                                                pass
+
+                            if gated_indices:
+                                # Replace gated tool calls with denial messages in content
+                                content = message.get("content", "") or ""
+                                for idx, fn_name in gated_indices:
+                                    # Check if this is a phase advance command
+                                    tc = tool_calls[idx]
+                                    fn = tc.get("function", {})
+                                    args_str = fn.get("arguments", "{}")
+                                    is_phase_advance = False
+                                    try:
+                                        import json
+                                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                        command = args.get("command", "")
+                                        is_phase_advance = _command_advances_phase_without_approval(command, current_phase)
+                                    except (json.JSONDecodeError, AttributeError):
+                                        pass
+
+                                    if is_phase_advance:
+                                        denial = (
+                                            f"[AgentAlloy] Phase advance denied in phase `{current_phase}`.\n\n"
+                                            f"You are in the {current_phase} phase, which requires explicit human approval before advancing.\n\n"
+                                            f"To advance, you must:\n"
+                                            f"1. Complete all deliverables for the {current_phase} phase\n"
+                                            f"2. Run `agentalloy approve {current_phase}` to get human sign-off\n\n"
+                                            f"Do not attempt to advance the phase without approval."
+                                        )
+                                    else:
+                                        denial = build_instructive_denial_message(
+                                            current_phase, fn_name
+                                        )
+                                    content = f"{content}\n\n{denial}" if content else denial
+                                    logger.info(
+                                        "intercepted gated tool call %s in phase %s",
+                                        fn_name,
+                                        current_phase,
+                                    )
+                                # Update message: remove tool_calls, add denial to content
+                                message["content"] = content.strip()
+                                # Remove the gated tool calls
+                                message["tool_calls"] = [
+                                    tc for i, tc in enumerate(tool_calls)
+                                    if i not in [idx for idx, _ in gated_indices]
+                                ]
+                                if not message["tool_calls"]:
+                                    del message["tool_calls"]
+                                # Update finish_reason to "stop" since we removed tool calls
+                                first_choice["finish_reason"] = "stop"
+        except Exception:
+            # Interception failure should never break the response
+            logger.warning("tool call interception failed; forwarding as-is", exc_info=True)
+
     return JSONResponse(
         status_code=resp.status_code,
         content=body,

@@ -372,6 +372,186 @@ def build_denial_message(phase: str, owed_artifacts: list[str] | None = None) ->
     return f"[AgentAlloy] Write denied in phase `{phase}` — complete {artifact} before advancing."
 
 
+def build_instructive_denial_message(
+    phase: str,
+    tool_name: str,
+    owed_artifacts: list[str] | None = None,
+) -> str:
+    """Build an instructive denial message that tells the LLM what to do instead.
+
+    Includes:
+    1. Why it was blocked (current phase)
+    2. What it should be doing (the deliverable)
+    3. How to advance (gates + approval)
+    """
+    artifact = _PHASE_ARTIFACT.get(phase, "the phase's deliverable")
+    if owed_artifacts:
+        artifact = ", ".join(owed_artifacts)
+
+    # Determine next phase and approval requirement
+    next_phase = _next_phase_label(phase)
+    approval_required = phase in ("spec", "design", "plan", "add-skill")
+
+    message_parts = [
+        f"[AgentAlloy] Tool `{tool_name}` denied in phase `{phase}`.",
+        "",
+        f"You are in the {phase} phase. Writes to src/ and tests/ are not allowed until you advance to the build phase.",
+        "",
+        f"Your current deliverable: {artifact}",
+        "",
+    ]
+
+    if approval_required:
+        message_parts.extend([
+            f"To advance from {phase}, you must complete the deliverable, then run `agentalloy approve {phase}` to get human sign-off before advancing.",
+            "",
+            f"Next: {next_phase}",
+        ])
+    else:
+        message_parts.extend([
+            f"To advance, complete the deliverable and the phase will auto-advance.",
+            "",
+            f"Next: {next_phase}",
+        ])
+
+    message_parts.extend([
+        "",
+        f"Focus on completing the {phase} artifacts. Do not attempt to write code.",
+    ])
+
+    return "\n".join(message_parts)
+
+
+def intercept_gated_tool_calls(
+    content_blocks: list[dict[str, Any]],
+    phase: str,
+    *,
+    pause_mode: bool = False,
+    owed_artifacts: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Scan content blocks for gated tool_use and replace with denial messages.
+
+    Returns (modified_blocks, was_modified). If a tool_use block is for a gated
+    tool in a denied phase, it's replaced with a text block containing an
+    instructive denial message.
+
+    This is called on the RESPONSE from upstream, before forwarding to the harness.
+    """
+    if pause_mode or phase not in DENIED_PHASES:
+        return content_blocks, False
+
+    modified = False
+    new_blocks: list[dict[str, Any]] = []
+
+    for block in content_blocks:
+        if block.get("type") == "tool_use":
+            tool_name = block.get("name", "")
+            tool_input = block.get("input", {})
+
+            # Check if it's a direct write tool
+            if tool_name in GATED_TOOL_NAMES:
+                # Replace with denial message
+                denial = build_instructive_denial_message(
+                    phase, tool_name, owed_artifacts
+                )
+                new_blocks.append({
+                    "type": "text",
+                    "text": denial,
+                })
+                modified = True
+                continue
+
+            # Check if it's a shell command that writes to src/ or tests/
+            if tool_name in SHELL_TOOL_NAMES and isinstance(tool_input, dict):
+                command = tool_input.get("command", "")
+                if _command_writes_to_code(command):
+                    denial = build_instructive_denial_message(
+                        phase, tool_name, owed_artifacts
+                    )
+                    new_blocks.append({
+                        "type": "text",
+                        "text": denial,
+                    })
+                    modified = True
+                    continue
+
+                # Check if it's a phase advance without approval
+                if _command_advances_phase_without_approval(command, phase):
+                    denial = (
+                        f"[AgentAlloy] Phase advance denied in phase `{phase}`.\n\n"
+                        f"You are in the {phase} phase, which requires explicit human approval before advancing.\n\n"
+                        f"To advance, you must:\n"
+                        f"1. Complete all deliverables for the {phase} phase\n"
+                        f"2. Run `agentalloy approve {phase}` to get human sign-off\n\n"
+                        f"Do not attempt to advance the phase without approval."
+                    )
+                    new_blocks.append({
+                        "type": "text",
+                        "text": denial,
+                    })
+                    modified = True
+                    continue
+
+        new_blocks.append(block)
+
+    return new_blocks, modified
+
+
+# Shell tool names that can execute arbitrary commands
+SHELL_TOOL_NAMES: frozenset[str] = frozenset({
+    "run_shell_command", "shell", "bash", "terminal", "execute_command"
+})
+
+# Patterns that indicate writing to files
+_SHELL_WRITE_PATTERNS: tuple[str, ...] = (
+    r">\s*src/",
+    r">\s*tests/",
+    r">>\s*src/",
+    r">>\s*tests/",
+    r"tee\s+src/",
+    r"tee\s+tests/",
+    r"cat\s+.*>\s*src/",
+    r"cat\s+.*>\s*tests/",
+    r"echo\s+.*>\s*src/",
+    r"echo\s+.*>\s*tests/",
+    r"cp\s+.*\s+src/",
+    r"cp\s+.*\s+tests/",
+    r"mv\s+.*\s+src/",
+    r"mv\s+.*\s+tests/",
+)
+
+
+def _command_writes_to_code(command: str) -> bool:
+    """Check if a shell command writes to src/ or tests/ directories."""
+    import re
+    for pattern in _SHELL_WRITE_PATTERNS:
+        if re.search(pattern, command):
+            return True
+    return False
+
+
+# Phases that require explicit approval before advancing
+_APPROVAL_REQUIRED_PHASES: frozenset[str] = frozenset({"spec", "design", "plan", "add-skill"})
+
+
+def _command_advances_phase_without_approval(command: str, current_phase: str) -> bool:
+    """Check if a shell command tries to advance phase without approval.
+
+    Returns True if the command tries to run `agentalloy phase set <next_phase>`
+    from a phase that requires approval.
+    """
+    import re
+    # Match: agentalloy phase set <phase>
+    pattern = r"agentalloy\s+phase\s+set\s+(\S+)"
+    match = re.search(pattern, command)
+    if match:
+        target_phase = match.group(1)
+        # If current phase requires approval, block the advance
+        if current_phase in _APPROVAL_REQUIRED_PHASES:
+            return True
+    return False
+
+
 def end_session_instruction(phase: str) -> str:
     """Build the end-session instruction for a phase advance.
 
