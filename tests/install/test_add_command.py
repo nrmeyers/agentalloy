@@ -223,6 +223,38 @@ class TestAddRun:
 
         assert _repo_phase(str(repo)) == "build"
 
+    def test_add_no_index_skips_code_index_wiring(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--no-index wires the harness but never calls maybe_wire."""
+        home = tmp_path / "home"
+        _global_hermes_config(home)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+        monkeypatch.chdir(repo)
+
+        from unittest.mock import patch
+
+        from agentalloy.install import code_index_wiring
+
+        with patch.object(code_index_wiring, "maybe_wire") as mock_maybe_wire:
+            args = argparse.Namespace(
+                harness="hermes-agent",
+                port=47950,
+                upstream_url=None,
+                upstream_model=None,
+                key_env=None,
+                lifecycle_mode=None,
+                no_index=True,
+            )
+            rc = add._run(args)
+
+        assert rc == 0
+        mock_maybe_wire.assert_not_called()
+        # The skip flag must be reset after the call (not leaked).
+        assert code_index_wiring.skip_injection is False
+
 
 # ---------------------------------------------------------------------------
 # Cline upstream adoption (GH#514 follow-up: `add cline` recovered no upstream).

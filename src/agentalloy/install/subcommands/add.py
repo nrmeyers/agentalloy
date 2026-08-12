@@ -76,6 +76,12 @@ def add_parser(
             "(TTY only); non-interactive runs default to 'full'."
         ),
     )
+    p.add_argument(
+        "--no-index",
+        action="store_true",
+        default=False,
+        help="Wire the harness only; skip code-index block injection and indexing.",
+    )
     p.set_defaults(func=_run)
 
 
@@ -167,6 +173,7 @@ def adopt_and_wire(
     key_env: str | None = None,
     lifecycle_mode: str | None = None,
     assume_index: bool = False,
+    no_index: bool = False,
 ) -> tuple[Upstream | None, dict[str, Any]]:
     """Adopt *harness*'s upstream and wire interception at *root* (repo scope).
 
@@ -240,7 +247,18 @@ def adopt_and_wire(
                 exc_info=True,
             )
 
-    result = _wire_harness_core(harness, port=port, root=root, scope="repo")
+    from agentalloy.install import code_index_wiring
+
+    # --no-index: suppress code-index block injection from both the provider
+    # install_writer (called inside _wire_harness_core) and the explicit
+    # maybe_wire call below.
+    if no_index:
+        code_index_wiring.skip_injection = True
+    try:
+        result = _wire_harness_core(harness, port=port, root=root, scope="repo")
+    finally:
+        if no_index:
+            code_index_wiring.skip_injection = False
     result["lifecycle_mode"] = mode
     _seed_repo_metadata(root)  # README + git-exclude; keeps .agentalloy/ uncommitted
 
@@ -253,9 +271,8 @@ def adopt_and_wire(
 
     # Code-index harness block (second sentinel pair) — written only when the
     # service reports the module enabled; cleans up stale/legacy blocks otherwise.
-    from agentalloy.install import code_index_wiring
-
-    code_index_wiring.maybe_wire(root, port, assume_yes=assume_index, harness=harness)
+    if not no_index:
+        code_index_wiring.maybe_wire(root, port, assume_yes=assume_index, harness=harness)
     return upstream, result
 
 
@@ -277,6 +294,7 @@ def _run(args: argparse.Namespace) -> int:
         upstream_model=args.upstream_model,
         key_env=args.key_env,
         lifecycle_mode=getattr(args, "lifecycle_mode", None),
+        no_index=getattr(args, "no_index", False),
     )
 
     _render(harness, upstream, result)

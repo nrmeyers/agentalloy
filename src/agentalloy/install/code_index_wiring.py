@@ -102,6 +102,11 @@ _PROXY_ONLY_NO_MARKDOWN: frozenset[str] = frozenset(
     {"claude-code", "qwen-code", "codex"},
 )
 
+# When True, maybe_wire() is a no-op. Set by `add --no-index` so the
+# provider install_writer's internal maybe_wire call is also suppressed
+# (both call sites check the same flag).
+skip_injection: bool = False
+
 _HARNESS_CARRIERS: dict[str, str] = {
     "cursor": ".cursor/rules/agentalloy.mdc",
     "cline": ".clinerules",
@@ -409,6 +414,8 @@ def maybe_wire(
     reported as warnings, never raised.
 
     """
+    if skip_injection:
+        return []
     try:
         status = service_module_status(port)
         if status == "enabled":
