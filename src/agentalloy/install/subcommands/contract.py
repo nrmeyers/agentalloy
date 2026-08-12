@@ -491,6 +491,7 @@ def _show(args: argparse.Namespace) -> int:
         print(error, file=sys.stderr)
         return 1
     contract_id = resolved
+    assert contract_id is not None  # guaranteed by _resolve_contract_id when error is None
 
     try:
         contract = client.get_contract(contract_id)
@@ -528,6 +529,7 @@ def _validate(args: argparse.Namespace) -> int:
         print(error, file=sys.stderr)
         return 1
     contract_id = resolved
+    assert contract_id is not None  # guaranteed by _resolve_contract_id when error is None
 
     try:
         contract = client.get_contract(contract_id)
@@ -566,6 +568,7 @@ def _edit(args: argparse.Namespace) -> int:
         print(error, file=sys.stderr)
         return 1
     contract_id = resolved
+    assert contract_id is not None  # guaranteed by _resolve_contract_id when error is None
 
     updates: dict[str, Any] = {}
     if args.body is not None:
@@ -725,6 +728,7 @@ def _supersede(args: argparse.Namespace) -> int:
         print(error, file=sys.stderr)
         return 1
     contract_id = resolved
+    assert contract_id is not None  # guaranteed by _resolve_contract_id when error is None
 
     payload: dict[str, Any] = {
         "new_contract_id": new_id,
