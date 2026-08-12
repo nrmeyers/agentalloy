@@ -1487,7 +1487,6 @@ async def proxy_chat_completions(
                                         elif fn_name in SHELL_TOOL_NAMES:
                                             args_str = fn.get("arguments", "{}")
                                             try:
-                                                import json
                                                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
                                                 command = args.get("command", "")
                                                 # Check writes to code
@@ -1506,7 +1505,6 @@ async def proxy_chat_completions(
                                     args_str = fn.get("arguments", "{}")
                                     is_phase_advance = False
                                     try:
-                                        import json
                                         args = json.loads(args_str) if isinstance(args_str, str) else args_str
                                         command = args.get("command", "")
                                         is_phase_advance = _command_advances_phase_without_approval(command, current_phase)
