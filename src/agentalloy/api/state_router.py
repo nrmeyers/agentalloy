@@ -1273,7 +1273,8 @@ async def set_artifact(
         ac_headings = parse_ac_headings(req.content)
         if ac_headings:
             # Find existing contract for this slug in spec phase
-            existing = store.get_contract(req.slug)
+            contract_id = f"{req.phase}/{req.slug}"
+            existing = store.get_contract(contract_id)
             if existing:
                 # Merge: new ACs from artifact, preserve any existing ones not overwritten
                 existing_criteria = existing.get("success_criteria") or []
@@ -1284,7 +1285,7 @@ async def set_artifact(
                     if not (isinstance(c, dict) and c.get("id") in ac_ids)
                 ]
                 merged.extend(ac_headings)
-                await asyncio.to_thread(store.update_contract, req.slug, success_criteria=merged)
+                await asyncio.to_thread(store.update_contract, contract_id, success_criteria=merged)
 
     return ArtifactResponse(**row)
 

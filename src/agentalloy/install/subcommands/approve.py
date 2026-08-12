@@ -193,6 +193,24 @@ def add_parser(
         "approve",
         help="Record human approval for the current SDD phase and advance.",
     )
+    _add_approve_args(p)
+    p.set_defaults(func=_run)
+
+
+def add_subparser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Register 'approve' as a subcommand under another parent (contract, workflow)."""
+    p: argparse.ArgumentParser = subparsers.add_parser(
+        "approve",
+        help="Record human approval for the current SDD phase and advance.",
+    )
+    _add_approve_args(p)
+    p.set_defaults(func=_run)
+
+
+def _add_approve_args(p: argparse.ArgumentParser) -> None:
+    """Add the standard approve arguments to a parser."""
     p.add_argument(
         "phase",
         choices=_APPROVABLE,
@@ -204,7 +222,6 @@ def add_parser(
         help="Approver identity to record (default: $USER).",
     )
     _add_project_root_flag(p)
-    p.set_defaults(func=_run)
 
 
 def _add_project_root_flag(p: argparse.ArgumentParser) -> None:

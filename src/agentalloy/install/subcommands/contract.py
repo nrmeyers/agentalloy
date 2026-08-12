@@ -47,6 +47,42 @@ def _get_client() -> StateClient:
     return client
 
 
+def _resolve_contract_id(client: StateClient, contract_id: str) -> tuple[str | None, str | None]:
+    """Resolve a contract_id, supporting bare slugs.
+
+    Returns (resolved_id, error_message). If resolved_id is not None, use it.
+    If error_message is not None, print it and return 1.
+    """
+    # Already a full ID (contains /)
+    if "/" in contract_id:
+        return contract_id, None
+
+    # Bare slug — try to find a matching contract
+    try:
+        contracts = client.list_contracts(slug=contract_id)
+    except StateClientError:
+        contracts = []
+
+    active = [c for c in contracts if c.get("status") == "active"]
+
+    if len(active) == 1:
+        return active[0]["contract_id"], None
+    elif len(active) > 1:
+        ids = ", ".join(c["contract_id"] for c in active)
+        return None, (
+            f"Error: Multiple active contracts match slug {contract_id!r}:\n"
+            f"  {ids}\n"
+            f"  Use the full contract_id (phase/slug) to disambiguate."
+        )
+    else:
+        return None, (
+            f"Error: Contract {contract_id!r} not found.\n"
+            f"  Hint: contract IDs have the form <phase>/<slug> "
+            f"(e.g., 'spec/{contract_id}', 'build/{contract_id}').\n"
+            f"  Run 'agentalloy contract list' to see all contracts."
+        )
+
+
 def _active_design_slug(project_root: Path) -> str | None:
     """The active design work-item slug, for stamping onto a new build contract.
 
@@ -379,6 +415,23 @@ def _init(args: argparse.Namespace) -> int:
         .replace("{task_slug_title}", title)
     )
 
+    # Override body with --body or --body-file if provided
+    body_override = getattr(args, "body", None)
+    body_file = getattr(args, "body_file", None)
+    if body_file is not None:
+        if body_file == "-":
+            body_override = sys.stdin.read()
+        else:
+            body_override = Path(body_file).read_text()
+    if body_override is not None:
+        # Replace just the body portion (after frontmatter) of the template
+        fm_end = content.find("\n---\n", 4)
+        if fm_end != -1:
+            frontmatter = content[: fm_end + 5]
+            content = frontmatter + "\n" + body_override
+        else:
+            content = body_override
+
     # Stamp work_item for build contracts
     if phase == "build":
         content = _inject_work_item(content, _active_design_slug(project_root))
@@ -420,7 +473,27 @@ def _init(args: argparse.Namespace) -> int:
 def _show(args: argparse.Namespace) -> int:
     """Show a contract by ID via StateClient."""
     client = _get_client()
-    contract_id = args.contract_id
+
+    # Resolve contract_id from positional, --phase/--slug, or bare slug
+    contract_id = getattr(args, "contract_id", None)
+    phase = getattr(args, "phase", None)
+    slug = getattr(args, "slug", None)
+
+    if phase and slug:
+        contract_id = f"{phase}/{slug}"
+    elif not contract_id:
+        print(
+            "Error: provide a contract_id, or --phase and --slug.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Fuzzy resolution for bare slugs
+    resolved, error = _resolve_contract_id(client, contract_id)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+    contract_id = resolved
 
     try:
         contract = client.get_contract(contract_id)
@@ -452,6 +525,13 @@ def _validate(args: argparse.Namespace) -> int:
     client = _get_client()
     contract_id = args.contract_id
 
+    # Fuzzy resolution for bare slugs
+    resolved, error = _resolve_contract_id(client, contract_id)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+    contract_id = resolved
+
     try:
         contract = client.get_contract(contract_id)
     except StateClientError as exc:
@@ -482,6 +562,13 @@ def _edit(args: argparse.Namespace) -> int:
     """In-place correction of a contract via StateClient."""
     client = _get_client()
     contract_id = args.contract_id
+
+    # Fuzzy resolution for bare slugs
+    resolved, error = _resolve_contract_id(client, contract_id)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+    contract_id = resolved
 
     updates: dict[str, Any] = {}
     if args.body is not None:
@@ -604,7 +691,21 @@ def _artifact_show(args: argparse.Namespace) -> int:
         return 1
 
     if result_data is None:
-        print(f"Error: artifact {phase}/{slug}/{name} not found", file=sys.stderr)
+        # List available artifacts for this phase/slug to help debug
+        try:
+            available = client.list_artifacts(phase, slug=slug)
+            names = [a.get("name", "?") for a in available]
+        except StateClientError:
+            names = []
+
+        msg = f"Error: artifact {phase}/{slug}/{name} not found"
+        if names:
+            msg += f"\n  Available artifacts for {phase}/{slug}:\n"
+            msg += "\n".join(f"    - {n}" for n in names)
+        else:
+            msg += f"\n  No artifacts found for {phase}/{slug}."
+        msg += "\n  Hint: artifact names are canonicalized to .artifact suffix for store-backed phases."
+        print(msg, file=sys.stderr)
         return 1
 
     if args.json:
@@ -620,6 +721,13 @@ def _supersede(args: argparse.Namespace) -> int:
     client = _get_client()
     contract_id = args.contract_id
     new_id = args.new_id
+
+    # Fuzzy resolution for bare slugs
+    resolved, error = _resolve_contract_id(client, contract_id)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+    contract_id = resolved
 
     payload: dict[str, Any] = {
         "new_contract_id": new_id,
@@ -653,6 +761,49 @@ def _supersede(args: argparse.Namespace) -> int:
     return 0
 
 
+def _list(args: argparse.Namespace) -> int:
+    """List contracts via StateClient."""
+    client = _get_client()
+
+    phase = getattr(args, "phase", None)
+    slug = getattr(args, "slug", None)
+    show_all = getattr(args, "all", False)
+
+    try:
+        contracts = client.list_contracts(
+            phase=phase,
+            slug=slug,
+            status=None if show_all else "active",
+        )
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    if not contracts:
+        print("No contracts found.", file=sys.stderr)
+        return 0
+
+    result = {
+        "contracts": [
+            {
+                "contract_id": c.get("contract_id"),
+                "phase": c.get("phase"),
+                "slug": c.get("slug"),
+                "status": c.get("status"),
+            }
+            for c in contracts
+        ],
+        "count": len(contracts),
+    }
+
+    def _render_list(r: dict[str, Any]) -> None:
+        for c in r["contracts"]:
+            print(f"  {c['contract_id']}  [{c['status']}]")
+
+    write_result(result, args, human_fn=_render_list)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Parser setup
 # ---------------------------------------------------------------------------
@@ -667,6 +818,7 @@ _HANDLERS = {
     "artifact-set": _artifact_set,
     "artifact-show": _artifact_show,
     "artifact-list": _artifact_list,
+    "list": _list,
 }
 
 
@@ -691,11 +843,19 @@ def add_parser(
         default="full",
         help="Workflow route.",
     )
+    init_p.add_argument("--body", default=None, help="Contract body text (overrides template).")
+    init_p.add_argument(
+        "--body-file",
+        default=None,
+        help="Read contract body from file ('-' for stdin). Overrides --body.",
+    )
     add_json_flag(init_p)
 
     # show
     show_p = sub.add_parser("show", help="Display a contract by ID.")
-    show_p.add_argument("contract_id", help="Contract ID.")
+    show_p.add_argument("contract_id", nargs="?", default=None, help="Contract ID (phase/slug) or slug.")
+    show_p.add_argument("--phase", default=None, help="Phase (alternative to positional contract_id).")
+    show_p.add_argument("--slug", default=None, help="Slug (alternative to positional contract_id).")
     add_json_flag(show_p)
 
     # validate
@@ -801,6 +961,18 @@ def add_parser(
     ashow_p.add_argument("--name", default=None, help="Artifact name, e.g. 'spec.md'.")
     add_json_flag(ashow_p)
 
+    # approve (alias — delegates to the top-level approve command)
+    from agentalloy.install.subcommands.approve import add_subparser as _add_approve_subparser
+
+    _add_approve_subparser(sub)
+
+    # list
+    list_p = sub.add_parser("list", help="List contracts (optionally filtered).")
+    list_p.add_argument("--phase", default=None, help="Filter by phase.")
+    list_p.add_argument("--slug", default=None, help="Filter by slug (substring match).")
+    list_p.add_argument("--all", action="store_true", default=False, help="Include archived contracts.")
+    add_json_flag(list_p)
+
     p.set_defaults(func=_run)
 
 
@@ -809,7 +981,7 @@ def _run(args: argparse.Namespace) -> int:
     if not cmd:
         print(
             "  Usage: agentalloy contract "
-            "{init,show,validate,edit,supersede,artifact-set,artifact-list}",
+            "{init,show,validate,edit,supersede,artifact-set,artifact-list,artifact-show}",
             file=sys.stderr,
         )
         return 1
