@@ -602,7 +602,7 @@ class TestOpenAISystemPromptInjection:
     - Stale strip removes prior phase blocks from the first system message.
     """
 
-    # TC-02-1: OpenAI — separate system message appended
+    # TC-02-1: OpenAI — instructions merged into first system message
     def test_appends_new_system_message(self) -> None:
         messages = [
             ProxyMessage(role="system", content="You are a helpful assistant."),
@@ -612,20 +612,18 @@ class TestOpenAISystemPromptInjection:
             messages, "Phase: intake — capture the request.", phase="intake"
         )
         assert result is not None
-        # Original system message is unchanged
-        assert result[0].content == "You are a helpful assistant."
-        # User message preserved in the middle
-        assert result[1].role == "user"
-        assert result[1].content == "Hello"
-        # A new system message is appended at the end
-        assert len(result) == 3
-        assert result[2].role == "system"
-        content = result[2].content
+        # Instructions merged into first system message (not appended as separate message)
+        assert len(result) == 2
+        content = result[0].content
         assert isinstance(content, str)
+        assert "You are a helpful assistant." in content
         assert ANTHROPIC_INSTRUCTIONS_BEGIN in content
         assert ANTHROPIC_INSTRUCTIONS_END in content
         assert 'phase="intake"' in content
         assert "Phase: intake" in content
+        # User message preserved
+        assert result[1].role == "user"
+        assert result[1].content == "Hello"
 
     # TC-02-2: OpenAI — creates system message if none exists
     def test_creates_system_message_if_none_exists(self) -> None:
@@ -652,23 +650,21 @@ class TestOpenAISystemPromptInjection:
         ]
         once = inject_into_openai_system_prompt(messages, "Phase instructions", phase="design")
         assert once is not None
-        assert len(once) == 3  # system + user + appended system
+        assert len(once) == 2  # system (merged) + user
         # Second call with same phase returns None (no-op)
         twice = inject_into_openai_system_prompt(once, "Different text", phase="design")
         assert twice is None  # idempotent: no change needed
         # List unchanged after second call
-        assert len(once) == 3
-        # Original harness content preserved in first message
-        assert once[0].content == "You are helpful."
-        # User message preserved
-        assert once[1].role == "user"
-        # Phase block in the appended message
-        content = once[2].content
+        assert len(once) == 2
+        # Phase block merged into first message
+        content = once[0].content
         assert isinstance(content, str)
+        assert "You are helpful." in content
         assert content.count(ANTHROPIC_INSTRUCTIONS_BEGIN) == 1
         assert 'phase="design"' in content
         assert "Phase instructions" in content
-        assert "Different text" not in content
+        # User message preserved
+        assert once[1].role == "user"
 
     # TC-02-4: OpenAI — stale strip prior phase
     def test_strips_stale_prior_phase_block(self) -> None:
@@ -682,23 +678,19 @@ class TestOpenAISystemPromptInjection:
         ]
         result = inject_into_openai_system_prompt(messages, "Phase: build", phase="build")
         assert result is not None
-        # First system message: stale block stripped, harness content preserved
+        # First system message: stale block stripped, new block merged in
+        assert len(result) == 2
         first_content = result[0].content
         assert isinstance(first_content, str)
         assert "You are helpful." in first_content
         assert 'phase="intake"' not in first_content
-        # User message preserved in the middle
+        assert ANTHROPIC_INSTRUCTIONS_BEGIN in first_content
+        assert ANTHROPIC_INSTRUCTIONS_END in first_content
+        assert 'phase="build"' in first_content
+        assert "Phase: build" in first_content
+        # User message preserved
         assert result[1].role == "user"
         assert result[1].content == "Hello"
-        # A new system message is appended with the current phase
-        assert len(result) == 3
-        assert result[2].role == "system"
-        second_content = result[2].content
-        assert isinstance(second_content, str)
-        assert ANTHROPIC_INSTRUCTIONS_BEGIN in second_content
-        assert ANTHROPIC_INSTRUCTIONS_END in second_content
-        assert 'phase="build"' in second_content
-        assert "Phase: build" in second_content
 
 
 class TestAnthropicSystemPromptInjection:

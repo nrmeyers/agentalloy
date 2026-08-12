@@ -242,14 +242,12 @@ def _last_user_content(captured: dict[str, Any]) -> str:
 
 
 def _system_content(captured: dict[str, Any]) -> str:
-    """Return the content of the LAST system message (where AgentAlloy prose lives)."""
+    """Return the content of the FIRST system message (where AgentAlloy prose is merged)."""
     sent = json.loads(captured["body"])
-    # AgentAlloy prose is now in a separate trailing system message.
-    for msg in reversed(sent["messages"]):
+    for msg in sent["messages"]:
         if msg["role"] == "system":
             return msg["content"]
-    # Fallback to first message for backwards compatibility.
-    return sent["messages"][0]["content"]
+    raise AssertionError("no system message found")
 
 
 def _harness_system_content(captured: dict[str, Any]) -> str:
@@ -348,9 +346,8 @@ def test_prose_lands_on_system_message(tmp_path: Path) -> None:
         resp = client.post("/v1/chat/completions", json=_body(tmp_path))
     assert resp.status_code == 200
     system = _system_content(captured)
-    # Harness's own system prompt preserved (first system message).
-    assert _harness_system_content(captured) == "SYSTEM-CACHED"
-    # AgentAlloy prose in a separate trailing system message.
+    # Harness's own system prompt and AgentAlloy prose merged into first system message.
+    assert "SYSTEM-CACHED" in system
     assert _PROSE in system
     assert system.count('<agentalloy-instructions phase="build">') == 1
     assert system.count("</agentalloy-instructions>") == 1
@@ -397,26 +394,18 @@ def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
     app = _make_app(orchestrator=_orchestrator("SHOULD-NOT-APPEAR"), captured=captured)
 
     # Turn 1 at build, then turn 2 at qa — with the harness replaying the system
-    # messages the proxy produced on turn 1 (a codex-style harness that persists
+    # message the proxy produced on turn 1 (a codex-style harness that persists
     # what it was handed would do exactly this).
     with patch(_SIGNAL, return_value=_prose_signal()), TestClient(app) as client:
         client.post("/v1/chat/completions", json=_body(tmp_path))
 
-    # Capture both system messages from turn 1: harness (first) + AgentAlloy (last).
+    # Capture the merged system message from turn 1.
     sent = json.loads(captured["body"])
-    harness_sys = next(
-        m for m in sent["messages"] if m["role"] == "system" and m["content"] == "SYSTEM-CACHED"
-    )
-    build_agentalloy_sys = next(
-        m for m in sent["messages"] if m["role"] == "system" and m["content"] != "SYSTEM-CACHED"
-    )
+    merged_sys = next(m for m in sent["messages"] if m["role"] == "system")
 
-    # Simulate harness replay: first system = harness's original, plus the AgentAlloy
-    # system message from turn 1. The harness sees both system messages and replays
-    # them in order.
+    # Simulate harness replay: the harness sees the merged system message and replays it.
     replayed = _body(tmp_path)
-    replayed["messages"][0] = harness_sys  # harness's original system message
-    replayed["messages"].append(build_agentalloy_sys)  # AgentAlloy's system from turn 1
+    replayed["messages"][0] = merged_sys  # merged system message from turn 1
     qa_prose = "# SDD — QA\nProve the acceptance criteria."
     with (
         patch(_SIGNAL, return_value=_prose_signal(phase="qa", workflow_system_prose=qa_prose)),
@@ -430,8 +419,8 @@ def test_prose_replaced_on_phase_transition(tmp_path: Path) -> None:
     assert _PROSE not in system
     assert qa_prose in system
     assert system.count('<agentalloy-instructions phase="qa">') == 1
-    # Harness's own system prompt preserved (first system message).
-    assert _harness_system_content(captured) == "SYSTEM-CACHED"
+    # Harness's own system prompt preserved in merged message.
+    assert "SYSTEM-CACHED" in system
 
 
 def test_composed_block_does_not_reach_the_system_message(tmp_path: Path) -> None:
