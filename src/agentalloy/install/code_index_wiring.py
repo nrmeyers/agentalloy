@@ -98,6 +98,10 @@ def build_block(slug: str, port: int) -> str:
 # written. hermes-agent is dual: proxy wiring + markdown injection into
 # AGENTS.md (repo-scoped); .hermes/config.yaml is a YAML config file that
 # must not receive prose.
+_PROXY_ONLY_NO_MARKDOWN: frozenset[str] = frozenset(
+    {"claude-code", "qwen-code", "codex"},
+)
+
 _HARNESS_CARRIERS: dict[str, str] = {
     "cursor": ".cursor/rules/agentalloy.mdc",
     "cline": ".clinerules",
@@ -122,6 +126,12 @@ def detect_target(root: Path, harness: str | None = None) -> Path | None:
     When no harness is specified, also checks for ``.cursor`` and ``.windsurf``
     directories (the original behaviour) to detect tool-specific carriers.
     """
+    # 0a. Proxy-only harnesses receive context per-turn via the AgentAlloy
+    #      proxy — they never get a code-index markdown block, even if a
+    #      CLAUDE.md / AGENTS.md already exists in the repo.
+    if harness in _PROXY_ONLY_NO_MARKDOWN:
+        return None
+
     # 0. Harness-agnostic directory checks (when no harness is specified).
     #     .cursor/.cursorrules → dedicated .mdc file.
     #     .windsurf → dedicated .md file (not the shared fallback).

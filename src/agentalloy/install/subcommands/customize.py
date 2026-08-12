@@ -295,8 +295,8 @@ def _ingest_skill(profile_name: str, data: dict[str, Any]) -> None:
             """
             INSERT OR REPLACE INTO profile_skills
               (skill_id, skill_class, canonical_name, raw_prose,
-               domain_tags, applies_to_phases, applies_when, exit_gates, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               domain_tags, applies_to_phases, applies_when, exit_gates, updated_at, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true)
             """,
             [
                 skill_id,
