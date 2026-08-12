@@ -881,7 +881,7 @@ async def _forward_streaming(
             await cm.__aexit__(None, None, None)
         if not has_finish_reason:
             yield _CORRECTIVE_CHUNK
-            yield 'data: [DONE]\n\n'.encode()
+            yield b'data: [DONE]\n\n'
 
     return StreamingResponse(
         relay(),

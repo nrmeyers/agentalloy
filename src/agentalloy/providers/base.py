@@ -409,7 +409,7 @@ def build_instructive_denial_message(
         ])
     else:
         message_parts.extend([
-            f"To advance, complete the deliverable and the phase will auto-advance.",
+            "To advance, complete the deliverable and the phase will auto-advance.",
             "",
             f"Next: {next_phase}",
         ])
@@ -524,10 +524,7 @@ _SHELL_WRITE_PATTERNS: tuple[str, ...] = (
 def _command_writes_to_code(command: str) -> bool:
     """Check if a shell command writes to src/ or tests/ directories."""
     import re
-    for pattern in _SHELL_WRITE_PATTERNS:
-        if re.search(pattern, command):
-            return True
-    return False
+    return any(re.search(pattern, command) for pattern in _SHELL_WRITE_PATTERNS)
 
 
 # Phases that require explicit approval before advancing
@@ -544,12 +541,8 @@ def _command_advances_phase_without_approval(command: str, current_phase: str) -
     # Match: agentalloy phase set <phase>
     pattern = r"agentalloy\s+phase\s+set\s+(\S+)"
     match = re.search(pattern, command)
-    if match:
-        target_phase = match.group(1)
-        # If current phase requires approval, block the advance
-        if current_phase in _APPROVAL_REQUIRED_PHASES:
-            return True
-    return False
+    # If current phase requires approval, block the advance
+    return bool(match) and current_phase in _APPROVAL_REQUIRED_PHASES
 
 
 def end_session_instruction(phase: str) -> str:

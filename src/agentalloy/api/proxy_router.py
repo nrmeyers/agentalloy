@@ -1469,9 +1469,9 @@ async def proxy_chat_completions(
                             from agentalloy.providers.base import (
                                 GATED_TOOL_NAMES,
                                 SHELL_TOOL_NAMES,
-                                build_instructive_denial_message,
-                                _command_writes_to_code,
                                 _command_advances_phase_without_approval,
+                                _command_writes_to_code,
+                                build_instructive_denial_message,
                             )
                             # Check if any tool calls are gated
                             gated_indices = []
@@ -1491,10 +1491,7 @@ async def proxy_chat_completions(
                                                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
                                                 command = args.get("command", "")
                                                 # Check writes to code
-                                                if _command_writes_to_code(command):
-                                                    gated_indices.append((i, fn_name))
-                                                # Check phase advance without approval
-                                                elif _command_advances_phase_without_approval(command, current_phase):
+                                                if _command_writes_to_code(command) or _command_advances_phase_without_approval(command, current_phase):
                                                     gated_indices.append((i, fn_name))
                                             except (json.JSONDecodeError, AttributeError):
                                                 pass
