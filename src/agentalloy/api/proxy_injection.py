@@ -680,24 +680,28 @@ def inject_into_openai_system_prompt(
         return new_messages
 
     # At least one system message exists.  Strip stale blocks from the first
-    # one, then append a fresh system message at the end.
+    # one, then merge the fresh block INTO it (not as a separate message).
+    # Some upstream chat templates (e.g. llama.cpp Jinja) reject multiple
+    # system messages — they only allow a single system message at position 0.
     first = sys_indices[0]
     target = messages[first]
     content = target.content
 
     if isinstance(content, str):
         stripped = _strip_any_delimited_block(content)
-        new_content: str | list[dict[str, Any]] = stripped
+        merged_content: str | list[dict[str, Any]] = (
+            f"{stripped}\n\n{new_block}" if stripped else new_block
+        )
     elif isinstance(content, list):
         blocks = [b for b in content if not _text_block_contains(b, _DELIMITED_BEGIN_PREFIX)]
-        new_content = blocks
+        blocks.append({"type": "text", "text": new_block})
+        merged_content = blocks
     else:
         # Unexpected content shape — leave list untouched.
         return None
 
     new_messages = list(messages)
-    new_messages[first] = target.model_copy(update={"content": new_content})
-    new_messages.append(ProxyMessage(role="system", content=new_block))
+    new_messages[first] = target.model_copy(update={"content": merged_content})
     return new_messages
 
 

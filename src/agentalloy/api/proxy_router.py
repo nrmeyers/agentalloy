@@ -632,8 +632,13 @@ def _stream_upstream_response(
         try:
             async with upstream.stream("POST", chat_url, json=payload) as resp:
                 on_status(resp.status_code)
-                if resp.status_code >= 500:
-                    logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
+                if resp.status_code >= 400:
+                    error_body = await resp.aread()
+                    logger.warning(
+                        "Upstream streaming returned HTTP %d: %s",
+                        resp.status_code,
+                        error_body.decode(errors="replace")[:500],
+                    )
                     yield error_sse_plain(
                         f"Upstream returned HTTP {resp.status_code}",
                         resp.status_code,
