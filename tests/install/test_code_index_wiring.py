@@ -122,19 +122,24 @@ class TestDetectTargetHarness:
         """codex has no dedicated carrier (proxy-wired) → None when no shared target."""
         assert ciw.detect_target(tmp_path, harness="codex") is None
 
-    def test_codex_falls_to_shared_when_target_exists(self, tmp_path: Path) -> None:
-        """codex falls through to shared targets when no dedicated carrier exists."""
+    def test_codex_returns_none_even_when_shared_target_exists(self, tmp_path: Path) -> None:
+        """codex is proxy-only — no code-index block even if CLAUDE.md exists."""
         (tmp_path / "CLAUDE.md").write_text("# Repo\n")
-        assert ciw.detect_target(tmp_path, harness="codex") == tmp_path / "CLAUDE.md"
+        assert ciw.detect_target(tmp_path, harness="codex") is None
 
     def test_qwen_code_returns_none_no_dedicated_carrier(self, tmp_path: Path) -> None:
         """qwen-code has no dedicated carrier (proxy-wired) → None when no shared target."""
         assert ciw.detect_target(tmp_path, harness="qwen-code") is None
 
-    def test_qwen_code_falls_to_shared_when_target_exists(self, tmp_path: Path) -> None:
-        """qwen-code falls through to shared targets when no dedicated carrier exists."""
+    def test_qwen_code_returns_none_even_when_shared_target_exists(self, tmp_path: Path) -> None:
+        """qwen-code is proxy-only — no code-index block even if AGENTS.md exists."""
         (tmp_path / "AGENTS.md").write_text("# Agents\n")
-        assert ciw.detect_target(tmp_path, harness="qwen-code") == tmp_path / "AGENTS.md"
+        assert ciw.detect_target(tmp_path, harness="qwen-code") is None
+
+    def test_claude_code_returns_none_even_when_claude_md_exists(self, tmp_path: Path) -> None:
+        """claude-code is proxy-only — no code-index block even if CLAUDE.md exists."""
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        assert ciw.detect_target(tmp_path, harness="claude-code") is None
 
     def test_hermes_agent_returns_none_without_agents(self, tmp_path: Path) -> None:
         """hermes-agent maps to AGENTS.md; returns None when it doesn't exist."""
