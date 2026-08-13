@@ -1,9 +1,10 @@
-"""Knowledge slice 2 — the just-in-time decision push (AC 6).
+"""Knowledge slice 2 — the just-in-time decision manifest (AC 6).
 
 Given a design/build work-item's contract, the repo's code-index graph, and the
 tier-2 text already composed this turn, select the decisions governing code in the
-contract's ``scope.touches`` and render them as a distinct "why" block to fold into
-the composed context (never the prompt-cached system field).
+contract's ``scope.touches`` and render them as a compact manifest — decision
+headings and source paths only, no snippet bodies.  The model must pull full
+rationale via ``agentalloy knowledge why <fqn>``.
 
 Deterministic, no LLM, no network. This module holds the pure selection/render
 logic (it takes an opened graph store); the compose seam (``proxy_apply``) owns the
@@ -35,13 +36,17 @@ _SOLUTIONS_PREFIX = "docs/solutions/"
 
 @dataclass(frozen=True)
 class DecisionPush:
-    """The rendered decision block plus its provenance counts (for telemetry —
+    """The rendered decision manifest plus its provenance counts (for telemetry —
     the push runs outside the compose telemetry merge, so it reports its own).
+
+    ``decisions`` carries the selected rows so downstream consumers (tests,
+    telemetry) can inspect what was chosen without re-parsing the manifest text.
     """
 
     text: str
     count: int
     truncated: bool
+    decisions: tuple[DecisionRow, ...] = ()
     related_count: int = 0
 
 
@@ -93,33 +98,28 @@ def _resolve_touched_files(graph: CodeGraphStore, globs: list[str]) -> list[str]
     return matched
 
 
-def _strip_duplicate_heading(snippet: str, heading: str) -> str:
-    """Drop the snippet's leading heading line when it duplicates ``heading``.
-
-    Markdown chunks carry their own ``## Heading`` line in the body, and
-    :func:`_render` emits the heading itself — without this the decision heading
-    appears twice in the injected block (UAT finding).
-    """
-    body = snippet.strip()
-    first, _, rest = body.partition("\n")
-    if first.startswith("#") and first.lstrip("#").strip().casefold() == heading.strip().casefold():
-        return rest.strip()
-    return body
-
-
 def _render(decisions: list[DecisionRow]) -> str:
-    lines = ["# Decisions governing this work", ""]
+    """Render a compact manifest: headings + source paths, no snippet bodies.
+
+    The model reads this list to learn *which* decisions exist, then pulls the
+    full rationale on demand via ``agentalloy knowledge why <fqn>``.
+    """
+    lines = [
+        "# Decisions governing this work",
+        "",
+        "The following design decisions govern code in this work-item's scope.",
+        "Use `agentalloy knowledge why <symbol>` to read a decision's full rationale.",
+        "",
+    ]
     for d in decisions:
         source = d.qualified_name.split("::", 1)[0]
         heading = d.heading or d.qualified_name
-        lines.append(f"## {heading}")
-        lines.append(f"_governing decision — {source}_")
-        if d.snippet:
-            body = _strip_duplicate_heading(d.snippet, heading)
-            if body:
-                lines.append("")
-                lines.append(body)
-        lines.append("")
+        lines.append(f"- **{heading}** — `{source}`")
+    lines.append("")
+    lines.append(
+        'Pull full content: `agentalloy knowledge why <fqn>`'
+        ' · `agentalloy knowledge related "<query>"`'
+    )
     return "\n".join(lines).rstrip()
 
 
@@ -207,5 +207,6 @@ def build_decision_block(
         text=_render(all_decisions),
         count=len(all_decisions),
         truncated=truncated,
+        decisions=tuple(all_decisions),
         related_count=related_count,
     )

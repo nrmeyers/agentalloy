@@ -86,6 +86,7 @@ class IndexResult:
     edges_total: int = 0
     symbols_embedded: int = 0
     markdown_embedded: int = 0
+    governs_edges: int = 0
     duration_s: float = 0.0
     error: str | None = None
 
@@ -683,6 +684,7 @@ async def run_index_job(
 
         # --- markdown phase (optional) -----------------------------------------
         markdown_embedded = 0
+        governs_written = 0
         if index_markdown:
             _check_cancel()
             _progress("markdown", 75.0)
@@ -718,6 +720,7 @@ async def run_index_job(
                 unresolved_spans=governs.unresolved_spans,
                 suspicious_docs=governs.suspicious_docs,
             )
+            governs_written = governs.written
 
         # --- fts phase ------------------------------------------------------------
         _check_cancel()
@@ -745,6 +748,7 @@ async def run_index_job(
             edges_total=len(code_edges),
             symbols_embedded=symbols_embedded,
             markdown_embedded=markdown_embedded,
+            governs_edges=governs_written,
         )
     except JobCancelledError:
         jobs.mark_failed(job_id, error="cancelled by request", terminal_status="cancelled")

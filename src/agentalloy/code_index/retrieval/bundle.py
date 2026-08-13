@@ -52,6 +52,14 @@ _TEST_PATH_MARKERS = ("/tests/", "test_", "_test", "/spec/")
 Reason = Literal["seed", "caller", "callee"]
 
 
+class DecisionSummary(BaseModel):
+    """A governing decision attached to a bundle item — the 'why' behind the code."""
+
+    qualified_name: str
+    heading: str
+    snippet: str | None
+
+
 class BundleItem(BaseModel):
     """One symbol in the bundle. Header fields are always populated; only
     ``source`` is subject to budget truncation.
@@ -64,6 +72,7 @@ class BundleItem(BaseModel):
     score: float
     reason: Reason
     source: str
+    governing_decisions: list[DecisionSummary] = []
 
 
 class Bundle(BaseModel):
@@ -144,6 +153,23 @@ async def build_bundle(
                 if len(source) > room:
                     source = source[:room]
                 total += header_cost + len(source)
+
+                # Attach governing decisions (the 'why' behind the code).
+                gov_decisions: list[DecisionSummary] = []
+                for d in graph.governing_decisions(qn):
+                    snippet = d.snippet or ""
+                    decision_cost = len(d.qualified_name) + len(d.heading) + len(snippet) + 16
+                    if total + decision_cost > budget_chars:
+                        break
+                    total += decision_cost
+                    gov_decisions.append(
+                        DecisionSummary(
+                            qualified_name=d.qualified_name,
+                            heading=d.heading,
+                            snippet=d.snippet,
+                        ),
+                    )
+
                 items.append(
                     BundleItem(
                         qualified_name=qn,
@@ -153,6 +179,7 @@ async def build_bundle(
                         score=score,
                         reason=reason,
                         source=source,
+                        governing_decisions=gov_decisions,
                     ),
                 )
                 if total >= budget_chars:

@@ -77,7 +77,12 @@ by intent, trace call graphs, or assemble cross-file context:
 
 - `agentalloy code search "<intent>" -k 10` — hybrid semantic search
 - `agentalloy code callers <fqn>` (or `callees`) — call-graph tracing
-- `agentalloy code bundle "<task>"` — budgeted multi-file context
+- `agentalloy code bundle "<task>"` — budgeted multi-file context (includes governing design decisions)
+
+Design decisions behind the code:
+
+- `agentalloy knowledge why <fqn>` — design rationale governing a symbol
+- `agentalloy knowledge related "<query>"` — find related decisions by topic
 
 Re-run `agentalloy code index` after large changes. This block is managed by
 agentalloy (`agentalloy unwire` removes it); edit outside the markers."""
