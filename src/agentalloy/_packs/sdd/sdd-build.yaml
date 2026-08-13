@@ -16,8 +16,8 @@ applies_to_phases:
 # work items and advances to qa. A customization may reword the prose but must
 # keep these verbatim.
 prose_invariants:
-  - "agentalloy phase set qa"
-  - "agentalloy task next"
+  - "state panel"
+  - "agentalloy:artifact"
 exit_gates:
   all_of:
     # Prove the build touched the declared scope (``scope.touches`` of the
@@ -68,13 +68,13 @@ contract_template: |
 
   Approach and task order live in the design artifact (approach.artifact) and plan artifacts
   (tasks.artifact, test-plan.artifact). Per-task build contracts live in the contract store and
-  are advanced with `agentalloy task next`.
+  are advanced automatically — state that the current task is complete and the next task loads.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "two-tier injection: build no longer authors contracts (design emits one per task); walk the per-task build contracts with `agentalloy task next`, which front-loads each task's domain skills + the task itself before coding — no skill-selection reasoning; contract body is now the retrieval prompt (a real task description, not a tasks.artifact pointer); strict TDD against test-plan.artifact unchanged"
+change_summary: "API-first migration: removed all CLI commands (agentalloy phase set, agentalloy task next, agentalloy contract artifact-list, agentalloy contracts list, agentalloy task status, agentalloy contract init, agentalloy compose, agentalloy resume). Replaced with state panel references and artifact markers. Build now reads phase/task progress from the state panel, records artifacts via <!-- agentalloy:artifact --> markers, and advances phases automatically when exit gates pass. Contract body remains the retrieval prompt; strict TDD against test-plan.artifact unchanged."
 raw_prose: |
 
   **Before writing any code, verify the preceding phase's deliverables exist.**  # SDD — Build
@@ -84,13 +84,7 @@ raw_prose: |
   do not, you skipped plan; STOP and go back. You MUST work the plan's
   task slices as written and prove each with a test. You MUST NOT invent new
   architecture or acceptance here — if you are making those decisions, you are
-  in the wrong phase. Confirm by running:
-
-      agentalloy contract artifact-list --phase design --slug <slug>   # check approach.artifact
-      agentalloy contract artifact-list --phase plan --slug <slug>     # check tasks.artifact, test-plan.artifact
-
-  (Replace `<slug>` with the active contract slug — run `agentalloy contracts list`
-  if you're not sure.)
+  in the wrong phase. Check your state panel for recorded artifacts from the design and plan phases.
 
   Spec said *what*, design said *how* and plan said *in what order*. Build is
   execution: work the plan's task slices, one at a time, each proven by a test
@@ -102,21 +96,15 @@ raw_prose: |
   Read the plan artifacts — `tasks.artifact` (your worklist) and `test-plan.artifact` (the unit
   cases each task must pass), the design artifact (approach.artifact, the how + decisions you're
   implementing against), plus the spec artifact (the acceptance behind it
-  all). Plan already wrote one build contract per task — `agentalloy task status`
-  lists them in order.
+  all). Check your state panel for task progress and the ordered list of build contracts.
 
-  ## 2. Pull the next task's skills, then work it
+  ## 2. Work each task in sequence
 
-  Don't author contracts here — plan did. For each task, top to bottom:
+  Don't author contracts here — plan did. For each task, top to bottom, state that the current task is complete. The next task loads automatically.
 
-      agentalloy task next
-
-  That advances the work-item cursor; on the next turn the proxy front-loads the
-  domain skills matching that task **plus the task itself**, before you write a
+  The proxy front-loads the domain skills matching that task **plus the task itself**, before you write a
   line. You don't decide which skills you need — they arrive with the task. Then
-  implement it test-first (§3). One `task next` per task; `agentalloy task status`
-  shows where you are. (If the skills don't arrive: `agentalloy compose --contract-id
-  <contract-id>`.)
+  implement it test-first (§3). One task at a time; check your state panel to see where you are. (If the skills don't arrive: use `agentalloy_query` with action=`contract_detail` to read the full contract.)
 
   ## 3. TDD: red → green → refactor, one case at a time
 
@@ -145,7 +133,7 @@ raw_prose: |
 
   Work within the current task contract's `scope.touches`. Spreading wider than you planned is
   the signal to stop and check: is this scope creep (cut it), or did design miss
-  something (fix it there — `agentalloy phase set design`)? Don't quietly grow
+  something (fix it there — state that the phase is complete. The phase advances automatically once exit gates pass.)? Don't quietly grow
   the blast radius.
 
   ## 5. Done when
@@ -156,23 +144,19 @@ raw_prose: |
   app's real entry point and confirm data flows end to end — green unit tests
   prove the unit works, not that the running app uses it.
 
-  Then seed **qa's work-item** — the contract review opens on:
-
-      agentalloy contract init --phase qa --slug <task-slug>
+  Then seed **qa's work-item** — record the artifact using an artifact marker: `<!-- agentalloy:artifact name=work-item -->...<!-- /agentalloy:artifact -->`
 
   Fill `domain_tags` with the *verification surface* (the tech qa will probe —
   the risk areas you touched, the test types that matter here) and write the body
   as what to verify for this feature; set `scope.touches`. That body is qa's
   retrieval prompt, so review opens already primed with the right testing skills.
 
-  Then advance yourself — don't wait to be told. With the suite green, run
-  `agentalloy phase set qa` and carry on into review. Phase advance ends this
-  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
-  context. If anything's unresolved —
+  Then advance yourself — don't wait to be told. With the suite green, state that the phase is complete. The phase advances automatically once exit gates pass. Phase advance ends this
+  session; the next phase begins in a fresh one, and the state panel provides context automatically. If anything's unresolved —
   a case you couldn't make pass, a regression you can't explain — **stop and
   surface it** instead of advancing; a red suite isn't done. The phase guard
   refuses the jump until code exists under `src/` and tests under `tests/`, so a
-  premature `phase set` just tells you what's missing.
+  premature advance just tells you what's missing.
 
   ## Not this
 

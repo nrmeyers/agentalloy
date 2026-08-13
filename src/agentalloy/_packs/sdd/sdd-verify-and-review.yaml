@@ -22,7 +22,8 @@ applies_to_phases:
 # warning logged) until its author re-adds the token. A customization may reword
 # the prose but must keep both verbatim.
 prose_invariants:
-  - "agentalloy phase set ship"
+  - "state panel"
+  - "agentalloy:artifact"
   - "the solutions artifact"
 exit_gates:
   all_of:
@@ -76,7 +77,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "two-tier cascade: qa reads its incoming work-item from the contract store (build authored) and, on a clean report, seeds ship's work-item in the store with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (qa artifact) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until the solutions artifact records this task's lesson (a stale prior-task lesson can't satisfy it), with the solutions artifact asserted as a prose invariant. MIGRATION: the lesson moved off disk — it is now the store artifact (phase=qa, name=solution, written via `agentalloy contract artifact-set`) rather than docs/solutions/<slug>.md; the gate reads the store first and still accepts a pre-migration docs/solutions/ file, so existing repos are not stranded. The prose invariant token likewise changed from docs/solutions/ to the solutions artifact: a pre-existing enabled profile override for this skill that lacks the new token is dropped at runtime (shipped prose served, warning logged) until its author re-adds it."
+change_summary: "API-first migration: removed all CLI commands (agentalloy phase set, agentalloy contract show, agentalloy contract artifact-set, agentalloy lessons promote, agentalloy resume). Replaced with state panel references, artifact markers, and agentalloy_query tool calls. QA now reads contracts via agentalloy_query with action=contract_detail, records artifacts via <!-- agentalloy:artifact --> markers, and advances phases automatically when exit gates pass. The solutions artifact is recorded via artifact marker instead of CLI. Route-by-cause remediation and compound-engineering codify gate unchanged."
 raw_prose: |
 
   **Before writing any code, verify the preceding phase's deliverables exist**
@@ -95,9 +96,9 @@ raw_prose: |
 
   ## 1. Run the full bar
 
-  Read your work-item contract first (`agentalloy contract show <slug>`, which
+  Read your work-item contract first — use `agentalloy_query` with action=`contract_detail` to read the full contract, which
   build authored — the proxy front-loaded the verification skills for it on
-  entry). Then run everything — the **CI** system skill names the exact commands
+  entry. Then run everything — the **CI** system skill names the exact commands
   — and record the real results, not "should pass":
 
   - the **whole** test suite, integration included (build only proved the units)
@@ -105,7 +106,7 @@ raw_prose: |
   - the type checker — clean
 
   A red anything stops here: fix it (back to **build** if it's a code defect —
-  `agentalloy phase set build`) before you review. Green is the floor, not the
+  state that the phase is complete. The phase advances automatically once exit gates pass.) before you review. Green is the floor, not the
   finish line.
 
   ## 2. Check it against spec and design
@@ -143,31 +144,38 @@ raw_prose: |
   Then sweep for dead code the change orphaned — list it, and ask before
   deleting anything you didn't add.
 
-  ## 4. Record the verdict to the qa artifact (store, not disk)
+  ## 4. Record the verdict to the qa artifact
 
-  The qa exit gate is store-backed — it does NOT read a `docs/qa/*.md` file on
-  disk. You MUST record the verdict with `agentalloy contract artifact-set`,
-  naming it `qa` (the store canonicalizes the bare name to
-  `qa.artifact`, matching the gate's `*.artifact` glob):
+  The qa exit gate is store-backed. You MUST record the verdict using an artifact marker,
+  naming it `qa`:
 
   ```
-  agentalloy contract artifact-set --phase qa --slug <slug> --name qa --body-file -
+  <!-- agentalloy:artifact name=qa -->
+  # <slug>
+
+  ## Checks
+
+  <suite, lint, and type results — green bar>
+
+  ## Review
+
+  <findings labelled by severity + the spec/non-goals/drift verdict>
+  <!-- /agentalloy:artifact -->
   ```
 
-  Pipe in a markdown body with a `# <slug>` top line, then `## Checks` (the
-  suite, lint, and type results — green bar) and `## Review` (findings labelled
-  by severity + the spec/non-goals/drift verdict). A clean report — green bar,
+  A clean report — green bar,
   every AC met, no open Critical or required finding — clears the way to ship.
 
-  On a clean report, seed **ship's work-item** in the data store before you go:
+  On a clean report, seed **ship's work-item** before you go, using an artifact marker:
 
   ```
-  agentalloy contract artifact-set --phase ship --slug <slug> --name work-item --body-file -
+  <!-- agentalloy:artifact name=work-item -->
+  <delivery surface: release, changelog, migration, rollout — whatever shipping this touches.
+  Write it as what to ship and how to make it reversible.>
+  <!-- /agentalloy:artifact -->
   ```
 
-  Fill the body with the *delivery surface* (release, changelog, migration,
-  rollout — whatever shipping this touches) and write it as what to ship
-  and how to make it reversible. That body is ship's retrieval prompt, so
+  That body is ship's retrieval prompt, so
   delivery opens already primed.
 
   ## 5. Codify what you learned
@@ -178,39 +186,40 @@ raw_prose: |
   decision worth keeping. Keep it concrete and short — a real lesson, not a
   restatement of the diff — so the next task starts smarter instead of from zero.
 
-  Store it, don't write a file:
+  Record it using an artifact marker:
 
   ```
-  agentalloy contract artifact-set --phase qa --slug <slug> --name solution --body-file -
+  <!-- agentalloy:artifact name=solution -->
+  <the problem, the approach that worked, what didn't, and the decision worth keeping>
+  <!-- /agentalloy:artifact -->
   ```
 
   The name is `solution` with no `.artifact` — the qa artifact gate globs `*.artifact` and
   would otherwise demand `## Checks`/`## Review` of your lesson too.
 
-  Once a lesson proves it recurs, promote it into the corpus with
-  `agentalloy lessons promote <slug>` so the signal layer front-loads it
-  automatically next time.
+  Check your state panel for recorded artifacts to confirm the lesson was captured.
 
   ## 6. Advance to ship
 
-  Advance yourself: `agentalloy phase set ship`, and go straight into delivery.
+  Advance yourself: state that the phase is complete. The phase advances automatically once exit gates pass.
+  Go straight into delivery.
   Phase advance ends this session; the next phase begins in a fresh one, and
-  `agentalloy resume` rebuilds context. Don't wait to be told; a clean report
+  the state panel provides context automatically. Don't wait to be told; a clean report
   *is* the signal. The phase guard refuses
   the jump until the qa artifact exists with its `## Checks` and `## Review`
   sections **and** the solutions artifact records this task's lesson, so a
-  premature `phase set` just names what's missing.
+  premature advance just names what's missing.
 
   Anything open routes by *cause*, and you don't fix code here: the report is
   the worklist for the phase that does. Don't advance to ship with an open
   Critical or required finding — route it back instead.
 
-  - **code defect** → `agentalloy phase set build`; build reproduces it as a
+  - **code defect** → state that the phase is complete. The phase advances automatically once exit gates pass.; build reproduces it as a
     failing test first, so the bug earns a regression test on the way out.
   - **design flaw** (the approach is wrong, not just the code) →
-    `agentalloy phase set design`.
+    state that the phase is complete. The phase advances automatically once exit gates pass.
   - **spec gap** (an acceptance criterion was wrong or missing) →
-    `agentalloy phase set spec`.
+    state that the phase is complete. The phase advances automatically once exit gates pass.
   - **nit / optional** → fix in place; it's not a blocker and doesn't need a
     test of its own.
 

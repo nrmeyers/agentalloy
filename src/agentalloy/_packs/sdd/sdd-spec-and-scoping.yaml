@@ -1,6 +1,6 @@
 skill_id: sdd-spec-and-scoping
 canonical_name: SDD — Spec and Scoping (sdd-spec)
-description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via `agentalloy contract artifact-set --phase spec --slug <slug> --name spec.artifact`."
+description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via artifact marker."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -13,10 +13,11 @@ requires: []
 always_apply: false
 applies_to_phases:
   - spec
-# Load-bearing command token not derivable from exit_gates: the forward advance
+# Load-bearing references not derivable from exit_gates: the forward advance
 # to design. A customization may reword the prose but must keep it verbatim.
 prose_invariants:
-  - "agentalloy phase set design"
+  - "state panel"
+  - "agentalloy:artifact"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -31,8 +32,8 @@ exit_gates:
     # Human-in-the-loop checkpoint (#10): spec→design requires a recorded
     # approval. `since_name_glob` = the spec artifact name so editing it after
     # approval invalidates the marker (current digest != recorded digest →
-    # unapproved again). `agentalloy approve spec` writes the marker.
-    # The CLI/service gate (`gates.py::evaluate_phase_gate`) is the HARD
+    # unapproved again). Human approval is recorded when the user approves.
+    # The service gate (`gates.py::evaluate_phase_gate`) is the HARD
     # enforcement and runs even under `--force`; this exit_gate node is the
     # composed advisory that surfaces the awaiting-approval message in-proxy
     # BEFORE the user tries to advance. Matches the design node at
@@ -67,30 +68,28 @@ contract_template: |
   ## Spec
 
   Acceptance criteria and out-of-scope live in the spec artifact
-  (agentalloy contract artifact-set --phase spec --slug {{task_slug}} --name spec.artifact).
+  (recorded via artifact marker: `<!-- agentalloy:artifact name=spec.artifact -->`).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "outcomes-first spec: code-index + knowledge-graph reconnaissance informs outcome questions; always recommend when presenting options; code-index/knowledge-graph for reconnaissance only, not method decisions; prepare hand-off wording aligned with checkpoint model"
+change_summary: "migrated to API-first interface: removed CLI commands, replaced with state panel references and artifact markers; outcomes-first spec with code-index + knowledge-graph reconnaissance"
 raw_prose: |
+  # SDD — Spec
 
-  **Before writing any spec, verify intake's contract exists** (`agentalloy contract list --phase spec`),
-  and **before writing code**, verify the preceding phase's deliverables exist.  # SDD — Spec
+  **Before writing any spec**, check your state panel to verify intake's contract exists,
+  and **before writing code**, verify the preceding phase's deliverables exist.
 
-  **Checkpoint first.** You MUST confirm intake's contract exists by running:
+  **Checkpoint first.** You MUST confirm intake's contract exists. Use `agentalloy_query`
+  with action=`contract_detail` to read the full contract. If it does not exist, you
+  skipped intake; STOP and go back.
 
-      agentalloy contract show <slug>
-
-  (Replace `<slug>` with the active contract slug — run `agentalloy contracts list` to find
-  it if you're not sure.) If it does not exist, you skipped intake; STOP and go back.
-
-  You MUST record the spec via `agentalloy contract artifact-set --phase spec --slug <slug>
-  --name spec.artifact --body <text>` (or `--body-file -` for stdin) with its **Acceptance
-  Criteria** and **Out of Scope** sections. There is no file to write — this is a store
-  write, not a filesystem document. You MUST NOT design solutions or touch `src/` here — spec
-  settles *what* and *done*, never *how*.
+  You MUST record the spec using an artifact marker:
+  `<!-- agentalloy:artifact name=spec.artifact -->...<!-- /agentalloy:artifact -->`
+  with its **Acceptance Criteria** and **Out of Scope** sections. There is no file to
+  write — this is a store write, not a filesystem document. You MUST NOT design solutions
+  or touch `src/` here — spec settles *what* and *done*, never *how*.
 
   You have one job: turn the intake contract's fuzzy ask into a spec precise enough that
   design and build can't drift from it. Bad specs cascade downstream into bad designs and
@@ -99,22 +98,22 @@ raw_prose: |
   ## 1. Ground your questions in the codebase
 
   Before you ask the user anything, understand what's possible in this codebase.
-  Use the tools available in your tool set — the code-index and knowledge-graph
-  queries — to find answers about the existing codebase. These aren't design
-  tools; they're reconnaissance tools. You're preparing to ask the user about
-  outcomes, and you can't ask good questions if you don't understand the terrain.
+  Use `agentalloy_query` with action=`code_search` and action=`knowledge_related` to
+  find answers about the existing codebase. These aren't design tools; they're
+  reconnaissance tools. You're preparing to ask the user about outcomes, and you can't
+  ask good questions if you don't understand the terrain.
 
-  - **Code-index**: What are the entry points? What patterns does this repo
-    follow? What's the data flow? (e.g. "the app has a FastAPI entry at
-    `/api/v1` with Pydantic models in `models/`")
-  - **Knowledge graph**: What domain concepts exist? What are the relationships
-    between entities? What constraints are baked in? (e.g. "User → Order →
-    Payment with a status transition constraint")
+  - **Code search**: What are the entry points? What patterns does this repo follow?
+    What's the data flow? (e.g. "the app has a FastAPI entry at `/api/v1` with Pydantic
+    models in `models/`")
+  - **Knowledge graph**: What domain concepts exist? What are the relationships between
+    entities? What constraints are baked in? (e.g. "User → Order → Payment with a status
+    transition constraint")
 
-  This is reconnaissance, not design. Query the code-index and knowledge graph
-  to inform your questions — don't use them to make method decisions. If you
-  don't have code-index or knowledge-graph tools available, skip reconnaissance
-  and proceed from the intake contract.
+  This is reconnaissance, not design. Query the code-index and knowledge graph to inform
+  your questions — don't use them to make method decisions. If you don't have code-index
+  or knowledge-graph tools available, skip reconnaissance and proceed from the intake
+  contract.
 
   ## 2. Ask about outcomes — not methods
 
@@ -173,34 +172,29 @@ raw_prose: |
   ## 6. Record it + prepare the hand-off
 
   The **spec artifact** is the deliverable and the single source of truth for acceptance —
-  record it with:
-
-      agentalloy contract artifact-set --phase spec --slug <task-slug> --name spec.artifact
+  record it using an artifact marker:
+  `<!-- agentalloy:artifact name=spec.artifact -->...<!-- /agentalloy:artifact -->`
 
   The body MUST include `## Acceptance Criteria` and `## Out of Scope` sections. That
   completes spec.
 
-  Then **prepare the hand-off** to design:
-
-      agentalloy contract init --phase design --slug <task-slug>
-
-  In the design work-item, fill `domain_tags` with the *design surface* (the tech and
-  patterns design will reason about — `caching`, `async`, `postgres-schema`, not process
-  words) and write the body as what design must produce for this feature. Set
+  Then **prepare the hand-off** to design. A contract is auto-created for the design
+  phase. In the design work-item, fill `domain_tags` with the *design surface* (the tech
+  and patterns design will reason about — `caching`, `async`, `postgres-schema`, not
+  process words) and write the body as what design must produce for this feature. Set
   `scope.touches/avoids`. Don't copy acceptance into it — the spec artifact is
   acceptance's one home.
 
   Then **PRESENT the spec in full and STOP** — do not advance yourself. The forward jump
-  to design is a human checkpoint: only once the user explicitly approves do you run
-  `agentalloy approve spec` (it records the approval and carries you into design) — or,
-  after approval, advance with `agentalloy phase set design`. Phase advance ends this
-  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
-  context. If anything's still unresolved — an assumption the user hasn't confirmed, an
-  acceptance criterion you can't make checkable — **stop and surface it** instead of
-  advancing; resolve it first. The phase guard refuses the jump until the spec artifact
-  is recorded with its required sections AND a human approval is recorded, so a premature
-  `phase set` or `approve` just names what's missing, including a forgotten artifact or
-  a missing section.
+  to design is a human checkpoint: only once the user explicitly approves do you advance.
+  Present the work for human approval. The phase advances after approval is recorded.
+  Phase advance ends this session; the next phase begins in a fresh one, and the state
+  panel provides context automatically. If anything's still unresolved — an assumption
+  the user hasn't confirmed, an acceptance criterion you can't make checkable — **stop
+  and surface it** instead of advancing; resolve it first. The phase guard refuses the
+  jump until the spec artifact is recorded with its required sections AND a human
+  approval is recorded, so a premature advance just names what's missing, including a
+  forgotten artifact or a missing section.
 
   ## Not this
 
@@ -208,4 +202,5 @@ raw_prose: |
   job, and doing it now locks in choices you haven't earned. Don't pad the spec with
   boilerplate the repo already documents. Don't leave acceptance fuzzy to "figure out
   later" — later is more expensive. And if it now feels too small for the full lane,
-  intake over-called it: bail with `agentalloy phase set sdd-fast`.
+  intake over-called it: state that the phase is complete and transition to the fast
+  lane instead.
