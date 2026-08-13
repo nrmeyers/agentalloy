@@ -230,7 +230,7 @@ secret store, and git-excluded by `agentalloy add`.
 - `contracts/` — **legacy.** Work-item contracts and phase artifacts live in the
   AgentAlloy state store, not here. A `contracts/` directory in this repo is a
   pre-migration leftover, read for backward compatibility only.
-- `cursor` — the current work-item pointer (advanced by `agentalloy task`).
+- `cursor` — the current work-item pointer (advanced automatically as tasks complete).
 - `announced` / `composed` / `banner-turns` — legacy locations of per-turn
   injection-cadence counters. Current releases keep these on the AgentAlloy
   data volume instead, precisely so nothing here changes mid-session; a
@@ -239,8 +239,9 @@ secret store, and git-excluded by `agentalloy add`.
 ## Agents: do not hand-write lifecycle files
 
 Specs, approaches, task plans, contracts and phase artifacts are recorded through
-`agentalloy contract artifact-set` / `agentalloy contract init` and read back from
-the store. The **only** files you write to disk are runtime source code and its
+artifact markers (`<!-- agentalloy:artifact name=<name> -->...<!-- /agentalloy:artifact -->`)
+and read back from the store. Contracts are auto-created on phase transitions.
+The **only** files you write to disk are runtime source code and its
 tests. A markdown file created under `docs/`, `.agentalloy/`, or the repo root to
 satisfy a phase gate satisfies nothing — the gate queries the store, so the file
 is invisible to it and the phase stays blocked.
@@ -417,14 +418,12 @@ _SOFT_NOTE_INNER = (
     "workflow here. Managed by AgentAlloy — edits inside these markers are "
     "overwritten on re-wire.\n\n"
     "**Phase protocol.** This repo runs a linear lifecycle: intake → spec → "
-    "design → build → qa → ship. The active phase is shown in your status line "
-    "(`⚙ agentalloy ▸ <phase>`) and its orientation is injected once when the "
-    "phase changes — not every turn, so the absence of an injected block means "
-    "the phase is unchanged, not that there is none. Stay within the current "
+    "design → build → qa → ship. The active phase is shown in your state panel "
+    "and status line (`⚙ agentalloy ▸ <phase>`). Its orientation is injected once "
+    "when the phase changes — not every turn, so the absence of an injected block "
+    "means the phase is unchanged, not that there is none. Stay within the current "
     "phase's intent and produce its exit artifact before advancing; advances are "
-    "gated on that artifact. Read the phase with `agentalloy phase`; advance with "
-    "`agentalloy phase set <phase>` (the proxy also advances it automatically "
-    "when an exit gate is satisfied)."
+    "gated on that artifact. The phase advances automatically once exit gates pass."
 )
 
 
@@ -590,7 +589,8 @@ def _list_wired(args: argparse.Namespace, cwd: Path) -> int:
     Deliberately does not report the phase.  Phase lives only in the state
     store, so showing it here would make a listing command depend on a running
     service — and wiring is specified to neither seed nor read lifecycle state.
-    ``agentalloy phase`` is the one place that answers "which phase".
+    The state panel (injected into the LLM context) is the primary place that
+    answers "which phase".
     """
     from agentalloy.signals.skill_loader import _read_lifecycle_mode
 
@@ -628,7 +628,7 @@ def _render_wired_list(result: dict[str, Any]) -> None:
     else:
         print_rich("    [dim]none wired in this repo[/dim]")
     print_rich(f"\n  Lifecycle: [bold]{result.get('lifecycle_mode', 'off')}[/bold]")
-    print_rich("  [dim]Phase: run `agentalloy phase`[/dim]\n")
+    print_rich("  [dim]Phase: check state panel in LLM context, or run `agentalloy phase`[/dim]\n")
 
 
 def _run(args: argparse.Namespace) -> int:
