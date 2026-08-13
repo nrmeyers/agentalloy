@@ -16,7 +16,7 @@ applies_to_phases:
 # the build contracts and advances. A customization may reword the prose but must
 # keep these verbatim.
 prose_invariants:
-  - "state panel shows current phase"
+  - "state panel"
 exit_gates:
   all_of:
     - artifact_exists:

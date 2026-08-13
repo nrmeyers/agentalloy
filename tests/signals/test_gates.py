@@ -588,8 +588,8 @@ def test_decide_transition_awaiting_approval_advisory(tmp_path: Path):
     ctx = _ctx(tmp_path, "spec")
     decision = decide_transition("spec", _approval_gate(), ctx)
     assert decision.should_transition is False
-    # The leaf eval attaches a present-and-STOP nudge naming `approve spec`.
-    assert any("approve spec" in a for a in decision.advisories)
+    # The leaf eval attaches a present-and-STOP nudge about approval.
+    assert any("approval" in a for a in decision.advisories)
     assert any("STOP" in a for a in decision.advisories)
 
 

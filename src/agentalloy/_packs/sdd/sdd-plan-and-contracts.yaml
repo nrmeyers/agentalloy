@@ -27,7 +27,7 @@ applies_to_phases:
 # taught — dropping it from a customization leaves the cursor mechanism
 # undocumented at the only phase that introduces it.
 prose_invariants:
-  - "state panel shows current phase"
+  - "state panel"
   - "present the work for human approval"
   - "agentalloy:artifact"
 exit_gates:

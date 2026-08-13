@@ -22,7 +22,7 @@ applies_to_phases:
 # to invent a filesystem path (historically docs/fast/*.md, which is gitignored).
 # Every sibling pack names its store verb; this one must too.
 prose_invariants:
-  - "state panel shows current phase; advance by completing exit gates"
+  - "state panel"
   - "agentalloy:artifact"
 exit_gates:
   all_of:

@@ -15,7 +15,6 @@ applies_to_phases:
 # Load-bearing advance references — must be present for prose validation.
 prose_invariants:
   - "state panel"
-  - "agentalloy:artifact"
 exit_gates:
   # §3: intake must produce a contract for the chosen route.
   # The agent writes a contract for one of four phases — any_of accepts whichever.

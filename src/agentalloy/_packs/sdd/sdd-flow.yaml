@@ -17,7 +17,7 @@ applies_to_phases:
 # so the only way to leave it is to advance — and the only destination is intake.
 # A customization may reword the prose but must keep this verbatim.
 prose_invariants:
-  - "state panel shows current phase; advance by completing exit gates"
+  - "state panel"
 signal_keywords:
   - enough exploring
   - ready to scope

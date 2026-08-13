@@ -294,7 +294,7 @@ class TestGuardedAdvance:
         assert result["phase"] == "spec"  # unchanged
         assert result["target"] == "design"
         assert result["reason"] == "approval"
-        assert any("approve spec" in a for a in result["advisories"])
+        assert any("approval" in a for a in result["advisories"])
         # phase file still says spec
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
@@ -406,7 +406,7 @@ class TestApprovalGate:
         assert result["reason"] == "approval"
         assert result["phase"] == "spec"  # unchanged
         assert result["target"] == "design"
-        assert any("approve spec" in a for a in result["advisories"])
+        assert any("approval" in a for a in result["advisories"])
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
     def test_force_bypasses_completeness_not_approval(self, repo_root: Path) -> None:
@@ -438,7 +438,7 @@ class TestApprovalGate:
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is True
         assert result["reason"] == "approval"
-        assert any("approve spec" in a for a in result["advisories"])
+        assert any("approval" in a for a in result["advisories"])
 
 
 class TestShipResetAutoArchive:

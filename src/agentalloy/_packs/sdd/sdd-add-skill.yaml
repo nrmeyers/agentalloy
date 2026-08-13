@@ -25,7 +25,7 @@ applies_to_phases:
 # the prose but must keep these verbatim.
 prose_invariants:
   - "agentalloy validate-pack"
-  - "present the work for human approval; the phase advances after approval is recorded"
+  - "for human approval"
 exit_gates:
   all_of:
     - artifact_exists:

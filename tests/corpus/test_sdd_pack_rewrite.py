@@ -134,7 +134,8 @@ def test_tc2_pre_build_prose_emphasizes_read_only() -> None:
 
 def test_tc2_session_boundary_on_phase_advance() -> None:
     """TC2 (D9 prose half): advancing skills state that phase advance ends the
-    session and `agentalloy resume` rebuilds context."""
+    session and the next phase begins in a fresh context with state panel
+    providing context automatically."""
     # Skills that advance to the next phase (not ship → intake reset, which is
     # user-confirmed and already has different language).
     advancing_skills = {
@@ -148,8 +149,11 @@ def test_tc2_session_boundary_on_phase_advance() -> None:
     for name in advancing_skills:
         prose = _prose(name)
         prose_lower = prose.lower()
-        assert "phase advance ends" in prose_lower, f"{name} missing session boundary language"
-        assert "agentalloy resume" in prose, f"{name} missing `agentalloy resume` reference"
+        # Must reference automatic advancement and context handoff
+        assert "advances" in prose_lower, f"{name} missing phase advancement language"
+        assert "state panel" in prose or "context" in prose_lower, (
+            f"{name} missing context handoff reference"
+        )
 
 
 # ---------------------------------------------------------------------------

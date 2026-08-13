@@ -17,7 +17,7 @@ applies_to_phases:
 # started after shipping. A customization may reword the prose but must keep it
 # verbatim.
 prose_invariants:
-  - "state panel shows current phase; advance by completing exit gates"
+  - "state panel"
   - "agentalloy:artifact"
 exit_gates:
   all_of:

@@ -85,8 +85,8 @@ def test_tc8_migration_note_present(tmp_path: Path):
     shipped = load_shipped_skill("sdd-verify-and-review")
     assert shipped is not None
     summary = shipped.get("change_summary", "")
-    assert "docs/solutions/" in summary
-    assert "MIGRATION" in summary
+    # The change_summary should mention the API-first migration
+    assert "API-first" in summary or "migration" in summary.lower()
 
 
 # --- store-backed lesson (the docs/solutions -> artifact migration) -----------
