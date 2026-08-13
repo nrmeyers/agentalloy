@@ -27,6 +27,7 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -71,6 +72,54 @@ _TOOL_DEFINITION: dict[str, Any] = {
     },
 }
 
+# Query tool actions and their descriptions for the LLM.
+_QUERY_ACTIONS = {
+    "code_search": "Semantic code search across the indexed codebase.",
+    "symbols": "Look up a symbol by fully-qualified name (function, class, etc.).",
+    "knowledge_why": "Read the design decision governing a specific symbol.",
+    "knowledge_related": "Find decisions related to a topic query.",
+    "artifact_body": "Read the full body of a recorded phase artifact.",
+    "contract_detail": "Read the full detail of a contract by ID.",
+    "telemetry": "Recent composition traces with token savings data.",
+}
+
+_QUERY_TOOL_DEFINITION: dict[str, Any] = {
+    "name": "agentalloy_query",
+    "description": (
+        "Query the AgentAlloy knowledge and project system. "
+        "Use for deep-dive lookups when the state leg summary isn't enough detail."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": list(_QUERY_ACTIONS.keys()),
+                "description": "The query to perform. " + " ".join(
+                    f"{k}: {v}" for k, v in _QUERY_ACTIONS.items()
+                ),
+            },
+            "query": {
+                "type": "string",
+                "description": "Search query, symbol FQN, or artifact name (action-specific).",
+            },
+            "slug": {
+                "type": "string",
+                "description": "Contract slug (for artifact_body, contract_detail).",
+            },
+            "phase": {
+                "type": "string",
+                "description": "Phase scope (for artifact_body when slug is omitted).",
+            },
+            "k": {
+                "type": "integer",
+                "description": "Number of results to return (for search actions). Default 10.",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
 
 def _ok(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -95,7 +144,7 @@ def _handle_initialize(request_id: Any, _params: dict[str, Any]) -> dict[str, An
 
 
 def _handle_tools_list(request_id: Any, _params: dict[str, Any]) -> dict[str, Any]:
-    return _ok(request_id, {"tools": [_TOOL_DEFINITION]})
+    return _ok(request_id, {"tools": [_TOOL_DEFINITION, _QUERY_TOOL_DEFINITION]})
 
 
 def _call_compose(port: int, task: str, phase: str) -> str:
@@ -115,8 +164,15 @@ def _call_compose(port: int, task: str, phase: str) -> str:
 def _handle_tools_call(request_id: Any, params: dict[str, Any], port: int) -> dict[str, Any]:
     name = params.get("name")
     args = params.get("arguments") or {}
-    if name != "get_skill_for":
-        return _err(request_id, METHOD_NOT_FOUND, f"Unknown tool: {name}")
+    if name == "get_skill_for":
+        return _handle_skill_for(request_id, args, port)
+    if name == "agentalloy_query":
+        return _handle_query_call(request_id, args, port)
+    return _err(request_id, METHOD_NOT_FOUND, f"Unknown tool: {name}")
+
+
+def _handle_skill_for(request_id: Any, args: dict[str, Any], port: int) -> dict[str, Any]:
+    """Handle the get_skill_for tool call."""
     task = args.get("task")
     if not isinstance(task, str) or not task.strip():
         return _err(request_id, INVALID_PARAMS, "'task' must be a non-empty string")
@@ -144,6 +200,186 @@ def _handle_tools_call(request_id: Any, params: dict[str, Any], port: int) -> di
             "isError": False,
         },
     )
+
+
+def _http_get(port: int, path: str) -> dict[str, Any]:
+    """GET a JSON endpoint on the local AgentAlloy service."""
+    req = urllib.request.Request(  # noqa: S310 — local-only host
+        f"http://127.0.0.1:{port}{path}",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 — local
+        return json.loads(resp.read())
+
+
+def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict[str, Any]:
+    """Handle the agentalloy_query tool call — dispatch to action handlers."""
+    action = args.get("action")
+    if not isinstance(action, str) or action not in _QUERY_ACTIONS:
+        return _err(
+            request_id,
+            INVALID_PARAMS,
+            f"'action' must be one of {list(_QUERY_ACTIONS.keys())}",
+        )
+
+    query = args.get("query", "")
+    slug = args.get("slug", "")
+    phase = args.get("phase", "")
+    k = args.get("k", 10)
+
+    try:
+        if action == "code_search":
+            if not query:
+                return _err(request_id, INVALID_PARAMS, "'query' required for code_search")
+            data = _http_get(port, f"/code/search/semantic?q={_urlencode(query)}&k={k}")
+            text = _format_search_results(data)
+
+        elif action == "symbols":
+            if not query:
+                return _err(request_id, INVALID_PARAMS, "'query' (FQN) required for symbols")
+            data = _http_get(port, f"/code/search/symbol?fqn={_urlencode(query)}")
+            text = _format_symbol(data)
+
+        elif action == "knowledge_why":
+            if not query:
+                return _err(request_id, INVALID_PARAMS, "'query' (FQN) required for knowledge_why")
+            data = _http_get(
+                port,
+                f"/code/search/structural?query=governing_decisions&fqn={_urlencode(query)}",
+            )
+            text = _format_search_results(data.get("results", data))
+
+        elif action == "knowledge_related":
+            if not query:
+                return _err(request_id, INVALID_PARAMS, "'query' required for knowledge_related")
+            data = _http_get(port, f"/code/search/related-decisions?q={_urlencode(query)}&k={k}")
+            text = _format_search_results(data)
+
+        elif action == "artifact_body":
+            if not phase or not slug or not query:
+                return _err(
+                    request_id,
+                    INVALID_PARAMS,
+                    "'phase', 'slug', and 'query' (artifact name) required for artifact_body",
+                )
+            data = _http_get(port, f"/state/artifact/{phase}/{slug}/{_urlencode(query)}")
+            text = data.get("content", json.dumps(data, indent=2))
+
+        elif action == "contract_detail":
+            contract_id = slug or query
+            if not contract_id:
+                return _err(
+                    request_id, INVALID_PARAMS, "'slug' or 'query' (contract ID) required"
+                )
+            data = _http_get(port, f"/contracts/{_urlencode(contract_id)}")
+            text = _format_contract(data)
+
+        elif action == "telemetry":
+            limit = k if isinstance(k, int) else 10
+            phase_filter = f"&phase={phase}" if phase else ""
+            data = _http_get(port, f"/telemetry/traces?limit={limit}{phase_filter}")
+            text = _format_telemetry(data)
+
+        else:
+            return _err(request_id, INVALID_PARAMS, f"Unknown action: {action}")
+
+    except urllib.error.HTTPError as exc:
+        return _err(
+            request_id,
+            INTERNAL_ERROR,
+            f"AgentAlloy returned HTTP {exc.code}: {exc.reason}",
+        )
+    except urllib.error.URLError as exc:
+        return _err(
+            request_id,
+            INTERNAL_ERROR,
+            f"AgentAlloy service unreachable on port {port}: {exc.reason}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err(request_id, INTERNAL_ERROR, f"query failed: {exc}")
+
+    return _ok(
+        request_id,
+        {"content": [{"type": "text", "text": text}], "isError": False},
+    )
+
+
+def _urlencode(s: str) -> str:
+    """URL-encode a string for query parameters."""
+    return urllib.parse.quote(s, safe="")
+
+
+def _format_search_results(data: Any) -> str:
+    """Format search results as readable text."""
+    if not isinstance(data, list):
+        return json.dumps(data, indent=2) if data else "No results."
+    if not data:
+        return "No results."
+    lines = []
+    for i, r in enumerate(data, 1):
+        if isinstance(r, dict):
+            heading = r.get("heading") or r.get("qualified_name") or r.get("symbol") or ""
+            source = r.get("file_path") or r.get("source") or ""
+            snippet = (r.get("snippet") or "")[:200]
+            lines.append(f"{i}. {heading}")
+            if source:
+                lines.append(f"   Source: {source}")
+            if snippet:
+                lines.append(f"   {snippet}")
+            lines.append("")
+    return "\n".join(lines)
+
+
+def _format_symbol(data: Any) -> str:
+    """Format a symbol view as readable text."""
+    if not isinstance(data, dict):
+        return "Symbol not found."
+    name = data.get("fqn") or data.get("name") or "unknown"
+    kind = data.get("kind") or ""
+    source = data.get("file_path") or ""
+    lines = [f"Symbol: {name}"]
+    if kind:
+        lines.append(f"Kind: {kind}")
+    if source:
+        lines.append(f"File: {source}")
+    doc = data.get("docstring") or ""
+    if doc:
+        lines.append(f"\n{doc[:500]}")
+    return "\n".join(lines)
+
+
+def _format_contract(data: Any) -> str:
+    """Format a contract as readable text."""
+    if not isinstance(data, dict):
+        return "Contract not found."
+    lines = [f"Contract: {data.get('contract_id', 'unknown')}"]
+    lines.append(f"Phase: {data.get('phase', '?')}")
+    lines.append(f"Slug: {data.get('slug', '?')}")
+    tags = data.get("domain_tags")
+    if tags:
+        lines.append(f"Domain tags: {tags}")
+    body = data.get("body") or ""
+    if body:
+        lines.append(f"\n{body[:1000]}")
+    return "\n".join(lines)
+
+
+def _format_telemetry(data: Any) -> str:
+    """Format telemetry traces as readable text."""
+    if not isinstance(data, dict):
+        return json.dumps(data, indent=2)
+    traces = data.get("traces", [])
+    if not traces:
+        return "No recent traces."
+    lines = [f"Recent traces ({len(traces)}):"]
+    for t in traces[:10]:
+        phase = t.get("phase", "?")
+        result = t.get("result_type", "?")
+        tokens = t.get("tokens_returned", 0)
+        saved = t.get("tokens_flat_equivalent", 0)
+        lines.append(f"  [{phase}] {result}: {tokens} tokens (flat equiv: {saved})")
+    return "\n".join(lines)
 
 
 _HANDLERS: dict[str, Any] = {
