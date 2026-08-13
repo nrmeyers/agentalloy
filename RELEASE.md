@@ -104,9 +104,7 @@ PRs — it runs nightly (`corpus-nightly.yml`, `integration-tests` job); failure
 open an issue labeled `nightly-integration`. Run it locally before risky
 retrieval/embedding changes: `uv run pytest -m integration`.
 
-Tests live under `tests/` and cover the install pipeline (`tests/install/`),
-retrieval, composition, applicability filtering, telemetry, and the
-harness-wiring catalog.
+Tests live under `tests/` and are organized by product module: proxy surfaces, composition/retrieval, signals, lifecycle flows, code index, storage, telemetry, corpus, contracts, API routers, providers, web UI, core app modules, and the install CLI (subpackaged by concern: wiring, setup, service, container, upgrade, doctor, packs, cli). See `tests/README.md` for the full layout.
 
 ## 4. Versioning (SemVer)
 

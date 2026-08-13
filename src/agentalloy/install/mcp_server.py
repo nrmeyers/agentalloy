@@ -36,7 +36,7 @@ SERVER_VERSION = "0.1.0"
 
 # Compose-target phases exposed to MCP callers: the full Phase vocabulary minus
 # "intake" (the session front door — never a compose probe target; the tool
-# defaults to "build"). tests/test_config_consistency.py asserts this stays in
+# defaults to "build"). tests/core/test_config_consistency.py asserts this stays in
 # lockstep with api.compose_models.Phase.
 MCP_PHASES = ("spec", "design", "plan", "build", "qa", "ship", "sdd-fast", "add-skill", "sdd-flow")
 

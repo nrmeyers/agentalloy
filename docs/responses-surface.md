@@ -83,7 +83,7 @@ outside `apply_signal` — and commits **no cadence marker**. A "delivered once"
 record here would recreate the bug #499 fixed: codex rebuilds each request from
 its own local history and never observes proxy mutations, so the prose would
 vanish from turn 2 on. That failure mode is invisible on turn 1; the two-turn
-tests in `tests/test_proxy_responses_native.py` are the ones that catch it.
+tests in `tests/proxy/test_proxy_responses_native.py` are the ones that catch it.
 
 `instructions` is therefore byte-identical **within a phase**, changing only on
 a phase transition. There is no `cache_control`/ttl analog on this wire —

@@ -108,7 +108,7 @@ The bare `/v1/messages` translate shim is **reachable but completely unwired**, 
 
 **Edit:**
 - `src/agentalloy/app.py` — drop the `proxy_anthropic_router` import and its `include_router(...)`.
-- `tests/test_streaming_error_handling.py` — remove the two bare-path Anthropic classes
+- `tests/proxy/test_streaming_error_handling.py` — remove the two bare-path Anthropic classes
   (`TestAntrhopicStreamingErrorHandling`, `TestAnthropicNonStreamingErrorHandling`) + docstring refs.
 - `README.md` — drop the `POST /v1/messages` translation-shim bullet.
 - `docs/proxy-architecture.md` — collapse the "two distinct Anthropic paths" section to one live
@@ -255,7 +255,7 @@ marker helpers (`api/proxy_injection.py`).
 **Delivery:** one branch, commits sequenced 1 → 2 → 3, a single PR carrying all three + this doc,
 squash-merged + tagged `vX.Y.Z` + container build + GitHub release.
 
-**Test strategy:** hermetic e2e via the `tests/test_proxy_passthrough_native.py` harness
+**Test strategy:** hermetic e2e via the `tests/proxy/test_proxy_passthrough_native.py` harness
 (`create_app(use_default_lifespan=False)` + `httpx.MockTransport` + `TestClient`, stub embed client
 on `app.state.embed_client`), mirrored against the OpenAI path once Phase 2 lands. Whole-suite green
 incl. `test_pack_version_bump_guard.py` (after the bump) and `test_tc11_sse_relay_byte_for_byte`

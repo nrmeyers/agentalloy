@@ -10,7 +10,7 @@ pure behavior, means the same thing inside the container) or *host-topology*
 point at paths or services that don't exist in its namespace).
 
 Classification is enforced for ``Settings`` fields by
-``tests/test_env_forwarding.py``, which enumerates ``Settings.model_fields``
+``tests/install/test_env_forwarding.py``, which enumerates ``Settings.model_fields``
 and fails on any env key absent from both sets — a new config key cannot ship
 without a forwarding decision.
 
