@@ -96,8 +96,9 @@ def test_related_queries_endpoint_and_prints(
     assert seen[0]["q"] == "dependency injection"
     assert seen[0]["repo"] == "org__repo"
     captured = capsys.readouterr()
-    assert "docs/solutions/di.md::anchor" in captured.out
-    assert "docs/solutions/di.md:10" in captured.out
+    # New format: heading extracted from QN, file_path shown separately, full snippet
+    assert "## anchor" in captured.out
+    assert "docs/solutions/di.md" in captured.out
     assert "DI is a pattern" in captured.out
 
 

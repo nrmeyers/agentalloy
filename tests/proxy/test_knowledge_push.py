@@ -95,29 +95,39 @@ def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:
     assert push is not None
     assert push.count == 1 and push.truncated is False
     assert "# Decisions governing this work" in push.text
-    assert "Why foo" in push.text and "Chose `pkg.a.foo`." in push.text
+    assert "Why foo" in push.text
     assert "docs/design/x/approach.md" in push.text
+    # Manifest format: no snippet bodies, just headings + source paths
+    assert "Chose `pkg.a.foo`." not in push.text
+    assert "agentalloy knowledge why" in push.text
+    # decisions tuple carries the selected rows
+    assert len(push.decisions) == 1
+    assert push.decisions[0].heading == "Why foo"
 
 
-def test_snippet_leading_heading_not_duplicated(store: DuckDBCodeGraphStore) -> None:
-    # Real markdown chunks carry their own heading line in the body (UAT finding:
-    # "## Why token bucket" rendered twice). _render must drop the snippet's
-    # leading heading when it duplicates the one it just emitted.
+def test_manifest_excludes_snippet_bodies(store: DuckDBCodeGraphStore) -> None:
+    # The manifest format lists decision headings + source paths but never
+    # includes snippet bodies — the model must pull those via CLI.
     store.upsert_symbols(
         [
             code_sym("pkg.a.foo", "pkg/a.py"),
             decision_sym(
                 "docs/design/x/approach.md::why-foo",
                 "Why foo",
-                "## Why foo\n\nChose `pkg.a.foo`.",
+                "## Why foo\n\nChose `pkg.a.foo` for good reasons.",
             ),
         ]
     )
     store.upsert_edges([governs("docs/design/x/approach.md::why-foo", "pkg.a.foo")])
     push = build_decision_block(contract(["pkg/a.py"]), "", store)
     assert push is not None
-    assert push.text.count("Why foo") == 1
-    assert "Chose `pkg.a.foo`." in push.text
+    # Heading is present (manifest lists it)
+    assert "Why foo" in push.text
+    # Snippet body is NOT present (model must pull it)
+    assert "Chose `pkg.a.foo`" not in push.text
+    # But the decision is accessible via the decisions tuple
+    assert len(push.decisions) == 1
+    assert push.decisions[0].snippet is not None
 
 
 def test_none_when_no_touches_or_no_decisions(store: DuckDBCodeGraphStore) -> None:
@@ -226,8 +236,11 @@ def test_phase2_related_decisions(
     assert push.related_count == 0  # Phase 2 adds nothing new (all in kept_qns)
     assert "Why foo" in push.text
     assert "Thematic bar" in push.text
-    assert "Chose `pkg.a.foo`." in push.text
-    assert "Chose bar for reason X." in push.text
+    # Manifest format: snippet bodies are NOT included
+    assert "Chose `pkg.a.foo`." not in push.text
+    assert "Chose bar for reason X." not in push.text
+    # But decisions are accessible via the decisions tuple
+    assert len(push.decisions) == 2
 
 
 def test_phase2_no_related_when_params_missing(

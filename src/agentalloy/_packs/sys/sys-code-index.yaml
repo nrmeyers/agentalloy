@@ -19,22 +19,31 @@ raw_prose: |
   # Code index
 
   This repo has a local code index (symbol graph + semantic search). Ground
-  yourself in the actual codebase before guessing.
+  yourself in the actual codebase before guessing. The index does NOT push all
+  context to you — pull what you need using the commands below.
+
+  ## Code context
 
   - **design** — check blast radius before committing to an approach:
     `agentalloy code callers <fqn>` · `agentalloy code search "<topic>"`
   - **build** — fetch the symbols your task touches before writing:
     `agentalloy code bundle "<task description>"`
+    The bundle includes governing design decisions ("why" rationale) alongside
+    each symbol's source code.
   - **qa** — regression scope of what you changed:
     `agentalloy code callers <changed-fqn> --depth 3`
 
   Results include file:line — read those files rather than re-searching.
 
-  - **knowledge-graph** — find the design decisions behind a symbol:
-    `agentalloy knowledge why <fqn>` · `agentalloy knowledge related "<query>"`
+  ## Design decisions (knowledge graph)
 
-    The knowledge-graph is a decision layer riding on the code-index graph.
-    It surfaces the rationale behind why code was written a certain way. Use
-    it when you're modifying code and want to understand the original design
-    intent, when you need to trace which decisions govern a particular symbol,
-    or when you're researching related decisions about a topic.
+  When you see a "Decisions governing this work" manifest listing decision
+  headings, pull the ones relevant to your task to understand the rationale:
+
+  - `agentalloy knowledge why <fqn>` — full design rationale governing a symbol
+  - `agentalloy knowledge related "<query>"` — find related decisions by topic
+
+  The knowledge graph is a decision layer riding on the code-index graph. It
+  surfaces the rationale behind why code was written a certain way. Use it when
+  modifying code to understand original design intent, when tracing which
+  decisions govern a symbol, or when researching related decisions on a topic.
