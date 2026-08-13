@@ -43,6 +43,7 @@ from agentalloy.api.proxy_injection import (
 )
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_passthrough_router import (
+    _build_artifact_context,
     _forward_once,
     _forward_streaming,
     _make_on_status,
@@ -183,6 +184,17 @@ async def _maybe_inject(
         if bannered is not current:
             current = bannered
 
+    # Leg 2b: Per-turn state leg — structured JSON context briefing.
+    if signal.state_leg is not None and signal.phase is not None:
+        stated = inject_into_responses_input(
+            current,
+            signal.state_leg,
+            phase=signal.phase,
+            kind="state",
+        )
+        if stated is not current:
+            current = stated
+
     # Leg 3: workflow prose onto the system leg (`instructions`). Fires on EVERY
     # carrier turn -- outside `should_compose`, outside `apply_signal`, and it
     # commits no cadence marker. A "delivered once" record here would recreate the
@@ -281,6 +293,7 @@ async def passthrough_openai_responses(
         payload = None  # not JSON — forward verbatim
 
     on_status: Callable[[int], None] = _noop_status
+    signal: SignalResult | None = None
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
@@ -315,6 +328,9 @@ async def passthrough_openai_responses(
             body_to_send = raw_body
 
     # --- Forward (shared with the Anthropic passthrough; only the path differs). ---
+    # Build artifact extraction context if enabled
+    artifact_ctx = _build_artifact_context(request, signal)
+
     if stream_flag:
         return await _forward_streaming(
             resolved_client,
@@ -323,6 +339,7 @@ async def passthrough_openai_responses(
             body_to_send,
             on_status,
             path=_UPSTREAM_PATH,
+            artifact_extraction=artifact_ctx,
         )
     return await _forward_once(
         resolved_client,
@@ -331,4 +348,5 @@ async def passthrough_openai_responses(
         body_to_send,
         on_status,
         path=_UPSTREAM_PATH,
+        artifact_extraction=artifact_ctx,
     )

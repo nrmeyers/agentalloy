@@ -27,6 +27,7 @@ from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import resolve_session_key
+from agentalloy.api.state_leg import build_state_leg
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE
@@ -160,6 +161,15 @@ class SignalResult:
     # Set only on a carrier turn with a known phase under the active lifecycle mode;
     # None otherwise (and on any soft failure while building it). See `build_banner`.
     banner: str | None = None
+
+    # Per-turn state leg: structured JSON context briefing injected into the
+    # trailing user message on EVERY carrier turn (same cadence as banner).
+    # Gives the LLM a machine-readable snapshot of phase, contract, artifacts,
+    # and gate status — replaces the need for CLI queries. Designed for the
+    # stateless-phase model: a fresh agent can read this and operate immediately.
+    # None when the state is too thin to be useful or building failed.
+    # See `agentalloy.api.state_leg.build_state_leg`.
+    state_leg: str | None = None
 
     # Deferred cadence markers. The signal layer DECIDES what to record but no
     # longer writes `.agentalloy/{announced,composed}` itself — committing at
@@ -1153,6 +1163,23 @@ async def evaluate_signal(
     # queryable instead of only a WARNING line.
     phase_gate_embed_failed = ctx.embed_failed
 
+    # State leg: structured JSON context briefing for the LLM. Built on every
+    # carrier turn (same cadence as banner). Soft: never raises — a failure
+    # yields None and the leg is simply not injected.
+    state_leg_text: str | None = None
+    if is_carrier and phase:
+        try:
+            state_leg_text = build_state_leg(
+                phase,
+                paused_mode=paused_mode,
+                store=ctx.store,
+                contract_id=contract_id,
+                gates_met=gates_met,
+                gates_unmet=gates_unmet,
+            )
+        except Exception:
+            logger.debug("state_leg build failed for phase=%s", phase, exc_info=True)
+
     # 7. Tier 2 cadence: decide whether the current work-item contract's domain block
     #    fires. `contract_id`/`contract_path` were resolved once near the top of this
     #    function (shared with the banner's <slug>). Tier 2 fires when the cursor changed
@@ -1201,6 +1228,7 @@ async def evaluate_signal(
             task=task,
             trace_id=trace_id,
             banner=banner,
+            state_leg=state_leg_text,
             # Quiet for composition, NOT quiet for the system leg: this is the return
             # taken on every turn after the first of a phase, and it is precisely where
             # the workflow instructions used to vanish.
@@ -1271,6 +1299,7 @@ async def evaluate_signal(
         phase=phase,
         task=task,
         banner=banner,
+        state_leg=state_leg_text,
         pre_filter_matched=match.detail if match is not None else None,
         gates_met=gates_met,
         gates_unmet=gates_unmet,

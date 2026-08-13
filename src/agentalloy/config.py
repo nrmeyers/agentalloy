@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     # budget. Env: KNOWLEDGE_RELATED_ENABLED.
     knowledge_related_enabled: bool = True
 
+    # Artifact extraction: parse <!-- agentalloy:artifact --> markers from LLM
+    # responses and write them to the store. Off by default during rollout.
+    # Env: ARTIFACT_EXTRACTION_ENABLED.
+    artifact_extraction_enabled: bool = False
+
     @field_validator("upstream_url")
     @classmethod
     def _normalize_upstream_url(cls, v: str) -> str:

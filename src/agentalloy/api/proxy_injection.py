@@ -83,6 +83,13 @@ BANNER_MARKER_END = "<!-- END AGENTALLOY-BANNER -->"
 ORIENTATION_MARKER_BEGIN = "<!-- BEGIN AGENTALLOY-ORIENTATION -->"
 ORIENTATION_MARKER_END = "<!-- END AGENTALLOY-ORIENTATION -->"
 
+# State markers are NOT phase-stamped: the structured state JSON is strip-and-replaced
+# on EVERY carrier turn (state changes turn to turn), same cadence as the banner.
+# Distinct from all other marker families so the state leg never interferes with
+# workflow, system, banner, or orientation blocks.
+STATE_MARKER_BEGIN = "<!-- BEGIN AGENTALLOY-STATE -->"
+STATE_MARKER_END = "<!-- END AGENTALLOY-STATE -->"
+
 # Delimited-block tags for Anthropic system-prompt and Responses instructions
 # injection.  XML-style tags make the block visually and structurally distinct
 # from the harness's own instructions.
@@ -150,6 +157,11 @@ def _strip_banner_block(text: str) -> str:
 def _strip_orientation_block(text: str) -> str:
     """Remove the orientation block from *text* (once-per-session, not strip-and-replace)."""
     return _strip_block(text, ORIENTATION_MARKER_BEGIN, ORIENTATION_MARKER_END)
+
+
+def _strip_state_block(text: str) -> str:
+    """Remove the state block from *text* (strip-and-replace every turn, like banner)."""
+    return _strip_block(text, STATE_MARKER_BEGIN, STATE_MARKER_END)
 
 
 def _find_delimited_phase(text: str) -> str | None:
@@ -252,6 +264,9 @@ def anthropic_has_marker(
     if kind == "orientation":
         return any(_message_contains(m, ORIENTATION_MARKER_BEGIN) for m in messages)
 
+    if kind == "state":
+        return any(_message_contains(m, STATE_MARKER_BEGIN) for m in messages)
+
     needle = anthropic_marker_begin(phase) if phase is not None else _workflow_begin_any()
     return any(_message_contains(m, needle) for m in messages)
 
@@ -311,6 +326,9 @@ def inject_into_anthropic_messages(
     elif kind == "banner":
         begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
         # Strip-and-replace every turn: no idempotent short-circuit.
+    elif kind == "state":
+        begin, end = STATE_MARKER_BEGIN, STATE_MARKER_END
+        # Strip-and-replace every turn: no idempotent short-circuit.
     else:
         begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
         # Idempotent: current-phase block already present.
@@ -330,6 +348,8 @@ def inject_into_anthropic_messages(
             stripped = _strip_workflow_block(content)
         elif kind == "banner":
             stripped = _strip_banner_block(content)
+        elif kind == "state":
+            stripped = _strip_state_block(content)
         else:
             stripped = content
         new_content = f"{stripped}\n\n{new_block}" if stripped else new_block
@@ -342,6 +362,9 @@ def inject_into_anthropic_messages(
         elif kind == "banner":
             # Drop any prior banner text-block, then append the fresh one.
             blocks = [b for b in blocks if not _text_block_contains(b, BANNER_MARKER_BEGIN)]
+        elif kind == "state":
+            # Drop any prior state text-block, then append the fresh one.
+            blocks = [b for b in blocks if not _text_block_contains(b, STATE_MARKER_BEGIN)]
         new_content = [*blocks, {"type": "text", "text": new_block}]
     else:
         # Unexpected content shape -- leave the payload untouched.
@@ -412,6 +435,8 @@ def responses_has_marker(
             return SYSTEM_MARKER_BEGIN in raw
         if kind == "orientation":
             return ORIENTATION_MARKER_BEGIN in raw
+        if kind == "state":
+            return STATE_MARKER_BEGIN in raw
         needle = anthropic_marker_begin(phase) if phase is not None else _workflow_begin_any()
         return needle in raw
     if not isinstance(raw, list):
@@ -421,6 +446,8 @@ def responses_has_marker(
         return any(_input_item_contains(i, SYSTEM_MARKER_BEGIN) for i in items)
     if kind == "orientation":
         return any(_input_item_contains(i, ORIENTATION_MARKER_BEGIN) for i in items)
+    if kind == "state":
+        return any(_input_item_contains(i, STATE_MARKER_BEGIN) for i in items)
     needle = anthropic_marker_begin(phase) if phase is not None else _workflow_begin_any()
     return any(_input_item_contains(i, needle) for i in items)
 
@@ -455,6 +482,8 @@ def inject_into_responses_input(
             return payload
     elif kind == "banner":
         begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
+    elif kind == "state":
+        begin, end = STATE_MARKER_BEGIN, STATE_MARKER_END
     else:
         begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
         if responses_has_marker(payload, kind="workflow", phase=phase):
@@ -468,6 +497,8 @@ def inject_into_responses_input(
             stripped = _strip_workflow_block(raw)
         elif kind == "banner":
             stripped = _strip_banner_block(raw)
+        elif kind == "state":
+            stripped = _strip_state_block(raw)
         else:
             stripped = raw
         new_input: str | list[Any] = f"{stripped}\n\n{new_block}" if stripped else new_block
@@ -489,6 +520,8 @@ def inject_into_responses_input(
             stripped = _strip_workflow_block(content)
         elif kind == "banner":
             stripped = _strip_banner_block(content)
+        elif kind == "state":
+            stripped = _strip_state_block(content)
         else:
             stripped = content
         new_content: str | list[dict[str, Any]] = (
@@ -501,6 +534,8 @@ def inject_into_responses_input(
             blocks = [b for b in blocks if not _input_text_block_contains(b, _workflow_begin_any())]
         elif kind == "banner":
             blocks = [b for b in blocks if not _input_text_block_contains(b, BANNER_MARKER_BEGIN)]
+        elif kind == "state":
+            blocks = [b for b in blocks if not _input_text_block_contains(b, STATE_MARKER_BEGIN)]
         new_content = [*blocks, {"type": "input_text", "text": new_block}]
     else:
         return payload
@@ -569,6 +604,8 @@ def inject_into_openai_messages(
             return None
     elif kind == "banner":
         begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
+    elif kind == "state":
+        begin, end = STATE_MARKER_BEGIN, STATE_MARKER_END
     else:
         begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
     target = messages[idx]
@@ -576,12 +613,14 @@ def inject_into_openai_messages(
 
     # Idempotent: current-phase block already present in the target.
     if isinstance(content, str):
-        if kind not in ("banner", "orientation", "system") and begin in content:
+        if kind not in ("banner", "state", "orientation", "system") and begin in content:
             return None
         if kind == "workflow":
             stripped = _strip_workflow_block(content)
         elif kind == "banner":
             stripped = _strip_banner_block(content)
+        elif kind == "state":
+            stripped = _strip_state_block(content)
         else:
             stripped = content
         new_block = _block_text(begin, block, end)
@@ -592,7 +631,7 @@ def inject_into_openai_messages(
         # ProxyMessage.content is str | list[dict[str, Any]] | None, so the list
         # branch is already list[dict[str, Any]] — no cast needed.
         blocks = content
-        if kind not in ("banner", "orientation", "system") and any(
+        if kind not in ("banner", "state", "orientation", "system") and any(
             _text_block_contains(b, begin) for b in blocks
         ):
             return None
@@ -602,6 +641,9 @@ def inject_into_openai_messages(
         elif kind == "banner":
             # Drop any prior banner text-block, then append the fresh one.
             blocks = [b for b in blocks if not _text_block_contains(b, BANNER_MARKER_BEGIN)]
+        elif kind == "state":
+            # Drop any prior state text-block, then append the fresh one.
+            blocks = [b for b in blocks if not _text_block_contains(b, STATE_MARKER_BEGIN)]
         new_block = _block_text(begin, block, end)
         new_content = [*blocks, {"type": "text", "text": new_block}]
     else:
