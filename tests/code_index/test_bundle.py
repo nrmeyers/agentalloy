@@ -10,12 +10,12 @@ from agentalloy.code_index.api.state import CodeIndexState
 from agentalloy.code_index.retrieval.bundle import build_bundle
 from agentalloy.code_index.store import open_jobs
 from agentalloy.config import Settings
+from agentalloy.storage.protocols import CodeEdge
 
 from .conftest import FixedEmbedClient, axis_vec, calls_edge, make_symbol, seed_index, vector_row
 
 
-def _governs_edge(src: str, dst: str) -> "CodeEdge":
-    from agentalloy.storage.protocols import CodeEdge
+def _governs_edge(src: str, dst: str) -> CodeEdge:
     return CodeEdge(src=src, dst=dst, kind="GOVERNS", file_path=src.split("::")[0])
 
 SLUG = "repo"

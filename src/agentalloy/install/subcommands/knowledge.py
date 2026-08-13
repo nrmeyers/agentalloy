@@ -55,20 +55,20 @@ def _run_why(args: argparse.Namespace) -> int:
         print("(no governing decisions)")
         return 0
     for d in results:
-        heading = d.get("heading", "")
-        source = d.get("qualified_name", "").split("::", 1)[0]
+        heading = str(d.get("heading", ""))
+        source = str(d.get("qualified_name", "")).split("::", 1)[0]
         loc = f"{d.get('file_path')}:{d.get('start_line')}" if d.get("file_path") else "?"
         print(f"## {heading}")
         print(f"  _governing decision — {source}_  ({loc})")
         print()
-        snippet = d.get("snippet") or ""
+        snippet = str(d.get("snippet") or "")
         if snippet:
-            body = snippet.strip()
-            first, _, rest = body.partition("\n")
+            text = snippet.strip()
+            first, _, rest = text.partition("\n")
             if first.startswith("#") and first.lstrip("#").strip().casefold() == heading.strip().casefold():
-                body = rest.strip()
-            if body:
-                print(body)
+                text = rest.strip()
+            if text:
+                print(text)
                 print()
     return 0
 
@@ -97,12 +97,12 @@ def _run_related(args: argparse.Namespace) -> int:
         print("(no related decisions)")
         return 0
     for d in results:
-        heading = d.get("qualified_name", "").split("::", 1)[-1]
-        source = d.get("file_path", "?")
+        heading = str(d.get("qualified_name", "")).split("::", 1)[-1]
+        source = str(d.get("file_path", "?"))
         print(f"## {heading}")
         print(f"  _related decision — {source}_")
         print()
-        snippet = d.get("snippet") or ""
+        snippet = str(d.get("snippet") or "")
         if snippet:
             print(snippet.strip())
             print()
