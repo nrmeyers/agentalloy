@@ -22,8 +22,8 @@ applies_to_phases:
 # to invent a filesystem path (historically docs/fast/*.md, which is gitignored).
 # Every sibling pack names its store verb; this one must too.
 prose_invariants:
-  - "agentalloy phase set qa"
-  - "agentalloy contract artifact-set --phase sdd-fast"
+  - "state panel"
+  - "agentalloy:artifact"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -87,15 +87,15 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: fast-lane workflow — compressed spec+design+build for a single task (no build loop), merging into the standard qa → ship; bail-to-spec escape hatch
+change_summary: "API-first migration: removed CLI commands (phase set, contract artifact-set); replaced with state panel references and artifact markers. Methodology unchanged — fast-lane workflow: compressed spec+design+build for a single task (no build loop), merging into the standard qa → ship; bail-to-spec escape hatch."
 raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
   **Checkpoint first.** The fast lane compresses spec + design + build into one pass, but you MUST
-  still record the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) to the
-  store — via `agentalloy contract artifact-set --phase sdd-fast` — before coding, and you MUST
-  prove the work with tests under `tests/` before ship. You MUST NOT skip the acceptance and test
-  cases just because the lane is fast — fast is not unspecified.
+  still record the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) using
+  an artifact marker before coding, and you MUST prove the work with tests under `tests/` before
+  ship. You MUST NOT skip the acceptance and test cases just because the lane is fast — fast is
+  not unspecified.
 
   You're on the fast lane: one compressed pass — spec → design → build → test —
   for a single, clearly-bounded task. It's the full lifecycle's spec + design +
@@ -104,10 +104,19 @@ raw_prose: |
 
   ## Where the artifact goes
 
-  **The sdd-fast artifact is not a file.** It lives in the AgentAlloy store, and
-  the only way to record it is:
+  **The sdd-fast artifact is not a file.** It is recorded via an artifact marker
+  in your response, which the proxy extracts automatically:
 
-      agentalloy contract artifact-set --phase sdd-fast --slug <slug> --name fast.artifact --body-file -
+  ```
+  <!-- agentalloy:artifact name=fast.artifact -->
+  ## Acceptance Criteria
+  ...
+  ## Approach
+  ...
+  ## Test Cases
+  ...
+  <!-- /agentalloy:artifact -->
+  ```
 
   Do **NOT** create `docs/fast/`, a spec markdown file, or any other file on disk
   for it. The exit gate reads the store, so a file written anywhere on disk does
@@ -131,11 +140,12 @@ raw_prose: |
      spreads wider than scoped, bail.
   4. **Test Cases.** Write the tests that prove the acceptance, and run them green.
   5. **Hand to QA.** Once the sdd-fast artifact carries the three sections *in the
-     store*, code
-     exists under `src/`, and a test under `tests/`, advance yourself —
-     `agentalloy phase set qa` — into the **standard** verification + ship. Don't
-     wait to be told. The phase guard refuses the jump until those exist, so a
-     premature `phase set` just tells you what's still missing.
+     artifact marker*, code exists under `src/`, and a test under `tests/`,
+     state that the phase is complete. The phase advances automatically once exit
+     gates pass, moving you into the **standard** verification + ship. Don't
+     wait to be told. Check your state panel — the exit gates refuse the jump
+     until the required artifacts exist, so a premature advance just tells you
+     what's still missing.
 
   Fast does *not* shortcut QA or ship: a small change still needs real
   verification. From `qa` on, you're on the same gates as the full lane.
@@ -144,10 +154,7 @@ raw_prose: |
 
   The fast lane is a bet that this is one simple task. If it turns out to need real
   design, touches more than you scoped, fragments into multiple tasks, or the
-  acceptance got fuzzy, **stop and bail**:
-
-      agentalloy phase set spec
-
+  acceptance got fuzzy, **stop and bail**: state that the phase is `spec` instead.
   That drops you into the full lifecycle (`spec → design → build → qa → ship`)
   with the same contract. Bailing early is far cheaper than forcing a complex
   change through a one-pass lane.

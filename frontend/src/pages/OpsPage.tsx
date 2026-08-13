@@ -26,7 +26,7 @@ import { Chip, ChipRow } from './skills/shared';
 function PassFailBadge({ passed }: { passed: boolean | undefined }) {
   if (passed === undefined) {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[var(--bg-tertiary)] text-[var(--text-primary)]">
         unknown
       </span>
     );
@@ -55,7 +55,7 @@ function DoctorSection() {
         <button
           onClick={() => doctor.refetch()}
           disabled={doctor.isFetching}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 disabled:opacity-50"
+          className="px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)] disabled:opacity-50"
         >
           {doctor.isFetching ? 'Running…' : 'Re-run checks'}
         </button>
@@ -73,7 +73,7 @@ function DoctorSection() {
                 ? 'bg-green-50 border border-green-200 text-green-800'
                 : doctor.data?.all_checks_passed === false
                   ? 'bg-red-50 border border-red-200 text-red-800'
-                  : 'bg-gray-50 border border-gray-200 text-gray-700'
+                  : 'bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-secondary)]'
             }`}
           >
             {doctor.data?.all_checks_passed === true
@@ -95,7 +95,7 @@ function DoctorSection() {
                 label: 'Detail',
                 className: 'max-w-md',
                 render: (r) => (
-                  <span className={`break-words ${r.passed === false ? 'text-red-700' : 'text-gray-700'}`}>
+                  <span className={`break-words ${r.passed === false ? 'text-red-700' : 'text-[var(--text-secondary)]'}`}>
                     {fmt(r.error ?? r.detail)}
                   </span>
                 ),
@@ -106,9 +106,9 @@ function DoctorSection() {
                 className: 'max-w-md',
                 render: (r) =>
                   r.passed === false && r.remediation ? (
-                    <span className="break-words text-gray-700">{r.remediation}</span>
+                    <span className="break-words text-[var(--text-secondary)]">{r.remediation}</span>
                   ) : (
-                    <span className="text-gray-400">—</span>
+                    <span className="text-[var(--text-tertiary)]">—</span>
                   ),
               },
               {
@@ -121,8 +121,8 @@ function DoctorSection() {
           />
 
           {anyFailed && (
-            <p className="text-xs text-gray-500">
-              Repair runs via CLI — <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">agentalloy doctor --repair</code>{' '}
+            <p className="text-xs text-[var(--text-tertiary)]">
+              Repair runs via CLI — <code className="font-mono bg-[var(--bg-tertiary)] px-1 py-0.5 rounded">agentalloy doctor --repair</code>{' '}
               (the service can't repair itself).
             </p>
           )}
@@ -180,10 +180,8 @@ function ReembedSection() {
                 fmt(status.data?.unembedded, 'unknown')
               )
             }
-            sub={
-              unembedded > 0 ? (
-                <span className="text-amber-700 font-medium">reembed needed</span>
-              ) : undefined
+            description={
+              unembedded > 0 ? 'reembed needed' : undefined
             }
           />
         </div>
@@ -193,7 +191,7 @@ function ReembedSection() {
         <button
           onClick={runDry}
           disabled={reembed.isPending}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 disabled:opacity-50"
+          className="px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)] disabled:opacity-50"
         >
           {reembed.isPending && mode === 'dry' ? 'Checking…' : 'Dry run'}
         </button>
@@ -205,14 +203,14 @@ function ReembedSection() {
           {reembed.isPending && mode === 'real' ? 'Reembedding…' : 'Run reembed'}
         </button>
         {reembed.isPending && mode === 'real' && (
-          <span className="text-xs text-gray-500">Running in the service process — may take minutes.</span>
+          <span className="text-xs text-[var(--text-tertiary)]">Running in the service process — may take minutes.</span>
         )}
       </div>
 
       {lastRun && (
         <div className="mt-4 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">Last run exit code:</span>
+            <span className="text-sm text-[var(--text-secondary)]">Last run exit code:</span>
             <span
               className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                 lastRun.exit_code === 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -224,9 +222,9 @@ function ReembedSection() {
             {dedupSoft.length > 0 && <Chip tone="amber">dedup soft ×{dedupSoft.length}</Chip>}
           </div>
           {(dedupHard.length > 0 || dedupSoft.length > 0) && (
-            <details className="text-sm text-gray-600">
+            <details className="text-sm text-[var(--text-secondary)]">
               <summary className="cursor-pointer">Dedup entries</summary>
-              <pre className="mt-1 text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
+              <pre className="mt-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
                 {JSON.stringify({ dedup_hard: dedupHard, dedup_soft: dedupSoft }, null, 2)}
               </pre>
             </details>
@@ -246,7 +244,7 @@ function packInstallState(pack: PackEntry): { label: string; style: string } {
   if (pack.installed_count > 0) {
     return { label: 'partial', style: 'bg-amber-100 text-amber-800' };
   }
-  return { label: 'none', style: 'bg-gray-100 text-gray-800' };
+  return { label: 'none', style: 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]' };
 }
 
 function PacksSection() {
@@ -256,7 +254,7 @@ function PacksSection() {
     <Card>
       <h2 className="text-lg font-semibold mb-4">
         Packs{' '}
-        <span className="text-sm font-normal text-gray-500">({packs.data?.total ?? 0})</span>
+        <span className="text-sm font-normal text-[var(--text-tertiary)]">({packs.data?.total ?? 0})</span>
       </h2>
       {packs.isLoading ? (
         <TableSkeleton rows={3} />
@@ -323,7 +321,7 @@ function ProfilesSection() {
     <Card>
       <h2 className="text-lg font-semibold mb-4">
         Profiles{' '}
-        <span className="text-sm font-normal text-gray-500">({profiles.data?.total ?? 0})</span>
+        <span className="text-sm font-normal text-[var(--text-tertiary)]">({profiles.data?.total ?? 0})</span>
       </h2>
       {profiles.isLoading ? (
         <TableSkeleton rows={3} />
@@ -363,20 +361,20 @@ function ProfilesSection() {
               label: 'Overrides',
               render: (r) =>
                 r.has_overrides ? (
-                  <span className="flex items-center gap-1.5 text-gray-700">
+                  <span className="flex items-center gap-1.5 text-[var(--text-secondary)]">
                     <span className="w-2 h-2 rounded-full bg-amber-500" aria-hidden />
                     yes
                   </span>
                 ) : (
-                  <span className="text-gray-400">—</span>
+                  <span className="text-[var(--text-tertiary)]">—</span>
                 ),
             },
           ]}
         />
       )}
 
-      <div className="mt-6 border-t border-gray-100 pt-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Which profile?</h3>
+      <div className="mt-6 border-t border-[var(--border-subtle)] pt-4">
+        <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Which profile?</h3>
         <div className="flex items-start gap-2 max-w-2xl">
           <div className="flex-1">
             <FormField label="Repo path">
@@ -400,8 +398,8 @@ function ProfilesSection() {
           </button>
         </div>
         {resolve.data && (
-          <p className="text-sm text-gray-700">
-            <span className="break-all font-mono text-xs text-gray-500">{resolve.data.repo}</span>{' '}
+          <p className="text-sm text-[var(--text-secondary)]">
+            <span className="break-all font-mono text-xs text-[var(--text-tertiary)]">{resolve.data.repo}</span>{' '}
             resolves to <span className="font-medium">{resolve.data.profile}</span>
             {resolve.data.is_default && (
               <span className="ml-1">

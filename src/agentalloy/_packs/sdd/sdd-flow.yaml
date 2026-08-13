@@ -17,7 +17,7 @@ applies_to_phases:
 # so the only way to leave it is to advance — and the only destination is intake.
 # A customization may reword the prose but must keep this verbatim.
 prose_invariants:
-  - "agentalloy phase set intake"
+  - "state panel"
 signal_keywords:
   - enough exploring
   - ready to scope
@@ -61,7 +61,7 @@ exit_gates:
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: flow lane — deliberately unguided exploration (brainstorming, exploratory Q&A) with a return edge to intake; no exit gates, no acceptance criteria, no build loop. The prose says "explore" without emptying into "do nothing."
+change_summary: "API-first migration: removed CLI command (phase set intake); replaced with state panel reference. Methodology unchanged — flow lane: deliberately unguided exploration (brainstorming, exploratory Q&A) with a return edge to intake; no exit gates, no acceptance criteria, no build loop. The prose says \"explore\" without emptying into \"do nothing.\""
 raw_prose: |
   # SDD — Flow
 
@@ -94,10 +94,8 @@ raw_prose: |
      matter — they shape what comes next.
   4. **Return to intake.** When the exploration has run its course — when you've
      learned enough to have a clearer sense of direction, or when you simply want
-     to pause — advance back to intake:
-
-         agentalloy phase set intake
-
+     to pause — state that the phase is complete. The phase advances automatically
+     once exit gates pass. Check your state panel for the current phase at any time.
      Intake will help you decide whether the exploration points toward the full
      SDD lane, the fast lane, or a fresh round of flow.
 
@@ -107,8 +105,8 @@ raw_prose: |
   acceptance criteria, writing a design document, or planning tasks, you've left
   the flow lane — go back.
 
-  This lane is not a code-writing lane. No `src/`, no `tests/`, no `agentalloy
-  contract artifact-set`. The output of flow is clarity, not code.
+  This lane is not a code-writing lane. No `src/`, no `tests/`, no artifact markers.
+  The output of flow is clarity, not code.
 
   This lane is not a decision lane. You may surface options, compare approaches,
   or build a case — but you don't need to commit to anything. Decisions happen in

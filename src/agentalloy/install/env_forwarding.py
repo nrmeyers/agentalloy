@@ -113,6 +113,10 @@ HOST_TOPOLOGY_KEYS: frozenset[str] = frozenset(
         "AGENTALLOY_PACKS",
         "AGENTALLOY_RUNTIME_STATE_DIR",
         "AGENTALLOY_PROJECTS_ROOT",
+        # Feature flag: artifact extraction from LLM responses. Runtime behavior
+        # toggle, not a container-forwarded intent — the container decides
+        # independently whether to parse markers from response text.
+        "ARTIFACT_EXTRACTION_ENABLED",
     },
 )
 

@@ -1,5 +1,7 @@
 export { Card, StatCard } from './Card';
 export { StatusBadge } from './StatusBadge';
+export { Button } from './Button';
+export { PageHeader } from './PageHeader';
 export { FormField, inputClass, readOnlyInputClass } from './FormField';
 export { Slider } from './Slider';
 export { DataTable } from './DataTable';
@@ -12,3 +14,4 @@ export { EmptyState } from './EmptyState';
 export { ErrorState } from './ErrorState';
 export { Layout } from './Layout';
 export { ToastContainer, showToast } from './Toast';
+export { CommandPalette } from './CommandPalette';

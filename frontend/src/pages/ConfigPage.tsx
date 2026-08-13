@@ -199,7 +199,7 @@ export function ConfigPage() {
           <button
             onClick={() => reload.mutate()}
             disabled={reload.isPending}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 disabled:opacity-50"
+            className="px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)] disabled:opacity-50"
           >
             {reload.isPending ? 'Reloading…' : 'Reload'}
           </button>
@@ -243,7 +243,7 @@ export function ConfigPage() {
             <button
               type="button"
               onClick={() => setShowKey((s) => !s)}
-              className="px-3 py-2 bg-gray-100 text-gray-600 rounded-md text-sm hover:bg-gray-200"
+              className="px-3 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)]"
             >
               {showKey ? 'Hide' : 'Show'}
             </button>
@@ -324,12 +324,12 @@ export function ConfigPage() {
           />
         </FormField>
         <FormField label="SDD Fast Require Approval">
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
             <input
               type="checkbox"
               checked={form.sdd_fast_require_approval}
               onChange={(e) => set('sdd_fast_require_approval', e.target.checked)}
-              className="h-4 w-4 accent-brand"
+              className="h-4 w-4 accent-brand-500"
             />
             Require approval for the sdd-fast phase
           </label>
@@ -354,7 +354,7 @@ export function ConfigPage() {
         <ReadOnlyField label="Env File Path" value={config.env_file_path} />
       </Card>
 
-      <div className="text-xs text-gray-500">
+      <div className="text-xs text-[var(--text-tertiary)]">
         Changes take effect after clicking "Save". Run "Reload" to apply without restart. Env file:{' '}
         {config.env_file_path}
       </div>

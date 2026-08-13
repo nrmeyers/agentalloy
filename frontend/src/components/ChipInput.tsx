@@ -1,9 +1,6 @@
 import { useState } from 'react';
+import { X } from 'lucide-react';
 
-/**
- * Editable chip list — type a value and press Enter (or comma) to add,
- * click × to remove. Used for domain_tags editing.
- */
 export function ChipInput({
   values,
   onChange,
@@ -23,20 +20,20 @@ export function ChipInput({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border border-gray-300 rounded-md bg-white">
+    <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border border-[var(--border-primary)] rounded-md bg-[var(--bg-primary)]">
       {values.map((value) => (
         <span
           key={value}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
         >
           {value}
           <button
             type="button"
             aria-label={`Remove ${value}`}
             onClick={() => onChange(values.filter((v) => v !== value))}
-            className="text-gray-400 hover:text-gray-700"
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
           >
-            ×
+            <X className="h-3 w-3" />
           </button>
         </span>
       ))}
@@ -53,7 +50,7 @@ export function ChipInput({
           }
         }}
         onBlur={add}
-        className="flex-1 min-w-[8rem] text-sm focus:outline-none"
+        className="flex-1 min-w-[8rem] text-sm bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none"
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { CheckCircle, XCircle, Info } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -8,8 +9,6 @@ interface ToastItem {
   type: ToastType;
 }
 
-// Module-level store so non-React code (React Query caches, api layer)
-// can raise toasts without a context handle.
 let nextId = 1;
 let items: readonly ToastItem[] = [];
 const listeners = new Set<() => void>();
@@ -30,7 +29,6 @@ function getSnapshot(): readonly ToastItem[] {
 }
 
 export function showToast(message: string, type: ToastType = 'info', duration = 4000): void {
-  // Dedupe identical visible toasts (30s polling can re-fire errors).
   if (items.some((t) => t.message === message && t.type === type)) return;
   const id = nextId++;
   items = [...items, { id, message, type }];
@@ -41,24 +39,29 @@ export function showToast(message: string, type: ToastType = 'info', duration = 
   }, duration);
 }
 
-const typeStyles: Record<ToastType, string> = {
-  success: 'bg-green-600',
-  error: 'bg-red-600',
-  info: 'bg-blue-600',
+const typeConfig: Record<ToastType, { icon: typeof CheckCircle; color: string }> = {
+  success: { icon: CheckCircle, color: 'border-success/30 bg-success/10 text-success' },
+  error: { icon: XCircle, color: 'border-error/30 bg-error/10 text-error' },
+  info: { icon: Info, color: 'border-brand-500/30 bg-brand-500/10 text-brand-500' },
 };
 
 export function ToastContainer() {
   const queue = useSyncExternalStore(subscribe, getSnapshot);
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
-      {queue.map((toast) => (
-        <div
-          key={toast.id}
-          className={`max-w-sm px-4 py-2 rounded-md shadow text-sm text-white ${typeStyles[toast.type]}`}
-        >
-          {toast.message}
-        </div>
-      ))}
+    <div className="fixed bottom-4 right-4 z-50 space-y-2">
+      {queue.map((toast) => {
+        const config = typeConfig[toast.type];
+        const Icon = config.icon;
+        return (
+          <div
+            key={toast.id}
+            className={`flex items-center gap-2 max-w-sm px-4 py-3 rounded-lg border shadow-lg text-sm animate-slide-up ${config.color}`}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            <span>{toast.message}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

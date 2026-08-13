@@ -7,8 +7,8 @@ import { Chip, ChipRow, ClassBadge } from './shared';
 function MetaItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium text-gray-500 uppercase">{label}</dt>
-      <dd className="text-sm text-gray-900 break-all">{value}</dd>
+      <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">{label}</dt>
+      <dd className="text-sm text-[var(--text-primary)] break-all">{value}</dd>
     </div>
   );
 }
@@ -45,24 +45,24 @@ export function ContentTab({ detail }: { detail: SkillDetail }) {
               />
             </dl>
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Raw Prose</h3>
-              <pre className="text-xs text-gray-800 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+              <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Raw Prose</h3>
+              <pre className="text-xs text-[var(--text-primary)] bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
                 {version.raw_prose}
               </pre>
             </div>
           </div>
         ) : (
-          <p className="text-sm text-gray-500">No active version.</p>
+          <p className="text-sm text-[var(--text-tertiary)]">No active version.</p>
         )}
       </Card>
 
       <Card>
         <h2 className="text-lg font-semibold mb-4">
           Fragments{' '}
-          <span className="text-sm font-normal text-gray-500">({detail.fragments.length})</span>
+          <span className="text-sm font-normal text-[var(--text-tertiary)]">({detail.fragments.length})</span>
         </h2>
         {detail.fragments.length === 0 ? (
-          <p className="text-sm text-gray-500">No fragments.</p>
+          <p className="text-sm text-[var(--text-tertiary)]">No fragments.</p>
         ) : (
           <div className="space-y-3">
             {[...detail.fragments]
@@ -70,16 +70,16 @@ export function ContentTab({ detail }: { detail: SkillDetail }) {
               .map((fragment) => (
                 <div
                   key={fragment.fragment_id}
-                  className="border border-gray-200 rounded-md p-3"
+                  className="border border-[var(--border-primary)] rounded-md p-3"
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <Chip tone="blue">{fragment.fragment_type}</Chip>
-                    <span className="text-xs text-gray-500">seq {fragment.sequence}</span>
-                    <span className="font-mono text-xs text-gray-400">
+                    <span className="text-xs text-[var(--text-tertiary)]">seq {fragment.sequence}</span>
+                    <span className="font-mono text-xs text-[var(--text-tertiary)]">
                       {fragment.fragment_id}
                     </span>
                   </div>
-                  <pre className="text-xs text-gray-800 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                  <pre className="text-xs text-[var(--text-primary)] whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
                     {fragment.content}
                   </pre>
                 </div>

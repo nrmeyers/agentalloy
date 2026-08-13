@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -58,6 +59,7 @@ from agentalloy.api.proxy_router import (
 from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
+from agentalloy.api.artifact_extractor import extract_and_store
 from agentalloy.providers.base import filter_tools_for_phase
 
 if TYPE_CHECKING:
@@ -67,6 +69,52 @@ if TYPE_CHECKING:
     from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ArtifactExtractionContext:
+    """Context for artifact extraction on the response path.
+
+    Carries the store, phase, and contract slug needed to write extracted
+    artifacts. ``None`` means extraction is disabled (feature flag off, or
+    no contract active).
+    """
+
+    store: Any
+    phase: str
+    slug: str
+
+
+def _build_artifact_context(
+    request: Any,
+    signal: SignalResult | None,
+) -> _ArtifactExtractionContext | None:
+    """Build the artifact extraction context from request state and signal.
+
+    Returns ``None`` when extraction is disabled (feature flag off, no signal,
+    no phase, or no active contract). Soft: never raises.
+    """
+    if signal is None or not signal.phase:
+        return None
+    if not signal.current_contract:
+        return None
+    try:
+        from agentalloy.config import get_settings
+
+        settings = get_settings()
+        if not settings.artifact_extraction_enabled:
+            return None
+    except Exception:
+        return None
+
+    store = getattr(request.app.state, "store", None)
+    if store is None:
+        return None
+
+    # Derive slug from contract_id (the store key, e.g. "auth-refactor")
+    slug = signal.current_contract
+    return _ArtifactExtractionContext(store=store, phase=signal.phase, slug=slug)
+
 
 router = APIRouter()
 
@@ -387,6 +435,20 @@ async def _maybe_inject(
         if bannered is not current:
             current = bannered
 
+    # 2b. Per-turn state leg — structured JSON context briefing, strip-and-replace.
+    #     Same cadence as banner: fires on every carrier turn with a known phase.
+    #     Gives the LLM a machine-readable snapshot of phase, contract, artifacts,
+    #     and gate status. Independent of should_compose.
+    if signal.state_leg is not None and signal.phase is not None:
+        stated = inject_into_anthropic_messages(
+            current,
+            signal.state_leg,
+            phase=signal.phase,
+            kind="state",
+        )
+        if stated is not current:
+            current = stated
+
     # 3. Workflow prose -> top-level `system`, on EVERY carrier turn.
     #    The harness rebuilds each request from its own local history and never sees
     #    our mutation, so a once-per-(phase, session) system block survives exactly one
@@ -665,6 +727,9 @@ async def passthrough_anthropic_messages(
     phase = signal.phase if signal else None
     pause_mode = signal.paused_mode if signal else False
 
+    # Build artifact extraction context if enabled
+    artifact_ctx = _build_artifact_context(request, signal)
+
     if stream_flag:
         return await _forward_streaming(
             resolved_client,
@@ -674,6 +739,7 @@ async def passthrough_anthropic_messages(
             on_status,
             phase=phase,
             pause_mode=pause_mode,
+            artifact_extraction=artifact_ctx,
         )
     return await _forward_once(
         resolved_client,
@@ -683,6 +749,7 @@ async def passthrough_anthropic_messages(
         on_status,
         phase=phase,
         pause_mode=pause_mode,
+        artifact_extraction=artifact_ctx,
     )
 
 
@@ -695,6 +762,7 @@ async def _forward_once(
     path: str = _UPSTREAM_PATH,
     phase: str | None = None,
     pause_mode: bool = False,
+    artifact_extraction: _ArtifactExtractionContext | None = None,
 ) -> Response:
     try:
         upstream = await client.forward(
@@ -739,6 +807,42 @@ async def _forward_once(
         except (json.JSONDecodeError, KeyError):
             # Not JSON or unexpected structure — forward as-is
             pass
+
+    # Artifact extraction: parse markers from response text, write to store,
+    # strip markers from the forwarded response.
+    if artifact_extraction is not None:
+        try:
+            response_json = json.loads(response_content)
+            if isinstance(response_json, dict) and "content" in response_json:
+                content_blocks = response_json.get("content", [])
+                if isinstance(content_blocks, list):
+                    # Concatenate text blocks for extraction
+                    full_text = "".join(
+                        b.get("text", "")
+                        for b in content_blocks
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                    if "<!--" in full_text:
+                        result = extract_and_store(
+                            full_text,
+                            phase=artifact_extraction.phase,
+                            slug=artifact_extraction.slug,
+                            store=artifact_extraction.store,
+                        )
+                        if result.extracted:
+                            # Replace text blocks with cleaned text
+                            cleaned = result.cleaned_text
+                            text_blocks_updated = False
+                            for b in content_blocks:
+                                if isinstance(b, dict) and b.get("type") == "text":
+                                    b["text"] = cleaned
+                                    text_blocks_updated = True
+                                    break  # only first text block gets cleaned
+                            if text_blocks_updated:
+                                response_json["content"] = content_blocks
+                                response_content = json.dumps(response_json).encode("utf-8")
+        except Exception:
+            logger.debug("artifact extraction failed on response", exc_info=True)
 
     return Response(
         content=response_content,
@@ -821,6 +925,7 @@ async def _forward_streaming(
     path: str = _UPSTREAM_PATH,
     phase: str | None = None,
     pause_mode: bool = False,
+    artifact_extraction: _ArtifactExtractionContext | None = None,
 ) -> Response | StreamingResponse:
     # Enter the stream manually so we can read the upstream status + headers
     # before constructing the StreamingResponse, then relay raw bytes.
@@ -872,14 +977,33 @@ async def _forward_streaming(
 
     async def relay() -> AsyncIterator[bytes]:
         has_finish_reason = False
+        # Tee pattern: accumulate response text for artifact extraction while
+        # yielding chunks to the client immediately (zero latency impact).
+        stream_buffer: list[str] = []
         try:
             async for raw in upstream.aiter_raw():
                 text = raw.decode("utf-8", errors="replace")
                 if _chunk_has_finish_reason(text):
                     has_finish_reason = True
+                if artifact_extraction is not None:
+                    stream_buffer.append(text)
                 yield raw
         finally:
             await cm.__aexit__(None, None, None)
+        # After stream ends, run artifact extraction on accumulated text.
+        # This runs in the background — the response is already fully sent.
+        if artifact_extraction is not None and stream_buffer:
+            try:
+                full_text = "".join(stream_buffer)
+                if "<!--" in full_text:
+                    extract_and_store(
+                        full_text,
+                        phase=artifact_extraction.phase,
+                        slug=artifact_extraction.slug,
+                        store=artifact_extraction.store,
+                    )
+            except Exception:
+                logger.debug("streaming artifact extraction failed", exc_info=True)
         if not has_finish_reason:
             yield _CORRECTIVE_CHUNK
             yield b'data: [DONE]\n\n'

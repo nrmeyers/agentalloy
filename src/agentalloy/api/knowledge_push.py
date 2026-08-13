@@ -102,13 +102,14 @@ def _render(decisions: list[DecisionRow]) -> str:
     """Render a compact manifest: headings + source paths, no snippet bodies.
 
     The model reads this list to learn *which* decisions exist, then pulls the
-    full rationale on demand via ``agentalloy knowledge why <fqn>``.
+    full rationale on demand via the ``agentalloy_query`` tool.
     """
     lines = [
         "# Decisions governing this work",
         "",
         "The following design decisions govern code in this work-item's scope.",
-        "Use `agentalloy knowledge why <symbol>` to read a decision's full rationale.",
+        "Use `agentalloy_query` with action=`knowledge_why` and query=<symbol> "
+        "to read a decision's full rationale.",
         "",
     ]
     for d in decisions:
@@ -117,8 +118,8 @@ def _render(decisions: list[DecisionRow]) -> str:
         lines.append(f"- **{heading}** — `{source}`")
     lines.append("")
     lines.append(
-        'Pull full content: `agentalloy knowledge why <fqn>`'
-        ' · `agentalloy knowledge related "<query>"`'
+        'Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>'
+        ' · action=`knowledge_related` query="<topic>"'
     )
     return "\n".join(lines).rstrip()
 

@@ -29,15 +29,20 @@ class TestInitialize:
 
 
 class TestToolsList:
-    def test_returns_get_skill_for_tool(self) -> None:
+    def test_returns_both_tools(self) -> None:
         msg = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
         resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
         assert resp is not None
         tools = resp["result"]["tools"]
-        assert len(tools) == 1
-        tool = tools[0]
-        assert tool["name"] == "get_skill_for"
-        # Schema enumerates the lifecycle phases
+        assert len(tools) == 2
+        names = {t["name"] for t in tools}
+        assert "get_skill_for" in names
+        assert "agentalloy_query" in names
+
+    def test_get_skill_for_schema(self) -> None:
+        msg = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
+        tool = next(t for t in resp["result"]["tools"] if t["name"] == "get_skill_for")
         phase_enum = tool["inputSchema"]["properties"]["phase"]["enum"]
         assert phase_enum == [
             "spec",
@@ -51,6 +56,20 @@ class TestToolsList:
             "sdd-flow",
         ]
         assert tool["inputSchema"]["required"] == ["task"]
+
+    def test_query_tool_schema(self) -> None:
+        msg = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
+        tool = next(t for t in resp["result"]["tools"] if t["name"] == "agentalloy_query")
+        action_enum = tool["inputSchema"]["properties"]["action"]["enum"]
+        assert "code_search" in action_enum
+        assert "symbols" in action_enum
+        assert "knowledge_why" in action_enum
+        assert "knowledge_related" in action_enum
+        assert "artifact_body" in action_enum
+        assert "contract_detail" in action_enum
+        assert "telemetry" in action_enum
+        assert tool["inputSchema"]["required"] == ["action"]
 
 
 class TestToolsCallValidation:
@@ -198,3 +217,63 @@ class TestMaxLineCap:
         # Full stdin testing would require subprocess; the cap value itself is
         # the contract we want to lock.
         assert mcp_server._MAX_LINE_BYTES == 1 << 20  # pyright: ignore[reportPrivateUsage]
+
+
+class TestQueryToolValidation:
+    def _call_query(self, args: dict, port: int = 8000) -> dict:
+        msg = {
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {"name": "agentalloy_query", "arguments": args},
+        }
+        resp = mcp_server._process_message(msg, port=port)  # pyright: ignore[reportPrivateUsage]
+        assert resp is not None
+        return resp
+
+    def test_missing_action_returns_invalid_params(self) -> None:
+        resp = self._call_query({})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_unknown_action_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "nonexistent"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_code_search_missing_query_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "code_search"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_symbols_missing_query_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "symbols"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_artifact_body_missing_fields_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "artifact_body", "query": "spec.artifact"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_contract_detail_missing_slug_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "contract_detail"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_code_search_calls_endpoint(self) -> None:
+        mock_data = [{"heading": "test_func", "file_path": "src/test.py", "snippet": "def test_func()"}]
+        with patch.object(mcp_server, "_http_get", return_value=mock_data):
+            resp = self._call_query({"action": "code_search", "query": "test_func"})
+        assert "error" not in resp
+        content = resp["result"]["content"][0]["text"]
+        assert "test_func" in content
+
+    def test_contract_detail_calls_endpoint(self) -> None:
+        mock_data = {"contract_id": "auth", "phase": "build", "slug": "auth", "body": "Implement auth"}
+        with patch.object(mcp_server, "_http_get", return_value=mock_data):
+            resp = self._call_query({"action": "contract_detail", "slug": "auth"})
+        assert "error" not in resp
+        content = resp["result"]["content"][0]["text"]
+        assert "auth" in content
+
+    def test_service_unreachable_returns_error(self) -> None:
+        import urllib.error
+        with patch.object(mcp_server, "_http_get", side_effect=urllib.error.URLError("connection refused")):
+            resp = self._call_query({"action": "code_search", "query": "test"})
+        assert "error" in resp
+        assert "unreachable" in resp["error"]["message"]

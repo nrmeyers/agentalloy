@@ -12,12 +12,9 @@ requires: []
 always_apply: false
 applies_to_phases:
   - intake
-# Load-bearing advance commands — must be present for prose validation.
+# Load-bearing advance references — must be present for prose validation.
 prose_invariants:
-  - "agentalloy phase set spec"
-  - "agentalloy phase set sdd-fast"
-  - "agentalloy phase set add-skill"
-  - "agentalloy phase set sdd-flow"
+  - "state panel"
 exit_gates:
   # §3: intake must produce a contract for the chosen route.
   # The agent writes a contract for one of four phases — any_of accepts whichever.
@@ -37,10 +34,9 @@ signal_keywords:
   - begin work
   - next phase
 # Intake writes the DOWNSTREAM contract (spec / sdd-fast / add-skill / sdd-flow
-# via `agentalloy contract init --phase <phase>`); this scaffold remains for the
-# workflow-skill contract_template contract (customize validation + the
-# `contract init --phase intake` legacy path) and documents the work-item shape
-# the agent authors in every lane.
+# via auto-created contracts on phase transition); this scaffold remains for the
+# workflow-skill contract_template contract (customize validation) and documents
+# the work-item shape the agent authors in every lane.
 contract_template: |
   ---
   phase: intake
@@ -64,9 +60,8 @@ contract_template: |
   <full SDD, sdd-fast, add-skill, or flow, and why>
 
 # Intake writes the DOWNSTREAM contract (spec / sdd-fast / add-skill / sdd-flow
-# via `agentalloy contract init --phase <phase>`); this scaffold remains for the
-# workflow-skill contract_template contract (customize validation + the
-# `contract init --phase intake` legacy path)
+# via auto-created contracts on phase transition); this scaffold remains for the
+# workflow-skill contract_template contract (customize validation)
 contract_template: |
   ---
   phase: intake
@@ -91,17 +86,18 @@ contract_template: |
 
 category_scope: [process]
 author: agentalloy
-change_summary: "removed intake contract — route determined by downstream contract phase, not an intermediate intake contract"
+change_summary: "migrated to API-first interface: removed CLI commands, replaced with state panel references and artifact markers"
 raw_prose: |
   # SDD — Intake
 
   **You MUST NOT design, plan, or write code in this phase.** Intake produces
-  exactly one artifact — the downstream contract created by `agentalloy contract init` —
+  exactly one artifact — the downstream contract for the chosen route —
   and nothing else. If you catch yourself proposing a solution, STOP: that is
   spec/design work, and you have not earned it yet.
 
   You open every session. Before any work, settle two things: **what are we
-  doing**, and **how much process does it need**.
+  doing**, and **how much process does it need**. Check your state panel for
+  the current phase and any active contracts.
 
   ## 1. Frame it (briefly)
 
@@ -126,16 +122,9 @@ raw_prose: |
   ## 2. Hand off the next phase's work-item
 
   Intake doesn't keep a contract of its own — it writes the **work-item the next
-  phase picks up**, into the contract store. Pick the command that matches the
-  route you chose in §1:
-
-      agentalloy contract init --phase spec --slug <task-slug>       # full lane
-      # or, for the fast lane:
-      agentalloy contract init --phase sdd-fast --slug <task-slug>
-      # or, for custom-skill authoring:
-      agentalloy contract init --phase add-skill --slug <task-slug>
-      # or, for exploration/brainstorming (free-flow):
-      agentalloy contract init --phase sdd-flow --slug <task-slug>
+  phase picks up**. A contract is auto-created for the phase you're transitioning
+  to. State that the phase is complete. The phase advances automatically once
+  exit gates pass.
 
   Write the body as a concrete restatement of what the user wants. That body
   becomes the next phase's retrieval prompt. Set `scope.touches`. Writing the
@@ -143,16 +132,12 @@ raw_prose: |
 
   Then **PRESENT the contract in full and STOP** — do not advance yourself. The
   forward jump is a human checkpoint: only once the user explicitly approves do
-  you advance, with the command matching the lane you picked in §1:
-
-      agentalloy phase set spec        # full lane
-      agentalloy phase set sdd-fast    # fast lane
-      agentalloy phase set add-skill   # custom-skill authoring
-      agentalloy phase set sdd-flow    # flow lane (free-flow exploration)
+  you advance. Present the work for human approval. The phase advances after
+  approval is recorded.
 
   Phase advance ends intake for this session. The next phase begins in a fresh
-  one; `agentalloy resume` rebuilds context. Stop here only if the route itself
-  is genuinely unclear — surface that and let the user make the call.
+  one; the state panel provides context automatically. Stop here only if the
+  route itself is genuinely unclear — surface that and let the user make the call.
 
   ## Not this
 

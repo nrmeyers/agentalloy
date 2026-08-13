@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { AlertTriangle, Search } from 'lucide-react';
 import { Card, ChipInput, EmptyState, ErrorState, FormField, inputClass } from '../components';
 import { useCompose, useEvaluateSignal, useRetrieve } from '../hooks/usePlayground';
 import { useSkillsList } from '../hooks/useSkills';
@@ -20,10 +21,10 @@ const KNOWN_COMPOSE_KEYS = new Set([
 function RetrievalResults({ data }: { data: RetrieveResponse }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   if (!Array.isArray(data.results) || data.results.length === 0) {
-    return <EmptyState title="No results" hint="Nothing matched this task." icon="🔎" />;
+    return <EmptyState title="No results" hint="Nothing matched this task." icon={<Search className="h-6 w-6" />} />;
   }
   return (
-    <div className="divide-y divide-gray-200 mt-4">
+    <div className="divide-y divide-[var(--border-primary)] mt-4">
       {data.results.map((result, i) => {
         const isOpen = expanded === result.version_id;
         const pct = Math.max(0, Math.min(1, result.score)) * 100;
@@ -32,24 +33,24 @@ function RetrievalResults({ data }: { data: RetrieveResponse }) {
             <button
               type="button"
               onClick={() => setExpanded(isOpen ? null : result.version_id)}
-              className="w-full flex items-center gap-3 text-left hover:bg-gray-50 rounded px-2 py-1"
+              className="w-full flex items-center gap-3 text-left hover:bg-[var(--bg-tertiary)] rounded px-2 py-1"
             >
-              <span className="text-sm font-semibold text-gray-400 w-6">#{i + 1}</span>
-              <span className="text-sm font-medium text-gray-900 w-56 truncate">
+              <span className="text-sm font-semibold text-[var(--text-tertiary)] w-6">#{i + 1}</span>
+              <span className="text-sm font-medium text-[var(--text-primary)] w-56 truncate">
                 {result.canonical_name}
               </span>
-              <span className="font-mono text-xs text-gray-500 w-48 truncate">
+              <span className="font-mono text-xs text-[var(--text-tertiary)] w-48 truncate">
                 {result.skill_id}
               </span>
-              <span className="flex-1 h-2 bg-gray-100 rounded overflow-hidden">
-                <span className="block h-full bg-brand" style={{ width: `${pct}%` }} />
+              <span className="flex-1 h-2 bg-[var(--bg-tertiary)] rounded overflow-hidden">
+                <span className="block h-full bg-brand-500" style={{ width: `${pct}%` }} />
               </span>
-              <span className="text-xs tabular-nums text-gray-600 w-12 text-right">
+              <span className="text-xs tabular-nums text-[var(--text-secondary)] w-12 text-right">
                 {result.score.toFixed(3)}
               </span>
             </button>
             {isOpen && (
-              <pre className="mt-2 ml-10 text-xs text-gray-800 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
+              <pre className="mt-2 ml-10 text-xs text-gray-800 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
                 {result.raw_prose}
               </pre>
             )}
@@ -91,24 +92,24 @@ function ComposeResult({ data }: { data: ComposeResponse }) {
 
       {data.dense_leg_degraded === true && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-md text-sm">
-          ⚠ Dense retrieval leg degraded — results came from a reduced retrieval path.
+          <AlertTriangle className="inline mr-1 h-4 w-4" /> Dense retrieval leg degraded — results came from a reduced retrieval path.
         </div>
       )}
 
       {typeof data.output === 'string' ? (
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Injected block</div>
-          <pre className="text-xs text-gray-800 bg-gray-50 border-2 border-gray-300 rounded p-3 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Injected block</div>
+          <pre className="text-xs text-gray-800 bg-[var(--bg-secondary)] border-2 border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
             {data.output}
           </pre>
         </div>
       ) : (
-        <p className="text-sm text-gray-500">No output block in the response.</p>
+        <p className="text-sm text-[var(--text-tertiary)]">No output block in the response.</p>
       )}
 
       {Array.isArray(data.source_skills) && data.source_skills.length > 0 && (
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Source skills</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Source skills</div>
           <div className="flex flex-wrap gap-1">
             {data.source_skills.map((id) => (
               <Chip key={String(id)} tone="blue">
@@ -120,9 +121,9 @@ function ComposeResult({ data }: { data: ComposeResponse }) {
       )}
 
       {Object.keys(extras).length > 0 && (
-        <details className="text-sm text-gray-600">
+        <details className="text-sm text-[var(--text-secondary)]">
           <summary className="cursor-pointer">Other response fields</summary>
-          <pre className="mt-1 text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+          <pre className="mt-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
             {JSON.stringify(extras, null, 2)}
           </pre>
         </details>
@@ -139,7 +140,7 @@ function VerdictPanel({ verdict }: { verdict: SignalVerdict }) {
       <div className="flex items-center gap-3">
         <span
           className={`inline-flex items-center px-3 py-1.5 rounded-md text-sm font-bold ${
-            verdict.should_compose ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'
+            verdict.should_compose ? 'bg-green-100 text-green-800' : 'bg-[var(--border-primary)] text-[var(--text-secondary)]'
           }`}
         >
           {verdict.should_compose ? 'WOULD COMPOSE' : 'PASSTHROUGH'}
@@ -150,37 +151,37 @@ function VerdictPanel({ verdict }: { verdict: SignalVerdict }) {
 
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2">
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase">Phase</dt>
-          <dd className="text-sm text-gray-900">{fmt(verdict.phase)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Phase</dt>
+          <dd className="text-sm text-[var(--text-primary)]">{fmt(verdict.phase)}</dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase">Pre-filter matched</dt>
-          <dd className="text-sm text-gray-900">{fmt(verdict.pre_filter_matched)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Pre-filter matched</dt>
+          <dd className="text-sm text-[var(--text-primary)]">{fmt(verdict.pre_filter_matched)}</dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase">Qwen calls</dt>
-          <dd className="text-sm text-gray-900 tabular-nums">{fmt(verdict.qwen_calls)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Qwen calls</dt>
+          <dd className="text-sm text-[var(--text-primary)] tabular-nums">{fmt(verdict.qwen_calls)}</dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase">Workflow skill</dt>
-          <dd className="text-sm text-gray-900 break-all">{fmt(verdict.workflow_skill_id)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Workflow skill</dt>
+          <dd className="text-sm text-[var(--text-primary)] break-all">{fmt(verdict.workflow_skill_id)}</dd>
         </div>
         <div className="col-span-2">
-          <dt className="text-xs font-medium text-gray-500 uppercase">Task</dt>
-          <dd className="text-sm text-gray-900 break-words">{fmt(verdict.task)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Task</dt>
+          <dd className="text-sm text-[var(--text-primary)] break-words">{fmt(verdict.task)}</dd>
         </div>
         <div className="col-span-2">
-          <dt className="text-xs font-medium text-gray-500 uppercase">Domain tags</dt>
-          <dd className="text-sm text-gray-900">{fmt(verdict.domain_tags)}</dd>
+          <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Domain tags</dt>
+          <dd className="text-sm text-[var(--text-primary)]">{fmt(verdict.domain_tags)}</dd>
         </div>
       </dl>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Gates met</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Gates met</div>
           <div className="flex flex-wrap gap-1">
             {verdict.gates_met.length === 0 ? (
-              <span className="text-sm text-gray-400">—</span>
+              <span className="text-sm text-[var(--text-tertiary)]">—</span>
             ) : (
               verdict.gates_met.map((g) => (
                 <Chip key={g} tone="green">
@@ -191,10 +192,10 @@ function VerdictPanel({ verdict }: { verdict: SignalVerdict }) {
           </div>
         </div>
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Gates unmet</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Gates unmet</div>
           <div className="flex flex-wrap gap-1">
             {verdict.gates_unmet.length === 0 ? (
-              <span className="text-sm text-gray-400">—</span>
+              <span className="text-sm text-[var(--text-tertiary)]">—</span>
             ) : (
               verdict.gates_unmet.map((g) => (
                 <Chip key={g} tone="red">
@@ -208,10 +209,10 @@ function VerdictPanel({ verdict }: { verdict: SignalVerdict }) {
 
       {verdict.advisories.length > 0 && (
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Advisories</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Advisories</div>
           <ul className="list-disc list-inside space-y-0.5">
             {verdict.advisories.map((a) => (
-              <li key={a} className="text-sm text-gray-700">
+              <li key={a} className="text-sm text-[var(--text-secondary)]">
                 {a}
               </li>
             ))}
@@ -220,7 +221,7 @@ function VerdictPanel({ verdict }: { verdict: SignalVerdict }) {
       )}
 
       {verdict.banner && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-2 rounded-md text-sm whitespace-pre-wrap">
+        <div className="bg-brand-500/5 border border-blue-200 text-blue-800 px-4 py-2 rounded-md text-sm whitespace-pre-wrap">
           {verdict.banner}
         </div>
       )}
@@ -312,7 +313,7 @@ export function PlaygroundPage() {
         <button
           onClick={() => retrieve.mutate(buildRequest())}
           disabled={!taskValid || retrieve.isPending}
-          className="px-4 py-2 bg-brand text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
+          className="px-4 py-2 bg-brand-500 text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
         >
           {retrieve.isPending ? 'Retrieving…' : 'Retrieve'}
         </button>
@@ -327,13 +328,13 @@ export function PlaygroundPage() {
 
       <Card>
         <h2 className="text-lg font-semibold mb-1">Compose Preview</h2>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-[var(--text-tertiary)] mb-3">
           Uses the same task / phase / tags / k inputs as Retrieval above.
         </p>
         <button
           onClick={() => compose.mutate(buildRequest())}
           disabled={!taskValid || compose.isPending}
-          className="px-4 py-2 bg-brand text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
+          className="px-4 py-2 bg-brand-500 text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
         >
           {compose.isPending ? 'Composing…' : 'Compose'}
         </button>
@@ -368,11 +369,11 @@ export function PlaygroundPage() {
         <button
           onClick={() => signal.mutate({ repo: repo.trim(), prompt })}
           disabled={!signalValid || signal.isPending}
-          className="px-4 py-2 bg-brand text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
+          className="px-4 py-2 bg-brand-500 text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
         >
           {signal.isPending ? 'Evaluating…' : 'Evaluate'}
         </button>
-        <p className="mt-2 text-xs text-gray-500">read-only — never advances repo state</p>
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">read-only — never advances repo state</p>
         {signal.error && (
           <ErrorState
             message={signal.error.message}

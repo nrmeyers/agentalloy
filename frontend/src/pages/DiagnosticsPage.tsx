@@ -20,7 +20,7 @@ const DEPENDENCY_LABELS: Record<string, string> = {
 function SkillStateTable({ title, entries }: { title: string; entries: SkillVersionEntry[] }) {
   return (
     <details className="mt-2">
-      <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-900">
+      <summary className="cursor-pointer text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
         {title} ({entries.length} skills)
       </summary>
       <div className="mt-2">
@@ -66,19 +66,19 @@ export function DiagnosticsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Object.entries(DEPENDENCY_LABELS).map(([key, label]) => (
             <div key={key} className="flex flex-col gap-1">
-              <span className="text-sm text-gray-500">{label}</span>
+              <span className="text-sm text-[var(--text-tertiary)]">{label}</span>
               <StatusBadge status={(readiness as Record<string, unknown>)[key]} />
             </div>
           ))}
         </div>
-        <h3 className="text-sm font-semibold text-gray-700 mt-6 mb-2">Per-path Readiness</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-secondary)] mt-6 mb-2">Per-path Readiness</h3>
         {Object.keys(perPath).length === 0 ? (
-          <p className="text-sm text-gray-500">unknown</p>
+          <p className="text-sm text-[var(--text-tertiary)]">unknown</p>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {Object.entries(perPath).map(([path, status]) => (
               <div key={path} className="flex flex-col gap-1">
-                <span className="text-sm text-gray-500">{path}</span>
+                <span className="text-sm text-[var(--text-tertiary)]">{path}</span>
                 <StatusBadge status={status} />
               </div>
             ))}
@@ -101,38 +101,38 @@ export function DiagnosticsPage() {
         </div>
         <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>
-            <dt className="text-gray-500">Cache Loaded</dt>
+            <dt className="text-[var(--text-tertiary)]">Cache Loaded</dt>
             <dd className="font-medium">{fmtUnknown(diag.cache_loaded)}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">Matched</dt>
+            <dt className="text-[var(--text-tertiary)]">Matched</dt>
             <dd className="font-medium">{fmtUnknown(consistency.matched)}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">Missing in Cache</dt>
+            <dt className="text-[var(--text-tertiary)]">Missing in Cache</dt>
             <dd className="font-medium">{missingInCache.length}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">Missing in Store</dt>
+            <dt className="text-[var(--text-tertiary)]">Missing in Store</dt>
             <dd className="font-medium">{missingInStore.length}</dd>
           </div>
         </dl>
 
         {missingInCache.length > 0 && (
           <div className="mt-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-1">Missing in Cache</h3>
-            <p className="text-sm text-gray-700 break-all">{missingInCache.join(', ')}</p>
+            <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-1">Missing in Cache</h3>
+            <p className="text-sm text-[var(--text-secondary)] break-all">{missingInCache.join(', ')}</p>
           </div>
         )}
         {missingInStore.length > 0 && (
           <div className="mt-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-1">Missing in Store</h3>
-            <p className="text-sm text-gray-700 break-all">{missingInStore.join(', ')}</p>
+            <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-1">Missing in Store</h3>
+            <p className="text-sm text-[var(--text-secondary)] break-all">{missingInStore.join(', ')}</p>
           </div>
         )}
         {mismatches.length > 0 && (
           <div className="mt-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Version Mismatches</h3>
+            <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Version Mismatches</h3>
             <DataTable<VersionMismatch>
               data={mismatches}
               rowKey={(row, i) => row.skill_id ?? i}

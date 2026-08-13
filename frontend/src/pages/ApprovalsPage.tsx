@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CheckCircle } from 'lucide-react';
 import { Card, EmptyState, ErrorState, FormField, PageSkeleton, inputClass } from '../components';
 import { useApprovals, useApprove } from '../hooks/useRepos';
 import { basename, fmt } from '../lib/format';
@@ -20,14 +21,14 @@ function ApprovalCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-bold text-gray-900">{basename(entry.repo)}</span>
-            <span className="text-sm text-gray-700">
+            <span className="text-base font-bold text-[var(--text-primary)]">{basename(entry.repo)}</span>
+            <span className="text-sm text-[var(--text-secondary)]">
               <span className="font-medium">{entry.phase}</span>
               {' → '}
               <span className="font-medium">{fmt(entry.next_phase)}</span>
             </span>
           </div>
-          <div className="text-xs text-gray-500 break-all">{entry.repo}</div>
+          <div className="text-xs text-[var(--text-tertiary)] break-all">{entry.repo}</div>
         </div>
         <button
           onClick={() => onApprove(entry)}
@@ -47,10 +48,10 @@ function ApprovalCard({
 
       {entry.artifacts.length > 0 && (
         <div className="mt-3">
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Artifacts</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Artifacts</div>
           <ul className="space-y-0.5">
             {entry.artifacts.map((path) => (
-              <li key={path} className="text-xs font-mono text-gray-700 break-all">
+              <li key={path} className="text-xs font-mono text-[var(--text-secondary)] break-all">
                 {path}
               </li>
             ))}
@@ -92,10 +93,10 @@ export function ApprovalsPage() {
     <div className="space-y-6 max-w-3xl">
       <h1 className="text-2xl font-bold">
         Approvals{' '}
-        <span className="text-base font-normal text-gray-500">({approvals.data?.total ?? 0} pending)</span>
+        <span className="text-base font-normal text-[var(--text-tertiary)]">({approvals.data?.total ?? 0} pending)</span>
       </h1>
 
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-[var(--text-secondary)]">
         Approving a gate signs off the artifact and{' '}
         <span className="font-medium">auto-advances the repo to the next phase</span>.
       </p>
@@ -112,7 +113,7 @@ export function ApprovalsPage() {
       </div>
 
       {pending.length === 0 ? (
-        <EmptyState title="No approvals waiting." icon="✅" />
+        <EmptyState title="No approvals waiting." icon={<CheckCircle className="w-8 h-8 text-green-500" />} />
       ) : (
         <div className="space-y-4">
           {pending.map((entry) => (

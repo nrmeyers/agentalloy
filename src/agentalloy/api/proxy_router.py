@@ -93,6 +93,44 @@ def get_vector_store(request: Request) -> TelemetryStore | None:
     return getattr(request.app.state, "telemetry_store", None)
 
 
+@dataclass(frozen=True)
+class _OpenAIArtifactContext:
+    """Context for artifact extraction on the OpenAI response path."""
+
+    store: Any
+    phase: str
+    slug: str
+
+
+def _build_openai_artifact_context(
+    request: Any,
+    signal_result: Any,
+) -> _OpenAIArtifactContext | None:
+    """Build artifact extraction context for the OpenAI router.
+
+    Returns ``None`` when extraction is disabled or no contract is active.
+    """
+    if signal_result is None or not getattr(signal_result, "phase", None):
+        return None
+    if not getattr(signal_result, "current_contract", None):
+        return None
+    try:
+        from agentalloy.config import get_settings
+
+        settings = get_settings()
+        if not settings.artifact_extraction_enabled:
+            return None
+    except Exception:
+        return None
+
+    store = getattr(request.app.state, "store", None)
+    if store is None:
+        return None
+
+    slug = signal_result.current_contract
+    return _OpenAIArtifactContext(store=store, phase=signal_result.phase, slug=slug)
+
+
 def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
     """Return the ComposeOrchestrator via dependency overrides or app.state."""
     # Try the dependency override pattern (same as compose_router)
@@ -561,6 +599,7 @@ def _stream_upstream_response(
     payload: dict[str, Any],
     on_status: Callable[[int], None] = lambda _status: None,
     telemetry: _StreamTelemetry | None = None,
+    artifact_extraction: _OpenAIArtifactContext | None = None,
 ) -> StreamingResponse:
     """Forward a streaming (SSE) response from the upstream LLM.
 
@@ -646,11 +685,31 @@ def _stream_upstream_response(
                     _finish_error(f"Upstream returned HTTP {resp.status_code}")
                     return
                 has_finish_reason = False
+                # Tee pattern: accumulate response text for artifact extraction
+                # while yielding chunks to the client immediately.
+                stream_buffer: list[str] = []
                 async for chunk in resp.aiter_text():
                     usage_scanner.feed(chunk)
                     if _sse_chunk_has_finish_reason(chunk):
                         has_finish_reason = True
+                    if artifact_extraction is not None:
+                        stream_buffer.append(chunk)
                     yield chunk
+            # After stream ends, run artifact extraction on accumulated text.
+            if artifact_extraction is not None and stream_buffer:
+                try:
+                    full_text = "".join(stream_buffer)
+                    if "<!--" in full_text:
+                        from agentalloy.api.artifact_extractor import extract_and_store
+
+                        extract_and_store(
+                            full_text,
+                            phase=artifact_extraction.phase,
+                            slug=artifact_extraction.slug,
+                            store=artifact_extraction.store,
+                        )
+                except Exception:
+                    logger.debug("streaming artifact extraction failed", exc_info=True)
             if not has_finish_reason:
                 yield _CORRECTIVE_CHUNK
                 yield 'data: [DONE]\n\n'
@@ -1092,6 +1151,24 @@ async def proxy_chat_completions(
         except Exception:
             logger.warning("Banner injection failed -- skipping banner", exc_info=True)
 
+    # Leg 2b: Per-turn state leg — structured JSON context briefing.
+    if (
+        signal_result is not None
+        and signal_result.state_leg is not None
+        and signal_result.phase is not None
+    ):
+        try:
+            state_msgs = inject_into_openai_messages(
+                current.messages,
+                signal_result.state_leg,
+                phase=signal_result.phase,
+                kind="state",
+            )
+            if state_msgs is not None:
+                current = current.model_copy(update={"messages": state_msgs})
+        except Exception:
+            logger.warning("State leg injection failed -- skipping", exc_info=True)
+
     # Leg 3: SDD workflow prose onto the system message (highest-compliance
     # location). Like the banner it runs on every carrier turn -- outside the
     # compose guard, outside apply_signal -- and commits no cadence marker, so it
@@ -1194,12 +1271,15 @@ async def proxy_chat_completions(
             if phase_telemetry_writer is not None
             else None
         )
+        # Build artifact extraction context for streaming path
+        stream_artifact_ctx = _build_openai_artifact_context(request, signal_result)
         return _stream_upstream_response(
             upstream_client,
             chat_url,
             payload,
             on_status=_commit,
             telemetry=stream_telemetry,
+            artifact_extraction=stream_artifact_ctx,
         )
 
     # Non-streaming: forward and return JSON
@@ -1456,6 +1536,10 @@ async def proxy_chat_completions(
     # Intercept gated tool calls in the response (OpenAI format)
     current_phase = signal_result.phase if signal_result else None
     pause_mode = signal_result.paused_mode if signal_result else False
+
+    # Build artifact extraction context if enabled
+    artifact_ctx = _build_openai_artifact_context(request, signal_result)
+
     if current_phase and not pause_mode:
         try:
             choices = body.get("choices", [])
@@ -1544,6 +1628,28 @@ async def proxy_chat_completions(
         except Exception:
             # Interception failure should never break the response
             logger.warning("tool call interception failed; forwarding as-is", exc_info=True)
+
+    # Artifact extraction: parse markers from response text, write to store,
+    # strip markers from the forwarded response.
+    if artifact_ctx is not None:
+        try:
+            choices = body.get("choices", [])
+            if choices and isinstance(choices[0], dict):
+                message = choices[0].get("message", {})
+                content = message.get("content", "")
+                if isinstance(content, str) and "<!--" in content:
+                    from agentalloy.api.artifact_extractor import extract_and_store
+
+                    result = extract_and_store(
+                        content,
+                        phase=artifact_ctx.phase,
+                        slug=artifact_ctx.slug,
+                        store=artifact_ctx.store,
+                    )
+                    if result.extracted:
+                        message["content"] = result.cleaned_text
+        except Exception:
+            logger.debug("artifact extraction failed on OpenAI response", exc_info=True)
 
     return JSONResponse(
         status_code=resp.status_code,

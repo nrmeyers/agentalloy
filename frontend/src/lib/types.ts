@@ -669,3 +669,50 @@ export interface ContractsListParams {
   slug?: string;
   status?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Code Index (/code/*)
+// ---------------------------------------------------------------------------
+
+export interface CodeIndexJob {
+  id: string;
+  slug: string;
+  state: string;
+  phase: string | null;
+  progress: number;
+  symbol_count: number;
+  edge_count: number;
+  embedding_count: number;
+  error: string | null;
+  started_at: number;
+  updated_at: number;
+  finished_at: number | null;
+  governs_written: number;
+  governs_dropped: number;
+  governs_unresolved_spans: string[];
+  governs_suspicious_docs: string[];
+}
+
+export interface CodeIndexRepo {
+  slug: string;
+  repo_path: string;
+  last_indexed_at: number | null;
+  indexed_head: string | null;
+  current_head: string | null;
+  is_stale: boolean;
+  watch_enabled: boolean;
+  symbol_count: number;
+  edge_count: number;
+}
+
+export interface CodeIndexCentralityEntry {
+  qualified_name: string;
+  pagerank: number;
+}
+
+export interface CodeIndexRepoStats {
+  slug: string;
+  counts_by_kind: Record<string, number>;
+  top_centrality: CodeIndexCentralityEntry[];
+  vector_count: number;
+}

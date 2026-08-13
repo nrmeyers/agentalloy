@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FolderOpen } from 'lucide-react';
 import { Card, EmptyState, ErrorState, PageSkeleton, Skeleton } from '../components';
 import { useRepoGates, useRepos } from '../hooks/useRepos';
 import { basename, fmt, fmtIsoTs } from '../lib/format';
@@ -28,7 +29,7 @@ function GateStatus({ repo }: { repo: string }) {
         >
           {g.blocked ? 'BLOCKED' : 'NOT BLOCKED'}
         </span>
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-[var(--text-secondary)]">
           phase <span className="font-medium">{fmt(g.phase)}</span>
           {' → next '}
           <span className="font-medium">{fmt(g.next_phase)}</span>
@@ -39,17 +40,17 @@ function GateStatus({ repo }: { repo: string }) {
 
       {g.advisories.length > 0 ? (
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase mb-1">Advisories</div>
+          <div className="text-xs font-medium text-[var(--text-tertiary)] uppercase mb-1">Advisories</div>
           <ul className="list-disc list-inside space-y-0.5">
             {g.advisories.map((a) => (
-              <li key={a} className="text-sm text-gray-700">
+              <li key={a} className="text-sm text-[var(--text-secondary)]">
                 {a}
               </li>
             ))}
           </ul>
         </div>
       ) : (
-        <p className="text-sm text-gray-500">No advisories.</p>
+        <p className="text-sm text-[var(--text-tertiary)]">No advisories.</p>
       )}
 
       {approvalSatisfied && (
@@ -75,11 +76,11 @@ function RepoCard({ repo }: { repo: RepoEntry }) {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-bold text-gray-900">{basename(repo.repo_root)}</span>
+            <span className="text-base font-bold text-[var(--text-primary)]">{basename(repo.repo_root)}</span>
             {!repo.exists && <Chip tone="red">missing</Chip>}
             {repo.approval_pending && <Chip tone="amber">approval pending</Chip>}
           </div>
-          <div className="text-xs text-gray-500 break-all">{repo.repo_root}</div>
+          <div className="text-xs text-[var(--text-tertiary)] break-all">{repo.repo_root}</div>
         </div>
         <div className="flex flex-wrap items-center gap-1 justify-end">
           {repo.harnesses.map((h) => (
@@ -105,18 +106,18 @@ function RepoCard({ repo }: { repo: RepoEntry }) {
 
       {(upstream || repo.cursor) && (
         <div className="mt-2 space-y-0.5">
-          {upstream && <div className="text-xs text-gray-500 break-all">upstream: {upstream}</div>}
+          {upstream && <div className="text-xs text-[var(--text-tertiary)] break-all">upstream: {upstream}</div>}
           {repo.cursor && (
-            <div className="text-xs text-gray-500 break-all font-mono">cursor: {repo.cursor}</div>
+            <div className="text-xs text-[var(--text-tertiary)] break-all font-mono">cursor: {repo.cursor}</div>
           )}
         </div>
       )}
 
-      <div className="mt-3 border-t border-gray-100 pt-2">
+      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
         <button
           type="button"
           onClick={() => setGatesOpen((open) => !open)}
-          className="text-sm text-gray-600 hover:text-gray-900"
+          className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
         >
           {gatesOpen ? '▾' : '▸'} Gate status
         </button>
@@ -145,19 +146,19 @@ export function ReposPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">
           Repos{' '}
-          <span className="text-base font-normal text-gray-500">({repos.data?.total ?? 0})</span>
+          <span className="text-base font-normal text-[var(--text-tertiary)]">({repos.data?.total ?? 0})</span>
         </h1>
         <button
           onClick={() => repos.refetch()}
           disabled={repos.isFetching}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 disabled:opacity-50"
+          className="px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)] disabled:opacity-50"
         >
           {repos.isFetching ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
       {entries.length === 0 ? (
-        <EmptyState title="No repos registered" hint="Onboard a repo to see it here." icon="📁" />
+        <EmptyState title="No repos registered" hint="Onboard a repo to see it here." icon={<FolderOpen className="w-8 h-8 text-[var(--text-tertiary)]" />} />
       ) : (
         <div className="space-y-4">
           {entries.map((repo) => (

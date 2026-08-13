@@ -17,7 +17,8 @@ applies_to_phases:
 # started after shipping. A customization may reword the prose but must keep it
 # verbatim.
 prose_invariants:
-  - "agentalloy phase set intake"
+  - "state panel"
+  - "agentalloy:artifact"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -58,7 +59,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: agentalloy
-change_summary: "two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → ship artifact record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
+change_summary: "API-first migration: removed CLI commands (phase set, contract show, artifact-set, telemetry show, resume); replaced with state panel references, artifact markers, and agentalloy_query tool calls. Methodology unchanged — two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → ship artifact record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake."
 raw_prose: |
   # SDD — Ship (Deliver)
 
@@ -74,9 +75,10 @@ raw_prose: |
 
   ## 1. Confirm you're shipping the verified state
 
-  Read your work-item contract (`agentalloy contract show <slug>`, which qa
-  authored — the proxy front-loaded the delivery skills for it on entry). Ship
-  rides on QA's report (the qa artifact) — don't re-run the review. Just
+  Check your state panel for the current phase and active contracts. Use
+  `agentalloy_query` with action=`contract_detail` to read the work-item contract
+  that qa authored — the proxy front-loaded the delivery skills for it on entry.
+  Ship rides on QA's report (the qa artifact) — don't re-run the review. Just
   confirm the commit you're shipping *is* the reviewed one: the suite is green at
   HEAD and nothing landed after sign-off. If code changed since QA, it isn't
   verified — back to `qa`.
@@ -92,10 +94,12 @@ raw_prose: |
   - **how it was verified** — link the spec acceptance, the design, and the QA
     report so a reviewer can trace the chain instead of reconstructing it.
 
-  Store the PR narrative in the data store (not on disk):
+  Record the PR narrative using an artifact marker:
 
   ```
-  agentalloy contract artifact-set --phase ship --slug <slug> --name pr-narrative --body-file -
+  <!-- agentalloy:artifact name=pr-narrative -->
+  ...narrative content...
+  <!-- /agentalloy:artifact -->
   ```
 
   A reviewer should be able to approve from the narrative plus the diff, without
@@ -103,16 +107,22 @@ raw_prose: |
 
   ## 3. Record the delivery
 
-  Write the ship artifact in the data store with `## Summary` (what shipped, the PR
+  Write the ship artifact with `## Summary` (what shipped, the PR
   link, the release-notes or changelog entry) and `## Rollback` (how to reverse this
-  exact change — the revert commit, the flag to flip, any data migration to undo):
+  exact change — the revert commit, the flag to flip, any data migration to undo)
+  using an artifact marker:
 
   ```
-  agentalloy contract artifact-set --phase ship --slug <slug> --name delivery --body-file -
+  <!-- agentalloy:artifact name=delivery -->
+  ## Summary
+  ...what shipped...
+  ## Rollback
+  ...how to reverse...
+  <!-- /agentalloy:artifact -->
   ```
 
-  The ship artifact persists in the data store — no ``docs/ship/*.md`` file. Update
-  the changelog or release notes to the repo's own convention.
+  The ship artifact is extracted by the proxy from your response — no ``docs/ship/*.md``
+  file. Update the changelog or release notes to the repo's own convention.
 
   ## 4. Reversibility scales with risk
 
@@ -129,9 +139,9 @@ raw_prose: |
   The watcher opens the PR, monitors CI, and detects merge — all automatically.
   After writing the PR narrative, the proxy starts the watcher for you. It:
 
-  - Opens the PR with the narrative from the data store
+  - Opens the PR with the narrative from the artifact marker
   - Polls CI every 60 seconds
-  - Captures all CI results to telemetry (queryable via ``agentalloy telemetry show``)
+  - Captures all CI results to telemetry (queryable via `agentalloy_query` with action=`telemetry`)
   - After 5 CI failures, pauses and notifies you
   - Detects when the PR merges (via VCS API)
   - After merge, asks you whether to reset to intake
@@ -145,10 +155,10 @@ raw_prose: |
   to intake, the work is done: **stay in `ship`** and tell the user it shipped.
   Do not then go quiet and wait to be prompted — explicitly ask the user whether
   they're ready to reset to intake for the next work item. The one transition out
-  is back to the top, and it's the user's call, not yours: when they say go, reset
-  the lifecycle with `agentalloy phase set intake` so the next session opens fresh.
-  Phase advance ends this session; the next phase begins in a fresh one, and
-  `agentalloy resume` rebuilds context. **Never reset on your own initiative** —
+  is back to the top, and it's the user's call, not yours: when they say go,
+  state that the phase is complete. The phase advances automatically once exit
+  gates pass, and the next session opens fresh. Check your state panel for the
+  current phase at any time. **Never reset on your own initiative** —
   a green CI run or a successful merge is not permission; only the user's explicit
   yes is. Ask, then wait for the answer.
 

@@ -27,6 +27,7 @@ from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import resolve_session_key
+from agentalloy.api.state_leg import build_state_leg
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE
@@ -160,6 +161,15 @@ class SignalResult:
     # Set only on a carrier turn with a known phase under the active lifecycle mode;
     # None otherwise (and on any soft failure while building it). See `build_banner`.
     banner: str | None = None
+
+    # Per-turn state leg: structured JSON context briefing injected into the
+    # trailing user message on EVERY carrier turn (same cadence as banner).
+    # Gives the LLM a machine-readable snapshot of phase, contract, artifacts,
+    # and gate status — replaces the need for CLI queries. Designed for the
+    # stateless-phase model: a fresh agent can read this and operate immediately.
+    # None when the state is too thin to be useful or building failed.
+    # See `agentalloy.api.state_leg.build_state_leg`.
+    state_leg: str | None = None
 
     # Deferred cadence markers. The signal layer DECIDES what to record but no
     # longer writes `.agentalloy/{announced,composed}` itself — committing at
@@ -734,6 +744,94 @@ def _evaluate_pause_mode(
     )
 
 
+# Phases where auto-creating a next-phase contract on transition is appropriate.
+# spec→design: same slug, carry scope forward. design→plan: same slug.
+# build→qa: same slug, verification-focused.
+_AUTO_CREATE_PHASES = {"design", "plan", "qa"}
+
+
+def _auto_create_next_contract(
+    project_root: Path,
+    to_phase: str,
+    current_contract_id: str | None,
+    store: Any,
+) -> None:
+    """Auto-create a next-phase contract after a phase transition.
+
+    Copies the slug and scope from the current contract into a fresh contract
+    for the target phase. This means the next phase's agent starts with a
+    contract already in place — no CLI ``contract init`` needed.
+
+    Soft: never raises. A failure leaves the next phase without an auto-created
+    contract (the agent can still create one manually).
+    """
+    if to_phase not in _AUTO_CREATE_PHASES:
+        return
+    if not current_contract_id or store is None:
+        return
+
+    try:
+        row = store.get_contract(current_contract_id)
+        if row is None:
+            return
+
+        slug = row.get("slug", "")
+        if not slug:
+            return
+
+        # Check if a contract already exists for this phase+slug
+        existing = store.list_contracts(phase=to_phase, slug=slug, status="active")
+        if existing:
+            return  # already exists, don't duplicate
+
+        # Build the new contract_id (use slug as the ID for simplicity)
+        new_contract_id = slug
+
+        # Carry forward scope from the current contract
+        import json as _json
+
+        scope_touches_raw = row.get("scope_touches", "[]")
+        scope_avoids_raw = row.get("scope_avoids", "[]")
+        domain_tags_raw = row.get("domain_tags", "[]")
+        try:
+            scope_touches = _json.loads(scope_touches_raw) if isinstance(scope_touches_raw, str) else scope_touches_raw
+        except Exception:
+            scope_touches = []
+        try:
+            scope_avoids = _json.loads(scope_avoids_raw) if isinstance(scope_avoids_raw, str) else scope_avoids_raw
+        except Exception:
+            scope_avoids = []
+        try:
+            domain_tags = _json.loads(domain_tags_raw) if isinstance(domain_tags_raw, str) else domain_tags_raw
+        except Exception:
+            domain_tags = []
+
+        store.put_contract(
+            new_contract_id,
+            phase=to_phase,
+            slug=slug,
+            domain_tags=domain_tags if isinstance(domain_tags, list) else [],
+            scope_touches=scope_touches if isinstance(scope_touches, list) else [],
+            scope_avoids=scope_avoids if isinstance(scope_avoids, list) else [],
+            body="",  # empty body — the agent fills it in
+        )
+        logger.info(
+            "Auto-created contract for phase=%s slug=%s (from %s)",
+            to_phase, slug, current_contract_id,
+        )
+
+        # Re-seed the cursor to the new contract so the next turn picks it up
+        from agentalloy.signals.skill_loader import _write_cursor_atomic
+
+        cursor = f"active/{to_phase}/{new_contract_id}.md"
+        _write_cursor_atomic(project_root, cursor)
+
+    except Exception:
+        logger.debug(
+            "auto-create contract failed for phase=%s", to_phase, exc_info=True,
+        )
+
+
 async def evaluate_signal(
     request: ProxyRequest,
     cwd: Path,
@@ -1101,6 +1199,12 @@ async def evaluate_signal(
                 try:
                     _write_phase_atomic(cwd, to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, to_phase)
+                    # Auto-create next-phase contract if the transition warrants it.
+                    # This runs AFTER _write_phase_atomic (which clears cursors), so
+                    # we re-seed the cursor to the new contract if creation succeeds.
+                    _auto_create_next_contract(
+                        cwd, to_phase, contract_id, ctx.store,
+                    )
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
                     # mode="workflow" is not a guess: this whole branch is only
                     # reached past the pause guard above (1b), which returns
@@ -1153,6 +1257,23 @@ async def evaluate_signal(
     # queryable instead of only a WARNING line.
     phase_gate_embed_failed = ctx.embed_failed
 
+    # State leg: structured JSON context briefing for the LLM. Built on every
+    # carrier turn (same cadence as banner). Soft: never raises — a failure
+    # yields None and the leg is simply not injected.
+    state_leg_text: str | None = None
+    if is_carrier and phase:
+        try:
+            state_leg_text = build_state_leg(
+                phase,
+                paused_mode=paused_mode,
+                store=ctx.store,
+                contract_id=contract_id,
+                gates_met=gates_met,
+                gates_unmet=gates_unmet,
+            )
+        except Exception:
+            logger.debug("state_leg build failed for phase=%s", phase, exc_info=True)
+
     # 7. Tier 2 cadence: decide whether the current work-item contract's domain block
     #    fires. `contract_id`/`contract_path` were resolved once near the top of this
     #    function (shared with the banner's <slug>). Tier 2 fires when the cursor changed
@@ -1201,6 +1322,7 @@ async def evaluate_signal(
             task=task,
             trace_id=trace_id,
             banner=banner,
+            state_leg=state_leg_text,
             # Quiet for composition, NOT quiet for the system leg: this is the return
             # taken on every turn after the first of a phase, and it is precisely where
             # the workflow instructions used to vanish.
@@ -1271,6 +1393,7 @@ async def evaluate_signal(
         phase=phase,
         task=task,
         banner=banner,
+        state_leg=state_leg_text,
         pre_filter_matched=match.detail if match is not None else None,
         gates_met=gates_met,
         gates_unmet=gates_unmet,
@@ -1339,8 +1462,8 @@ def _boundary_confirm_directives(
         if new_session:
             return [
                 "You are resuming a NEW session on phase `intake` (the entry phase). "
-                "Before doing any work, RUN `agentalloy contract init --phase spec` "
-                "to write the contract and PRESENT it in full and STOP — do not draft "
+                "Before doing any work, create a contract for the `spec` phase "
+                "and PRESENT it in full and STOP — do not draft "
                 "solutions. The user will approve and advance the phase.",
             ]
         return []
@@ -1378,7 +1501,7 @@ def _boundary_confirm_directives(
                 "CONFIRM with the user that `ship` is the right phase to be on; "
                 "if it is, check for a reset marker file in `.agentalloy/` — if one "
                 "exists, ASK whether they are ready to reset to intake for the next "
-                "work item (`agentalloy phase set intake`). Do NOT change the phase "
+                "work item. Do NOT change the phase "
                 "on your own initiative — wait for their answer.",
             ]
         return [
@@ -1396,7 +1519,7 @@ def _boundary_confirm_directives(
                 "CONFIRM with the user that `ship` is the right phase to be on; if it "
                 "is, check for a reset marker file in `.agentalloy/` — if one exists, "
                 "ASK whether they are ready to reset to intake for the next work "
-                "item (`agentalloy phase set intake`). Do NOT change the phase on your "
+                "item. Do NOT change the phase on your "
                 "own initiative — wait for their answer.",
             ]
         return [

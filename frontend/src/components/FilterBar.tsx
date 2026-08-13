@@ -31,11 +31,13 @@ export function FilterSelect({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-gray-500 uppercase">{label}</span>
+      <span className="text-[10px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">
+        {label}
+      </span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="px-2 py-1.5 border border-gray-300 rounded-md text-sm bg-white min-w-[9rem]"
+        className="px-2.5 py-1.5 border border-[var(--border-primary)] rounded-md text-sm bg-[var(--bg-primary)] text-[var(--text-primary)] min-w-[9rem] focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -51,10 +53,6 @@ function withAll(values: string[], allLabel: string): { value: string; label: st
   return [{ value: '', label: allLabel }, ...values.map((v) => ({ value: v, label: v }))];
 }
 
-/**
- * Phase / status / repo options are derived from live data by the caller —
- * never hardcoded (phase vocabulary is owned by the backend).
- */
 export function FilterBar({
   phases,
   statuses,

@@ -20,9 +20,11 @@ export function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 accent-brand"
+        className="flex-1 accent-brand-500"
       />
-      <span className="w-14 text-right text-sm tabular-nums text-gray-700">{value.toFixed(2)}</span>
+      <span className="w-14 text-right text-sm tabular-nums text-[var(--text-secondary)]">
+        {value.toFixed(2)}
+      </span>
     </div>
   );
 }

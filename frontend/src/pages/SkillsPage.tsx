@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Puzzle } from 'lucide-react';
 import {
   Card,
   DataTable,
@@ -85,7 +86,7 @@ export function SkillsPage() {
         <span className="flex flex-wrap gap-1">
           {s.pack && <Chip tone="gray">pack: {s.pack}</Chip>}
           {s.override_layer && <Chip tone="amber">overridden: {s.override_layer}</Chip>}
-          {!s.pack && !s.override_layer && <span className="text-sm text-gray-400">—</span>}
+          {!s.pack && !s.override_layer && <span className="text-sm text-[var(--text-tertiary)]">—</span>}
         </span>
       ),
     },
@@ -96,7 +97,7 @@ export function SkillsPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Skills</h1>
         {data && (
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-[var(--text-tertiary)]">
             {data.total} skill{data.total === 1 ? '' : 's'}
           </span>
         )}
@@ -119,12 +120,12 @@ export function SkillsPage() {
           onChange={setCategory}
         />
         <label className="flex flex-col gap-1 flex-1 min-w-[14rem] max-w-md">
-          <span className="text-xs font-medium text-gray-500 uppercase">Search</span>
+          <span className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Search</span>
           <input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="name, id, description…"
-            className="px-2 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+            className="px-2 py-1.5 border border-[var(--border-primary)] rounded-md text-sm bg-[var(--bg-elevated)]"
           />
         </label>
       </div>
@@ -137,7 +138,7 @@ export function SkillsPage() {
         <EmptyState
           title="No skills match"
           hint="Try clearing the class/category filters or the search text."
-          icon="🧩"
+          icon={<Puzzle className="w-8 h-8" />}
         />
       ) : (
         <Card>

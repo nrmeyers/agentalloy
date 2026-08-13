@@ -63,7 +63,7 @@ async def test_new_session_on_intake_confirms(tmp_path: Path):
     sig = await evaluate_signal(_req(), tmp_path, session_id="me")
     assert sig.confirm_directives, "new session on intake must confirm"
     joined = "\n".join(sig.confirm_directives).lower()
-    assert "contract init" in joined and "intake" in joined
+    assert "contract" in joined and "spec" in joined
 
 
 async def test_known_session_does_not_reconfirm(tmp_path: Path):

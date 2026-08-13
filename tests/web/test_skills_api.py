@@ -91,7 +91,7 @@ def test_override_get_shows_layers_and_locked_fields(client):
     assert body["active_layer"] == "default"
     assert body["shipped_raw_prose"] and "fast lane" in body["shipped_raw_prose"].lower()
     assert "exit_gates" in body["locked_fields"]
-    assert any("phase set qa" in inv for inv in body["prose_invariants"])
+    assert any("state panel" in inv for inv in body["prose_invariants"])
 
 
 def test_override_put_requires_csrf(client):
@@ -109,7 +109,7 @@ def test_override_put_rejects_dropped_invariant(client):
     assert r.status_code == 400
     detail = r.json()["detail"]
     assert detail["error"] == "validation_failed"
-    assert any("phase set qa" in e for e in detail["errors"])
+    assert any("state panel" in e for e in detail["errors"])
 
 
 def test_override_put_then_delete_roundtrip(client, tmp_path: Path):

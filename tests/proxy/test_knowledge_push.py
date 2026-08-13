@@ -99,7 +99,7 @@ def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:
     assert "docs/design/x/approach.md" in push.text
     # Manifest format: no snippet bodies, just headings + source paths
     assert "Chose `pkg.a.foo`." not in push.text
-    assert "agentalloy knowledge why" in push.text
+    assert "agentalloy_query" in push.text
     # decisions tuple carries the selected rows
     assert len(push.decisions) == 1
     assert push.decisions[0].heading == "Why foo"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Lock } from 'lucide-react';
 import { Card, ChipInput, EmptyState, ErrorState, PageSkeleton } from '../../components';
 import { useDeleteOverride, useSaveOverride, useSkillOverride } from '../../hooks/useSkills';
 import { ApiError, extractValidationErrors } from '../../lib/api';
@@ -19,7 +20,7 @@ function seedForm(override: SkillOverride): FormState {
 
 function InvariantChecklist({ invariants, prose }: { invariants: string[]; prose: string }) {
   if (invariants.length === 0) {
-    return <p className="text-sm text-gray-500">No prose invariants for this skill.</p>;
+    return <p className="text-sm text-[var(--text-tertiary)]">No prose invariants for this skill.</p>;
   }
   return (
     <ul className="space-y-1.5">
@@ -33,7 +34,7 @@ function InvariantChecklist({ invariants, prose }: { invariants: string[]; prose
             >
               {present ? '✓' : '✗'}
             </span>
-            <code className="text-xs text-gray-800 whitespace-pre-wrap break-words">
+            <code className="text-xs text-[var(--text-primary)] whitespace-pre-wrap break-words">
               {invariant}
             </code>
           </li>
@@ -44,7 +45,7 @@ function InvariantChecklist({ invariants, prose }: { invariants: string[]; prose
 }
 
 const diffLineStyles = {
-  same: 'text-gray-600',
+  same: 'text-[var(--text-secondary)]',
   add: 'bg-green-50 text-green-800',
   del: 'bg-red-50 text-red-800',
 } as const;
@@ -55,10 +56,10 @@ function DiffView({ shipped, current }: { shipped: string; current: string }) {
   const lines = useMemo(() => diffLines(shipped, current), [shipped, current]);
   const changed = lines.some((l) => l.type !== 'same');
   if (!changed) {
-    return <p className="text-sm text-gray-500">No differences from the shipped default.</p>;
+    return <p className="text-sm text-[var(--text-tertiary)]">No differences from the shipped default.</p>;
   }
   return (
-    <pre className="text-xs font-mono border border-gray-200 rounded max-h-96 overflow-y-auto">
+    <pre className="text-xs font-mono border border-[var(--border-primary)] rounded max-h-96 overflow-y-auto">
       {lines.map((l, i) => (
         <div key={i} className={`px-3 whitespace-pre-wrap break-words ${diffLineStyles[l.type]}`}>
           {diffPrefix[l.type]} {l.line}
@@ -91,7 +92,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
         <EmptyState
           title="This skill is not overridable"
           hint="The backend exposes no override surface for it."
-          icon="🔒"
+          icon={<Lock className="w-8 h-8" />}
         />
       );
     }
@@ -140,7 +141,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
         className={`px-4 py-3 rounded-md text-sm border ${
           isOverridden
             ? 'bg-amber-50 border-amber-200 text-amber-800'
-            : 'bg-gray-50 border-gray-200 text-gray-700'
+            : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-secondary)]'
         }`}
       >
         Active layer: <span className="font-semibold">{override.active_layer}</span>
@@ -156,7 +157,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
               <button
                 onClick={handleReset}
                 disabled={remove.isPending}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 disabled:opacity-50"
+                className="px-4 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)] disabled:opacity-50"
               >
                 {remove.isPending ? 'Resetting…' : 'Reset to default'}
               </button>
@@ -175,7 +176,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
           onChange={(e) => setForm((prev) => (prev ? { ...prev, prose: e.target.value } : prev))}
           rows={18}
           spellCheck={false}
-          className="w-full font-mono text-xs px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-brand"
+          className="w-full font-mono text-xs px-3 py-2 border border-[var(--border-primary)] rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         {validationErrors.length > 0 && (
           <div className="mt-2 bg-red-50 border border-red-200 rounded-md px-4 py-3">
@@ -190,7 +191,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
           </div>
         )}
         <div className="mt-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Domain Tags</h3>
+          <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Domain Tags</h3>
           <ChipInput
             values={form.tags}
             onChange={(tags) => setForm((prev) => (prev ? { ...prev, tags } : prev))}
@@ -200,7 +201,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
 
       <Card>
         <h2 className="text-lg font-semibold mb-1">Prose Invariants</h2>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-[var(--text-tertiary)] mb-3">
           Each invariant must appear verbatim in the prose — missing ones fail validation on save.
         </p>
         <InvariantChecklist invariants={override.prose_invariants} prose={form.prose} />
@@ -208,11 +209,11 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
 
       <Card>
         <h2 className="text-lg font-semibold mb-1">Locked Fields</h2>
-        <p className="text-xs text-gray-500 mb-3">🔒 product-owned — not customizable</p>
+        <p className="text-xs text-[var(--text-tertiary)] mb-3 flex items-center gap-1"><Lock className="w-3 h-3" /> product-owned — not customizable</p>
         {Object.keys(override.locked_fields).length === 0 ? (
-          <p className="text-sm text-gray-500">No locked fields.</p>
+          <p className="text-sm text-[var(--text-tertiary)]">No locked fields.</p>
         ) : (
-          <pre className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto select-text cursor-not-allowed">
+          <pre className="text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto select-text cursor-not-allowed">
             {JSON.stringify(override.locked_fields, null, 2)}
           </pre>
         )}
@@ -221,7 +222,7 @@ export function CustomizeTab({ skillId }: { skillId: string }) {
       <Card>
         <h2 className="text-lg font-semibold mb-1">Diff vs Shipped Default</h2>
         {override.shipped_raw_prose === null ? (
-          <p className="text-sm text-gray-500">No shipped default prose to diff against.</p>
+          <p className="text-sm text-[var(--text-tertiary)]">No shipped default prose to diff against.</p>
         ) : (
           <DiffView shipped={override.shipped_raw_prose} current={form.prose} />
         )}

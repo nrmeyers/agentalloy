@@ -1,17 +1,80 @@
 import type { ReactNode } from 'react';
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+interface CardProps {
+  children: ReactNode;
+  className?: string;
+  padding?: boolean;
+  hover?: boolean;
+  onClick?: () => void;
+}
+
+export function Card({
+  children,
+  className = '',
+  padding = true,
+  hover = false,
+  onClick,
+}: CardProps) {
   return (
-    <div className={`bg-white rounded-lg border border-gray-200 p-4 ${className}`}>{children}</div>
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={`rounded-lg border border-[var(--border-primary)] bg-[var(--bg-elevated)]
+        ${padding ? 'p-4' : ''}
+        ${hover ? 'transition-colors hover:border-[var(--text-tertiary)] cursor-pointer' : ''}
+        ${onClick ? 'cursor-pointer' : ''}
+        ${className}`}
+    >
+      {children}
+    </div>
   );
 }
 
-export function StatCard({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
+interface StatCardProps {
+  label: string;
+  value: ReactNode;
+  description?: string;
+  trend?: 'up' | 'down' | 'neutral';
+  icon?: ReactNode;
+}
+
+export function StatCard({ label, value, description, trend, icon }: StatCardProps) {
+  const trendColor =
+    trend === 'up'
+      ? 'text-success'
+      : trend === 'down'
+        ? 'text-error'
+        : 'text-[var(--text-tertiary)]';
+
   return (
     <Card>
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-2xl font-bold text-gray-900">{value}</div>
-      {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      <div className="flex items-start justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">
+            {label}
+          </p>
+          <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)] tabular-nums tracking-tight">
+            {value}
+          </p>
+          {description && (
+            <p className={`mt-1 text-xs ${trendColor}`}>{description}</p>
+          )}
+        </div>
+        {icon && (
+          <div className="text-[var(--text-tertiary)] shrink-0">{icon}</div>
+        )}
+      </div>
     </Card>
   );
 }

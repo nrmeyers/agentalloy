@@ -102,8 +102,8 @@ def _build_approval_advisory(ctx: PredicateContext) -> str:
     phase = ctx.current_phase or "this phase"
     return (
         f"'{phase}' is complete and awaiting human approval. PRESENT the work in full and STOP; "
-        f"run `agentalloy approve {phase}` only after the user explicitly approves (re-run it if the "
-        f"exit artifact changed after the last approval)."
+        f"the phase advances only after the user explicitly approves. If the exit artifact "
+        f"changed after the last approval, present the updated work for re-approval."
     )
 
 
@@ -139,8 +139,7 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     return (
         f"Design emitted {contracts} build contract(s) for {tasks} task(s) in tasks.md. "
         f"Emit ONE build contract per task before advancing to build — "
-        f"`agentalloy contract init --phase build --slug <NN-task-slug>`, each centered on a "
-        f"single tech surface."
+        f"each centered on a single tech surface. Contracts are auto-created on phase transition."
     )
 
 
@@ -156,8 +155,8 @@ def _build_contract_exists_advisory(args: dict[str, Any], ctx: PredicateContext)
     to_phase = _get_next().get(target_phase, target_phase)
     return (
         f"You are in intake, but no contracts exist for phase '{target_phase}'. "
-        f"Run ``agentalloy contract init --phase {target_phase} --slug <task-slug>`` to "
-        f"write the contract, then PRESENT it in full and STOP — do not draft solutions. "
+        f"Create a contract for '{target_phase}' with slug <task-slug>, "
+        f"then PRESENT it in full and STOP — do not draft solutions. "
         f"The user will advance to '{to_phase}' once they approve the contract."
     )
 
@@ -460,8 +459,8 @@ def decide_transition(
                 advisories.append(
                     f"Phase '{current_phase}' isn't complete yet, so staying in "
                     f"'{current_phase}'. To advance to '{to_phase}', record its exit "
-                    f"artifact: `agentalloy contract artifact-set --phase {phase_name} "
-                    f"--slug <slug> --name {name_glob}`.",
+                    f"artifact using an artifact marker: "
+                    f"`<!-- agentalloy:artifact name={name_glob} -->...<!-- /agentalloy:artifact -->`.",
                 )
         # Split missing paths into "wrote it somewhere wrong" vs "doesn't exist at
         # all". A near-miss (the deliverable exists but at the wrong path — e.g.
@@ -610,8 +609,8 @@ def evaluate_phase_gate(
                 "reason": "approval",
                 "advisories": [
                     f"'{current_phase}' requires human approval before advancing "
-                    f"to '{target_phase}'. Run `agentalloy approve {current_phase}` "
-                    f"once the user has approved.",
+                    f"to '{target_phase}'. Present the work for approval; the phase "
+                    f"advances automatically once the user approves.",
                 ],
             }
 
