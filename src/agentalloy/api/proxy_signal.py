@@ -1462,8 +1462,8 @@ def _boundary_confirm_directives(
         if new_session:
             return [
                 "You are resuming a NEW session on phase `intake` (the entry phase). "
-                "Before doing any work, RUN `agentalloy contract init --phase spec` "
-                "to write the contract and PRESENT it in full and STOP — do not draft "
+                "Before doing any work, create a contract for the `spec` phase "
+                "and PRESENT it in full and STOP — do not draft "
                 "solutions. The user will approve and advance the phase.",
             ]
         return []
@@ -1501,7 +1501,7 @@ def _boundary_confirm_directives(
                 "CONFIRM with the user that `ship` is the right phase to be on; "
                 "if it is, check for a reset marker file in `.agentalloy/` — if one "
                 "exists, ASK whether they are ready to reset to intake for the next "
-                "work item (`agentalloy phase set intake`). Do NOT change the phase "
+                "work item. Do NOT change the phase "
                 "on your own initiative — wait for their answer.",
             ]
         return [
@@ -1519,7 +1519,7 @@ def _boundary_confirm_directives(
                 "CONFIRM with the user that `ship` is the right phase to be on; if it "
                 "is, check for a reset marker file in `.agentalloy/` — if one exists, "
                 "ASK whether they are ready to reset to intake for the next work "
-                "item (`agentalloy phase set intake`). Do NOT change the phase on your "
+                "item. Do NOT change the phase on your "
                 "own initiative — wait for their answer.",
             ]
         return [
