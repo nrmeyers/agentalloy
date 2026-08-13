@@ -229,7 +229,7 @@ def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     making verdicts environment-dependent. Pin cosine so the unit suite is
     hermetic, and reset the process-wide scorer cache so each test re-reads the
     backend from its env. The reranker backend is covered explicitly in
-    tests/test_classifier_reranker.py, which deletes this pin to exercise the
+    tests/signals/test_classifier_reranker.py, which deletes this pin to exercise the
     default-on path against a faked transport.
     """
     from agentalloy.signals.classifier import reset_intent_scorer_cache

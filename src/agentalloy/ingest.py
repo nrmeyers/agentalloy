@@ -561,7 +561,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
         # still-missing target may be a legitimate cross-pack edge (including
         # circular ones like python<->fastapi) — warn, don't fail. Corpus-wide
         # referential integrity is enforced at the complete-corpus level (see
-        # tests/test_bundled_corpus_integrity.py).
+        # tests/corpus/test_bundled_corpus_integrity.py).
         if failed == 0 and deferred_edges:
             still_missing = _resolve_deferred_edges(store, deferred_edges)
             for edge in still_missing:

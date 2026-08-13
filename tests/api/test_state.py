@@ -16,14 +16,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentalloy.api.state_client import StateClient, StateClientError
+from agentalloy.install.subcommands.phase import run_phase_set
+from agentalloy.storage.state_store import DuckDBStateStore
+
 # Re-export fixture_repo so tests in this file can use it.
 from tests.code_index.conftest import (
     fixture_repo,  # noqa: F401, F811 — imported for fixture parameter use
 )
-
-from agentalloy.api.state_client import StateClient, StateClientError
-from agentalloy.install.subcommands.phase import run_phase_set
-from agentalloy.storage.state_store import DuckDBStateStore
 
 # ---------------------------------------------------------------------------
 # AC-6: Integration test (sidecar + statusline) via StateClient
