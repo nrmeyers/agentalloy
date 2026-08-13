@@ -744,6 +744,94 @@ def _evaluate_pause_mode(
     )
 
 
+# Phases where auto-creating a next-phase contract on transition is appropriate.
+# spec→design: same slug, carry scope forward. design→plan: same slug.
+# build→qa: same slug, verification-focused.
+_AUTO_CREATE_PHASES = {"design", "plan", "qa"}
+
+
+def _auto_create_next_contract(
+    project_root: Path,
+    to_phase: str,
+    current_contract_id: str | None,
+    store: Any,
+) -> None:
+    """Auto-create a next-phase contract after a phase transition.
+
+    Copies the slug and scope from the current contract into a fresh contract
+    for the target phase. This means the next phase's agent starts with a
+    contract already in place — no CLI ``contract init`` needed.
+
+    Soft: never raises. A failure leaves the next phase without an auto-created
+    contract (the agent can still create one manually).
+    """
+    if to_phase not in _AUTO_CREATE_PHASES:
+        return
+    if not current_contract_id or store is None:
+        return
+
+    try:
+        row = store.get_contract(current_contract_id)
+        if row is None:
+            return
+
+        slug = row.get("slug", "")
+        if not slug:
+            return
+
+        # Check if a contract already exists for this phase+slug
+        existing = store.list_contracts(phase=to_phase, slug=slug, status="active")
+        if existing:
+            return  # already exists, don't duplicate
+
+        # Build the new contract_id (use slug as the ID for simplicity)
+        new_contract_id = slug
+
+        # Carry forward scope from the current contract
+        import json as _json
+
+        scope_touches_raw = row.get("scope_touches", "[]")
+        scope_avoids_raw = row.get("scope_avoids", "[]")
+        domain_tags_raw = row.get("domain_tags", "[]")
+        try:
+            scope_touches = _json.loads(scope_touches_raw) if isinstance(scope_touches_raw, str) else scope_touches_raw
+        except Exception:
+            scope_touches = []
+        try:
+            scope_avoids = _json.loads(scope_avoids_raw) if isinstance(scope_avoids_raw, str) else scope_avoids_raw
+        except Exception:
+            scope_avoids = []
+        try:
+            domain_tags = _json.loads(domain_tags_raw) if isinstance(domain_tags_raw, str) else domain_tags_raw
+        except Exception:
+            domain_tags = []
+
+        store.put_contract(
+            new_contract_id,
+            phase=to_phase,
+            slug=slug,
+            domain_tags=domain_tags if isinstance(domain_tags, list) else [],
+            scope_touches=scope_touches if isinstance(scope_touches, list) else [],
+            scope_avoids=scope_avoids if isinstance(scope_avoids, list) else [],
+            body="",  # empty body — the agent fills it in
+        )
+        logger.info(
+            "Auto-created contract for phase=%s slug=%s (from %s)",
+            to_phase, slug, current_contract_id,
+        )
+
+        # Re-seed the cursor to the new contract so the next turn picks it up
+        from agentalloy.signals.skill_loader import _write_cursor_atomic
+
+        cursor = f"active/{to_phase}/{new_contract_id}.md"
+        _write_cursor_atomic(project_root, cursor)
+
+    except Exception:
+        logger.debug(
+            "auto-create contract failed for phase=%s", to_phase, exc_info=True,
+        )
+
+
 async def evaluate_signal(
     request: ProxyRequest,
     cwd: Path,
@@ -1111,6 +1199,12 @@ async def evaluate_signal(
                 try:
                     _write_phase_atomic(cwd, to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, to_phase)
+                    # Auto-create next-phase contract if the transition warrants it.
+                    # This runs AFTER _write_phase_atomic (which clears cursors), so
+                    # we re-seed the cursor to the new contract if creation succeeds.
+                    _auto_create_next_contract(
+                        cwd, to_phase, contract_id, ctx.store,
+                    )
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
                     # mode="workflow" is not a guess: this whole branch is only
                     # reached past the pause guard above (1b), which returns
