@@ -3,8 +3,7 @@
 `POST /corpus/ingest-pack` lets the CLI write the **live** corpus while the
 service is running — native or container — instead of requiring it to be stopped
 (native) or being unreachable inside the data volume (container). It is the
-durable fix for #390, which shipped honest failures in v6.7.0 and the routing in
-v6.8.0.
+durable fix for #390.
 
 ## Why it exists
 

@@ -19,20 +19,15 @@ github-copilot) receive a proxy instruction block explaining the proxy is active
 ### Wiring modes
 
 `agentalloy add <harness>` is the primary wiring command — it adopts the harness
-upstream and wires the proxy in one step, and supports `--lifecycle-mode {full,off}`.
-The deprecated `agentalloy wire` remains for harness auto-detection and always uses
-proxy wiring (its flags are `--harness`, `--port`, `--via proxy`, `--force`,
-`--lifecycle-mode`, `--clean-room`, `--list`, `--json`). The `--legacy` and
-`--mcp-fallback` flags below live on **`agentalloy wire-harness`**, not on `wire`.
+upstream and wires the proxy in one step, and supports `--lifecycle-mode {full,off}`,
+`--mcp-fallback`, and `--sidecar`. The legacy `agentalloy wire` remains for harness
+auto-detection and always uses proxy wiring (its flags are `--harness`, `--port`,
+`--via proxy`, `--force`, `--lifecycle-mode`, `--clean-room`, `--list`, `--json`);
+`wire` is deprecated in favor of `add`.
 `--harness` is repeatable and comma-tolerant
 (`--harness claude-code --harness hermes-agent` or `--harness claude-code,hermes-agent`);
 `wire --list` prints the harnesses currently wired in the cwd repo.
 
-| `wire-harness` flag | Behavior |
-|------|----------|
-| (default) | Proxy wiring — writes native API endpoint config |
-| `--legacy` | Legacy markdown-injection — writes static rules files (old behavior) |
-| `--mcp-fallback` | MCP server config — writes stdio MCP server entry |
 
 ### Proxy-wired harnesses
 
@@ -123,7 +118,7 @@ These harnesses route through their own backends and cannot be intercepted by th
 - **GitHub Copilot** — marker-block replacement in `.github/copilot-instructions.md` using `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` markers.
 - **Antigravity CLI** (formerly Gemini CLI) — marker-block replacement in `GEMINI.md` using the same `AGENTALLOY-CONTEXT` markers.
 
-> **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`. Both are proxy-wired by default and should not need the sidecar.
+> **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy add <harness> --sidecar`. Both are proxy-wired by default and should not need the sidecar.
 
 ### Other
 
@@ -134,7 +129,7 @@ These harnesses route through their own backends and cannot be intercepted by th
 
 ## Auto-Detection
 
-When you run `agentalloy wire` without `--harness`, AgentAlloy scans the current directory for filesystem markers and picks the first match. Priority order (from `wire.py`):
+When you run `agentalloy wire` without `--harness`, AgentAlloy scans the current directory for filesystem markers and picks the first match. Priority order (legacy auto-detection path; `add` is preferred):
 
 | Priority | Harness | Markers Checked |
 |----------|---------|----------------|
@@ -171,7 +166,7 @@ The file contains user content alongside AgentAlloy content. AgentAlloy injects 
 <!-- END agentalloy install -->
 ```
 
-On subsequent writes, the block between sentinels is replaced; all surrounding content is preserved byte-for-byte. Tamper detection: if a user edits content inside the sentinels, the next wire-harness run refuses with a sha256 mismatch error unless `--force` is passed.
+On subsequent writes, the block between sentinels is replaced; all surrounding content is preserved byte-for-byte. Tamper detection: if a user edits content inside the sentinels, the next `agentalloy add` run refuses with a sha256 mismatch error unless `--force` is passed.
 
 Duplicate sentinel pairs are also rejected — the file writer requires at most one BEGIN and one END marker to avoid stranded pairs that `uninstall` cannot clean up.
 
@@ -196,7 +191,7 @@ The `--mcp-fallback` flag replaces the default markdown-injection wiring with an
 Usage:
 
 ```bash
-agentalloy wire-harness --harness cursor --mcp-fallback
+agentalloy add cursor --mcp-fallback
 ```
 
 ### What it does
@@ -238,7 +233,7 @@ Using `--mcp-fallback` with unsupported harnesses (e.g., `antigravity`, `opencod
 ```
 ERROR: --harness mcp-only is no longer a standalone harness.
 FIX:   Pick a real harness and add --mcp-fallback. Example:
-       python -m agentalloy.install wire-harness --harness claude-code --mcp-fallback
+       agentalloy add claude-code --mcp-fallback
 ```
 
 ## Uninstalling Proxy Wiring
