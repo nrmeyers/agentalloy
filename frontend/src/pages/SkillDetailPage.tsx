@@ -41,10 +41,10 @@ export function SkillDetailPage() {
             label={detail.is_active ? 'active' : 'inactive'}
           />
         </div>
-        <p className="font-mono text-xs text-gray-500 mt-1">{detail.skill_id}</p>
+        <p className="font-mono text-xs text-[var(--text-tertiary)] mt-1">{detail.skill_id}</p>
       </div>
 
-      <div className="border-b border-gray-200">
+      <div className="border-b border-[var(--border-primary)]">
         <nav className="flex items-center gap-4">
           {visibleTabs.map((t) => (
             <button
@@ -53,14 +53,14 @@ export function SkillDetailPage() {
               className={`px-1 py-2 text-sm font-medium border-b-2 -mb-px ${
                 activeTab === t.id
                   ? 'border-brand text-brand'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
               }`}
             >
               {t.label}
             </button>
           ))}
           {!customizable && (
-            <span className="text-xs text-gray-400 ml-auto">
+            <span className="text-xs text-[var(--text-tertiary)] ml-auto">
               domain skills are not customizable
             </span>
           )}

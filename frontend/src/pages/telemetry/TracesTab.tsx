@@ -10,18 +10,18 @@ const COLS = 7;
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium text-gray-500 uppercase">{label}</dt>
-      <dd className="text-sm text-gray-900 break-all">{value}</dd>
+      <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase">{label}</dt>
+      <dd className="text-sm text-[var(--text-primary)] break-all">{value}</dd>
     </div>
   );
 }
 
 function ChipList({ items, tone }: { items: string[] | null; tone: 'green' | 'red' | 'gray' }) {
-  if (!items || items.length === 0) return <span className="text-sm text-gray-400">—</span>;
+  if (!items || items.length === 0) return <span className="text-sm text-[var(--text-tertiary)]">—</span>;
   const styles = {
     green: 'bg-green-100 text-green-800',
     red: 'bg-red-100 text-red-800',
-    gray: 'bg-gray-100 text-gray-700',
+    gray: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
   };
   return (
     <span className="flex flex-wrap gap-1">
@@ -37,7 +37,7 @@ function ChipList({ items, tone }: { items: string[] | null; tone: 'green' | 're
 function DetailSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <h3 className="text-sm font-semibold text-gray-700 mb-2">{title}</h3>
+      <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">{title}</h3>
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2">{children}</dl>
     </div>
   );
@@ -45,7 +45,7 @@ function DetailSection({ title, children }: { title: string; children: ReactNode
 
 function TraceDetail({ trace }: { trace: TraceRecord }) {
   return (
-    <div className="space-y-4 bg-gray-50 p-4 rounded-md">
+    <div className="space-y-4 bg-[var(--bg-secondary)] p-4 rounded-md">
       <DetailSection title="Signal">
         <DetailItem label="Event Type" value={fmt(trace.event_type)} />
         <DetailItem label="Pre-filter Matched" value={fmt(trace.pre_filter_matched)} />
@@ -119,8 +119,8 @@ function TraceDetail({ trace }: { trace: TraceRecord }) {
 
       {trace.task_prompt && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Task Prompt</h3>
-          <pre className="text-xs text-gray-800 bg-white border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+          <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Task Prompt</h3>
+          <pre className="text-xs text-gray-800 bg-[var(--bg-elevated)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
             {trace.task_prompt}
           </pre>
         </div>
@@ -160,41 +160,41 @@ export function TracesTab({
   return (
     <Card>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full divide-y divide-[var(--border-primary)]">
           <thead>
             <tr>
               {['Time', 'Phase', 'Status', 'Event', 'Prompt', 'Latency (ms)', 'Repo'].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide"
+                  className="px-4 py-2 text-left text-xs font-medium text-[var(--text-tertiary)] uppercase tracking-wide"
                 >
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-[var(--border-primary)]">
             {data.traces.map((trace) => (
               <Fragment key={trace.trace_id}>
                 <tr
                   onClick={() => setExpanded(expanded === trace.trace_id ? null : trace.trace_id)}
-                  className="cursor-pointer hover:bg-gray-50"
+                  className="cursor-pointer hover:bg-[var(--bg-tertiary)]"
                 >
-                  <td className="px-4 py-2 text-sm text-gray-900 whitespace-nowrap">
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)] whitespace-nowrap">
                     {fmtTs(trace.request_ts)}
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-900">{fmt(trace.phase)}</td>
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)]">{fmt(trace.phase)}</td>
                   <td className="px-4 py-2 text-sm">
-                    <StatusBadge status={trace.status} />
+                    <StatusBadge status={trace.status ?? 'unknown'} />
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-900">{fmt(trace.event_type)}</td>
-                  <td className="px-4 py-2 text-sm text-gray-900">
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)]">{fmt(trace.event_type)}</td>
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)]">
                     {truncate(trace.task_prompt, 60)}
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-900 text-right tabular-nums">
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)] text-right tabular-nums">
                     {fmt(trace.total_latency_ms)}
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-900">{fmt(trace.repo)}</td>
+                  <td className="px-4 py-2 text-sm text-[var(--text-primary)]">{fmt(trace.repo)}</td>
                 </tr>
                 {expanded === trace.trace_id && (
                   <tr>
@@ -209,7 +209,7 @@ export function TracesTab({
         </table>
       </div>
 
-      <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+      <div className="flex items-center justify-between mt-4 text-sm text-[var(--text-secondary)]">
         <span>
           Showing {from}–{to} of {data.total}
         </span>
@@ -217,14 +217,14 @@ export function TracesTab({
           <button
             onClick={() => onPage(Math.max(0, offset - limit))}
             disabled={offset === 0}
-            className="px-3 py-1.5 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50"
+            className="px-3 py-1.5 bg-[var(--bg-tertiary)] rounded-md hover:bg-[var(--border-primary)] disabled:opacity-50"
           >
             Previous
           </button>
           <button
             onClick={() => onPage(offset + limit)}
             disabled={offset + limit >= data.total}
-            className="px-3 py-1.5 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50"
+            className="px-3 py-1.5 bg-[var(--bg-tertiary)] rounded-md hover:bg-[var(--border-primary)] disabled:opacity-50"
           >
             Next
           </button>

@@ -105,7 +105,7 @@ export function TelemetryPage() {
         onChange={handleFilters}
       />
 
-      <div className="border-b border-gray-200">
+      <div className="border-b border-[var(--border-primary)]">
         <nav className="flex gap-4">
           {TABS.map((t) => (
             <button
@@ -114,7 +114,7 @@ export function TelemetryPage() {
               className={`px-1 py-2 text-sm font-medium border-b-2 -mb-px ${
                 tab === t.id
                   ? 'border-brand text-brand'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
               }`}
             >
               {t.label}

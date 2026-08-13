@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ClipboardList } from 'lucide-react';
 import {
   Card,
   ChipInput,
@@ -33,7 +34,7 @@ const STATUS_OPTIONS = [
 const Q_DEBOUNCE_MS = 300;
 
 function TagsCell({ tags }: { tags: string[] | null }) {
-  if (!tags || tags.length === 0) return <span className="text-gray-400 text-sm">—</span>;
+  if (!tags || tags.length === 0) return <span className="text-[var(--text-tertiary)] text-sm">—</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {tags.map((t) => (
@@ -90,26 +91,26 @@ function ContractDetailPanel({
           <h3 className="text-lg font-bold font-mono">{contract.contract_id}</h3>
           <div className="flex items-center gap-2 mt-1">
             <StatusBadge status={contract.status} />
-            <span className="text-sm text-gray-500">{contract.phase}</span>
-            <span className="text-sm text-gray-500">{contract.slug}</span>
+            <span className="text-sm text-[var(--text-tertiary)]">{contract.phase}</span>
+            <span className="text-sm text-[var(--text-tertiary)]">{contract.slug}</span>
             {contract.work_item && (
-              <span className="text-sm text-gray-500">· {contract.work_item}</span>
+              <span className="text-sm text-[var(--text-tertiary)]">· {contract.work_item}</span>
             )}
           </div>
         </div>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+          className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] text-xl leading-none"
         >
           ×
         </button>
       </div>
 
       {contract.supersedes && (
-        <p className="text-xs text-gray-500 mb-2">Supersedes: {contract.supersedes}</p>
+        <p className="text-xs text-[var(--text-tertiary)] mb-2">Supersedes: {contract.supersedes}</p>
       )}
 
-      <div className="flex gap-2 mb-3 text-xs text-gray-500">
+      <div className="flex gap-2 mb-3 text-xs text-[var(--text-tertiary)]">
         <span>Created: {new Date(contract.created_at).toLocaleString()}</span>
         <span>Updated: {new Date(contract.updated_at).toLocaleString()}</span>
       </div>
@@ -119,18 +120,18 @@ function ContractDetailPanel({
         <div className="mb-3 space-y-1 text-sm">
           {contract.scope_touches?.length && (
             <p>
-              <span className="text-gray-500">Touches:</span>{' '}
+              <span className="text-[var(--text-tertiary)]">Touches:</span>{' '}
               {contract.scope_touches.join(', ')}
             </p>
           )}
           {contract.scope_avoids?.length && (
             <p>
-              <span className="text-gray-500">Avoids:</span> {contract.scope_avoids.join(', ')}
+              <span className="text-[var(--text-tertiary)]">Avoids:</span> {contract.scope_avoids.join(', ')}
             </p>
           )}
           {contract.success_criteria?.length && (
             <p>
-              <span className="text-gray-500">Criteria:</span>{' '}
+              <span className="text-[var(--text-tertiary)]">Criteria:</span>{' '}
               {contract.success_criteria.join('; ')}
             </p>
           )}
@@ -138,7 +139,7 @@ function ContractDetailPanel({
       )}
 
       <div className="mb-3">
-        <span className="text-xs font-medium text-gray-500 uppercase">Tags</span>
+        <span className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Tags</span>
         {editing && isEditable ? (
           <div className="mt-1">
             <ChipInput values={tags} onChange={setTags} placeholder="domain tag" />
@@ -151,23 +152,23 @@ function ContractDetailPanel({
       </div>
 
       <div>
-        <span className="text-xs font-medium text-gray-500 uppercase">Body</span>
+        <span className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Body</span>
         {editing && isEditable ? (
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={10}
-            className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm font-mono bg-white"
+            className="mt-1 w-full px-2 py-1.5 border border-[var(--border-primary)] rounded-md text-sm font-mono bg-[var(--bg-elevated)]"
           />
         ) : (
-          <pre className="mt-1 whitespace-pre-wrap text-sm font-mono bg-gray-50 rounded-md p-3 max-h-96 overflow-auto">
+          <pre className="mt-1 whitespace-pre-wrap text-sm font-mono bg-[var(--bg-secondary)] rounded-md p-3 max-h-96 overflow-auto">
             {contract.body || '(empty)'}
           </pre>
         )}
       </div>
 
       {isEditable && (
-        <div className="flex gap-2 mt-4 pt-3 border-t border-gray-200">
+        <div className="flex gap-2 mt-4 pt-3 border-t border-[var(--border-primary)]">
           {editing ? (
             <>
               <button
@@ -179,7 +180,7 @@ function ContractDetailPanel({
               </button>
               <button
                 onClick={() => setEditing(false)}
-                className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300"
+                className="px-3 py-1.5 bg-[var(--border-primary)] text-[var(--text-secondary)] rounded-md text-sm hover:bg-[var(--border-primary)]"
               >
                 Cancel
               </button>
@@ -205,7 +206,7 @@ function ContractDetailPanel({
       )}
 
       {!isEditable && contract.status !== 'active' && (
-        <p className="mt-3 text-xs text-gray-400 italic">
+        <p className="mt-3 text-xs text-[var(--text-tertiary)] italic">
           Cannot edit — contract is {contract.status}.
         </p>
       )}
@@ -256,7 +257,7 @@ export function ContractsPage() {
       key: 'phase',
       label: 'Phase',
       render: (c) => (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
           {c.phase}
         </span>
       ),
@@ -288,7 +289,7 @@ export function ContractsPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Contracts</h1>
         {data && (
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-[var(--text-tertiary)]">
             {data.contracts.length} contract{data.contracts.length === 1 ? '' : 's'}
           </span>
         )}
@@ -308,12 +309,12 @@ export function ContractsPage() {
           onChange={setStatus}
         />
         <label className="flex flex-col gap-1 flex-1 min-w-[14rem] max-w-md">
-          <span className="text-xs font-medium text-gray-500 uppercase">Search</span>
+          <span className="text-xs font-medium text-[var(--text-tertiary)] uppercase">Search</span>
           <input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="contract id, slug, work item…"
-            className="px-2 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+            className="px-2 py-1.5 border border-[var(--border-primary)] rounded-md text-sm bg-[var(--bg-elevated)]"
           />
         </label>
       </div>
@@ -326,7 +327,7 @@ export function ContractsPage() {
         <EmptyState
           title="No contracts match"
           hint="Try clearing the phase/status filters or the search text."
-          icon="📋"
+          icon={<ClipboardList className="h-6 w-6" />}
         />
       ) : (
         <Card>

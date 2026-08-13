@@ -7,7 +7,7 @@ const classStyles: Record<string, string> = {
 };
 
 export function ClassBadge({ skillClass }: { skillClass: string }) {
-  const style = classStyles[skillClass] ?? 'bg-gray-100 text-gray-800';
+  const style = classStyles[skillClass] ?? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]';
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${style}`}>
       {skillClass}
@@ -18,7 +18,7 @@ export function ClassBadge({ skillClass }: { skillClass: string }) {
 export type ChipTone = 'gray' | 'amber' | 'green' | 'red' | 'blue';
 
 const chipStyles: Record<ChipTone, string> = {
-  gray: 'bg-gray-100 text-gray-700',
+  gray: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
   amber: 'bg-amber-100 text-amber-800',
   green: 'bg-green-100 text-green-800',
   red: 'bg-red-100 text-red-800',
@@ -43,7 +43,7 @@ export function ChipRow({
   tone?: ChipTone;
   max?: number;
 }) {
-  if (!items || items.length === 0) return <span className="text-sm text-gray-400">—</span>;
+  if (!items || items.length === 0) return <span className="text-sm text-[var(--text-tertiary)]">—</span>;
   const shown = max > 0 ? items.slice(0, max) : items;
   const hidden = items.length - shown.length;
   return (

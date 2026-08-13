@@ -20,6 +20,9 @@ export default defineConfig({
       '/retrieve': BACKEND,
       '/compose': BACKEND,
       '/skills': BACKEND,
+      '/contracts': BACKEND,
+      '/state': BACKEND,
+      '/code': BACKEND,
     },
   },
 });

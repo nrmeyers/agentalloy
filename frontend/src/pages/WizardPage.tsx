@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Package } from 'lucide-react';
 import {
   Card,
   EmptyState,
@@ -81,7 +82,7 @@ function Stepper({
         const active = n === step;
         return (
           <li key={label} className="flex items-center gap-2">
-            {i > 0 && <span className="text-gray-300">→</span>}
+            {i > 0 && <span className="text-[var(--text-tertiary)]">→</span>}
             <button
               onClick={() => onSelect(n)}
               disabled={!reachable}
@@ -89,13 +90,13 @@ function Stepper({
                 active
                   ? 'bg-brand text-white font-medium'
                   : reachable
-                    ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
-                    : 'bg-gray-50 border border-gray-200 text-gray-400 cursor-not-allowed'
+                    ? 'bg-[var(--bg-elevated)] border border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    : 'bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-tertiary)] cursor-not-allowed'
               }`}
             >
               <span
                 className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold ${
-                  active ? 'bg-white/20' : reachable ? 'bg-gray-100' : 'bg-gray-100 text-gray-400'
+                  active ? 'bg-white/20' : reachable ? 'bg-[var(--bg-tertiary)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]'
                 }`}
               >
                 {n}
@@ -165,8 +166,8 @@ function SelfCheckPanel({
   const addressed = SELF_CHECK_ITEMS.filter((i) => (state[i.id] ?? 'open') !== 'open').length;
   return (
     <Card>
-      <h3 className="text-sm font-semibold text-gray-700">Self-check (R1–R9)</h3>
-      <p className="text-xs text-gray-500 mb-3">
+      <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Self-check (R1–R9)</h3>
+      <p className="text-xs text-[var(--text-tertiary)] mb-3">
         Advisory only — tick as you review your draft. The real gate is the validate step.{' '}
         <span className="font-medium">{addressed} of {SELF_CHECK_ITEMS.length} addressed.</span>
       </p>
@@ -180,13 +181,13 @@ function SelfCheckPanel({
                 checked={mark === 'done'}
                 disabled={mark === 'na'}
                 onChange={() => onChange(item.id, mark === 'done' ? 'open' : 'done')}
-                className="mt-0.5 accent-brand"
+                className="mt-0.5 accent-brand-500"
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span
                     className={`text-sm font-medium ${
-                      mark === 'na' ? 'text-gray-400 line-through' : 'text-gray-800'
+                      mark === 'na' ? 'text-[var(--text-tertiary)] line-through' : 'text-[var(--text-primary)]'
                     }`}
                   >
                     {item.id} · {item.label}
@@ -196,16 +197,16 @@ function SelfCheckPanel({
                     title={item.naHint ?? 'Mark not applicable'}
                     className={`text-[10px] px-1.5 py-0.5 rounded border ${
                       mark === 'na'
-                        ? 'bg-gray-200 border-gray-300 text-gray-700 font-semibold'
-                        : 'border-gray-200 text-gray-400 hover:bg-gray-100'
+                        ? 'bg-[var(--border-primary)] border-[var(--border-primary)] text-[var(--text-secondary)] font-semibold'
+                        : 'border-[var(--border-primary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'
                     }`}
                   >
                     N/A
                   </button>
                 </div>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-[var(--text-tertiary)]">
                   {item.hint}
-                  {item.naHint && <span className="text-gray-400"> ({item.naHint}.)</span>}
+                  {item.naHint && <span className="text-[var(--text-tertiary)]"> ({item.naHint}.)</span>}
                 </p>
               </div>
             </li>
@@ -313,8 +314,8 @@ export function WizardPage() {
   const renderScaffold = () => (
     <Card className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1">Scaffold a new pack</h2>
-      <p className="text-sm text-gray-600 mb-4">
-        Creates <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">
+      <p className="text-sm text-[var(--text-secondary)] mb-4">
+        Creates <code className="font-mono text-xs bg-[var(--bg-tertiary)] px-1 py-0.5 rounded">
           &lt;repo&gt;/.agentalloy/custom-skills/&lt;pack&gt;
         </code>{' '}
         with a pack.yaml and a starter skill YAML.
@@ -325,7 +326,7 @@ export function WizardPage() {
           <select
             value={repoChoice}
             onChange={(e) => setRepoChoice(e.target.value)}
-            className={`${inputClass} bg-white`}
+            className={`${inputClass} bg-[var(--bg-elevated)]`}
           >
             <option value="">Select a repo…</option>
             {repoOptions.map((r) => (
@@ -368,7 +369,7 @@ export function WizardPage() {
         <select
           value={skillClass}
           onChange={(e) => setSkillClass(e.target.value)}
-          className={`${inputClass} bg-white`}
+          className={`${inputClass} bg-[var(--bg-elevated)]`}
         >
           <option value="domain">domain (default)</option>
           <option value="system">system — advanced, rare</option>
@@ -452,7 +453,7 @@ export function WizardPage() {
         <EmptyState
           title="Pack not found on disk."
           hint="Go back to step 1 and scaffold it first."
-          icon="📦"
+          icon={<Package className="w-8 h-8" />}
         />
       );
     }
@@ -470,8 +471,8 @@ export function WizardPage() {
                   }}
                   className={`px-3 py-1.5 rounded-md text-sm font-mono ${
                     f.name === selectedFile
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : 'text-gray-600 hover:bg-gray-100'
+                      ? 'bg-brand-500/5 text-blue-700 font-medium'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                   }`}
                 >
                   {f.name}
@@ -501,7 +502,7 @@ export function WizardPage() {
             }}
             rows={24}
             spellCheck={false}
-            className="w-full font-mono text-xs px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-brand"
+            className="w-full font-mono text-xs px-3 py-2 border border-[var(--border-primary)] rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
           {saveError && (
             <div className="mt-2 bg-red-50 border border-red-200 rounded-md px-4 py-3">
@@ -509,7 +510,7 @@ export function WizardPage() {
               <p className="text-sm text-red-700 whitespace-pre-wrap break-words">{saveError}</p>
             </div>
           )}
-          <p className="mt-2 text-xs text-gray-500 font-mono break-all">{packQuery.data.pack_dir}</p>
+          <p className="mt-2 text-xs text-[var(--text-tertiary)] font-mono break-all">{packQuery.data.pack_dir}</p>
         </Card>
         <SelfCheckPanel
           state={selfCheck}
@@ -554,7 +555,7 @@ export function WizardPage() {
   const renderValidate = () => (
     <Card className="max-w-3xl">
       <h2 className="text-lg font-semibold mb-1">Validate</h2>
-      <p className="text-sm text-gray-600 mb-4">
+      <p className="text-sm text-[var(--text-secondary)] mb-4">
         Strict schema + lint dry-run over the saved pack files. Nothing is installed yet.
       </p>
 
@@ -610,9 +611,9 @@ export function WizardPage() {
             </div>
           )}
 
-          <details className="text-sm text-gray-600">
+          <details className="text-sm text-[var(--text-secondary)]">
             <summary className="cursor-pointer">Raw validate-pack result</summary>
-            <pre className="mt-1 text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
+            <pre className="mt-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
               {JSON.stringify(validate.data, null, 2)}
             </pre>
           </details>
@@ -675,7 +676,7 @@ export function WizardPage() {
             <p className="font-medium">
               Approval recorded for phase {fmt(approval.phase)}
               {approval.approver && <> by {approval.approver}</>}
-              {advancedPhase && <> — phase advanced to {advancedPhase}</>}
+              {advancedPhase && <> — phase advances to {advancedPhase}</>}
             </p>
             {approval.marker && (
               <p className="mt-1 font-mono text-xs break-all">marker: {fmt(approval.marker)}</p>
@@ -713,9 +714,9 @@ export function WizardPage() {
           </div>
         )}
 
-        <details className="text-sm text-gray-600">
+        <details className="text-sm text-[var(--text-secondary)]">
           <summary className="cursor-pointer">Raw install result</summary>
-          <pre className="mt-1 text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
+          <pre className="mt-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded p-3 whitespace-pre-wrap break-words max-h-72 overflow-y-auto">
             {JSON.stringify(result, null, 2)}
           </pre>
         </details>
@@ -729,26 +730,26 @@ export function WizardPage() {
 
       <div className="space-y-2 mb-4 text-sm">
         <div className="flex gap-2">
-          <span className="w-20 shrink-0 text-gray-500">Repo</span>
-          <span className="font-mono text-xs text-gray-800 break-all">{target?.repo ?? '—'}</span>
+          <span className="w-20 shrink-0 text-[var(--text-tertiary)]">Repo</span>
+          <span className="font-mono text-xs text-[var(--text-primary)] break-all">{target?.repo ?? '—'}</span>
         </div>
         <div className="flex gap-2">
-          <span className="w-20 shrink-0 text-gray-500">Pack</span>
-          <span className="font-medium text-gray-800">{target?.pack ?? '—'}</span>
+          <span className="w-20 shrink-0 text-[var(--text-tertiary)]">Pack</span>
+          <span className="font-medium text-[var(--text-primary)]">{target?.pack ?? '—'}</span>
         </div>
         <div className="flex gap-2 items-start">
-          <span className="w-20 shrink-0 text-gray-500">Files</span>
+          <span className="w-20 shrink-0 text-[var(--text-tertiary)]">Files</span>
           <ChipRow items={files.map((f) => f.name)} tone="blue" max={6} />
         </div>
         {passedThisSession && (
           <div className="flex gap-2">
-            <span className="w-20 shrink-0 text-gray-500">Validate</span>
+            <span className="w-20 shrink-0 text-[var(--text-tertiary)]">Validate</span>
             <Chip tone="green">0 errors</Chip>
           </div>
         )}
       </div>
 
-      <div className="mb-4 bg-blue-50 border border-blue-200 rounded-md px-4 py-3 text-sm text-blue-800">
+      <div className="mb-4 bg-brand-500/5 border border-blue-200 rounded-md px-4 py-3 text-sm text-blue-800">
         Installing changes what gets composed into{' '}
         <span className="font-medium">every future session in this repo</span>.
         {inAddSkillLane && (
@@ -773,16 +774,16 @@ export function WizardPage() {
         </FormField>
       </div>
 
-      <label className="flex items-start gap-2 mb-4 text-sm text-gray-700">
+      <label className="flex items-start gap-2 mb-4 text-sm text-[var(--text-secondary)]">
         <input
           type="checkbox"
           checked={allowDuplicates}
           onChange={(e) => setAllowDuplicates(e.target.checked)}
-          className="mt-0.5 accent-brand"
+          className="mt-0.5 accent-brand-500"
         />
         <span>
           Allow duplicates{' '}
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-[var(--text-tertiary)]">
             (downgrade a hard dedup match — not recommended)
           </span>
         </span>
@@ -816,7 +817,7 @@ export function WizardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">New Skill</h1>
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-[var(--text-secondary)]">
         Create a custom skill pack on the same rails as the add-skill lane: scaffold → draft →
         validate → approve + install.
       </p>
