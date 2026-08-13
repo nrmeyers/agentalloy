@@ -371,6 +371,26 @@ If the bulk re-embed fails partway (e.g., the embedding server crashes mid-run),
 
 If the user wants a non-default port (because 47950 is taken on their machine), pass `--port <n>`. Otherwise let it default to 47950.
 
+The `.env` preset covers the core knobs (upstream, embeddings, reranker, signal intent, LM-assist). Additional optional modules:
+
+| Variable | Default | Description |
+|---|---|---|
+| `CODE_INDEX_WATCH` | `0` | Watchdog-driven incremental reindex of wired repos (1 = on) |
+| `CODE_INDEX_REFRESH_SECONDS` | `0` | Periodic staleness-driven incremental reindex interval in seconds (0 = disabled) |
+| `CODE_INDEX_DATA_DIR` | `~/.local/share/agentalloy/code_index` | Per-repo code index data directory |
+| `AGENTALLOY_RELEASE_CHECK` | `1` | Check GitHub for new releases at most once/day (0 = disabled) |
+| `SDD_FAST_REQUIRE_APPROVAL` | `off` | Require explicit approval before sdd-fast→qa (full lane always requires approval) |
+| `AGENTALLOY_PROCESS_DEMOTION` | `auto` | Aboutness-gated process skill demotion (auto = active iff LM_ASSIST != arbitrate) |
+| `LM_ASSIST` | `off` | Fragment reranker for composition quality (arbitrate on GPU presets only) |
+| `LM_ASSIST_TIMEOUT_MS` | `2000` | Per-hardware budget for fragment reranker (GPU presets) |
+| `LM_ASSIST_MAX_CANDIDATES` | `16` | Candidate fan-out per composition |
+| `LM_ASSIST_KEEP_THRESHOLD` | `0.05` | Relevance floor for fragment eviction (0.0 = disabled) |
+| `LM_ASSIST_DOC_CAP_CHARS` | `2400` | Per-fragment char cap applied before scoring |
+| `KNOWEDGE_RELATED_ENABLED` | `1` | Push related decisions via `related_decisions()` into context (0 = disabled) |
+| `ARTIFACT_EXTRACTION_ENABLED` | `0` | Parse `<!-- agentalloy:artifact -->` markers from LLM responses (0 = disabled) |
+
+Full key reference: [docs/operator.md](docs/operator.md#configuration).
+
 ---
 
 ## Step 10: Handoff harness selection
@@ -403,7 +423,7 @@ Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (al
 > cd <user's repo> && agentalloy add <chosen-harness>
 > ```
 
-(Substitute the harness key from step 10.) `add` adopts the harness's own upstream LLM from its config, wires the harness through the proxy, and seeds the repo's entry phase — one command, no re-declaring the upstream. (The older `agentalloy wire` still runs but is deprecated in favor of `add`; if you need harness auto-detection from the cwd, `wire` without `--harness` still provides it using the priority below.)
+(Substitute the harness key from step 10.) `add` adopts the harness's own upstream LLM from its config, wires the harness through the proxy, and seeds the repo's entry phase — one command, no re-declaring the upstream. `add` is the primary verb; the legacy `agentalloy wire` subcommand is deprecated but retained for backward compatibility (including harness auto-detection when `--harness` is omitted).
 
 **Auto-detection priority** (used by `wire` when `--harness` is omitted; first match wins):
 1. `.cursor/` or `.cursorrules` → `cursor`

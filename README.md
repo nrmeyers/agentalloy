@@ -15,18 +15,18 @@
   &nbsp;
   <img src="https://img.shields.io/badge/runtime-deterministic--by--default-success" alt="deterministic by default" />
   &nbsp;
-  <img src="https://img.shields.io/badge/packs-39-orange" alt="39 packs" />
+  <img src="https://img.shields.io/badge/packs-41-orange" alt="41 packs" />
   &nbsp;
-  <img src="https://img.shields.io/badge/skills-320+-orange" alt="320+ skills" />
+  <img src="https://img.shields.io/badge/skills-711-orange" alt="711 skills" />
   &nbsp;
-  <img src="https://img.shields.io/badge/v7.6-Knowledge%20module-brightgreen" alt="v7.6: Knowledge module" />
+  <img src="https://img.shields.io/badge/v9.0.0-Knowledge%20module-brightgreen" alt="v9.0.0: Knowledge module" />
 </p>
 
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
 **AgentAlloy** is a **just-in-time context engine**: one local service, three context modules.
 
-- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 320+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
+- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 355-skill corpus across 39 packs) that fit *this* moment. Nothing changed means nothing injected.
 - **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs ("what breaks if I change this?") and budgeted context bundles. The agent **queries it**; nothing is pushed. The composed instructions teach the agent when to ask: check blast radius at design, pull a grounded bundle at build, map regression scope at qa.
 - **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index — no separate store, no new process, no separate toggle: a deterministic `_index_decisions` pass links each decision (an existing lifecycle doc: `docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand (`agentalloy knowledge why <symbol>`) or let it push: at design/build, when a work-item's scope touches governed code, the governing decision's rationale is composed into context without asking. See [Knowledge module (decisions)](#knowledge-module-decisions).
 
@@ -133,7 +133,7 @@ Your agent calls `/compose`, gets back the relevant raw skill prose, and assembl
 
 ## Container deployment
 
-The default deployment is a single container bundling the service and its two `llama-server` inference runners (embed :47951, reranker :47952 — neither exposed), pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). One command sets it up — `agentalloy setup -n --deployment container --harness <name>` — port 47950 is the only external surface, and a named `agentalloy-data` volume persists corpus, databases, and GGUFs across restarts.
+The default deployment is a single container bundling the service and its two `llama-server` inference runners (embed :47951, reranker :47952 — neither exposed, port 47950 is the only external surface), pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). One command sets it up — `agentalloy setup -n --deployment container --harness <name>` — port 47950 is the only external surface, and a named `agentalloy-data` volume persists corpus, databases, and GGUFs across restarts.
 
 Container inference is CPU-only on every host (GPU acceleration requires a native install) — fast enough for the runtime path. Architecture, bootstrap sequence, hardware requirements, and operational commands: [INSTALL.md](INSTALL.md#container-architecture).
 
@@ -264,21 +264,21 @@ AgentAlloy serves three proxy surfaces — `POST /proj/{token}/v1/messages` (nat
 
 ## MCP Server
 
-For harnesses that speak the Model Context Protocol instead of taking a proxy, AgentAlloy ships a built-in dependency-free stdio MCP server exposing one tool — `get_skill_for(task, phase)` — which forwards to the local `/compose` endpoint. Wire it with `agentalloy wire-harness --harness <name> --mcp-fallback` (supported: Claude Code, Cursor, Continue.dev). Per-harness configuration: [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md#mcp-fallback).
+For harnesses that speak the Model Context Protocol instead of taking a proxy, AgentAlloy ships a built-in dependency-free stdio MCP server exposing one tool — `get_skill_for(task, phase)` — which forwards to the local `/compose` endpoint. Wire it with `agentalloy add <name> --mcp-fallback` (supported: Claude Code, Cursor, Continue.dev). Per-harness configuration: [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md#mcp-fallback).
 
 ---
 
 ## Packs shipping in-tree
 
-The corpus is **packs** — opt-in groups of related skills. `main` ships **39 packs / 320+ declared skills** organized across 9 tiers:
+The corpus is **packs** — opt-in groups of related skills. `main` ships **39 packs / 355 declared skills** organized across 10 tiers:
 
 <table>
 <tr><th>Tier</th><th>Packs</th></tr>
-<tr><td><b>foundation</b></td><td><code>core</code> · <code>documentation</code> · <code>engineering</code> · <code>performance</code> · <code>refactoring</code></td></tr>
+<tr><td><b>foundation</b></td><td><code>core</code> · <code>documentation</code> · <code>engineering</code> · <code>performance</code> · <code>refactoring</code> · <code>sys</code> · <code>conventions</code></td></tr>
 <tr><td><b>language</b></td><td><code>csharp-dotnet</code> · <code>go</code> · <code>java</code> · <code>nodejs</code> · <code>python</code> · <code>rust</code> · <code>typescript</code></td></tr>
 <tr><td><b>framework</b></td><td><code>fastapi</code> · <code>fastify</code> · <code>nestjs</code> · <code>nextjs</code> · <code>react</code> · <code>vue</code></td></tr>
 <tr><td><b>tooling</b></td><td><code>linting</code> · <code>pytest</code> · <code>testing</code> · <code>vite</code> · <code>vitest</code></td></tr>
-<tr><td><b>workflow</b></td><td><code>code-review</code> · <code>design-review</code> · <code>intake</code> · <code>sdd</code></td></tr>
+<tr><td><b>workflow</b></td><td><code>code-review</code> · <code>design-review</code> · <code>intake</code> · <code>sdd</code> · <code>meta</code></td></tr>
 <tr><td><b>domain</b></td><td><code>analytics</code> · <code>calendar-ui</code> · <code>data-engineering</code> · <code>ui-design</code></td></tr>
 <tr><td><b>platform</b></td><td><code>github-actions</code></td></tr>
 <tr><td><b>protocol</b></td><td><code>rest</code> · <code>webhooks</code></td></tr>
@@ -291,11 +291,21 @@ Every skill is sourced from authoritative upstream docs and validated against th
 
 ## Architecture
 
-AgentAlloy is a three-layer system:
+AgentAlloy is a multi-layer system served as a single FastAPI process on port `:47950`:
 
-1. **Signal layer** — deterministic Python that wakes on phase transitions, contract writes, or tool fires. Pre-filters cheaply, evaluates exit gates, and composes skills only when needed.
-2. **Composition engine** — hybrid BM25 + dense retrieval over DuckDB (skill graph) and LanceDB (vector + BM25 index), fused via phase-tuned Reciprocal Rank Fusion.
-3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
+1. **Signal layer** (`src/agentalloy/signals/`) — deterministic Python that wakes on phase transitions, contract writes, or tool fires. Pre-filters cheaply, evaluates exit gates, and composes skills only when needed.
+2. **Retrieval pipeline** (`src/agentalloy/retrieval/`) — embed, filter, rank, diversify: the core retrieval path that converts domain tags to candidate fragments.
+3. **Composition engine** (`src/agentalloy/orchestration/`) — hybrid BM25 + dense retrieval over DuckDB (skill graph) and LanceDB (vector + BM25 index), fused via phase-tuned Reciprocal Rank Fusion.
+4. **Proxy** (`src/agentalloy/api/`) — OpenAI-compatible, Anthropic Messages, and Responses passthrough endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
+5. **Code index** (`src/agentalloy/code_index/`) — optional tree-sitter symbol graph plus hybrid semantic/lexical search over repos, served under `/code/*`.
+6. **Knowledge layer** — decision-graph layer riding the code index, linking decisions to governing code symbols.
+7. **Storage** (`src/agentalloy/storage/`) — DuckDB/LanceDB hybrid store for skills, telemetry, and phase state.
+8. **Telemetry** (`src/agentalloy/telemetry/`) — structured trace writer and query system.
+9. **Web UI** (`src/agentalloy/web/`) — browser dashboard at http://localhost:47950/ (localhost-only, no auth).
+10. **Providers** (`src/agentalloy/providers/`) — harness provider registry (Claude Code, Copilot, Aider, Continue.dev, etc.).
+11. **Watch & Watcher** (`src/agentalloy/watch/`, `src/agentalloy/watcher/`) — code index staleness watching and file watch enrollment.
+12. **Install CLI** (`src/agentalloy/install/`) — preflight, setup wizard, harness wiring, container service, release checking, MCP server.
+13. **Skill packs** (`src/agentalloy/_packs/`) — 41 curated packs of engineering skills, testing patterns, error handling, deployment recipes.
 
 Both runtime paths are **deterministic by default** — the only optional LM stages (the composition re-ranker and the signal-layer intent reranker) fail safe to deterministic scoring. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
 

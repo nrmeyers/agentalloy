@@ -43,7 +43,7 @@ Conventional Commits with a scope: `type(scope): subject`.
 1. Push the branch: `git push -u origin <branch>`.
 2. Open the PR against `main` with `gh pr create --base main`.
 3. PR title = the same Conventional-Commit summary; append the target version when
-   the PR carries a release, e.g. `... (v3.5.2)`.
+   the PR carries a release, e.g. `... (v9.0.0)`.
 4. PR body: Context → the problem/root cause → the fix → tests. End with:
 
    ```

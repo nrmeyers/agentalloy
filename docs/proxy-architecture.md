@@ -298,7 +298,7 @@ This replaces the previous per-harness wiring logic (`agentalloy wire`, now depr
 For harnesses that support MCP tools but not custom API endpoints:
 
 ```bash
-agentalloy wire-harness --harness <name> --mcp-fallback
+agentalloy add <name> --mcp-fallback
 ```
 
 This installs an MCP server entry that exposes `get_skill_for(task, phase)` — effectively a manual compose call. The harness invokes it, gets skill context back, and uses it. No proxy involved.
@@ -306,6 +306,10 @@ This installs an MCP server entry that exposes `get_skill_for(task, phase)` — 
 MCP-fallback-compatible harnesses: claude-code, cursor, continue-closed, continue-local.
 
 For the full proxy-wired and sidecar harness sets, see [Harness Classification](harness-classification.md) (the source of truth).
+
+## Phase Drift Adherence (pending)
+
+Phase-drift adherence (banner, scold-after-stray, artifact-as-key, intent-drift, predecessor-contract) is the Phase 3 design from [proxy-surfaces.md](proxy-surfaces.md). **Not yet implemented** — shipped as a passive-first set of lightweight layers in a follow-up PR (forceful layers deferred pending real-world testing).
 
 ## History
 
