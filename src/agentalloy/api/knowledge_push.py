@@ -236,16 +236,27 @@ def build_decision_block(
     truncated = len(all_decisions) > _MAX_DECISIONS
     all_decisions = all_decisions[:_MAX_DECISIONS]
 
-    # Phase 3: Entity path — surface typed entities alongside decisions
+    # Phase 3: Entity path — surface typed entities alongside decisions.
+    # Collect from ALL decision source paths, not just the first, so entities
+    # from every governing file are captured.
     entity_edges: list[Any] = []
     if all_decisions:
-        # Use the first decision's qualified name as the anchor for entity lookup
-        anchor_fqn = all_decisions[0].qualified_name.split("::", 1)[0]
-        with contextlib.suppress(Exception):
-            entity_edges = graph.typed_edges_for_fqn(anchor_fqn)
+        seen_fqns: set[str] = set()
+        for d in all_decisions:
+            anchor_fqn = d.qualified_name.split("::", 1)[0]
+            if anchor_fqn in seen_fqns:
+                continue
+            seen_fqns.add(anchor_fqn)
+            with contextlib.suppress(Exception):
+                entity_edges.extend(graph.typed_edges_for_fqn(anchor_fqn))
+
+    text = _render(all_decisions)
+    rendered_entities = _render_entities(entity_edges)
+    if rendered_entities:
+        text = text + "\n\n" + rendered_entities
 
     return DecisionPush(
-        text=_render(all_decisions),
+        text=text,
         count=len(all_decisions),
         truncated=truncated,
         decisions=tuple(all_decisions),
