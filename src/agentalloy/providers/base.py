@@ -249,7 +249,7 @@ def sdd_instructions_markdown(port: int) -> str:
 # Phases that get deny rules on source/test writes.  Explicit allow-list —
 # not "deny unless build" — so QA (which edits src/tests) and unknown phases
 # stay open.  An unknown/unreadable phase fails open (writes nothing).
-DENIED_PHASES: frozenset[str] = frozenset({"intake", "spec", "design"})
+DENIED_PHASES: frozenset[str] = frozenset({"intake", "spec", "design", "sdd-flow"})
 
 # Patterns denied by claude-code during pre-build phases.
 DENY_PATTERNS: tuple[str, ...] = (
@@ -270,6 +270,7 @@ _PHASE_ARTIFACT: dict[str, str] = {
     "intake": "a contract",
     "spec": "docs/spec/<slug>.md",
     "design": "docs/design/<slug>/{approach,tasks,test-plan}.md",
+    "sdd-flow": "clarity (not code)",
 }
 
 # ---------------------------------------------------------------------------
