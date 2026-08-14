@@ -56,11 +56,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   governs_written INTEGER NOT NULL DEFAULT 0,
   governs_dropped INTEGER NOT NULL DEFAULT 0,
   governs_unresolved_spans TEXT,
-  governs_suspicious_docs TEXT,
-  entities_written INTEGER NOT NULL DEFAULT 0,
-  entities_dropped INTEGER NOT NULL DEFAULT 0,
-  entity_counts_by_kind TEXT,
-  entities_exhausted INTEGER NOT NULL DEFAULT 0
+  governs_suspicious_docs TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
@@ -131,27 +127,6 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
         "jobs",
         "governs_suspicious_docs",
         "ALTER TABLE jobs ADD COLUMN governs_suspicious_docs TEXT",
-    ),
-    # Entity extraction counters (additive overlay on GOVERNS path).
-    (
-        "jobs",
-        "entities_written",
-        "ALTER TABLE jobs ADD COLUMN entities_written INTEGER NOT NULL DEFAULT 0",
-    ),
-    (
-        "jobs",
-        "entities_dropped",
-        "ALTER TABLE jobs ADD COLUMN entities_dropped INTEGER NOT NULL DEFAULT 0",
-    ),
-    (
-        "jobs",
-        "entity_counts_by_kind",
-        "ALTER TABLE jobs ADD COLUMN entity_counts_by_kind TEXT",
-    ),
-    (
-        "jobs",
-        "entities_exhausted",
-        "ALTER TABLE jobs ADD COLUMN entities_exhausted INTEGER NOT NULL DEFAULT 0",
     ),
 )
 
@@ -272,10 +247,6 @@ class CodeIndexJob:
     governs_dropped: int = 0
     governs_unresolved_spans: list[str] = field(default_factory=lambda: [])
     governs_suspicious_docs: list[str] = field(default_factory=lambda: [])
-    entities_written: int = 0
-    entities_dropped: int = 0
-    entity_counts_by_kind: str = ""
-    entities_exhausted: bool = False
 
 
 @dataclass(frozen=True)
@@ -345,10 +316,6 @@ def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
         governs_dropped=int(row["governs_dropped"] or 0),
         governs_unresolved_spans=_json_list(row["governs_unresolved_spans"]),
         governs_suspicious_docs=_json_list(row["governs_suspicious_docs"]),
-        entities_written=int(row["entities_written"] or 0),
-        entities_dropped=int(row["entities_dropped"] or 0),
-        entity_counts_by_kind=row["entity_counts_by_kind"] or "",
-        entities_exhausted=bool(row["entities_exhausted"] or 0),
     )
 
 
@@ -645,15 +612,11 @@ class CodeIndexJobsStore:
         dropped: int,
         unresolved_spans: list[str],
         suspicious_docs: list[str],
-        entities_written: int = 0,
-        entities_dropped: int = 0,
-        entity_counts_by_kind: dict[str, int] | None = None,
-        entities_exhausted: bool = False,
     ) -> None:
         """Record the decision phase's GOVERNS-edge delta (#527 B) on the job
-        row, plus entity extraction counters. Also appends a warn-level event
-        when the result looks bad (dropped > written, or anything reported
-        suspicious) so ``list_job_events``/CLI surfaces it without a separate poll.
+        row. Also appends a warn-level event when the result looks bad
+        (dropped > written, or anything reported suspicious) so
+        ``list_job_events``/CLI surfaces it without a separate poll.
         """
         with self._lock:
             self.conn.execute(
@@ -661,8 +624,6 @@ class CodeIndexJobsStore:
                 UPDATE jobs SET
                   governs_written = ?, governs_dropped = ?,
                   governs_unresolved_spans = ?, governs_suspicious_docs = ?,
-                  entities_written = ?, entities_dropped = ?,
-                  entity_counts_by_kind = ?, entities_exhausted = ?,
                   updated_at = ?
                 WHERE job_id = ?
                 """,
@@ -671,10 +632,6 @@ class CodeIndexJobsStore:
                     int(dropped),
                     json.dumps(unresolved_spans),
                     json.dumps(suspicious_docs),
-                    int(entities_written),
-                    int(entities_dropped),
-                    json.dumps(entity_counts_by_kind),
-                    1 if entities_exhausted else 0,
                     time.time(),
                     job_id,
                 ),
