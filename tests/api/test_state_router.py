@@ -1095,11 +1095,12 @@ class TestArchiveAll:
     def test_archive_all_nothing_to_archive(
         self, state_client: TestClient, state_store: DuckDBStateStore
     ) -> None:
-        """Already archived: returns 409 with detail."""
+        """Already archived: returns 200 with zero counts (no-op, not an error)."""
         resp = state_client.post("/state/archive-all")
-        assert resp.status_code == 409
+        assert resp.status_code == 200
         body = resp.json()
-        assert body["detail"] == "Nothing to archive — already archived"
+        assert body["contracts_archived"] == 0
+        assert body["artifacts_archived"] == 0
 
     def test_archive_all_only_contracts(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1128,16 +1129,19 @@ class TestArchiveAll:
     def test_archive_all_is_idempotent(
         self, state_client: TestClient, state_store: DuckDBStateStore
     ) -> None:
-        """A second archive-all returns 409 — nothing to archive the second time."""
+        """A second archive-all returns 200 with zero counts — idempotent no-op."""
         state_store.put_contract("ctr-arch-idem", phase="build", slug="idem")
 
         # First call succeeds
         resp1 = state_client.post("/state/archive-all")
         assert resp1.status_code == 200
 
-        # Second call returns 409
+        # Second call is a no-op (zero counts, not an error)
         resp2 = state_client.post("/state/archive-all")
-        assert resp2.status_code == 409
+        assert resp2.status_code == 200
+        body = resp2.json()
+        assert body["contracts_archived"] == 0
+        assert body["artifacts_archived"] == 0
 
     # ------------------------------------------------------------------
     # GET /state/artifact/{phase}/{slug}/{name} — single artifact route
