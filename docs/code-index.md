@@ -139,7 +139,7 @@ existing symbol/edge tables.
 
 ## Harness wiring
 
-`agentalloy add` (or the deprecated `agentalloy wire`) writes a second sentinel block —
+`agentalloy add` writes a second sentinel block —
 `<!-- BEGIN agentalloy code-index --> … <!-- END agentalloy code-index -->`,
 independent of the main install block — into the repo's agent-instruction file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.clinerules`, or a dedicated

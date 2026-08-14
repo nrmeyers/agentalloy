@@ -104,7 +104,7 @@ Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.a
 
 Set it with `agentalloy add <harness> --lifecycle-mode {full,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`). (The legacy `assist` mode was removed with the hook transport; a repo still configured `assist` now reads as `off`.)
 
-In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` (this flag lives on the deprecated `wire` only) additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
+In `full` mode on Claude Code, `add` writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The legacy `agentalloy wire --clean-room` (this flag lives on the deprecated `wire` only) additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
 
 ### Approval gates
 
@@ -425,7 +425,7 @@ Operator notes: everything is localhost-only with no auth; mutating endpoints (`
 
 ## Cross-References
 
-- [Web UI + add-skill Combined Spec](web-ui-and-add-skill-combined-spec.md) — the web UI surface and the add-skill lane design, verified against v5.0.3
+- [Web UI + add-skill Combined Spec](web-ui-and-add-skill-combined-spec.md) — the web UI surface and the add-skill lane design, verified against v9.0.0
 - [Profiles and Overrides](profiles-and-overrides.md) — profiles, per-profile datastores, three-layer overrides
 - [Sidecar Experience](sidecar-experience.md) — sidecar architecture, watcher setup, capability comparison
 - [Harness Classification](harness-classification.md) — proxy-wired vs sidecar classification spec

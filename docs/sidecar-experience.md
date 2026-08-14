@@ -91,7 +91,7 @@ The file contains user content alongside AgentAlloy content. Only the sentinel-b
 
 The marker block strategy ensures user edits outside the block survive regeneration. If the markers already exist, the block is replaced in place. On first write, the block is appended.
 
-> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`, but both are proxy-wired by default and should not need the sidecar path.
+> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy add <harness> --sidecar`, but both are proxy-wired by default and should not need the sidecar path.
 
 ## What the Store Hook Does
 
@@ -139,7 +139,7 @@ Some harnesses support an MCP fallback variant instead of the default markdown-i
 **Supported harnesses:** claude-code, cursor, continue-closed, continue-local
 
 ```bash
-agentalloy wire-harness --harness cursor --mcp-fallback
+agentalloy add cursor --mcp-fallback
 ```
 
 This writes an MCP server configuration instead of a markdown-injection block. The MCP server (`agentalloy.install.mcp_server`) exposes a single tool:
