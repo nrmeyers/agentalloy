@@ -16,6 +16,7 @@ from agentalloy.code_index.api.models import (
     CallSiteView,
     CentralitySymbol,
     DecisionView,
+    EntityEdgeView,
     SymbolView,
 )
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
@@ -104,6 +105,38 @@ async def search_related_decisions(
         repo_path=indexed.repo_path,
         indexed_head=indexed.head_sha,
     )
+
+
+@router.get(
+    "/search/entities",
+    response_model=list[EntityEdgeView],
+    summary="Typed entity edges touching a symbol (FQN or short name resolution)",
+)
+async def search_entities(
+    repo: str = Query(description="Indexed repo slug"),
+    query: str = Query(min_length=1, description="FQN or short name to look up"),
+    kind: str | None = Query(default=None, description="Optional kind filter (CONSTRAINTS, TOUCHES, etc.)"),
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> list[EntityEdgeView]:
+    """Return typed entity edges touching a symbol.
+
+    Two-tier resolution: try exact FQN match first, fall back to
+    ``symbols_by_name()`` if no edges found for the FQN.
+    """
+    indexed = require_indexed_repo(state, repo)
+
+    def _run(h: CodeIndexHandles) -> list[EntityEdgeView]:
+        edges = h.graph.typed_edges_for_fqn(query)
+        if not edges:
+            candidates = h.graph.symbols_by_name(query)
+            if candidates:
+                fqn = candidates[0][0]
+                edges = h.graph.typed_edges_for_fqn(fqn)
+        if kind:
+            edges = [e for e in edges if e.kind == kind]
+        return [EntityEdgeView.from_edge(e) for e in edges]
+
+    return await with_handles(state, repo, _run, repo_path=indexed.repo_path)
 
 
 @router.get(

@@ -66,6 +66,7 @@ class TestToolsList:
         assert "symbols" in action_enum
         assert "knowledge_why" in action_enum
         assert "knowledge_related" in action_enum
+        assert "knowledge_entities" in action_enum
         assert "artifact_body" in action_enum
         assert "contract_detail" in action_enum
         assert "telemetry" in action_enum
@@ -277,3 +278,36 @@ class TestQueryToolValidation:
             resp = self._call_query({"action": "code_search", "query": "test"})
         assert "error" in resp
         assert "unreachable" in resp["error"]["message"]
+
+    def test_knowledge_entities_missing_query_returns_invalid_params(self) -> None:
+        resp = self._call_query({"action": "knowledge_entities"})
+        assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
+
+    def test_knowledge_entities_calls_endpoint(self) -> None:
+        mock_data = [
+            {"kind": "CONSTRAINTS", "src": "docs/auth.md", "dst": "src/auth.py", "span": "rate_limit"},
+        ]
+        with patch.object(mcp_server, "_http_get", return_value=mock_data):
+            resp = self._call_query({"action": "knowledge_entities", "query": "src/auth.py"})
+        assert "error" not in resp
+        content = resp["result"]["content"][0]["text"]
+        assert "CONSTRAINTS" in content
+        assert "src/auth.py" in content
+
+    def test_knowledge_entities_empty_result(self) -> None:
+        with patch.object(mcp_server, "_http_get", return_value=[]):
+            resp = self._call_query({"action": "knowledge_entities", "query": "nonexistent"})
+        assert "error" not in resp
+        content = resp["result"]["content"][0]["text"]
+        assert "No entities found" in content
+
+    def test_knowledge_entities_with_kind_filter(self) -> None:
+        mock_data = [{"kind": "TOUCHES", "src": "docs/auth.md", "dst": "src/auth.py", "span": ""}]
+        with patch.object(mcp_server, "_http_get", return_value=mock_data) as mock_get:
+            resp = self._call_query(
+                {"action": "knowledge_entities", "query": "AuthMiddleware", "kind": "TOUCHES"}
+            )
+        assert "error" not in resp
+        mock_get.assert_called_once()
+        call_url = mock_get.call_args[0][1]
+        assert "kind=TOUCHES" in call_url

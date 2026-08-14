@@ -120,6 +120,9 @@ class SearchResult(BaseModel):
     snippet: str
     indexed_head: str | None = None
     """HEAD commit this index was built from (for staleness detection)."""
+    connected_via: str | None = None
+    """Entity edge kind that connected this result (e.g. CONSTRAINTS, TOUCHES).
+    None for semantic matches; set for entity-connected discoveries."""
 
 
 def _snippet(sym: CodeSymbol) -> str:
@@ -316,13 +319,48 @@ async def related_decisions(
             dense = handles.vectors.search_similar(query_vec, k=_FETCH_K, where=where)
             bm25 = handles.vectors.search_bm25(query, k=_FETCH_K, where=where)
             ranked = _rrf_fuse([d.qualified_name for d in dense], [qn for qn, _ in bm25])
-            return _hydrate(
+            semantic = _hydrate(
                 handles.graph,
                 ranked,
                 k=k,
                 dense_by_qn={d.qualified_name: d for d in dense},
                 indexed_head=indexed_head,
             )
+
+            # Entity expansion: traverse entity edges from semantic results
+            # and surface additional decisions connected via those edges.
+            entity_results: list[SearchResult] = []
+            seen_qns: set[str] = {r.qualified_name for r in semantic}
+            chunk_qns = [r.qualified_name for r in semantic]
+            entity_edges = handles.graph.typed_edges_from_chunks(chunk_qns, limit=20)
+            for edge in entity_edges:
+                if len(entity_results) >= 3:
+                    break
+                dst = edge.dst
+                if not dst:
+                    continue
+                governing = handles.graph.governing_decisions(dst)
+                for d in governing:
+                    if d.qualified_name in seen_qns:
+                        continue
+                    if len(entity_results) >= 3:
+                        break
+                    entity_results.append(
+                        SearchResult(
+                            qualified_name=d.qualified_name,
+                            kind="MarkdownDoc",
+                            file_path=d.file_path,
+                            start_line=d.start_line,
+                            end_line=None,
+                            score=0.0,
+                            snippet=d.snippet or "",
+                            indexed_head=indexed_head,
+                            connected_via=edge.kind,
+                        ),
+                    )
+                    seen_qns.add(d.qualified_name)
+
+            return semantic + entity_results
         finally:
             handles.close()
 

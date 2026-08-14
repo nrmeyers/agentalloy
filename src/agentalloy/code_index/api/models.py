@@ -10,7 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agentalloy.code_index.store import CodeIndexJob, IndexedRepo
-from agentalloy.storage.protocols import CallSite, CodeSymbol, DecisionRow
+from agentalloy.storage.protocols import CallSite, CodeEdge, CodeSymbol, DecisionRow
 
 
 class IndexRequest(BaseModel):
@@ -269,3 +269,23 @@ class CentralitySymbol(BaseModel):
     pagerank: float
     file_path: str | None
     start_line: int | None
+
+
+class EntityEdgeView(BaseModel):
+    """One typed entity edge (CONSTRAINTS, TOUCHES, REQUIRES, COMMAND, STAKEHOLDER)."""
+
+    src: str
+    dst: str
+    kind: str
+    file_path: str
+    span: str | None = None
+
+    @classmethod
+    def from_edge(cls, e: CodeEdge) -> EntityEdgeView:
+        return cls(
+            src=e.src,
+            dst=e.dst,
+            kind=e.kind,
+            file_path=e.file_path,
+            span=e.span,
+        )
