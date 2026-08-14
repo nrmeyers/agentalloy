@@ -24,7 +24,7 @@ from agentalloy.providers.base import (
     is_tier_a_enforced,
 )
 
-PRE_BUILD = ("intake", "spec", "design")
+PRE_BUILD = ("intake", "spec", "design", "sdd-flow")
 UNLOCKED = ("build", "qa", "ship", "sdd-fast", "add-skill")
 
 

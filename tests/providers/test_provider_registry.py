@@ -388,8 +388,8 @@ class TestToolGating(TestCase):
     """Tests for filter_tools_for_phase and related constants."""
 
     def test_denied_phases_are_correct(self):
-        """DENIED_PHASES contains intake, spec, design."""
-        self.assertEqual(DENIED_PHASES, frozenset({"intake", "spec", "design"}))
+        """DENIED_PHASES contains intake, spec, design, sdd-flow."""
+        self.assertEqual(DENIED_PHASES, frozenset({"intake", "spec", "design", "sdd-flow"}))
 
     def test_gated_tool_names_are_correct(self):
         """GATED_TOOL_NAMES contains write_file, edit, notebook_edit."""
