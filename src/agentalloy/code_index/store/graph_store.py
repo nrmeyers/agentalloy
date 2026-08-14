@@ -582,7 +582,7 @@ class DuckDBCodeGraphStore:
     def typed_edges_from_chunks(
         self, chunk_qns: Sequence[str], *, limit: int = 20,
     ) -> list[CodeEdge]:
-        """Typed edges rooted at any of the given chunk qualified names.
+        """Typed edges rooted at any of the given chunk qualified names or file paths.
 
         Used by ``related_decisions()`` to surface entities from the same
         doc chunks as related decisions.
@@ -590,17 +590,21 @@ class DuckDBCodeGraphStore:
         entity_kinds = ("CONSTRAINTS", "TOUCHES", "REQUIRES", "COMMAND", "STAKEHOLDER")
         if not entity_kinds or not chunk_qns:
             return []
+        # Extract file paths from chunk QNs (e.g., "docs/auth.md::anchor" → "docs/auth.md")
+        file_paths = list({qn.split("::", 1)[0] for qn in chunk_qns})
         qn_placeholders = ", ".join("?" for _ in chunk_qns)
+        path_placeholders = ", ".join("?" for _ in file_paths)
         kind_placeholders = ", ".join("?" for _ in entity_kinds)
         rows = self.conn.execute(
             f"""
             SELECT src, dst, kind, file_path, span, resolution_tier
             FROM edges
-            WHERE src IN ({qn_placeholders}) AND kind IN ({kind_placeholders})
+            WHERE (src IN ({qn_placeholders}) OR file_path IN ({path_placeholders}))
+              AND kind IN ({kind_placeholders})
             ORDER BY kind, src
             LIMIT ?
             """,
-            list(chunk_qns) + list(entity_kinds) + [limit],
+            list(chunk_qns) + file_paths + list(entity_kinds) + [limit],
         ).fetchall()
         return [
             CodeEdge(

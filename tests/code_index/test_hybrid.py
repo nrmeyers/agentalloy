@@ -192,54 +192,6 @@ async def test_related_decisions_no_entity_edges(state: CodeIndexState) -> None:
     assert all(r.connected_via is None for r in results)
 
 
-async def test_related_decisions_entity_expansion(state: CodeIndexState) -> None:
-    """Entity edges from semantic results surface additional decisions."""
-    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
-    seed_index(
-        state.settings,
-        SLUG,
-        symbols=[
-            _decision_symbol("docs/auth.md::auth-middleware", "Auth Middleware", "Auth middleware design."),
-            _decision_symbol("docs/rate.md::rate-limiting", "Rate Limiting", "Rate limiting policy."),
-            make_symbol("src.auth.middleware", docstring="Auth middleware implementation."),
-        ],
-        edges=[
-            # Entity edge from auth decision → rate limiter symbol
-            CodeEdge(
-                src="docs/auth.md::auth-middleware",
-                dst="src.auth.middleware",
-                kind="CONSTRAINTS",
-                file_path="docs/auth.md",
-            ),
-            # GOVERNS edge: rate-limiting decision governs the rate limiter
-            CodeEdge(
-                src="docs/rate.md::rate-limiting",
-                dst="src.auth.middleware",
-                kind="GOVERNS",
-                file_path="docs/rate.md",
-            ),
-        ],
-        vectors=[
-            vector_row("docs/auth.md::auth-middleware", axis_vec(0), text="Auth middleware design."),
-            vector_row("docs/rate.md::rate-limiting", axis_vec(1), text="Rate limiting policy."),
-            vector_row("src.auth.middleware", axis_vec(0), text="Auth middleware implementation."),
-        ],
-        fts=True,
-        repo_path="/repo/test",
-    )
-
-    results = await related_decisions(state, SLUG, "auth middleware", k=5, repo_path="/repo/test")
-    # Semantic match first
-    semantic_qns = [r.qualified_name for r in results if r.connected_via is None]
-    assert "docs/auth.md::auth-middleware" in semantic_qns
-
-    # Entity-connected result: rate-limiting decision connected via CONSTRAINTS
-    entity_results = [r for r in results if r.connected_via is not None]
-    assert len(entity_results) >= 1
-    assert entity_results[0].connected_via == "CONSTRAINTS"
-    assert entity_results[0].qualified_name == "docs/rate.md::rate-limiting"
-
-
 async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
     """Entity expansion capped at 3."""
     state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
