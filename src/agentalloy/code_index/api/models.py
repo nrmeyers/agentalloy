@@ -47,6 +47,9 @@ class JobView(BaseModel):
     governs_dropped: int = 0
     governs_unresolved_spans: list[str] = Field(default_factory=list)
     governs_suspicious_docs: list[str] = Field(default_factory=list)
+    entities_written: int = 0
+    entities_dropped: int = 0
+    entity_counts_by_kind: str = ""
 
     @classmethod
     def from_job(cls, job: CodeIndexJob) -> JobView:
@@ -67,6 +70,9 @@ class JobView(BaseModel):
             governs_dropped=job.governs_dropped,
             governs_unresolved_spans=list(job.governs_unresolved_spans),
             governs_suspicious_docs=list(job.governs_suspicious_docs),
+            entities_written=job.entities_written,
+            entities_dropped=job.entities_dropped,
+            entity_counts_by_kind=job.entity_counts_by_kind,
         )
 
 

@@ -404,6 +404,18 @@ class DuckDBCodeGraphStore:
         ).fetchall()
         return [(str(r[0]), str(r[1])) for r in rows]
 
+    def symbols_by_file(self, file_path: str) -> list[tuple[str, str]]:
+        """All symbol (fqn, kind) pairs defined in ``file_path``.
+
+        Used by entity extraction to resolve file-path targets to symbols.
+        """
+        rows = self.conn.execute(
+            "SELECT qualified_name, kind FROM symbols "
+            "WHERE file_path = ? AND kind != 'MarkdownDoc' ORDER BY qualified_name",
+            [file_path],
+        ).fetchall()
+        return [(str(r[0]), str(r[1])) for r in rows]
+
     def decision_qns(self) -> list[str]:
         """All qualified names of MarkdownDoc symbols (decision chunks).
 
@@ -534,6 +546,73 @@ class DuckDBCodeGraphStore:
             [doc_path],
         )
         return int(n or 0)
+
+    def typed_edges_for_fqn(self, fqn: str) -> list[CodeEdge]:
+        """Non-decision edges pointing at ``fqn`` — all kinds except CALLS and GOVERNS.
+
+        Used by ``build_decision_block()`` to surface typed entities alongside
+        decisions. Returns edges where dst = fqn and kind is in the entity kinds.
+        """
+        entity_kinds = ("CONSTRAINTS", "TOUCHES", "REQUIRES", "COMMAND", "STAKEHOLDER")
+        if not entity_kinds:
+            return []
+        fqn = self._resolve_qn(fqn)
+        placeholders = ", ".join("?" for _ in entity_kinds)
+        rows = self.conn.execute(
+            f"""
+            SELECT src, dst, kind, file_path, span, resolution_tier
+            FROM edges
+            WHERE dst = ? AND kind IN ({placeholders})
+            ORDER BY kind, src
+            """,
+            [fqn] + list(entity_kinds),
+        ).fetchall()
+        return [
+            CodeEdge(
+                src=str(r[0]),
+                dst=str(r[1]),
+                kind=str(r[2]),
+                file_path=None if r[3] is None else str(r[3]),
+                span=None if r[4] is None else str(r[4]),
+                resolution_tier=_opt_int(r[5]) or 0,
+            )
+            for r in rows
+        ]
+
+    def typed_edges_from_chunks(
+        self, chunk_qns: Sequence[str], *, limit: int = 20,
+    ) -> list[CodeEdge]:
+        """Typed edges rooted at any of the given chunk qualified names.
+
+        Used by ``related_decisions()`` to surface entities from the same
+        doc chunks as related decisions.
+        """
+        entity_kinds = ("CONSTRAINTS", "TOUCHES", "REQUIRES", "COMMAND", "STAKEHOLDER")
+        if not entity_kinds or not chunk_qns:
+            return []
+        qn_placeholders = ", ".join("?" for _ in chunk_qns)
+        kind_placeholders = ", ".join("?" for _ in entity_kinds)
+        rows = self.conn.execute(
+            f"""
+            SELECT src, dst, kind, file_path, span, resolution_tier
+            FROM edges
+            WHERE src IN ({qn_placeholders}) AND kind IN ({kind_placeholders})
+            ORDER BY kind, src
+            LIMIT ?
+            """,
+            list(chunk_qns) + list(entity_kinds) + [limit],
+        ).fetchall()
+        return [
+            CodeEdge(
+                src=str(r[0]),
+                dst=str(r[1]),
+                kind=str(r[2]),
+                file_path=None if r[3] is None else str(r[3]),
+                span=None if r[4] is None else str(r[4]),
+                resolution_tier=_opt_int(r[5]) or 0,
+            )
+            for r in rows
+        ]
 
     def transitive_callers(self, fqn: str, *, max_depth: int = 4) -> list[CallSite]:
         """All symbols that (transitively) call ``fqn`` within ``max_depth`` hops.
