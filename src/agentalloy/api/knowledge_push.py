@@ -18,6 +18,7 @@ from __future__ import annotations
 # reporting for this module rather than at the call site.
 # pyright: reportPrivateUsage=false
 import asyncio
+import contextlib
 import fnmatch
 from dataclasses import dataclass
 from typing import Any
@@ -240,10 +241,8 @@ def build_decision_block(
     if all_decisions:
         # Use the first decision's qualified name as the anchor for entity lookup
         anchor_fqn = all_decisions[0].qualified_name.split("::", 1)[0]
-        try:
+        with contextlib.suppress(Exception):
             entity_edges = graph.typed_edges_for_fqn(anchor_fqn)
-        except Exception:
-            pass  # Graceful degradation: no entities if query fails
 
     return DecisionPush(
         text=_render(all_decisions),

@@ -572,8 +572,8 @@ class DuckDBCodeGraphStore:
                 src=str(r[0]),
                 dst=str(r[1]),
                 kind=str(r[2]),
-                file_path=None if r[3] is None else str(r[3]),
-                span=None if r[4] is None else str(r[4]),
+                file_path=str(r[3]) if r[3] is not None else "",
+                span=str(r[4]) if r[4] is not None else "",
                 resolution_tier=_opt_int(r[5]) or 0,
             )
             for r in rows
@@ -607,8 +607,8 @@ class DuckDBCodeGraphStore:
                 src=str(r[0]),
                 dst=str(r[1]),
                 kind=str(r[2]),
-                file_path=None if r[3] is None else str(r[3]),
-                span=None if r[4] is None else str(r[4]),
+                file_path=str(r[3]) if r[3] is not None else "",
+                span=str(r[4]) if r[4] is not None else "",
                 resolution_tier=_opt_int(r[5]) or 0,
             )
             for r in rows

@@ -39,15 +39,14 @@ from agentalloy.code_index.ingest.embed_text import (
     is_embeddable,
     text_hash,
 )
+from agentalloy.code_index.ingest.entity_extract import (
+    _index_entity_edges,
+)
 from agentalloy.code_index.ingest.markdown import (
     MarkdownChunk,
     chunk_markdown,
     collect_markdown_chunks,
     compose_markdown_embed_text,
-)
-from agentalloy.code_index.ingest.entity_extract import (
-    _index_entity_edges,
-    EntityIndexResult,
 )
 from agentalloy.code_index.store import (
     CodeIndexJobsStore,

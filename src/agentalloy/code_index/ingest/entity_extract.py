@@ -31,7 +31,6 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from agentalloy.code_index.ingest.markdown import MarkdownChunk
 from agentalloy.config import Settings
@@ -224,7 +223,7 @@ def extract_entities_from_chunk(
     seen_spans: set[str] = set()
 
     # Process patterns in priority order (REQUIRES first, STAKEHOLDER last)
-    pattern_sets: list[tuple[str, list[re.Pattern]]] = [
+    pattern_sets: list[tuple[str, list[re.Pattern[str]]]] = [
         ("REQUIRES", _REQUIRE_PATTERNS),
         ("TOUCHES", _TOUCH_PATTERNS),
         ("CONSTRAINTS", _CONSTRAINT_PATTERNS),

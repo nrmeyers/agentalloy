@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
+from agentalloy.api.artifact_extractor import extract_and_store
 from agentalloy.api.proxy_apply import (
     InjectOutcome,
     _compose_block,  # noqa: F401 — re-exported for callers/tests
@@ -59,7 +60,6 @@ from agentalloy.api.proxy_router import (
 from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
-from agentalloy.api.artifact_extractor import extract_and_store
 from agentalloy.providers.base import filter_tools_for_phase
 
 if TYPE_CHECKING:

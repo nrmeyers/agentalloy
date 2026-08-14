@@ -13,24 +13,22 @@ Covers:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from agentalloy.code_index.ingest.entity_extract import (
-    EntityEdge,
-    EntityIndexResult,
-    extract_entities_from_chunk,
-    _index_entity_edges,
-    _HIGH_PRIORITY_KINDS,
     _EDGE_KINDS,
+    _HIGH_PRIORITY_KINDS,
+    EntityIndexResult,
+    _index_entity_edges,
+    extract_entities_from_chunk,
 )
 from agentalloy.code_index.ingest.markdown import MarkdownChunk
 from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
-from agentalloy.storage.protocols import CodeEdge, CodeGraphStore, CodeSymbol
 from agentalloy.config import Settings
-
+from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -568,8 +566,10 @@ class TestImportSmoke:
 
     def test_entity_extract_import(self) -> None:
         import agentalloy.code_index.ingest.entity_extract  # noqa: F401
-        from agentalloy.code_index.ingest.entity_extract import _index_entity_edges  # noqa: F401
-        from agentalloy.code_index.ingest.entity_extract import EntityIndexResult  # noqa: F401
+        from agentalloy.code_index.ingest.entity_extract import (
+            EntityIndexResult,  # noqa: F401
+            _index_entity_edges,  # noqa: F401
+        )
 
     def test_pipeline_import(self) -> None:
         import agentalloy.code_index.ingest.pipeline  # noqa: F401
