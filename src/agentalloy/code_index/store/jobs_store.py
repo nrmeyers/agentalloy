@@ -247,6 +247,9 @@ class CodeIndexJob:
     governs_dropped: int = 0
     governs_unresolved_spans: list[str] = field(default_factory=lambda: [])
     governs_suspicious_docs: list[str] = field(default_factory=lambda: [])
+    entities_written: int = 0
+    entities_dropped: int = 0
+    entity_counts_by_kind: str = ""
 
 
 @dataclass(frozen=True)

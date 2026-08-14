@@ -198,10 +198,17 @@ def _add_actions(
     # Phase advance depends on gate status
     unmet = gates_unmet or []
     if not unmet:
-        actions["advance_phase"] = (
-            "State that the phase is complete. "
-            "The phase advances automatically once exit gates pass."
-        )
+        if phase == "ship":
+            actions["advance_phase"] = (
+                "Ship is terminal — it does not self-advance. "
+                "When the user confirms they're ready for the next work item, "
+                "run `agentalloy phase set intake` to reset."
+            )
+        else:
+            actions["advance_phase"] = (
+                "State that the phase is complete. "
+                "The phase advances automatically once exit gates pass."
+            )
     else:
         actions["blocked"] = (
             f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."

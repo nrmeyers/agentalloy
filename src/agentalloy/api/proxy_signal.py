@@ -384,8 +384,8 @@ def _adaptive_banner_cadence(phase: str, turns_in_phase: int) -> int:
 def _checkpoint_label(path_glob: str) -> str:
     """A short human label for an exists-only checkpoint glob.
 
-    ``.agentalloy/contracts/build/*.md`` -> ``"build contracts"``; a non-contract glob
-    falls back to its last non-wildcard segment, or the glob itself.
+    A contract-related glob (e.g. ``contracts/build/*``) maps to ``"build contracts"``;
+    a non-contract glob falls back to its last non-wildcard segment, or the glob itself.
     """
     segments = [seg for seg in path_glob.split("/") if seg and "*" not in seg]
     parent = segments[-1] if segments else ""
@@ -547,10 +547,8 @@ def build_banner(
 
     # checkpoint: surface unmet pure-existence gates (no sections) on a second line.
     # Restricted to CODE paths (`src/`, `tests/`) — the only disk deliverables an agent
-    # legitimately writes. Any other exists-only glob is a lifecycle artifact, and
-    # `_checkpoint_label` falls back to echoing the glob's own segments, so a legacy
-    # pack's `.agentalloy/contracts/...` or a bare `out.md` would print a path here and
-    # re-teach exactly the disk-write habit the store migration removed.
+    # legitimately writes. Any other exists-only glob is a lifecycle artifact whose
+    # status lives in the data store, not on disk.
     checkpoint = ""
     try:
         for path in _extract_exists_only_paths(exit_gates):

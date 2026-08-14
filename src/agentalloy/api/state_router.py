@@ -621,13 +621,9 @@ async def archive_all(
     """Archive every active contract and artifact in one transaction.
 
     Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
-    When nothing needs archiving (everything is already archived), returns
-    HTTP 409 so callers can distinguish "nothing to do" from success.
+    Zero counts is a valid no-op (everything already archived) — not an error.
     """
-    result = await asyncio.to_thread(store.archive_all)
-    if result["contracts_archived"] == 0 and result["artifacts_archived"] == 0:
-        raise HTTPException(status_code=409, detail="Nothing to archive — already archived")
-    return result
+    return await asyncio.to_thread(store.archive_all)
 
 
 @router.get(

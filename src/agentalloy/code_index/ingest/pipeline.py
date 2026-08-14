@@ -39,6 +39,9 @@ from agentalloy.code_index.ingest.embed_text import (
     is_embeddable,
     text_hash,
 )
+from agentalloy.code_index.ingest.entity_extract import (
+    _index_entity_edges,
+)
 from agentalloy.code_index.ingest.markdown import (
     MarkdownChunk,
     chunk_markdown,
@@ -721,6 +724,23 @@ async def run_index_job(
                 suspicious_docs=governs.suspicious_docs,
             )
             governs_written = governs.written
+
+            # Entity extraction phase: parallel pass over all chunks, writes
+            # typed edges (CONSTRAINTS, TOUCHES, REQUIRES, COMMAND, STAKEHOLDER)
+            # to the graph store alongside existing GOVERNS edges.
+            entity_result = await asyncio.to_thread(
+                _index_entity_edges,
+                graph,
+                chunks=md.chunks,
+                settings=settings,
+            )
+            if entity_result.entities_written > 0:
+                logger.info(
+                    "entity extraction wrote %d edges (%s) for job %s",
+                    entity_result.entities_written,
+                    entity_result.entity_counts_by_kind,
+                    job_id,
+                )
 
         # --- fts phase ------------------------------------------------------------
         _check_cancel()

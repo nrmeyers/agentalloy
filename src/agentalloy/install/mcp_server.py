@@ -78,6 +78,7 @@ _QUERY_ACTIONS = {
     "symbols": "Look up a symbol by fully-qualified name (function, class, etc.).",
     "knowledge_why": "Read the design decision governing a specific symbol.",
     "knowledge_related": "Find decisions related to a topic query.",
+    "knowledge_entities": "List typed entity edges (CONSTRAINTS, TOUCHES, REQUIRES, COMMAND, STAKEHOLDER) touching a symbol.",
     "artifact_body": "Read the full body of a recorded phase artifact.",
     "contract_detail": "Read the full detail of a contract by ID.",
     "telemetry": "Recent composition traces with token savings data.",
@@ -256,6 +257,16 @@ def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict
             data = _http_get(port, f"/code/search/related-decisions?q={_urlencode(query)}&k={k}")
             text = _format_search_results(data)
 
+        elif action == "knowledge_entities":
+            if not query:
+                return _err(
+                    request_id, INVALID_PARAMS, "'query' (FQN or short name) required for knowledge_entities"
+                )
+            kind_param = args.get("kind")
+            kind_qs = f"&kind={_urlencode(kind_param)}" if kind_param else ""
+            data = _http_get(port, f"/code/search/entities?query={_urlencode(query)}{kind_qs}")
+            text = _format_entity_edges(data)
+
         elif action == "artifact_body":
             if not phase or not slug or not query:
                 return _err(
@@ -362,6 +373,25 @@ def _format_contract(data: Any) -> str:
     body = data.get("body") or ""
     if body:
         lines.append(f"\n{body[:1000]}")
+    return "\n".join(lines)
+
+
+def _format_entity_edges(data: Any) -> str:
+    """Format entity edges as readable text."""
+    if not isinstance(data, list):
+        return json.dumps(data, indent=2) if data else "No entities found."
+    if not data:
+        return "No entities found."
+    lines = [f"Entity edges ({len(data)}):", ""]
+    for e in data[:20]:
+        if isinstance(e, dict):
+            kind = e.get("kind", "")
+            src = e.get("src", "")
+            dst = e.get("dst", "")
+            span = (e.get("span") or "")[:80]
+            lines.append(f"- **{kind}**: `{src}` → `{dst}`")
+            if span:
+                lines.append(f"  `{span}`")
     return "\n".join(lines)
 
 

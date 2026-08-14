@@ -178,9 +178,9 @@ class TestTB3LegacyGlobTolerance:
 
     def test_derive_phase_from_glob(self) -> None:
         """_derive_phase_from_glob extracts phase from glob pattern."""
-        assert _derive_phase_from_glob(".agentalloy/contracts/active/build/*.md") == "build"
-        assert _derive_phase_from_glob(".agentalloy/contracts/active/spec/*.md") == "spec"
-        assert _derive_phase_from_glob(".agentalloy/contracts/active/sdd-fast/*.md") == "sdd-fast"
+        assert _derive_phase_from_glob("contracts/active/build/*") == "build"
+        assert _derive_phase_from_glob("contracts/active/spec/*") == "spec"
+        assert _derive_phase_from_glob("contracts/active/sdd-fast/*") == "sdd-fast"
 
     def test_legacy_glob_arg_contract_exists(
         self, ctx_with_contracts: PredicateContext, monkeypatch: pytest.MonkeyPatch
@@ -196,7 +196,7 @@ class TestTB3LegacyGlobTolerance:
         monkeypatch.setattr(pred_mod, "_emit_legacy_glob_trace", mock_trace)
         result = eval_contract_exists(
             {
-                "contracts": ".agentalloy/contracts/active/build/*.md",
+                "contracts": "contracts/active/build/*",
             },
             ctx_with_contracts,
         )
@@ -204,7 +204,7 @@ class TestTB3LegacyGlobTolerance:
         # Should still evaluate correctly (derives phase='build' from glob)
         assert result == PredicateResult.MET
         assert trace_calls, "Expected _emit_legacy_glob_trace to be called"
-        assert trace_calls[0][0] == ".agentalloy/contracts/active/build/*.md"
+        assert trace_calls[0][0] == "contracts/active/build/*"
 
     def test_legacy_glob_arg_has_tags(
         self, ctx_with_contracts: PredicateContext, monkeypatch: pytest.MonkeyPatch
@@ -220,7 +220,7 @@ class TestTB3LegacyGlobTolerance:
         monkeypatch.setattr(pred_mod, "_emit_legacy_glob_trace", mock_trace)
         result = eval_contract_has_tags(
             {
-                "contracts": ".agentalloy/contracts/active/build/*.md",
+                "contracts": "contracts/active/build/*",
                 "any_of": ["api"],
             },
             ctx_with_contracts,
@@ -239,7 +239,7 @@ class TestTB3LegacyGlobTolerance:
         captured: list[str] = []
         logger.warning = lambda *args, **kwargs: captured.append(args[0] % args[1:])  # type: ignore[assignment]
         try:
-            pred_mod._emit_legacy_glob_trace(".agentalloy/contracts/active/build/*.md")
+            pred_mod._emit_legacy_glob_trace("contracts/active/build/*")
         finally:
             logger.warning = orig_warning
 

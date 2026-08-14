@@ -11,11 +11,13 @@ from agentalloy.code_index.retrieval import hybrid
 from agentalloy.code_index.retrieval.hybrid import (
     finalize_query_text,
     lexical_search,
+    related_decisions,
     rewrite_query,
     semantic_search,
 )
 from agentalloy.code_index.store import open_jobs
 from agentalloy.config import Settings
+from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 from .conftest import (
     FixedEmbedClient,
@@ -148,3 +150,94 @@ def test_finalize_query_text_prefix_and_cap() -> None:
     out = finalize_query_text("x" * 10_000)
     assert out.startswith("search_query: ")
     assert len(out) <= hybrid.MAX_EMBED_TEXT_CHARS
+
+
+# ---------------------------------------------------------------------------
+# related_decisions — entity expansion
+# ---------------------------------------------------------------------------
+
+
+def _decision_symbol(qn: str, heading: str, body: str) -> CodeSymbol:
+    """A MarkdownDoc symbol that acts as a decision chunk."""
+    from .conftest import make_symbol
+    return make_symbol(
+        qn,
+        kind="MarkdownDoc",
+        file_path=qn.split("::")[0] if "::" in qn else f"{qn}.md",
+        docstring=body,
+        source_code=f"# {heading}\n\n{body}",
+    )
+
+
+async def test_related_decisions_no_entity_edges(state: CodeIndexState) -> None:
+    """No regression: semantic-only results when no entity edges exist."""
+    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    seed_index(
+        state.settings,
+        SLUG,
+        symbols=[
+            _decision_symbol("docs/auth.md::rate-limiting", "Rate Limiting", "Limit requests per user."),
+            _decision_symbol("docs/auth.md::auth-middleware", "Auth Middleware", "Middleware for auth."),
+        ],
+        vectors=[
+            vector_row("docs/auth.md::rate-limiting", axis_vec(0), text="Limit requests per user."),
+            vector_row("docs/auth.md::auth-middleware", axis_vec(0, 1), text="Middleware for auth."),
+        ],
+        fts=True,
+        repo_path="/repo/test",
+    )
+
+    results = await related_decisions(state, SLUG, "rate limiting", k=5, repo_path="/repo/test")
+    assert len(results) >= 1
+    assert all(r.connected_via is None for r in results)
+
+
+async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
+    """Entity expansion capped at 3."""
+    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    symbols = [
+        _decision_symbol("docs/main.md::main-decision", "Main", "Main decision about everything."),
+    ]
+    edges = []
+    for i in range(5):
+        dst = f"src.mod{i}.fn"
+        symbols.append(make_symbol(dst, docstring=f"Module {i} function."))
+        edges.append(CodeEdge(
+            src="docs/main.md::main-decision",
+            dst=dst,
+            kind="TOUCHES",
+            file_path="docs/main.md",
+        ))
+        edges.append(CodeEdge(
+            src=f"docs/extra{i}.md::decision-{i}",
+            dst=dst,
+            kind="GOVERNS",
+            file_path=f"docs/extra{i}.md",
+        ))
+        symbols.append(_decision_symbol(
+            f"docs/extra{i}.md::decision-{i}",
+            f"Decision {i}",
+            f"Extra decision {i}.",
+        ))
+
+    seed_index(
+        state.settings,
+        SLUG,
+        symbols=symbols,
+        edges=edges,
+        vectors=[
+            vector_row("docs/main.md::main-decision", axis_vec(0), text="Main decision about everything."),
+        ] + [
+            vector_row(f"src.mod{i}.fn", axis_vec(0), text=f"Module {i} function.")
+            for i in range(5)
+        ] + [
+            vector_row(f"docs/extra{i}.md::decision-{i}", axis_vec(1), text=f"Extra decision {i}.")
+            for i in range(5)
+        ],
+        fts=True,
+        repo_path="/repo/test",
+    )
+
+    results = await related_decisions(state, SLUG, "main decision", k=5, repo_path="/repo/test")
+    entity_results = [r for r in results if r.connected_via is not None]
+    assert len(entity_results) <= 3

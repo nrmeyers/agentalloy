@@ -18,6 +18,7 @@ from __future__ import annotations
 # reporting for this module rather than at the call site.
 # pyright: reportPrivateUsage=false
 import asyncio
+import contextlib
 import fnmatch
 from dataclasses import dataclass
 from typing import Any
@@ -41,6 +42,7 @@ class DecisionPush:
 
     ``decisions`` carries the selected rows so downstream consumers (tests,
     telemetry) can inspect what was chosen without re-parsing the manifest text.
+    ``entity_edges`` carries typed non-decision edges pointing at the anchor fqn.
     """
 
     text: str
@@ -48,6 +50,7 @@ class DecisionPush:
     truncated: bool
     decisions: tuple[DecisionRow, ...] = ()
     related_count: int = 0
+    entity_edges: tuple[Any, ...] = ()
 
 
 def _is_superseded(_decision: DecisionRow) -> bool:
@@ -120,6 +123,34 @@ def _render(decisions: list[DecisionRow]) -> str:
     lines.append(
         'Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>'
         ' · action=`knowledge_related` query="<topic>"'
+    )
+    return "\n".join(lines).rstrip()
+
+
+def _render_entities(entity_edges: list[Any]) -> str:
+    """Render typed entity edges alongside decisions.
+
+    Surfaces constraints, file touches, dependencies, commands, and stakeholders
+    that weren't captured in the SDD artifact pipeline.
+    """
+    if not entity_edges:
+        return ""
+    lines = [
+        "# Entities governing this work",
+        "",
+        "The following typed entities were extracted from the repo's docs.",
+        "",
+    ]
+    for e in entity_edges[:10]:
+        dst = e.dst if hasattr(e, 'dst') and e.dst else "(standalone)"
+        src = e.src if hasattr(e, 'src') else ""
+        kind = e.kind if hasattr(e, 'kind') else ""
+        span = e.span if hasattr(e, 'span') and e.span else ""
+        span_preview = span[:80] if span else "(no span)"
+        lines.append(f"- **{kind}**: `{src}` → `{dst}` (`{span_preview}`)")
+    lines.append("")
+    lines.append(
+        'Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>'
     )
     return "\n".join(lines).rstrip()
 
@@ -204,10 +235,31 @@ def build_decision_block(
     all_decisions.sort(key=lambda d: (d.file_path or "", d.qualified_name))
     truncated = len(all_decisions) > _MAX_DECISIONS
     all_decisions = all_decisions[:_MAX_DECISIONS]
+
+    # Phase 3: Entity path — surface typed entities alongside decisions.
+    # Collect from ALL decision source paths, not just the first, so entities
+    # from every governing file are captured.
+    entity_edges: list[Any] = []
+    if all_decisions:
+        seen_fqns: set[str] = set()
+        for d in all_decisions:
+            anchor_fqn = d.qualified_name.split("::", 1)[0]
+            if anchor_fqn in seen_fqns:
+                continue
+            seen_fqns.add(anchor_fqn)
+            with contextlib.suppress(Exception):
+                entity_edges.extend(graph.typed_edges_for_fqn(anchor_fqn))
+
+    text = _render(all_decisions)
+    rendered_entities = _render_entities(entity_edges)
+    if rendered_entities:
+        text = text + "\n\n" + rendered_entities
+
     return DecisionPush(
-        text=_render(all_decisions),
+        text=text,
         count=len(all_decisions),
         truncated=truncated,
         decisions=tuple(all_decisions),
         related_count=related_count,
+        entity_edges=tuple(entity_edges),
     )

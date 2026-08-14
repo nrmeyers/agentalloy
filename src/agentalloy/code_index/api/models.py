@@ -10,7 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agentalloy.code_index.store import CodeIndexJob, IndexedRepo
-from agentalloy.storage.protocols import CallSite, CodeSymbol, DecisionRow
+from agentalloy.storage.protocols import CallSite, CodeEdge, CodeSymbol, DecisionRow
 
 
 class IndexRequest(BaseModel):
@@ -47,6 +47,9 @@ class JobView(BaseModel):
     governs_dropped: int = 0
     governs_unresolved_spans: list[str] = Field(default_factory=list)
     governs_suspicious_docs: list[str] = Field(default_factory=list)
+    entities_written: int = 0
+    entities_dropped: int = 0
+    entity_counts_by_kind: str = ""
 
     @classmethod
     def from_job(cls, job: CodeIndexJob) -> JobView:
@@ -67,6 +70,9 @@ class JobView(BaseModel):
             governs_dropped=job.governs_dropped,
             governs_unresolved_spans=list(job.governs_unresolved_spans),
             governs_suspicious_docs=list(job.governs_suspicious_docs),
+            entities_written=job.entities_written,
+            entities_dropped=job.entities_dropped,
+            entity_counts_by_kind=job.entity_counts_by_kind,
         )
 
 
@@ -263,3 +269,23 @@ class CentralitySymbol(BaseModel):
     pagerank: float
     file_path: str | None
     start_line: int | None
+
+
+class EntityEdgeView(BaseModel):
+    """One typed entity edge (CONSTRAINTS, TOUCHES, REQUIRES, COMMAND, STAKEHOLDER)."""
+
+    src: str
+    dst: str
+    kind: str
+    file_path: str
+    span: str | None = None
+
+    @classmethod
+    def from_edge(cls, e: CodeEdge) -> EntityEdgeView:
+        return cls(
+            src=e.src,
+            dst=e.dst,
+            kind=e.kind,
+            file_path=e.file_path,
+            span=e.span,
+        )

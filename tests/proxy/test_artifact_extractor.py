@@ -6,16 +6,13 @@ from LLM response text, the store write path, and edge cases.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 from agentalloy.api.artifact_extractor import (
-    ExtractionResult,
     extract_and_store,
     extract_artifacts,
     write_artifacts,
 )
-
 
 # ---------------------------------------------------------------------------
 # extract_artifacts() — pure extraction

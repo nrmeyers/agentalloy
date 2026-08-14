@@ -149,11 +149,11 @@ def _read_file(path: Path) -> str | None:
 def _derive_phase_from_glob(glob_pattern: str) -> str | None:
     """Derive the phase name from a legacy contracts glob pattern.
 
-    Patterns like ``.agentalloy/contracts/active/build/*.md`` yield ``"build"``.
+    Patterns like ``contracts/active/build/*`` yield ``"build"``.
     Returns ``None`` when the pattern doesn't match the expected shape.
     """
     parts = glob_pattern.split("/")
-    # Expect: .../active/<phase>/*.md
+    # Expect: .../active/<phase>/*
     try:
         idx = parts.index("active")
         if idx + 1 < len(parts):

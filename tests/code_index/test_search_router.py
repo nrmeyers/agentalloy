@@ -174,6 +174,117 @@ def test_unknown_repo_404(client: TestClient) -> None:
         assert "not indexed" in resp.json()["detail"]
 
 
+def test_entities_endpoint(client: TestClient) -> None:
+    """Entity edges returned for an FQN with typed edges."""
+    from agentalloy.code_index.store import open_code_index
+    from agentalloy.storage.protocols import CodeEdge
+
+    handles = open_code_index(
+        client.app.dependency_overrides[get_code_index_state]().settings,
+        SLUG,
+        role="service",
+        repo_path="/repo/demo",
+    )
+    try:
+        handles.graph.upsert_edges([
+            CodeEdge(
+                src="docs/auth.md",
+                dst="pkg.util.helper",
+                kind="CONSTRAINTS",
+                file_path="docs/auth.md",
+                span="rate_limit",
+            ),
+            CodeEdge(
+                src="docs/auth.md",
+                dst="pkg.util.caller",
+                kind="TOUCHES",
+                file_path="docs/auth.md",
+                span="caller_fn",
+            ),
+        ])
+    finally:
+        handles.close()
+
+    resp = client.get(
+        "/code/search/entities",
+        params={"repo": SLUG, "query": "pkg.util.helper"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "CONSTRAINTS"
+    assert body[0]["dst"] == "pkg.util.helper"
+    assert body[0]["src"] == "docs/auth.md"
+
+
+def test_entities_endpoint_kind_filter(client: TestClient) -> None:
+    """Kind filter narrows results."""
+    from agentalloy.code_index.store import open_code_index
+    from agentalloy.storage.protocols import CodeEdge
+
+    handles = open_code_index(
+        client.app.dependency_overrides[get_code_index_state]().settings,
+        SLUG,
+        role="service",
+        repo_path="/repo/demo",
+    )
+    try:
+        handles.graph.upsert_edges([
+            CodeEdge(src="docs/a.md", dst="pkg.util.helper", kind="CONSTRAINTS", file_path="docs/a.md"),
+            CodeEdge(src="docs/b.md", dst="pkg.util.helper", kind="TOUCHES", file_path="docs/b.md"),
+        ])
+    finally:
+        handles.close()
+
+    resp = client.get(
+        "/code/search/entities",
+        params={"repo": SLUG, "query": "pkg.util.helper", "kind": "TOUCHES"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "TOUCHES"
+
+
+def test_entities_endpoint_name_fallback(client: TestClient) -> None:
+    """Short name resolves to FQN when direct FQN lookup finds no edges."""
+    from agentalloy.code_index.store import open_code_index
+    from agentalloy.storage.protocols import CodeEdge
+
+    handles = open_code_index(
+        client.app.dependency_overrides[get_code_index_state]().settings,
+        SLUG,
+        role="service",
+        repo_path="/repo/demo",
+    )
+    try:
+        handles.graph.upsert_edges([
+            CodeEdge(src="docs/a.md", dst="pkg.util.helper", kind="REQUIRES", file_path="docs/a.md"),
+        ])
+    finally:
+        handles.close()
+
+    # "helper" is not an FQN — should resolve via symbols_by_name to pkg.util.helper
+    resp = client.get(
+        "/code/search/entities",
+        params={"repo": SLUG, "query": "helper"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["kind"] == "REQUIRES"
+
+
+def test_entities_endpoint_empty(client: TestClient) -> None:
+    """No entities found returns empty list, not an error."""
+    resp = client.get(
+        "/code/search/entities",
+        params={"repo": SLUG, "query": "pkg.util.helper"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 def test_bounds_validation_422(client: TestClient) -> None:
     assert (
         client.get("/code/search/semantic", params={"repo": SLUG, "q": "x", "k": 0}).status_code

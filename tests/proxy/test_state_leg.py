@@ -20,7 +20,6 @@ from agentalloy.api.proxy_injection import (
 )
 from agentalloy.api.state_leg import build_state_leg
 
-
 # ---------------------------------------------------------------------------
 # build_state_leg() — JSON shape and content
 # ---------------------------------------------------------------------------
@@ -219,7 +218,7 @@ class TestAnthropicStateInjection:
             "model": "claude",
             "messages": [{"role": "user", "content": "hi"}],
         }
-        from agentalloy.api.proxy_injection import anthropic_marker_begin, ANTHROPIC_MARKER_END
+        from agentalloy.api.proxy_injection import ANTHROPIC_MARKER_END, anthropic_marker_begin
 
         with_workflow = inject_into_anthropic_messages(
             payload, "workflow prose", phase="build", kind="workflow"

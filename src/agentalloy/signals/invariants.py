@@ -84,7 +84,7 @@ def _normalize_gate_path(glob: str) -> str | None:
     Examples::
 
         docs/design/**/approach.md      -> "approach.md"     (concrete filename leaf)
-        .agentalloy/contracts/build/*.md-> ".agentalloy/contracts/build/"  (dir prefix)
+        contracts/build/*               -> "contracts/build/"  (dir prefix)
         src/**                          -> "src/"
         tasks.md                        -> "tasks.md"        (fully literal path)
         **/*.md                         -> None              (no literal anchor)

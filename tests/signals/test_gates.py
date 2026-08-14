@@ -654,7 +654,6 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
     spec = {
         "build_contracts_cover_tasks": {
             "tasks": "docs/design/**/tasks.md",
-            "contracts": ".agentalloy/contracts/active/build/*.md",
         }
     }
     qwen_calls: list[int] = [0]
@@ -671,7 +670,7 @@ def test_tag_focus_advisory_names_offender(tmp_path: Path):
     _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
     _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
-    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
+    spec = {"build_contract_tag_focus": {}}
     qwen_calls: list[int] = [0]
     result, evals = evaluate_node(
         spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
@@ -686,7 +685,7 @@ def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
     _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
     _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
-    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
+    spec = {"build_contract_tag_focus": {}}
     qwen_calls: list[int] = [0]
     result, evals = evaluate_node(
         spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
