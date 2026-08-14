@@ -2103,10 +2103,14 @@ class DuckDBStateStore:
         return [self._row_to_contract(row) for row in rows]
 
     def migrate_disk_contracts(self, roots: list[str]) -> dict[str, Any]:
-        """Migrate disk-based ``.agentalloy/contracts/`` files into the store, then delete them.
+        """Migrate legacy disk-based contract files into the store, then delete them.
 
-        Scans each root for ``contracts/active/<phase>/*.md`` and
-        ``contracts/archive/<phase>/*.md``.  Each file's YAML front-matter
+        .. note:: Contracts are now store-backed; ``.md`` contract files on disk
+           are sunset.  This method exists only to upgrade repos that still carry
+           pre-migration contract files.
+
+        Scans each root for ``contracts/active/<phase>/`` and
+        ``contracts/archive/<phase>/`` directories.  Each file's YAML front-matter
         is parsed and written into the store via :meth:`put_contract`.
         All migrated files and their empty parent directories are deleted.
 

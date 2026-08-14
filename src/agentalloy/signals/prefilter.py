@@ -220,11 +220,11 @@ def _extract_exists_only_paths(gate_spec: Any) -> list[str]:
     """Paths guarded by an ``artifact_exists`` gate with NO sibling ``artifact_contains``.
 
     In the SDD gates each doc file carries both an ``artifact_exists`` and an
-    ``artifact_contains`` for the same glob; a pure checkpoint like the design phase's
-    ``.agentalloy/contracts/build/*.md`` build-contract requirement has only
-    ``artifact_exists``. Returning the exists-only paths lets the banner surface that
-    requirement (otherwise invisible until the gate fails) without duplicating the
-    section-bearing doc gates. Order follows declaration, deduped.
+    ``artifact_contains`` for the same glob; a pure checkpoint like a build-contract
+    requirement (now store-backed) has only ``artifact_exists``. Returning the
+    exists-only paths lets the banner surface that requirement (otherwise invisible
+    until the gate fails) without duplicating the section-bearing doc gates. Order
+    follows declaration, deduped.
     """
     contains_paths = {p for p, _ in _extract_artifact_contains_specs(gate_spec)}
     out: list[str] = []

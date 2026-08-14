@@ -560,9 +560,13 @@ def _write_cursor_atomic(project_root: Path, cursor: str, session_key: str | Non
 def ensure_migrated(project_root: Path) -> int:
     """Auto-migrate legacy flat contracts into the store on first read.
 
+    .. note:: Legacy migration — contracts are now store-backed; ``.md`` contract
+       files on disk are sunset.  This function exists only to upgrade repos that
+       still carry pre-migration contract files.
+
     Handles two migration steps in sequence:
-    1. **Flat → tree**: moves contracts from ``contracts/<phase>/*.md`` and
-       ``contracts/*.md`` into ``contracts/active/<phase>/*.md`` on disk.
+    1. **Flat → tree**: moves contracts from flat layout into
+       ``contracts/active/<phase>/`` on disk (so step 2 can find them).
     2. **Tree → store**: delegates to :meth:`DuckDBStateStore.migrate_disk_contracts`
        which writes every tree-layout contract into the DuckDB store and
        removes the now-redundant disk files.

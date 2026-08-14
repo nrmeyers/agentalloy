@@ -800,7 +800,7 @@ class TestStoreBackedBanner:
     @pytest.mark.parametrize(
         "gates",
         [
-            {"all_of": [{"artifact_exists": {"path": ".agentalloy/contracts/build/*.md"}}]},
+            {"all_of": [{"artifact_exists": {"path": "contracts/build/*"}}]},
             {"all_of": [{"artifact_exists": {"path": "docs/fast/*.md"}}]},
             {"all_of": [{"artifact_exists": {"path": "docs/spec/<slug>/spec.md"}}]},
             {
@@ -847,7 +847,7 @@ class TestStoreBackedBanner:
 
 def _design_gates() -> dict[str, Any]:
     """Mirror the real design exit gate: three docs each in their OWN file (one section
-    apiece) plus the section-less build-contract checkpoint."""
+    apiece) plus the store-backed build-contract checkpoint."""
     return {
         "all_of": [
             {"artifact_exists": {"path": "docs/design/**/approach.md"}},
@@ -861,7 +861,7 @@ def _design_gates() -> dict[str, Any]:
                     "sections": ["Test Cases"],
                 }
             },
-            {"artifact_exists": {"path": ".agentalloy/contracts/active/build/*.md"}},
+            {"artifact_exists": {"phase": "build", "name": "*"}},
         ]
     }
 
@@ -910,10 +910,9 @@ class TestBuildBanner:
         """An unknown phase's directive must NOT echo its gate's filesystem path.
 
         It used to render "out.md not yet produced". An unrecognized phase is by
-        definition a custom pack, and a legacy one still carries disk-path gates like
-        `.agentalloy/contracts/build/*.md` — naming that path in the banner is a
-        standing instruction to write lifecycle artifacts to disk, at the highest
-        frequency injection point there is.
+        definition a custom pack, and a legacy one may still carry disk-path gates —
+        naming any such path in the banner is a standing instruction to write
+        lifecycle artifacts to disk, at the highest frequency injection point there is.
         """
         from agentalloy.api.proxy_signal import build_banner
 
@@ -992,16 +991,21 @@ class TestBuildBanner:
         assert "(missing: Tasks, Test Cases)" in banner
 
     def test_contract_disk_checkpoint_is_not_surfaced(self, tmp_path: Path) -> None:
-        """A `.agentalloy/contracts/**` checkpoint no longer reaches the banner.
+        """A contracts disk checkpoint no longer reaches the banner.
 
         Contracts are store-backed; the real design pack declares no such gate. A
-        legacy pack that still does must not get its disk location advertised on the
-        highest-frequency injection surface.
+        legacy pack that still carries a disk-path contract gate must not get its
+        disk location advertised on the highest-frequency injection surface.
         """
         from agentalloy.api.proxy_signal import build_banner
 
         self._write_design_docs(tmp_path, slug="feat", which={"approach", "tasks", "test-plan"})
-        banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
+        # Inject a legacy disk-path gate to verify it is filtered from the banner.
+        legacy_gates = dict(_design_gates())
+        legacy_gates["all_of"] = list(legacy_gates["all_of"]) + [
+            {"artifact_exists": {"path": "contracts/active/build/*"}},
+        ]
+        banner = build_banner("design", legacy_gates, tmp_path, slug="feat")
         assert "build contracts" not in banner
         assert ".agentalloy" not in banner
 
@@ -1021,7 +1025,7 @@ class TestBuildBanner:
 
         # Directive is a generic pointer; slug is resolved in the progress suffix.
         banner = build_banner("design", _design_gates(), tmp_path, slug="calendar-web-ui")
-        assert "[agentalloy · design] phase instructions: system prompt" in banner
+        assert "phase instructions: system prompt" in banner
         assert "<slug>" not in banner
 
     def test_slug_left_literal_when_unknown(self, tmp_path: Path) -> None:
@@ -1029,7 +1033,7 @@ class TestBuildBanner:
 
         # Directive is a generic pointer; no <slug> placeholder in the directive itself.
         banner = build_banner("design", _design_gates(), tmp_path)
-        assert "[agentalloy · design] phase instructions: system prompt" in banner
+        assert "phase instructions: system prompt" in banner
 
 
 class TestEvaluateSignalBanner:

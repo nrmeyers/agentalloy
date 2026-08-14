@@ -27,8 +27,8 @@ class TestNormalizeGatePath:
         [
             ("docs/design/**/approach.md", "approach.md"),  # filename behind wildcard dir
             (
-                ".agentalloy/contracts/active/build/*.md",
-                ".agentalloy/contracts/active/build/",
+                "contracts/build/*",
+                "contracts/build/",
             ),  # dir prefix
             ("src/**", "src/"),
             ("tests/**/*.py", "tests/"),

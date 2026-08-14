@@ -98,9 +98,9 @@ def test_no_disk_approval_globs(stem: str, skill: dict[str, Any]) -> None:
 def test_scaffolded_workflow_pack_is_store_backed() -> None:
     """`agentalloy new-skill-pack` must not mint disk-path gates.
 
-    The scaffold shipped `.agentalloy/contracts/build/<id>-*.md`, so every custom
+    The scaffold historically shipped disk-path contract gates, so every custom
     workflow pack a user generated carried a derived prose invariant instructing
-    the agent to write contracts to disk.
+    the agent to write contracts to disk. Contracts are now store-backed.
     """
     from agentalloy.install.subcommands.new_skill_pack import (
         _build_skill_record,  # pyright: ignore[reportPrivateUsage]
