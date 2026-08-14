@@ -36,6 +36,7 @@ def test_build_router_mounts_expected_routes() -> None:
         "/code/search/semantic",
         "/code/search/lexical",
         "/code/search/related-decisions",
+        "/code/search/entities",
         "/code/search/symbol",
         "/code/search/files",
         "/code/search/centrality",
