@@ -56,7 +56,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   governs_written INTEGER NOT NULL DEFAULT 0,
   governs_dropped INTEGER NOT NULL DEFAULT 0,
   governs_unresolved_spans TEXT,
-  governs_suspicious_docs TEXT
+  governs_suspicious_docs TEXT,
+  entities_written INTEGER NOT NULL DEFAULT 0,
+  entities_dropped INTEGER NOT NULL DEFAULT 0,
+  entity_counts_by_kind TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
@@ -127,6 +130,24 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
         "jobs",
         "governs_suspicious_docs",
         "ALTER TABLE jobs ADD COLUMN governs_suspicious_docs TEXT",
+    ),
+    # Entity-extraction delta reporting (mirror of the governs_* columns): the
+    # entity phase's written/dropped counts + per-kind breakdown, surfaced on
+    # the job row so /code/jobs reflects what the entity pass actually wrote.
+    (
+        "jobs",
+        "entities_written",
+        "ALTER TABLE jobs ADD COLUMN entities_written INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "entities_dropped",
+        "ALTER TABLE jobs ADD COLUMN entities_dropped INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "entity_counts_by_kind",
+        "ALTER TABLE jobs ADD COLUMN entity_counts_by_kind TEXT",
     ),
 )
 
@@ -319,6 +340,11 @@ def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
         governs_dropped=int(row["governs_dropped"] or 0),
         governs_unresolved_spans=_json_list(row["governs_unresolved_spans"]),
         governs_suspicious_docs=_json_list(row["governs_suspicious_docs"]),
+        entities_written=int(row["entities_written"] or 0),
+        entities_dropped=int(row["entities_dropped"] or 0),
+        entity_counts_by_kind=(
+            "" if row["entity_counts_by_kind"] is None else str(row["entity_counts_by_kind"])
+        ),
     )
 
 
@@ -645,6 +671,35 @@ class CodeIndexJobsStore:
                 "warn",
                 f"GOVERNS delta looks suspicious: written={written} dropped={dropped} "
                 f"suspicious_docs={suspicious_docs} unresolved_spans={unresolved_spans}",
+            )
+
+    def update_entity_result(
+        self,
+        job_id: str,
+        *,
+        written: int,
+        dropped: int,
+        counts_by_kind: dict[str, int],
+    ) -> None:
+        """Record the entity-extraction phase's delta on the job row (mirror of
+        :meth:`update_governs_result`). ``counts_by_kind`` is stored as JSON
+        text (the column is TEXT; the job row's field is a ``str``).
+        """
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  entities_written = ?, entities_dropped = ?,
+                  entity_counts_by_kind = ?, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (
+                    int(written),
+                    int(dropped),
+                    json.dumps(counts_by_kind),
+                    time.time(),
+                    job_id,
+                ),
             )
 
     # -- job events --------------------------------------------------------------

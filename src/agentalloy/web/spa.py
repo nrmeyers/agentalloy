@@ -97,16 +97,21 @@ def mount_web_ui(app: FastAPI) -> None:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="web-ui-assets")
 
+    dist_resolved = dist.resolve()
     index_html = str(dist / "index.html")
 
     @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
     async def _spa_catchall(request: Request, full_path: str) -> FileResponse | JSONResponse:
         path = f"/{full_path}" if full_path else "/"
 
-        # Serve existing static files (favicon, manifest, etc.)
-        file_path = dist / full_path
-        if full_path and file_path.is_file():
-            return FileResponse(str(file_path))
+        # Serve existing static files (favicon, manifest, etc.).
+        # Resolve and require containment: Starlette decodes %2e to "."
+        # before routing but leaves literal ".." segments intact, so an
+        # unvalidated join would escape dist (unauthenticated file read).
+        if full_path:
+            resolved = (dist / full_path).resolve()
+            if resolved.is_file() and resolved.is_relative_to(dist_resolved):
+                return FileResponse(str(resolved))
 
         # API paths should never reach here (FastAPI routing handles them),
         # but guard anyway.

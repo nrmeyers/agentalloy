@@ -98,10 +98,15 @@ def upsert_env_file(updates: dict[str, str | None], path: Path | None = None) ->
     for line in lines:
         stripped = line.strip()
         key = stripped.partition("=")[0].strip() if "=" in stripped else None
+        export_prefix = ""
+        if key is not None and key.startswith("export "):
+            # Match parse_env_file: an `export FOO=bar` line keys on FOO.
+            export_prefix = "export "
+            key = key[len("export ") :].strip()
         if key is not None and not stripped.startswith("#") and key in remaining:
             value = remaining.pop(key)
             if value is not None:
-                out.append(f"{key}={value}")
+                out.append(f"{export_prefix}{key}={value}")
             # None -> drop the line (unset)
         else:
             out.append(line)
@@ -452,7 +457,22 @@ def load_state(root: Path | None = None) -> dict[str, Any]:
                 file=sys.stderr,
             )
         return _empty_state()
-    data = json.loads(fp.read_text())
+    try:
+        data = json.loads(fp.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(
+            f"ERROR: install-state.json could not be read or parsed ({e}). "
+            f"Delete or repair {fp} and re-run setup.",
+            file=sys.stderr,
+        )
+        raise SystemExit(3) from None
+    if not isinstance(data, dict):
+        print(
+            f"ERROR: install-state.json top-level value must be an object, "
+            f"got {type(data).__name__}. Delete or repair {fp} and re-run setup.",
+            file=sys.stderr,
+        )
+        raise SystemExit(3) from None
     raw_version = data.get("schema_version", 0)
     # A hostile state file can set schema_version to a string or other
     # type; coercing through int() with a fallback gives a clean exit
@@ -622,7 +642,11 @@ def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
         data.setdefault("data_volume", None)
         # Migrate old compose fields to new runtime fields if present
         if "compose_binary" in data:
-            data["runtime_binary"] = data["compose_binary"].split()[0]
+            raw_binary = data["compose_binary"]
+            # An empty/non-string legacy value has no binary to recover — leave
+            # runtime_binary at its None default rather than crash on split()[0].
+            if isinstance(raw_binary, str) and raw_binary.strip():
+                data["runtime_binary"] = raw_binary.split()[0]
             data.pop("compose_binary")
         if "compose_file" in data:
             data.pop("compose_file")

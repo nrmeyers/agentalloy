@@ -276,7 +276,9 @@ class TestCheckNameConflicts:
         def run_side_effect(cmd, **kwargs):
             mock = MagicMock()
             mock.returncode = 0
-            mock.stdout = "abc123def456"
+            # bughunt 4.10: output is now "ID\tName"; only an exact-name
+            # collision (parts[1] == "agentalloy") fails the check.
+            mock.stdout = "abc123def456\tagentalloy"
             return mock
 
         with patch(

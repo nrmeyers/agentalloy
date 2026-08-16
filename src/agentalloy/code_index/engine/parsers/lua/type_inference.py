@@ -60,12 +60,17 @@ class LuaTypeInferenceEngine:
             return
 
         var_names = self._extract_var_names(assignment)
-        func_calls = self._extract_function_calls(assignment)
+        # Pair LHS names with RHS values BY POSITION. The expression list holds
+        # every RHS value (calls and non-calls alike), so indexing it directly
+        # keeps ``local a, b = foo(), 42`` aligned. The old code filtered to
+        # calls first, which shifted the pairing whenever a non-call value
+        # appeared (``b`` would inherit ``bar()``'s type from a later slot).
+        rhs_values = self._extract_rhs_expressions(assignment)
 
         for i, var_name in enumerate(var_names):
-            if i >= len(func_calls):
+            if i >= len(rhs_values):
                 break
-            if var_type := self._infer_lua_variable_type_from_value(func_calls[i], module_qn):
+            if var_type := self._infer_lua_variable_type_from_value(rhs_values[i], module_qn):
                 local_var_types[var_name] = var_type
                 logger.debug(ls.LUA_VAR_INFERRED, var_name=var_name, var_type=var_type)
 
@@ -80,16 +85,20 @@ class LuaTypeInferenceEngine:
                         names.append(decoded)
         return names
 
-    def _extract_function_calls(
+    def _extract_rhs_expressions(
         self,
         assignment: TreeSitterNodeProtocol,
     ) -> list[TreeSitterNodeProtocol]:
-        calls: list[TreeSitterNodeProtocol] = []
+        # Every RHS value in source order (named nodes only — this skips the
+        # anonymous `````,```` separators). Non-call values yield no inferred
+        # type downstream, but they must keep their slot so the LHS/RHS pairing
+        # stays aligned.
+        values: list[TreeSitterNodeProtocol] = []
         for child in assignment.children:
             if child.type != cs.TS_LUA_EXPRESSION_LIST:
                 continue
-            calls.extend(expr for expr in child.children if expr.type == cs.TS_LUA_FUNCTION_CALL)
-        return calls
+            values.extend(expr for expr in child.children if expr.is_named)
+        return values
 
     def _infer_lua_variable_type_from_value(
         self,

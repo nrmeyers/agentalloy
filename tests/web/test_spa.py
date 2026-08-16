@@ -70,6 +70,40 @@ def test_mount_serves_spa(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     assert "ui" in resp.text
 
 
+def test_mount_serves_static_file_inside_dist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Static files inside dist are served by the catch-all, not just /."""
+    dist = _dist(tmp_path / "dist")
+    (dist / "logo.txt").write_text("logo-bytes")
+    monkeypatch.setenv("AGENTALLOY_WEB_DIST", str(dist))
+    app = FastAPI()
+    spa.mount_web_ui(app)
+    resp = TestClient(app).get("/logo.txt")
+    assert resp.status_code == 200
+    assert resp.text == "logo-bytes"
+
+
+def test_mount_blocks_path_traversal_outside_dist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bughunt 6.1: percent-encoded dotdot segments must not escape dist.
+
+    Starlette decodes %2e to "." before routing but leaves literal ".."
+    segments intact, so an unvalidated ``dist / full_path`` join served
+    files outside the bundle (unauthenticated read).
+    """
+    dist = _dist(tmp_path / "dist")
+    (tmp_path / "secret.txt").write_text("topsecret")
+    monkeypatch.setenv("AGENTALLOY_WEB_DIST", str(dist))
+    app = FastAPI()
+    spa.mount_web_ui(app)
+    resp = TestClient(app).get("/%2e%2e/secret.txt")
+    assert resp.status_code == 200
+    assert "topsecret" not in resp.text
+    assert "ui" in resp.text  # falls through to index.html
+
+
 def test_mount_501_hint_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("AGENTALLOY_WEB_DIST", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))

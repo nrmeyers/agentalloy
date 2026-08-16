@@ -56,12 +56,14 @@ def classify_port(port: int, *, timeout: float = 5.0) -> tuple[PortStatus, str]:
             body = json.loads(resp.read())
         # /health uses a three-state status: "healthy" (all-green), "degraded"
         # (embed/telemetry down but service is bound), or "unavailable". Both
-        # healthy and degraded mean a agentalloy server holds the port.
-        if body.get("status") in ("healthy", "degraded"):
-            return "ours", f"Port {port} is bound by agentalloy (status={body.get('status')!r})"
+        # healthy and degraded mean a agentalloy server holds the port. A
+        # non-object JSON body (list/str) is a foreign service, not agentalloy.
+        status = body.get("status") if isinstance(body, dict) else None
+        if status in ("healthy", "degraded"):
+            return "ours", f"Port {port} is bound by agentalloy (status={status!r})"
         return (
             "foreign",
-            f"Port {port} is bound by a service that returned status={body.get('status')!r}",
+            f"Port {port} is bound by a service that returned status={status!r}",
         )
     except json.JSONDecodeError as exc:
         # /health responded but the body wasn't JSON — likely a foreign service

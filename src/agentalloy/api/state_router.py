@@ -58,6 +58,21 @@ router = APIRouter(prefix="/state", tags=["state"])
 contract_router = APIRouter(prefix="/contracts", tags=["contracts"])
 
 
+# Fire-and-forget compose tasks. The event loop holds only a weak reference to
+# a Task, so an unretained ``asyncio.create_task`` can be garbage-collected
+# mid-flight (the compose never runs). Keep strong references here until each
+# task completes.
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _spawn_background(coro: Any) -> None:
+    """Schedule *coro* as a fire-and-forget background task, retaining a strong
+    reference so it cannot be GC'd before it completes."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 # ---------------------------------------------------------------------------
 # Dependency providers — overridden during the app lifespan (or by tests).
 # ---------------------------------------------------------------------------
@@ -767,7 +782,10 @@ async def write_phase(
     current_phase = current_phase_row.phase if current_phase_row else None
     project_root = Path(repo_root) if repo_root else None
     # Route through the graph's route_step (single decision point).
-    verdict = _route_phase(
+    # Runs in a worker thread: the gate does file I/O + embedding, which must
+    # not block the event loop (mirrors the store.write_phase call below).
+    verdict = await asyncio.to_thread(
+        _route_phase,
         store,
         current_phase,
         lane="sdd-full",  # HTTP path doesn't carry a lane; target_phase overrides _PHASE_GRAPH lookup
@@ -775,6 +793,11 @@ async def write_phase(
         override=req.override,
         project_root=project_root,
     )
+    # A same-phase no-op routes to the current phase, so _route_phase returns
+    # None. Only a real transition (verdict is not None) should stamp the
+    # phase-start HEAD ref — re-stamping on a no-op would push the entry ref
+    # forward and shrink the scope_touched_in_diff window.
+    is_real_transition = verdict is not None
     if verdict is not None and not verdict.get("should_transition", True):
         # Gate blocks the transition — return verdict without writing. Mark
         # success=False so a 2xx cannot be read as a recorded advance (#501).
@@ -817,8 +840,10 @@ async def write_phase(
                 written.mode if written else None,
             )
         # Stamp the phase-start HEAD ref on a real transition (soft — must not
-        # block the phase advance).
-        _stamp_phase_start_ref(store, project_root)
+        # block the phase advance). Skipped on a same-phase no-op so the entry
+        # ref is not pushed forward.
+        if is_real_transition:
+            _stamp_phase_start_ref(store, project_root)
         return PhaseAdvanceResponse(
             kind=result.kind,
             # ``result.value`` is the stored blob; callers want the bare name.
@@ -877,7 +902,13 @@ async def write_phase(
         # Transaction committed — posture rewrite + in-process compose.
         if repo_root is not None:
             await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value, written_mode)
-        asyncio.create_task(_trigger_compose_in_process(store, contract_id, request))
+        # Stamp the phase-start HEAD ref on a real transition (soft — must not
+        # block the phase advance). Mirrors the fast path so every real
+        # transition records the entry-point HEAD, not just contract-less ones;
+        # skipped on a same-phase no-op so the entry ref is not pushed forward.
+        if is_real_transition:
+            _stamp_phase_start_ref(store, project_root)
+        _spawn_background(_trigger_compose_in_process(store, contract_id, request))
     except HTTPException:
         raise
     except Exception:
@@ -1077,7 +1108,7 @@ async def create_contract(
     )
 
     # Trigger compose in-process — the write is the trigger
-    asyncio.create_task(_trigger_compose_in_process(store, cid, request))
+    _spawn_background(_trigger_compose_in_process(store, cid, request))
 
     row = store.get_contract(cid)
     if row is None:
@@ -1235,7 +1266,7 @@ async def supersede_contract(
     )
 
     # Trigger compose in-process for the new contract
-    asyncio.create_task(_trigger_compose_in_process(store, new_id, request))
+    _spawn_background(_trigger_compose_in_process(store, new_id, request))
 
     row = store.get_contract(new_id)
     if row is None:
@@ -1268,10 +1299,19 @@ async def set_artifact(
 
         ac_headings = parse_ac_headings(req.content)
         if ac_headings:
-            # Find existing contract for this slug in spec phase
-            contract_id = f"{req.phase}/{req.slug}"
-            existing = store.get_contract(contract_id)
-            if existing:
+            # Find the existing contract for this slug in spec phase. Contract
+            # IDs are not a fixed f"{phase}/{slug}" (callers store the bare slug
+            # or a filename stem), so resolve by the (phase, slug) pair instead
+            # of constructing an ID that get_contract would never find.
+            existing_rows = await asyncio.to_thread(
+                store.list_contracts,
+                phase=req.phase,
+                slug=req.slug,
+                status="active",
+            )
+            if existing_rows:
+                existing = existing_rows[0]
+                contract_id = existing["contract_id"]
                 # Merge: new ACs from artifact, preserve any existing ones not overwritten
                 existing_criteria = existing.get("success_criteria") or []
                 ac_ids = {h["id"] for h in ac_headings}

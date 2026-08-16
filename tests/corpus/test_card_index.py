@@ -278,8 +278,9 @@ def test_card_boost_promotes_skill_and_strips_card() -> None:
 
     # No card ids survive — cards never assemble.
     assert all(not is_card_id(fid) for fid in out)
-    # sk-2's fragment "c" is promoted above "b" by its top-ranked card.
-    assert out == ["a", "c", "b"]
+    # sk-2's fragment "c" is promoted to its card's top fused rank — ahead of
+    # "a", which trails the card — so skill_granular_select ranks sk-2 first.
+    assert out == ["c", "a", "b"]
 
 
 def test_card_boost_keeps_real_order_when_card_ranks_low() -> None:

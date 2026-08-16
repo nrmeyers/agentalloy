@@ -303,7 +303,7 @@ AgentAlloy is a multi-layer system served as a single FastAPI process on port `:
 8. **Telemetry** (`src/agentalloy/telemetry/`) — structured trace writer and query system.
 9. **Web UI** (`src/agentalloy/web/`) — browser dashboard at http://localhost:47950/ (localhost-only, no auth).
 10. **Providers** (`src/agentalloy/providers/`) — harness provider registry (Claude Code, Copilot, Aider, Continue.dev, etc.).
-11. **Watch & Watcher** (`src/agentalloy/watch/`, `src/agentalloy/watcher/`) — code index staleness watching and file watch enrollment.
+11. **Watch** (`src/agentalloy/watch/`) — code index staleness watching and sidecar harness file-watch enrollment.
 12. **Install CLI** (`src/agentalloy/install/`) — preflight, setup wizard, harness wiring, container service, release checking, MCP server.
 13. **Skill packs** (`src/agentalloy/_packs/`) — 41 curated packs of engineering skills, testing patterns, error handling, deployment recipes.
 

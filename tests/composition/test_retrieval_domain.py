@@ -10,6 +10,7 @@ import agentalloy.retrieval.domain as domain_module
 from agentalloy.lm_client import LMModelNotLoaded
 from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
+    _apply_card_boost,  # pyright: ignore[reportPrivateUsage]
     _rrf_fuse,  # pyright: ignore[reportPrivateUsage]
     diversity_select,
     retrieve_domain_candidates,
@@ -520,6 +521,40 @@ def test_rrf_fuse_empty_dense_returns_bm25_order() -> None:
 
 def test_rrf_fuse_both_empty_returns_empty() -> None:
     assert _rrf_fuse([], []) == []
+
+
+# -------- _apply_card_boost --------
+
+
+def test_card_boost_no_cards_returns_unchanged() -> None:
+    fused = ["a", "b", "c"]
+    assert _apply_card_boost(fused, {"a": "s1", "b": "s2"}) == fused
+
+
+def test_card_boost_promotes_skill_fragments_to_card_position() -> None:
+    # card::skillA fused at pos 0; its fragment f2_A fused at pos 2. The card
+    # must lift f2_A ahead of f1_B (fused pos 1, skillB has no card).
+    fused = ["card::skillA", "f1_B", "f2_A", "f3_B"]
+    skill_of = {"f1_B": "skillB", "f2_A": "skillA", "f3_B": "skillB"}
+    assert _apply_card_boost(fused, skill_of) == ["f2_A", "f1_B", "f3_B"]
+
+
+def test_card_boost_strips_all_cards_from_output() -> None:
+    fused = ["card::skillA", "f1_A", "card::skillB", "f2_B"]
+    skill_of = {"f1_A": "skillA", "f2_B": "skillB"}
+    result = _apply_card_boost(fused, skill_of)
+    assert "card::skillA" not in result
+    assert "card::skillB" not in result
+    assert set(result) == {"f1_A", "f2_B"}
+
+
+def test_card_boost_ties_keep_fused_order() -> None:
+    # Two skills each with a card; a fragment whose skill has NO card keeps its
+    # own fused position and must not be displaced by another skill's card.
+    fused = ["card::skillA", "f1_B", "f2_A"]
+    skill_of = {"f1_B": "skillB", "f2_A": "skillA"}
+    # f2_A promoted to 0 (its card); f1_B has no card → stays at fused pos 1.
+    assert _apply_card_boost(fused, skill_of) == ["f2_A", "f1_B"]
 
 
 def test_degradable_embedding_error_with_empty_bm25(

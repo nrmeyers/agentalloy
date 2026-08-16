@@ -297,7 +297,7 @@ class StateClient:
         """Read a contract by ID.  Returns None if not found."""
         try:
             resp = urllib.request.urlopen(
-                self._url(f"/contracts/{contract_id}"),
+                self._url(f"/contracts/{urllib.parse.quote(contract_id, safe='')}"),
                 timeout=self._timeout,
             )
             return json.loads(resp.read().decode())
@@ -340,7 +340,7 @@ class StateClient:
 
     def list_contracts_for_phase(self, phase: str) -> list[dict[str, Any]]:
         """List active contracts for a phase, ordered by contract_id (filename order)."""
-        url = self._url(f"/contracts/phases/{phase}/contracts")
+        url = self._url(f"/contracts/phases/{urllib.parse.quote(phase, safe='')}/contracts")
         try:
             resp = urllib.request.urlopen(url, timeout=self._timeout)
             data = json.loads(resp.read().decode())

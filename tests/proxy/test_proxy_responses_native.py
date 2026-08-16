@@ -132,10 +132,10 @@ def test_forwards_verbatim_when_nothing_composes(tmp_path: Path) -> None:
 
 
 def test_streaming_relays_sse_bytes(tmp_path: Path) -> None:
-    """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
+    """A complete stream (ending in ``response.completed``) is relayed
+    byte-for-byte with no corrective chunk appended (1.1 regression)."""
     captured: dict[str, Any] = {}
     sse = b'event: response.completed\ndata: {"type": "response.completed"}\n\n'
-    correction = b'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
     app = _make_app(captured, sse=sse)
     with (
         patch(_SIGNAL, return_value=_no_compose_signal()),
@@ -147,8 +147,12 @@ def test_streaming_relays_sse_bytes(tmp_path: Path) -> None:
         )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert sse in resp.content
-    assert correction in resp.content
+    # The stream already carries its surface terminal event (response.completed),
+    # so the relay is byte-for-byte — the old OpenAI-shaped corrective chunk is
+    # never appended.
+    assert resp.content == sse
+    assert b"finish_reason" not in resp.content
+    assert b"[DONE]" not in resp.content
 
 
 def test_banner_injects_into_last_user_item(tmp_path: Path) -> None:

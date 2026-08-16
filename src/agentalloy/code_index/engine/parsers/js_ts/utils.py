@@ -145,7 +145,10 @@ def analyze_return_expression(expr_node: Node, method_qn: str) -> str | None:
     match expr_node.type:
         case cs.TS_NEW_EXPRESSION:
             if class_name := extract_constructor_name(expr_node):
-                return _extract_class_qn(method_qn) or class_name
+                # ``new Foo()`` yields a ``Foo`` instance — return the
+                # constructed class, not the enclosing method's class (the
+                # previous ``_extract_class_qn(method_qn)`` was the wrong class).
+                return class_name
             return None
 
         case cs.TS_THIS:

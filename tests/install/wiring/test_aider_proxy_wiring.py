@@ -66,3 +66,42 @@ class TestAiderProxyWiring:
         entry = result["files_written"][0]
         assert entry["path"].endswith(".aider.conf.yml")
         assert entry["action"] == "injected_block"
+
+    def test_aider_proxy_stored_sha_covers_inner_content(self, repo_root: Path) -> None:
+        """bughunt 6.9: the stored content_sha256 covers the content BETWEEN
+        the sentinels (markers excluded) — the convention the re-wire and
+        uninstall tamper checks hash against. Storing the sha of the full
+        block (markers included) made every re-wire/uninstall a false hit."""
+        from agentalloy.install.subcommands.wire_harness import _sha256
+
+        result = wire_compat("aider", port=7777, root=repo_root)
+        entry = result["files_written"][0]
+        assert entry["path"].endswith(".aider.conf.yml")
+
+        content = (repo_root / ".aider.conf.yml").read_text()
+        begin = content.index(entry["sentinel_begin"]) + len(entry["sentinel_begin"])
+        end = content.index(entry["sentinel_end"])
+        inner = content[begin:end].strip()
+        assert entry["content_sha256"] == _sha256(inner)
+        # Sanity: the inner content is the proxy config, not the markers.
+        assert "openai-api-base" in inner
+        assert "agentalloy install" not in inner
+
+    def test_aider_conf_read_entry_sha_covers_inner_content(self, repo_root: Path) -> None:
+        """bughunt 6.9 (instructions vector): same convention for the
+        .aider.conf.yml read-list block written by _wire_aider_conf."""
+        from agentalloy.install.subcommands.wire_harness import (
+            _sha256,
+            _wire_aider_conf,
+        )
+
+        entries = _wire_aider_conf(repo_root)
+        entry = entries[0]
+        assert entry["path"].endswith(".aider.conf.yml")
+
+        content = (repo_root / ".aider.conf.yml").read_text()
+        begin = content.index(entry["sentinel_begin"]) + len(entry["sentinel_begin"])
+        end = content.index(entry["sentinel_end"])
+        inner = content[begin:end].strip()
+        assert entry["content_sha256"] == _sha256(inner)
+        assert inner == "read:\n  - .agentalloy-aider-instructions.md"

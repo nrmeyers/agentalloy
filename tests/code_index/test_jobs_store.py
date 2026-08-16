@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -47,6 +48,29 @@ def test_lifecycle_create_running_done(store: CodeIndexJobsStore) -> None:
     # Terminal transition records an event.
     events = store.list_job_events(job.job_id)
     assert any("done" in str(e["message"]) for e in events)
+
+
+def test_update_entity_result_persists(store: CodeIndexJobsStore) -> None:
+    """Regression 2.3: the entity-extraction phase delta is persisted on the
+    job row and surfaced via get_job (previously the pipeline computed the
+    result but never wrote it back, so /code/jobs always showed zeros)."""
+    job = store.create_job(slug="s", repo_path="/r")
+    assert job.entities_written == 0
+    assert job.entities_dropped == 0
+    assert job.entity_counts_by_kind == ""
+
+    store.update_entity_result(
+        job.job_id,
+        written=5,
+        dropped=1,
+        counts_by_kind={"REQUIRES": 2, "TOUCHES": 3},
+    )
+    got = store.get_job(job.job_id)
+    assert got is not None
+    assert got.entities_written == 5
+    assert got.entities_dropped == 1
+    # counts_by_kind is stored as JSON text on the str field
+    assert json.loads(got.entity_counts_by_kind) == {"REQUIRES": 2, "TOUCHES": 3}
 
 
 def test_get_job_missing(store: CodeIndexJobsStore) -> None:

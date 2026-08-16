@@ -488,55 +488,10 @@ func main() {
             namespace = parts[0]
             if namespace == cs.CPP_STD_NAMESPACE:
                 entity_name = parts[-1]
-
-                try:
-                    import os
-                    import subprocess
-                    import tempfile
-
-                    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-                        f.write(entity_name)
-                        entity_file = f.name
-
-                    try:
-                        cpp_template_program = f"""
-#include <iostream>
-#include <fstream>
-#include <string>
-
-int main() {{
-    std::ifstream file("{entity_file}");
-    std::string entity_name;
-    std::getline(file, entity_name);
-    file.close();
-
-    // This is a compile-time check strategy - we can't dynamically construct templates
-    // Fall back to heuristic approach for safety
-    std::cout << "heuristic_check" << std::endl;
-    return 0;
-}}
-                        """
-
-                        subprocess.run(
-                            ["g++", "-std=c++17", "-x", "c++", "-", "-o", "/dev/null"],
-                            check=False,
-                            input=cpp_template_program,
-                            capture_output=True,
-                            text=True,
-                            timeout=5,
-                        )
-
-                    finally:
-                        os.unlink(entity_file)
-
-                except (
-                    subprocess.TimeoutExpired,
-                    subprocess.CalledProcessError,
-                    OSError,
-                ):
-                    pass
-
-                entity_name = parts[-1]
+                # The old version spawned g++ per entity to "verify" the symbol,
+                # but the generated program ignored its own lookup and always fell
+                # through to the heuristic below — the subprocess was pure overhead.
+                # Resolve stdlib paths with the heuristic alone.
                 if (
                     entity_name[:1].isupper()
                     or entity_name.startswith(cs.CPP_PREFIX_IS)

@@ -737,6 +737,66 @@ class TestReadWrite:
             assert result.success is True
             assert result.conflict is None
 
+    def test_write_inside_open_transaction(self, tmp_path: Path) -> None:
+        """write() inside an open transaction() must not raise 'nested'.
+
+        The probe+write block joins the outer transaction (nullcontext path),
+        so the outer rollback undoes it.
+        """
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with pytest.raises(RuntimeError, match="boom"):
+                with store.transaction():
+                    store.write("phase", "build")
+                    raise RuntimeError("boom")
+            assert store.read("phase") is None
+
+    def test_concurrent_writes_same_key_single_row(self, tmp_path: Path) -> None:
+        """Concurrent first-writes to the same key must not both INSERT.
+
+        The probe + INSERT must be atomic (held under the store lock for the
+        whole block) so a second writer sees the first's row and UPDATEs
+        instead of INSERTing a duplicate row.
+        """
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+
+            for i in range(10):
+                key = f"cursor-r{i}"
+                barrier = threading.Barrier(2)
+                errors: list[BaseException] = []
+
+                def worker(
+                    value: str,
+                    barrier: threading.Barrier = barrier,
+                    key: str = key,
+                    errors: list[BaseException] = errors,
+                ) -> None:
+                    try:
+                        barrier.wait()
+                        store.write("cursor", value, session_key=key)
+                    except BaseException as e:  # noqa: BLE001
+                        errors.append(e)
+
+                threads = [
+                    threading.Thread(target=worker, args=(f"a-{i}",)),
+                    threading.Thread(target=worker, args=(f"b-{i}",)),
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+                assert not errors, errors
+                count = store.scalar(
+                    "SELECT COUNT(*) FROM sdd_state "
+                    "WHERE kind='cursor' AND session_key=?",
+                    (key,),
+                )
+                assert count == 1, f"round {i}: expected 1 row, got {count}"
+
 
 # ---------------------------------------------------------------------------
 # Lease management
@@ -829,6 +889,24 @@ class TestLease:
             result = store.acquire_lease("phase", "s1")
             assert result.acquired is True
             assert result.owner == "s1"
+
+    def test_acquire_lease_on_owner_set_null_expiry(self, tmp_path: Path) -> None:
+        """A row with an owner but NULL lease_expires_at has no active lease.
+
+        write()'s UPDATE path sets ``owner`` while nulling ``lease_expires_at``.
+        Such a row must be acquirable by another session — the conflict check
+        must not compare ``None > now`` (TypeError).
+        """
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.write("phase", "v1")
+            # UPDATE path: sets owner, nulls lease_expires_at.
+            store.write("phase", "v2", owner="s1")
+            result = store.acquire_lease("phase", "s2")
+            assert result.acquired is True
+            assert result.owner == "s2"
+            assert result.conflict is None
 
 
 # ---------------------------------------------------------------------------

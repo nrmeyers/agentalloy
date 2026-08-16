@@ -26,6 +26,7 @@ from .utils import (
     ingest_method,
     is_method_node,
     safe_decode_text,
+    safe_decode_with_fallback,
 )
 
 if TYPE_CHECKING:
@@ -82,6 +83,9 @@ class FunctionIngestMixin:
             if language == cs.SupportedLanguage.CPP:
                 if self._handle_cpp_out_of_class_method(func_node, module_qn):
                     continue
+
+            if language in cs.JS_TS_LANGUAGES and self._is_owned_by_dedicated_js_pass(func_node):
+                continue
 
             resolution = self._resolve_function_identity(
                 func_node,
@@ -447,6 +451,47 @@ class FunctionIngestMixin:
 
     def _is_method(self, func_node: Node, lang_config: LanguageSpec) -> bool:
         return is_method_node(func_node, lang_config)
+
+    def _is_owned_by_dedicated_js_pass(self, func_node: Node) -> bool:
+        """Whether a JS/TS fn-expr/arrow is registered by a dedicated JS pass.
+
+        The generic ``_ingest_all_functions`` pass and the JS-specific
+        ``_ingest_object_literal_methods`` / ``_ingest_assignment_arrow_functions``
+        passes both capture the same ``function_expression`` / ``arrow_function``
+        node but compute different qualified names (``anonymous_N_M`` vs the
+        property/member name), so the node would be registered twice. The
+        dedicated passes own these contexts and produce the meaningful QN, so the
+        generic pass skips them. The predicate mirrors the dedicated passes'
+        register conditions exactly (including the object-literal pass's
+        class-method bail) so no node is dropped in the cases where a dedicated
+        pass would bail and the generic pass keeps ownership.
+        """
+        if func_node.type not in (cs.TS_FUNCTION_EXPRESSION, cs.TS_ARROW_FUNCTION):
+            return False
+        parent = func_node.parent
+        if parent is None:
+            return False
+
+        if parent.type == cs.TS_PAIR:
+            # Object-literal value. The object-literal pass registers it unless
+            # it bails on a class method that is not inside a method with object
+            # literals; in that bail case the generic pass keeps ownership.
+            return not (
+                self._handler.is_class_method(func_node)
+                and not self._handler.is_inside_method_with_object_literals(func_node)
+            )
+
+        if parent.type == cs.TS_ASSIGNMENT_EXPRESSION:
+            # Member assignment (``obj.fn = function ...``). The assignment pass
+            # registers it only when the member expression is dotted (``obj.fn``);
+            # a bare identifier (``fn = ...``) is not a member_expression and is
+            # left to the generic pass.
+            left = parent.child_by_field_name(cs.FIELD_LEFT)
+            if left is not None and left.type == cs.TS_MEMBER_EXPRESSION:
+                return cs.SEPARATOR_DOT in safe_decode_with_fallback(left)
+            return False
+
+        return False
 
     def _determine_function_parent(
         self,

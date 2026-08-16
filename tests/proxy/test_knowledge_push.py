@@ -7,6 +7,7 @@ inert superseded filter (DK5), cap (DK6), render (DK7).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -87,6 +88,26 @@ def _seed_one(store: DuckDBCodeGraphStore, decision_qn: str) -> None:
         ]
     )
     store.upsert_edges([governs(decision_qn, "pkg.a.foo")])
+
+
+def test_run_coro_from_live_event_loop() -> None:
+    """_run_coro must complete when called from a thread that already has a
+    running event loop (1.2 regression).
+
+    ``build_decision_block`` runs synchronously on the FastAPI event loop. The
+    old code called ``asyncio.run()`` directly, which raises ``RuntimeError``
+    from a live loop. The fix detects the running loop and offloads the
+    coroutine to a worker thread with a fresh loop.
+    """
+
+    async def _inner() -> int:
+        return 42
+
+    async def _drive() -> int:
+        # We are inside a running event loop here.
+        return knowledge_push._run_coro(_inner())
+
+    assert asyncio.run(_drive()) == 42
 
 
 def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:

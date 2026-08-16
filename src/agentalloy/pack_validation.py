@@ -375,11 +375,20 @@ def check_version_gate(
     - Previously installed, different content, SAME version → ok=False,
       error message explaining the version-bump rule.
     """
-    # Find the most-recently-installed entry for this pack name.
+    # Find the most-recently-installed entry for this pack name. Select by the
+    # installed_at timestamp (max) rather than list position, so the result is
+    # independent of how installed_packs happens to be ordered. Ties (and
+    # legacy entries with no timestamp) fall back to the later entry in list
+    # order, matching the previous "last matching entry" behavior.
     prior: dict[str, Any] | None = None
+    prior_ts = -1
     for entry in installed_packs:
         if str(entry.get("name", "")) == pack_name:
-            prior = entry
+            ts = entry.get("installed_at")
+            ts_val = int(ts) if isinstance(ts, (int, float)) else 0
+            if prior is None or ts_val >= prior_ts:
+                prior = entry
+                prior_ts = ts_val
 
     if prior is None:
         return VersionGateResult(ok=True)

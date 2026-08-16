@@ -16,9 +16,10 @@ immediately without spawning a second process.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
-import socket
+import signal
 import subprocess
 import sys
 import time
@@ -96,8 +97,10 @@ def _run(args: argparse.Namespace) -> int:
         print("ERROR: No embed_model found in recommend-models output.", file=sys.stderr)
         return 1
 
-    # Idempotency: already listening?
-    if _port_open(EMBED_HOST, LLAMA_EMBED_PORT):
+    # Idempotency: already serving a ready model? Gate on /health (not a bare
+    # TCP connect) so a still-warming llama-server is not mistaken for "already
+    # running" and skipped while its model is unloaded.
+    if _health_ready(EMBED_HOST, LLAMA_EMBED_PORT):
         print(
             f"start-embed-server: embed endpoint already reachable on port "
             f"{LLAMA_EMBED_PORT} — skipping.",
@@ -203,9 +206,10 @@ def _start_llama_server(
         f"(ubatch={LLAMA_UBATCH_SIZE}, log={log_path})",
         file=sys.stderr,
     )
+    proc: subprocess.Popen[bytes] | None = None
     try:
         with log_path.open("ab") as log_fh:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=log_fh,
                 stderr=log_fh,
@@ -231,6 +235,9 @@ def _start_llama_server(
             break
         time.sleep(2)
     else:
+        # The launch never reached /health — reap the child so a failed start
+        # doesn't leave an orphaned llama-server holding the port.
+        _reap_llama_server(proc)
         print(
             f"ERROR: llama-server did not start within {timeout:.0f}s. "
             f"Check {log_path} for details.",
@@ -263,12 +270,28 @@ def _start_llama_server(
     return 0
 
 
-def _port_open(host: str, port: int) -> bool:
+def _reap_llama_server(proc: subprocess.Popen[bytes] | None) -> None:
+    """Terminate a launched llama-server (and its process group) on failure.
+
+    ``start_new_session=True`` makes the child the leader of its own process
+    group, so signalling the group takes down any helpers it spawned. Without
+    this, a launch that never reaches /health leaves an orphaned server
+    holding the port.
+    """
+    if proc is None:
+        return
     try:
-        with socket.create_connection((host, port), timeout=1):
-            return True
-    except OSError:
-        return False
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        # Group already gone (or not a group leader) — fall back to the handle.
+        with contextlib.suppress(OSError):
+            proc.terminate()
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            os.killpg(proc.pid, signal.SIGKILL)
 
 
 def _health_ready(host: str, port: int) -> bool:

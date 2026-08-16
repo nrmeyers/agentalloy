@@ -345,9 +345,9 @@ def test_system_leg_fires_but_undelivered_message_leg_holds_marker(tmp_path: Pat
 
 
 def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
-    """Upstream SSE is relayed verbatim; finish_reason correction appended if absent."""
+    """A complete stream (ending in ``message_stop``) is relayed byte-for-byte
+    with no corrective chunk appended (1.1 regression)."""
     sse = b"event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n"
-    correction = b'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
     captured: dict[str, Any] = {}
     app = _make_app(captured, sse=sse)
     with (
@@ -359,8 +359,12 @@ def test_tc11_sse_relay_byte_for_byte(tmp_path: Path) -> None:
         )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert sse in resp.content
-    assert correction in resp.content
+    # The stream already carries its surface terminal event (message_stop), so
+    # the relay is byte-for-byte — the old OpenAI-shaped corrective chunk is
+    # never appended.
+    assert resp.content == sse
+    assert b"finish_reason" not in resp.content
+    assert b"[DONE]" not in resp.content
 
 
 # --------------------------------------------------------------------------- #

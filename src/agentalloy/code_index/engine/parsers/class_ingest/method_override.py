@@ -22,9 +22,17 @@ def process_all_method_overrides(
 
     for method_qn in function_registry.keys():
         if function_registry[method_qn] == NodeType.METHOD and cs.SEPARATOR_DOT in method_qn:
-            parts = method_qn.rsplit(cs.SEPARATOR_DOT, 1)
+            # Java method QNs carry a param signature whose types can be dotted
+            # (e.g. ``com.foo.Bar.m(Map.Entry, String)``); a plain rsplit on the
+            # last dot would land inside the parens.  Split the name part first,
+            # then re-attach the signature so ``method_name`` keeps it intact.
+            open_paren = method_qn.find("(")
+            name_part = method_qn[:open_paren] if open_paren != -1 else method_qn
+            parts = name_part.rsplit(cs.SEPARATOR_DOT, 1)
             if len(parts) == 2:
                 class_qn, method_name = parts
+                if open_paren != -1:
+                    method_name = f"{method_name}{method_qn[open_paren:]}"
                 check_method_overrides(
                     method_qn,
                     method_name,

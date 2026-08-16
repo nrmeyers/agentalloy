@@ -524,34 +524,57 @@ def _extract_sentinel_content(text: str, begin: str, end: str) -> str | None:
 
 
 def _remove_sentinel_block(text: str, begin: str, end: str) -> str:
-    """Remove the sentinel block (inclusive) from text."""
-    if begin not in text or end not in text:
+    """Remove the sentinel block (inclusive of both marker lines) from text.
+
+    Operates on whole lines so the surrounding lines keep their newline
+    separation. A naive substring splice that consumes both the newline
+    before the block and the one after it would glue the adjacent lines
+    together (e.g. ``"a\\n# BEGIN\\n...\\n# END\\nb"`` -> ``"ab"``).
+
+    Returns the text unchanged if either marker is absent or the END marker
+    precedes the BEGIN marker (no valid block to remove).
+    """
+    first_begin = text.find(begin)
+    first_end = text.find(end)
+    if first_begin == -1 or first_end == -1:
+        return text
+    if first_end < first_begin:
+        # Inverted order — no valid block to remove; return unchanged.
         return text
 
-    b = text.index(begin)
-    e = text.index(end) + len(end)
+    lines = text.split("\n")
+    result: list[str] = []
+    skip = False
+    found_sentinel = False
 
-    # Validate order: if end appears before begin, there's no valid block
-    # to remove; return content unchanged.
-    end_marker_start = text.index(end)
-    if end_marker_start < b:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not skip and begin in line:
+            skip = True
+            found_sentinel = True
+            i += 1
+            continue
+        if skip and end in line:
+            skip = False
+            i += 1
+            # Skip one trailing blank line after the end sentinel.
+            if i < len(lines) and lines[i].strip() == "":
+                i += 1
+            continue
+        if not skip:
+            result.append(line)
+        i += 1
+
+    if not found_sentinel:
         return text
 
-    # Consume trailing newline
-    if e < len(text) and text[e] == "\n":
-        e += 1
-    elif e + 1 < len(text) and text[e : e + 2] == "\r\n":
-        e += 2
-    # Consume blank line before block if present
-    if b > 0 and text[b - 1] == "\n":
-        b -= 1
-        if b > 0 and text[b - 1] == "\n":
-            b -= 1
-    result = text[:b] + text[e:]
-    # Clean up double blank lines
-    while "\n\n\n" in result:
-        result = result.replace("\n\n\n", "\n\n")
-    return result
+    out = "\n".join(result)
+    # Collapse runs of 3+ newlines down to 2 so removing a block that sat
+    # between blank-separated sections does not leave a big gap.
+    while "\n\n\n" in out:
+        out = out.replace("\n\n\n", "\n\n")
+    return out
 
 
 def _detect_install_mode() -> dict[str, Any]:

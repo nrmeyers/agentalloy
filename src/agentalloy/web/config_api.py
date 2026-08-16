@@ -77,6 +77,36 @@ def _env_file_path() -> Any:
     return install_state.env_path()
 
 
+def _initial_applied_env() -> dict[str, str]:
+    """Snapshot of the .env entries this process actually holds.
+
+    The serve wrapper sources the user .env into the child env with
+    ``setdefault`` (shell-exported values win), so only keys whose live
+    value matches the file are file-sourced and eligible for unsetting on
+    reload.
+    """
+    try:
+        from agentalloy.install import state as install_state
+
+        env_path = install_state.env_path()
+        if not env_path.exists():
+            return {}
+        return {
+            key: val
+            for key, val in install_state.parse_env_file(env_path).items()
+            if os.environ.get(key) == val
+        }
+    except Exception:  # noqa: BLE001 — tracking is best-effort; reload still works
+        return {}
+
+
+# key -> value this process pushed into os.environ from the .env file.
+# Reload pops tracked keys that vanish from the file (and still hold the
+# tracked value), so a UI deletion actually unsets the var instead of
+# leaving a stale value behind; shell-exported vars are never clobbered.
+_APPLIED_ENV: dict[str, str] = _initial_applied_env()
+
+
 def _require_csrf(header_value: str | None) -> None:
     if header_value != "1":
         raise HTTPException(
@@ -227,7 +257,14 @@ async def reload_config(
         from agentalloy.install import state as install_state
 
         values = install_state.parse_env_file(env_path)
+        # Unset keys the file no longer defines — only ones we set (and still
+        # hold), so shell-exported vars are never clobbered.
+        for key, old in list(_APPLIED_ENV.items()):
+            if key not in values and os.environ.get(key) == old:
+                os.environ.pop(key, None)
+                del _APPLIED_ENV[key]
         os.environ.update(values)
+        _APPLIED_ENV.update(values)
         configure_logging()
     except Exception as exc:  # noqa: BLE001 — surfaced as a structured 500
         raise HTTPException(

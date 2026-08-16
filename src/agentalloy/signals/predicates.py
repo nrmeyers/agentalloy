@@ -1030,6 +1030,8 @@ def eval_scope_touched_in_diff(args: dict[str, Any], ctx: PredicateContext) -> P
         # None (store errored) or [] (no store / no contract) — can't tell either way.
         return PredicateResult.UNKNOWN
     slug = _resolve_workitem_slug(ctx, str(phase))
+    if slug is None:
+        return PredicateResult.UNKNOWN  # no cursor → can't pick the contract
     chosen = next((c for c in contracts if c.get("slug") == slug), None) or contracts[0]
     touches = chosen.get("scope_touches") or []
     if not touches:
@@ -1186,7 +1188,7 @@ def _item_build_contracts(
     slug: str,
     *,
     contracts_glob: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | None:
     """The build contracts attributed to design work-item ``slug``.
 
     Attribution is the contract's ``work_item`` field. Build contracts are keyed
@@ -1195,6 +1197,10 @@ def _item_build_contracts(
     them; to avoid a spurious block there, attribution falls back to **all** build
     contracts when NONE declares a ``work_item`` (the old repo-global behavior).
     Once any contract is stamped, only contracts stamped to *this* item count.
+
+    Returns ``None`` when the store query **errored** (distinct from a real
+    empty result): callers must treat that as UNKNOWN / fail-open, never as
+    "zero contracts", or a transient store blip would fail-closed the gate.
 
     ``contracts_glob`` is retained for legacy gate YAML that still carries a
     ``contracts`` key; when present it triggers a deprecation trace but is not
@@ -1205,7 +1211,9 @@ def _item_build_contracts(
         _emit_legacy_glob_trace(contracts_glob)
 
     # Query store for build contracts
-    build_contracts = _query_store_contracts(ctx, phase="build") or []
+    build_contracts = _query_store_contracts(ctx, phase="build")
+    if build_contracts is None:
+        return None
 
     any_tagged = False
     mine: list[dict[str, Any]] = []
@@ -1269,7 +1277,10 @@ def eval_build_contracts_cover_tasks(
                 return PredicateResult.UNKNOWN
             task_count += _count_task_items(content)
     task_count = max(1, task_count)
-    contract_count = len(_item_build_contracts(ctx, slug, contracts_glob=contracts_glob))
+    item_contracts = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
+    if item_contracts is None:
+        return PredicateResult.UNKNOWN  # store error → fail open, not a zero count
+    contract_count = len(item_contracts)
     return PredicateResult.MET if contract_count >= task_count else PredicateResult.NOT_MET
 
 

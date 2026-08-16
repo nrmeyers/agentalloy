@@ -1422,7 +1422,7 @@ async def proxy_chat_completions(
         )
         return _upstream_unavailable_error(str(e))
 
-    if resp.status_code >= 500:
+    if resp.status_code >= 400:
         logger.warning("Upstream returned HTTP %d: %s", resp.status_code, resp.text[:200])
         error_code = f"upstream_http_{resp.status_code}"
         latency_ms = int((time.monotonic() - start_time) * 1000)
@@ -1455,7 +1455,16 @@ async def proxy_chat_completions(
             trace_id=signal_result.trace_id if signal_result else None,
             phase_telemetry=phase_telemetry_writer,
         )
-        return _upstream_unavailable_error(f"HTTP {resp.status_code}")
+        if resp.status_code >= 500:
+            return _upstream_unavailable_error(f"HTTP {resp.status_code}")
+        # 4xx: forward the upstream's own status + body so the caller sees the
+        # real error (rate limit, auth, bad request) instead of a generic 503.
+        # Telemetry above already recorded this as an llm_error.
+        return Response(
+            content=resp.text,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type", "application/json"),
+        )
 
     # Parse and return upstream response
     latency_ms = int((time.monotonic() - start_time) * 1000)

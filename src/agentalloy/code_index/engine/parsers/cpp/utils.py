@@ -14,9 +14,11 @@ def convert_operator_symbol_to_name(symbol: str) -> str:
 def build_qualified_name(node: Node, module_qn: str, name: str) -> str:
     module_parts = module_qn.split(cs.SEPARATOR_DOT)
 
-    is_module_file = len(module_parts) >= 3 and (
-        bool(cs.CPP_MODULE_PATH_MARKERS & set(module_parts))
-        or any(part.endswith(cs.CPP_MODULE_EXTENSIONS) for part in module_parts)
+    # A C++20 module file is recognized by a path-marker segment (``modules`` /
+    # ``interfaces``). The extension check that used to sit here was dead:
+    # ``module_qn`` parts never carry file extensions, so it could never match.
+    is_module_file = len(module_parts) >= 3 and bool(
+        cs.CPP_MODULE_PATH_MARKERS & set(module_parts)
     )
 
     if is_module_file:

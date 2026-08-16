@@ -33,7 +33,10 @@ if TYPE_CHECKING:
 
 def _is_nested_inside_function(node: Node, class_body: Node, lang_config: LanguageSpec) -> bool:
     current = node.parent
-    while current and current is not class_body:
+    # tree-sitter Node wrappers are per-access objects, so identity (``is``)
+    # never matches the passed-in ``class_body``; compare by value instead so
+    # the walk stops at the class body rather than running to the root.
+    while current and current != class_body:
         if (
             current.type in lang_config.function_node_types
             and current.child_by_field_name(cs.FIELD_BODY) is not None

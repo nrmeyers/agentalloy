@@ -533,6 +533,32 @@ class DuckDBCodeGraphStore:
         )
         return int(n or 0)
 
+    def delete_entity_edges_for_docs(self, file_paths: Sequence[str]) -> int:
+        """Drop every entity-kind edge (REQUIRES/TOUCHES/CONSTRAINTS/COMMAND/
+        STAKEHOLDER) rooted at any of ``file_paths`` (edges carry ``file_path``
+        = the decision doc). Doc-granular, mirroring
+        :meth:`delete_govern_edges_for_doc`, so the entity phase can re-derive a
+        doc's edges without accumulating duplicates on incremental reindex.
+        Returns rows removed.
+        """
+        paths = list(file_paths)
+        if not paths:
+            return 0
+        kinds = ("REQUIRES", "TOUCHES", "CONSTRAINTS", "COMMAND", "STAKEHOLDER")
+        kind_ph = ", ".join("?" for _ in kinds)
+        path_ph = ", ".join("?" for _ in paths)
+        n = self._scalar(
+            f"SELECT count(*) FROM edges WHERE kind IN ({kind_ph}) "
+            f"AND file_path IN ({path_ph})",
+            [*kinds, *paths],
+        )
+        self.conn.execute(
+            f"DELETE FROM edges WHERE kind IN ({kind_ph}) "
+            f"AND file_path IN ({path_ph})",
+            [*kinds, *paths],
+        )
+        return int(n or 0)
+
     def count_govern_edges_for_doc(self, doc_path: str) -> int:
         """Non-destructive count of ``GOVERNS`` edges rooted at ``doc_path``.
 

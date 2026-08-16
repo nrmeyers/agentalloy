@@ -17,6 +17,7 @@ path's ``--json`` shape closely enough that callers can hand it straight to
 
 from __future__ import annotations
 
+import math
 import subprocess
 from typing import Any
 
@@ -30,6 +31,17 @@ EXIT_SYSTEM = 2
 # State strings ``_container_state`` returns (lowercase ``.State.Status``) that
 # mean the container exists but is not running, so a ``start`` is appropriate.
 _STOPPED_STATES = {"created", "exited", "stopped", "dead", "configured"}
+
+
+def _docker_time_arg(seconds: float) -> str:
+    """Whole-second ``--time`` value for the container runtime.
+
+    The runtime accepts only whole seconds, and ``0`` means "use the default
+    grace period". Round up and floor at 1 so a sub-second ``--timeout`` is
+    honoured as ~1s instead of collapsing to ``0`` (the host path passes the
+    float straight through).
+    """
+    return str(max(1, math.ceil(seconds)))
 
 
 def _functional_runtime_or_error(
@@ -183,7 +195,7 @@ def run_stop(target: DeploymentTarget, *, timeout: float) -> tuple[int, dict[str
 
     proc = _runtime_call(
         runtime,
-        ["stop", "--time", str(int(timeout)), name],
+        ["stop", "--time", _docker_time_arg(timeout), name],
         timeout=timeout + 30.0,
     )
     if proc.returncode != 0:
@@ -238,7 +250,7 @@ def run_restart(
 
     proc = _runtime_call(
         runtime,
-        ["restart", "--time", str(int(stop_timeout)), name],
+        ["restart", "--time", _docker_time_arg(stop_timeout), name],
         timeout=stop_timeout + 90.0,
     )
     if proc.returncode != 0:
