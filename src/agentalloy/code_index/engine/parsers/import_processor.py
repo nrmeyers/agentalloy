@@ -313,7 +313,14 @@ class ImportProcessor:
         return names
 
     def _parse_python_imports(self, captures: dict, module_qn: str) -> None:
-        all_imports = captures.get(cs.CAPTURE_IMPORT, []) + captures.get(cs.CAPTURE_IMPORT_FROM, [])
+        # Merge the two capture kinds in SOURCE order. Each list is individually
+        # position-sorted, but concatenating them would process every plain
+        # ``import`` before every ``from ... import`` — breaking the documented
+        # last-write-wins pinning when the same local name is bound twice.
+        all_imports = sorted(
+            captures.get(cs.CAPTURE_IMPORT, []) + captures.get(cs.CAPTURE_IMPORT_FROM, []),
+            key=lambda node: (node.start_byte, node.end_byte),
+        )
         for import_node in all_imports:
             if import_node.type == cs.TS_PY_IMPORT_STATEMENT:
                 self._handle_python_import_statement(import_node, module_qn)
@@ -559,7 +566,14 @@ class ImportProcessor:
                 if decoded_name := safe_decode_text(child):
                     module_name = decoded_name
 
-        target_parts = module_parts[:-dots] if dots > 0 else module_parts
+        # An ``__init__.py`` IS its package, so ``from . import x`` (dots=1)
+        # resolves within the package itself rather than one level up.  The
+        # module_qn alone is ambiguous (``pkg.py`` and ``pkg/__init__.py``
+        # both yield ``project.pkg``), so disambiguate with the filesystem.
+        rel_dir = Path(*module_parts) if module_parts else Path()
+        is_init = (self.repo_path / rel_dir / cs.INIT_PY).is_file()
+        drop = (dots - 1) if is_init else dots
+        target_parts = module_parts[:-drop] if drop > 0 else list(module_parts)
 
         if module_name:
             target_parts.extend(module_name.split(cs.SEPARATOR_DOT))
@@ -1047,12 +1061,15 @@ class ImportProcessor:
                     else f"{cs.IMPORT_STD_PREFIX}{include_path}"
                 )
             else:
-                path_parts = (
-                    include_path.replace(cs.SEPARATOR_SLASH, cs.SEPARATOR_DOT)
-                    .replace(cs.EXT_H, "")
-                    .replace(cs.EXT_HPP, "")
-                )
-                full_name = f"{self.project_name}{cs.SEPARATOR_DOT}{path_parts}"
+                dotted = include_path.replace(cs.SEPARATOR_SLASH, cs.SEPARATOR_DOT)
+                # Strip exactly ONE trailing extension: a blanket
+                # ``.replace(".h", "")`` mangles ``foo.hpp`` -> ``foopp`` and
+                # ``math/hash.h`` -> ``mathash`` (it removes every ".h").
+                if dotted.endswith(cs.EXT_HPP):
+                    dotted = dotted[: -len(cs.EXT_HPP)]
+                elif dotted.endswith(cs.EXT_H):
+                    dotted = dotted[: -len(cs.EXT_H)]
+                full_name = f"{self.project_name}{cs.SEPARATOR_DOT}{dotted}"
 
             self.import_mapping[module_qn][local_name] = full_name
             logger.debug(

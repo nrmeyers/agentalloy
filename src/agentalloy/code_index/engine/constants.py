@@ -319,7 +319,6 @@ CPP_PARTITION_PREFIX = "partition_"
 # (H) Trie internal keys
 TRIE_TYPE_KEY = "__type__"
 TRIE_QN_KEY = "__qn__"
-TRIE_INTERNAL_PREFIX = "__"
 
 
 class UniqueKeyType(StrEnum):

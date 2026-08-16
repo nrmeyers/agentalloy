@@ -113,6 +113,7 @@ LOGGER_CONFIGURED = "Logger configured for Real-Time Updater."
 # (H) Build logs
 BUILD_BINARY = "Building binary: {name}"
 BUILD_PROGRESS = "This may take a few minutes..."
+PROGRESS_CALLBACK_ERROR = "Progress callback raised {error}; continuing index"
 BUILD_READY = "Binary is ready for distribution!"
 BINARY_INFO = "Binary: {path}"
 BINARY_SIZE = "Size: {size:.1f} MB"

@@ -86,7 +86,10 @@ def _try_import_language(
         module = importlib.import_module(module_path)
         loader: LanguageLoader = getattr(module, attr_name)
         return loader
-    except ImportError:
+    except (ImportError, AttributeError):
+        # A module that imports but lacks the expected attribute (e.g. a
+        # renamed grammar binding) is just as unusable as a missing one;
+        # fall through to the submodule loader instead of escaping.
         return _try_load_from_submodule(lang_name)
 
 

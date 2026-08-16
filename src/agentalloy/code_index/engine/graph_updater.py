@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import sys
 import time as _time
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, ItemsView, KeysView
@@ -139,7 +138,9 @@ class FunctionRegistryTrie:
             del node[part]
 
         is_endpoint = cs.TRIE_QN_KEY in node
-        has_children = any(not key.startswith(cs.TRIE_INTERNAL_PREFIX) for key in node)
+        # Only the two metadata keys are internal; a startswith("__") check
+        # would also drop real segments like ``__init__`` / ``__str__``.
+        has_children = any(key not in (cs.TRIE_QN_KEY, cs.TRIE_TYPE_KEY) for key in node)
         return not has_children and not is_endpoint
 
     def _navigate_to_prefix(self, prefix: str) -> TrieNode | None:
@@ -169,7 +170,7 @@ class FunctionRegistryTrie:
                     results.append((qn, func_type))
 
             for key, child in n.items():
-                if not key.startswith(cs.TRIE_INTERNAL_PREFIX):
+                if key not in (cs.TRIE_QN_KEY, cs.TRIE_TYPE_KEY):
                     assert isinstance(child, dict)
                     dfs(child)
 
@@ -254,11 +255,13 @@ class BoundedASTCache:
                     self.cache.popitem(last=False)
 
     def _should_evict_for_memory(self) -> bool:
-        try:
-            cache_size = sum(sys.getsizeof(v) for v in self.cache.values())
-            return cache_size > self.max_memory_bytes
-        except Exception:
-            return len(self.cache) > self.max_entries * self._config.cache_memory_threshold_ratio
+        # tree-sitter ASTs live in C memory that ``sys.getsizeof`` cannot see:
+        # the cached values are ``(Node, language)`` tuples, so summing their
+        # sizeof yields ~72 bytes per entry regardless of tree size and never
+        # crosses the byte budget (eviction would never fire). Use the
+        # entry-count ratio as the effective memory proxy; the count limit is
+        # the real bound.
+        return len(self.cache) > self.max_entries * self._config.cache_memory_threshold_ratio
 
 
 def _hash_file(filepath: Path) -> str:
@@ -404,10 +407,11 @@ class GraphUpdater:
         if self._progress_cb is not None:
             try:
                 self._progress_cb(event)
-            except Exception:
-                # Re-raise only CancelledError-style signals; swallow everything else
-                # so a buggy callback cannot break the index run.
-                raise
+            except Exception as e:
+                # CancelledError is a BaseException (3.8+) and propagates on its
+                # own; swallow every other error so a buggy callback cannot break
+                # the index run (the docstring promises errors never abort it).
+                logger.debug(ls.PROGRESS_CALLBACK_ERROR, error=e)
 
     def _is_dependency_file(self, file_name: str, filepath: Path) -> bool:
         return (
@@ -454,9 +458,12 @@ class GraphUpdater:
             logger.debug(ls.REMOVED_FROM_CACHE)
 
         relative_path = file_path.relative_to(self.repo_path)
+        # Ingestion drops the filename for BOTH ``__init__.py`` and ``mod.rs``
+        # (the module is the directory, not the file); removal must mirror that
+        # or symbols under ``project.src.foo.*`` from ``src/foo/mod.rs`` survive.
         path_parts = (
             relative_path.parent.parts
-            if file_path.name == cs.INIT_PY
+            if file_path.name in (cs.INIT_PY, cs.MOD_RS)
             else relative_path.with_suffix("").parts
         )
         module_qn_prefix = cs.SEPARATOR_DOT.join([self.project_name, *path_parts])

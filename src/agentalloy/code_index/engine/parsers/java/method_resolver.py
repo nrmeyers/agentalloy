@@ -64,16 +64,13 @@ class JavaMethodResolverMixin:
         if object_ref in local_var_types:
             return local_var_types[object_ref]
 
-        # (H) Check for 'this' reference - find the containing class (using trie for O(k) lookup)
+        # (H) Check for 'this' reference — resolve to the module's primary
+        # (first-declared top-level) class. The old trie prefix-scan could
+        # return a *nested* class or an arbitrary sibling; the AST-derived
+        # current-class name is the containing class in the common single-class
+        # file and is never a nested one.
         if object_ref == cs.JAVA_KEYWORD_THIS:
-            return next(
-                (
-                    str(qn)
-                    for qn, entity_type in self.function_registry.find_with_prefix(module_qn)
-                    if entity_type == NodeType.CLASS
-                ),
-                None,
-            )
+            return self._get_current_class_name(module_qn)
 
         # (H) Check for 'super' reference - for super calls, look at parent classes (using trie for O(k) lookup)
         if object_ref == cs.JAVA_KEYWORD_SUPER:
@@ -146,7 +143,9 @@ class JavaMethodResolverMixin:
             if result := self._search_method_in_class(class_qn, method_name):
                 return result
 
-        if class_qn and not class_qn.startswith(self.project_name):
+        # Require the trailing separator so ``proj`` does not prefix-match a
+        # sibling project named ``proj2``.
+        if class_qn and not class_qn.startswith(f"{self.project_name}{cs.SEPARATOR_DOT}"):
             return self._search_method_in_alternate_modules(
                 class_qn,
                 method_name,

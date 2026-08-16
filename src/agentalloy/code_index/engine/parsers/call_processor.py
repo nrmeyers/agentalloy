@@ -11,6 +11,7 @@ from ..language_spec import LanguageSpec
 from ..services import IngestorProtocol
 from ..types_defs import FunctionRegistryTrieProtocol, LanguageQueries
 from .call_resolver import CallResolver
+from .class_ingest.identity import build_nested_qualified_name_for_class
 from .cpp import utils as cpp_utils
 from .import_processor import ImportProcessor
 from .rebind_processor import RebindRegistry
@@ -217,13 +218,23 @@ class CallProcessor:
         captures = cursor.captures(root_node)
         class_nodes = captures.get(cs.CAPTURE_CLASS, [])
 
+        lang_config = queries[language][cs.QUERY_CONFIG]
         for class_node in class_nodes:
             if not isinstance(class_node, Node):
                 continue
             class_name = self._get_class_name_for_node(class_node, language)
             if not class_name:
                 continue
-            class_qn = f"{module_qn}{cs.SEPARATOR_DOT}{class_name}"
+            # Nested classes are registered with their enclosing-class prefix
+            # (e.g. ``module.Outer.Inner``); use the same builder so CALLS
+            # edges target the canonical class QN instead of ``module.Inner``.
+            nested_qn = build_nested_qualified_name_for_class(
+                class_node,
+                module_qn,
+                class_name,
+                lang_config,
+            )
+            class_qn = nested_qn or f"{module_qn}{cs.SEPARATOR_DOT}{class_name}"
             if body_node := class_node.child_by_field_name(cs.FIELD_BODY):
                 self._process_methods_in_class(
                     body_node,
