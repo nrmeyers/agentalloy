@@ -113,7 +113,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Only create /app/data in deployment contexts (containers); native installs
     # that don't use /app should skip this silently.
     if Path("/.dockerenv").exists() or Path("/app").is_dir():
-        Path("/app/data").mkdir(parents=True, exist_ok=True)
+        try:
+            Path("/app/data").mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Read-only /app mount (or similar): best-effort — the dir may
+            # already exist or be baked into the image. Don't crash startup.
+            logger.warning("could not create /app/data: %s", exc)
     # Ensure the skill schema exists, then serve it READ-ONLY for the app's
     # lifetime. DuckDB grants a writer only while nothing else holds the file
     # — this read-only handle included — so out-of-process writers (the

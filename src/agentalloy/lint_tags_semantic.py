@@ -37,26 +37,23 @@ def parse_semantic_verdicts(raw: str) -> list[dict[str, str]]:
     """Defensively parse an LLM response containing a JSON verdict array.
 
     Tolerates:
-    - Extra text before/after the JSON array
-    - Truncated/partial JSON
+    - Extra text before/after the JSON array, including stray ``[``/``]`` in
+      that prose — the first ``[`` that begins a valid JSON list wins
+    - Truncated/partial JSON (returns [] if no complete list is found)
     - Non-list top-level values
     - Verdict dicts missing fields (kept if they have at minimum a "tag" key)
     """
     if not raw:
         return []
 
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-
-    substring = raw[start : end + 1]
-    try:
-        result = json.loads(substring)
-    except (json.JSONDecodeError, ValueError):
-        return []
-
-    if not isinstance(result, list):
-        return []
-
-    return [item for item in result if isinstance(item, dict) and "tag" in item]  # type: ignore[return-value]
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(raw):
+        if ch != "[":
+            continue
+        try:
+            result, _ = decoder.raw_decode(raw[idx:])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, dict) and "tag" in item]  # type: ignore[return-value]
+    return []

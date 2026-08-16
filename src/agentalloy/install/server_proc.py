@@ -305,6 +305,19 @@ def server_log_path() -> Path:
     return install_state.user_data_dir() / "server.log"
 
 
+def _flock_exclusive(fd: int) -> None:
+    """Acquire an exclusive advisory lock on file descriptor ``fd``.
+
+    No-op where ``fcntl`` is unavailable (non-Unix) so the start path still
+    works, degrading to the pre-lock single-process behavior.
+    """
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover — non-Unix
+        return
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+
 def start_background(
     port: int,
     host: str = DEFAULT_HOST,
@@ -319,48 +332,58 @@ def start_background(
     Loads the user-scope ``.env`` into the child's environment using the
     same logic as the ``serve`` foreground path so the two produce
     identical runtime configurations.
+
+    The "port free? then Popen" section is serialized with an exclusive
+    advisory lock so two concurrent starts cannot both pass the free-port
+    check and race to bind (the loser dies EADDRINUSE while
+    ``wait_until_listening`` reports the winner's port against the loser's
+    dead pid).
     """
-    existing = find_listening_pid(port, host=host)
-    if existing is not None:
-        raise ServerLifecycleError(
-            f"port {host}:{port} is already bound by pid {existing}; "
-            "stop it first or pick another port",
+    lock_path = install_state.user_data_dir() / "server-start.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a", encoding="utf-8") as lock_fh:
+        _flock_exclusive(lock_fh.fileno())
+        existing = find_listening_pid(port, host=host)
+        if existing is not None:
+            raise ServerLifecycleError(
+                f"port {host}:{port} is already bound by pid {existing}; "
+                "stop it first or pick another port",
+            )
+
+        log_path = server_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Append, not overwrite — preserves prior session output for triage.
+        log = open(log_path, "ab", buffering=0)  # noqa: SIM115 — handed to subprocess
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "agentalloy.app:app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+        # Build the child env: process env, then the user .env (without
+        # overriding anything already set in the parent shell — matches
+        # pydantic-settings priority), then any caller overrides.
+        child_env = {**os.environ}
+        for key, val in install_state.parse_env_file().items():
+            child_env.setdefault(key, val)
+        if env:
+            child_env.update(env)
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env=child_env,
         )
-
-    log_path = server_log_path()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    # Append, not overwrite — preserves prior session output for triage.
-    log = open(log_path, "ab", buffering=0)  # noqa: SIM115 — handed to subprocess
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "agentalloy.app:app",
-        "--host",
-        host,
-        "--port",
-        str(port),
-    ]
-    # Build the child env: process env, then the user .env (without
-    # overriding anything already set in the parent shell — matches
-    # pydantic-settings priority), then any caller overrides.
-    child_env = {**os.environ}
-    for key, val in install_state.parse_env_file().items():
-        child_env.setdefault(key, val)
-    if env:
-        child_env.update(env)
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        env=child_env,
-    )
-    log.close()
-    return proc.pid
+        log.close()
+        return proc.pid
 
 
 def wait_until_listening(port: int, timeout_s: float, host: str = DEFAULT_HOST) -> bool:

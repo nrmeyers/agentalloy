@@ -211,8 +211,9 @@ def _normalize_success_criteria(raw: list[Any]) -> list[str | dict[str, Any]]:
     Legacy: ["AC-1: feature works", "AC-2: another feature"]
     New: [{"id": "AC-1", "text": "feature works"}, ...]
 
-    Legacy entries are preserved as-is with auto-generated IDs to maintain
-    backward compatibility. New entries must have both id and text keys.
+    Legacy string entries are preserved as-is: the whole string is used for both
+    the id and the text (no id/text split is attempted), so consumers see the
+    original text verbatim. New entries must have both id and text keys.
     """
     if not raw:
         return []

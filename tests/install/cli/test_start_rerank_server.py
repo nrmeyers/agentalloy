@@ -87,10 +87,12 @@ class TestResolveRerankModel:
 
 
 class TestIdempotency:
-    def test_skips_when_port_already_open(self, tmp_path: Path) -> None:
+    def test_skips_when_health_ready(self, tmp_path: Path) -> None:
+        # bughunt 4.9: idempotency gates on /health (200), not a bare TCP
+        # connect, so a still-warming llama-server is not mistaken for ready.
         models = _models_file(tmp_path)
         with (
-            patch.object(srs, "_port_open", return_value=True),
+            patch.object(srs, "_health_ready", return_value=True),
             patch.object(srs, "_save"),
             patch("subprocess.Popen") as popen,
         ):
@@ -111,7 +113,9 @@ class TestErrors:
 
     def test_missing_gguf_on_disk(self, tmp_path: Path) -> None:
         models = _models_file(tmp_path)
-        with patch.object(srs, "_port_open", return_value=False):
+        # bughunt 4.9: health not ready → proceed to launch (not skipped on a
+        # bare open port), which then fails because the GGUF is absent.
+        with patch.object(srs, "_health_ready", return_value=False):
             rc = srs.run(_args(models))
         # GGUF was never downloaded into the data dir → error
         assert rc == 1
@@ -129,12 +133,12 @@ class TestLaunch:
         gguf_dir.mkdir()
         (gguf_dir / "Qwen3-Reranker-0.6B-Q8_0.gguf").write_text("stub")
 
-        # Idempotency _port_open → False (not already running); readiness now polls
-        # /health, so mock _health_ready → True.
+        # bughunt 4.9: readiness polls /health (not a bare TCP connect). The
+        # idempotency gate must be False (proceed to launch) and the wait-loop
+        # probe True (server came up) so the launch completes.
         with (
             patch.object(srs.install_state, "user_data_dir", return_value=tmp_path),
-            patch.object(srs, "_port_open", return_value=False),
-            patch.object(srs, "_health_ready", return_value=True),
+            patch.object(srs, "_health_ready", side_effect=[False, True]),
             patch.object(srs, "_save"),
             patch("subprocess.Popen") as popen,
         ):

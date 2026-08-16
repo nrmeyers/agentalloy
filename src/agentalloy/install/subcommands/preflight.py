@@ -552,12 +552,27 @@ def _check_name_conflicts(runtime: str) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
         result = subprocess.run(
-            [runtime, "ps", "--all", "--filter", "name=agentalloy", "--format", "{{.ID}}"],
+            [
+                runtime,
+                "ps",
+                "--all",
+                "--filter",
+                "name=agentalloy",
+                "--format",
+                "{{.ID}}\t{{.Names}}",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        container_id = (result.stdout or "").strip()
+        # The name= filter is a substring match, so "agentalloy-backup" would
+        # also match. Only fail on an exact-name collision.
+        container_id = None
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) == 2 and parts[1] == "agentalloy":
+                container_id = parts[0]
+                break
         if container_id:
             return _check(
                 "name_conflicts",
@@ -644,6 +659,8 @@ def _runner_from_models_output() -> str | None:
     try:
         data = json.loads(fp.read_text())
     except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
         return None
     return data.get("selected_runner") or data.get("embed_runner") or data.get("runner")
 

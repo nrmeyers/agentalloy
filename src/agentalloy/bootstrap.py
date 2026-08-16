@@ -140,6 +140,11 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return EXIT_VALIDATION
+            # --force with a canonical_name collision: the colliding row has a
+            # DIFFERENT skill_id, so _insert's delete-by-new-id would be a no-op
+            # and leave a duplicate canonical_name. Delete the colliding skill.
+            if existing_id_by_name is not None and args.force:
+                store.delete_skill(existing_id_by_name)
 
         # --- confirmation gate ---
         _print_summary(skill, existing=existing_name is not None)

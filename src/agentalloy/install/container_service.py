@@ -74,16 +74,32 @@ def _find_uvicorn_pid() -> int | None:
     return min(pids) if pids else None
 
 
+def _pid_is_zombie(pid: int) -> bool:
+    """Return True if ``pid`` is a zombie (defunct) process.
+
+    A zombie still passes ``os.kill(pid, 0)`` but has already exited; treating
+    it as alive would make the stop loop wait out the full deadline.
+    """
+    try:
+        status = Path(f"/proc/{pid}/status").read_text()
+    except (OSError, PermissionError):
+        return False
+    for line in status.splitlines():
+        if line.startswith("State:"):
+            return "Z" in line
+    return False
+
+
 def _pid_alive(pid: int) -> bool:
-    """Return True if ``pid`` is still running."""
+    """Return True if ``pid`` is still running (and not a zombie)."""
     try:
         os.kill(pid, 0)
-        return True
     except ProcessLookupError:
         return False
     except PermissionError:
         # Process exists but we can't signal it (e.g. different user).
-        return True
+        return not _pid_is_zombie(pid)
+    return not _pid_is_zombie(pid)
 
 
 def stop_service_in_container(no_restart: bool = False) -> bool:
@@ -201,7 +217,9 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, _, value = line.partition("=")
-                env[key.strip()] = value.strip()
+                # Process env wins over .env (matches server_proc.start_background's
+                # setdefault); a stale .env key must not clobber a live env var.
+                env.setdefault(key.strip(), value.strip())
         except OSError:
             pass
 
@@ -222,27 +240,31 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
         return False
 
     # Poll /health endpoint up to 30 seconds.
-    # The `finally` block guarantees cleanup (terminate + kill) so the child
-    # process is never orphaned when the timeout fires.
     deadline = time.monotonic() + 30.0
-    try:
-        while time.monotonic() < deadline:
-            if server_proc.port_reachable(port):
-                # Verify the process is still alive (not crashed immediately).
-                if proc.poll() is not None:
-                    # Process died — fall through to cleanup.
-                    break
-                return True
-            time.sleep(0.5)
-    finally:
-        # Always clean up the child process to prevent orphans.
-        if started:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except Exception:  # noqa: BLE001 — includes TimeoutExpired; force-kill below
-                with contextlib.suppress(OSError):
-                    proc.kill()
+    healthy = False
+    while time.monotonic() < deadline:
+        if server_proc.port_reachable(port):
+            # Verify the process is still alive (not crashed immediately).
+            if proc.poll() is not None:
+                # Process died — fall through to cleanup.
+                break
+            healthy = True
+            break
+        time.sleep(0.5)
+
+    if healthy:
+        # Service is up and responding — leave it running. (A `finally` here
+        # would terminate the very service we just started.)
+        return True
+
+    # Timeout or crash — clean up the child process to prevent orphans.
+    if started:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001 — includes TimeoutExpired; force-kill below
+            with contextlib.suppress(OSError):
+                proc.kill()
     return False
 
 

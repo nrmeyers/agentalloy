@@ -248,6 +248,32 @@ def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore
     store.close()
 
 
+def test_force_replaces_same_canonical_different_skill_id(
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+) -> None:
+    """bughunt 4b: --force with a canonical_name collision (different skill_id)
+    replaces the existing skill instead of leaving a duplicate row."""
+    db_path, store = seeded_db
+    first = tmp_path / "first.yaml"
+    first.write_text(_DOMAIN_YAML)
+
+    second = tmp_path / "second.yaml"
+    second.write_text(_DOMAIN_YAML.replace("test-domain-skill", "test-domain-skill-b"))
+
+    with patch("agentalloy.ingest.get_settings", return_value=_make_settings(db_path)):
+        assert main([str(first), "--yes"]) == EXIT_OK
+        code = main([str(second), "--force", "--yes"])
+
+    assert code == EXIT_OK
+
+    store.open()
+    count = store.scalar("SELECT count(*) FROM skills WHERE canonical_name = 'Test Domain Skill'")
+    assert count == 1
+    sid = store.scalar("SELECT skill_id FROM skills WHERE canonical_name = 'Test Domain Skill'")
+    assert sid == "test-domain-skill-b"
+    store.close()
+
+
 def test_file_not_found_returns_usage_error() -> None:
     code = main(["/nonexistent/review.yaml", "--yes"])
     assert code == EXIT_USAGE

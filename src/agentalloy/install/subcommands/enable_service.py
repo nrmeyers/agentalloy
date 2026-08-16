@@ -144,7 +144,8 @@ def _sanitize_env_for_systemd(env_path: Path) -> Path:
             val = val[1:-1]
         if key:
             lines.append(f"{key}={val}")
-    install_state._atomic_write(sanitized_path, "\n".join(lines) + "\n")
+    # Contains API keys from the .env — owner-only, not world-readable.
+    install_state._atomic_write(sanitized_path, "\n".join(lines) + "\n", mode=0o600)
     return sanitized_path
 
 

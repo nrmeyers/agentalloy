@@ -344,6 +344,11 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
                     file=sys.stderr,
                 )
                 return EXIT_DUPLICATE
+            # --force with a canonical_name collision: the colliding row has a
+            # DIFFERENT skill_id, so _insert's delete-by-new-id would be a no-op
+            # and leave a duplicate canonical_name. Delete the colliding skill.
+            if existing_id_by_name is not None and force:
+                store.delete_skill(existing_id_by_name)
 
         _print_summary(record, existing=existing_name is not None)
         if not yes:
@@ -498,6 +503,11 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                     ),
                 )
                 continue
+            # --force with a canonical_name collision: the colliding row has a
+            # DIFFERENT skill_id, so _insert's delete-by-new-id would be a no-op
+            # and leave a duplicate canonical_name. Delete the colliding skill.
+            if existing_id is not None and force:
+                store.delete_skill(existing_id)
 
         to_load.append((f, record))
 
@@ -544,6 +554,10 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                     record.skill_id,
                     exc,
                 )
+                # _insert may have partially inserted this record (skills row,
+                # version row) before raising — clean up the partial data so the
+                # rollback leaves no orphaned rows for the failing record.
+                store.rollback_skill(record.skill_id)
                 # Roll back all previously inserted skills to maintain consistency
                 if inserted_skill_ids:
                     logger.warning(
