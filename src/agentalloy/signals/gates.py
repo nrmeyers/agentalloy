@@ -133,7 +133,10 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
         for f in _glob_files(ctx.project_root, tasks_glob):
             tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)
-        contracts = len(_item_build_contracts(ctx, slug, contracts_glob=contracts_glob))
+        contracts_list = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
+        if contracts_list is None:
+            return None  # store error -> fail-open (no advisory)
+        contracts = len(contracts_list)
     except Exception:
         return None
     return (
@@ -180,7 +183,10 @@ def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> st
         return None
     try:
         offenders: list[str] = []
-        for c in _item_build_contracts(ctx, slug, contracts_glob=contracts_glob):
+        contracts_list = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
+        if contracts_list is None:
+            return None  # store error -> fail-open (no advisory)
+        for c in contracts_list:
             tags = c.get("domain_tags") or []
             if len(tags) > max_tags:
                 name = c.get("slug", c.get("contract_id", "unknown"))
