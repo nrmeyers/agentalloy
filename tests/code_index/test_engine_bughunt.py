@@ -313,3 +313,52 @@ def test_3_6_method_override_with_dotted_param_type() -> None:
     # The old ``rsplit(".", 1)`` split inside the parens (``Map.Entry``) and
     # never matched the inheritance map, so no OVERRIDES edge was emitted.
     assert ("com.foo.Sub.m(Map.Entry, String)", "com.foo.Base.m(Map.Entry, String)") in overrides
+
+
+# ---------------------------------------------------------------------------
+# 3.7-O — JS/TS object-literal / member-assignment fn-expr & arrow register a
+#         single FUNCTION node (no duplicate spans)
+# ---------------------------------------------------------------------------
+
+
+def test_3_7o_js_fn_expr_and_arrow_register_once(tmp_path: Path) -> None:
+    from agentalloy.code_index.facade import parse_repo
+
+    js_src = (
+        "const obj = {\n"
+        "  bar: function () { return 1; },   // object-literal fn-expr (pair value)\n"
+        "  baz: () => { return 2; },          // object-literal arrow (pair value)\n"
+        "  qux() { return 4; },               // object method_definition\n"
+        "};\n"
+        "\n"
+        "const standalone = () => { return 5; };   // variable declarator arrow (generic only)\n"
+        "\n"
+        "const target = {};\n"
+        "target.fn = () => { return 6; };          // member assignment arrow (JS pass)\n"
+        "target.fn2 = function () { return 7; };   // member assignment fn-expr (JS pass)\n"
+        "\n"
+        "function top() { return 3; }               // function declaration (generic only)\n"
+    )
+    (tmp_path / "app.js").write_text(js_src, encoding="utf-8")
+
+    result = parse_repo(tmp_path, languages=["javascript"])
+    fns = [s for s in result.symbols if s.kind == "Function"]
+
+    # The core regression: no source span may be registered under more than
+    # one qualified name. The generic ``_ingest_all_functions`` pass and the
+    # dedicated JS passes used to both register the same fn-expr/arrow node
+    # (``anonymous_N_M`` vs the property/member name).
+    by_span: dict[tuple[int, int], list[str]] = {}
+    for s in fns:
+        by_span.setdefault((s.start_line or 0, s.end_line or 0), []).append(s.qualified_name)
+    duplicated = {span: sorted(qns) for span, qns in by_span.items() if len(qns) > 1}
+    assert not duplicated, f"duplicated FUNCTION spans: {duplicated}"
+
+    # The dedup must keep the MEANINGFUL (named) node from the dedicated JS
+    # pass, not the ``anonymous_N_M`` node from the generic pass.
+    names = {s.name for s in fns}
+    for expected in ("bar", "baz", "qux", "standalone", "fn", "fn2", "top"):
+        assert expected in names, f"expected Function {expected!r}; got {sorted(names)}"
+    assert not any(cs.PREFIX_ANONYMOUS in s.qualified_name for s in fns), (
+        "anonymous FUNCTION node survived the dedup"
+    )
