@@ -53,6 +53,30 @@ def _native_state(**overrides: Any) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# _docker_time_arg — whole-second ``--time`` conversion (bughunt 4.10)
+# ---------------------------------------------------------------------------
+
+
+class TestDockerTimeArg:
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [
+            # Sub-second must NOT collapse to ``0`` (docker's "use default"
+            # sentinel); it rounds up to 1s.
+            (0.5, "1"),
+            (0.0, "1"),
+            # Whole seconds pass through unchanged.
+            (1.0, "1"),
+            (10.0, "10"),
+            # Fractional seconds round UP to the next whole second.
+            (2.9, "3"),
+        ],
+    )
+    def test_whole_second_clamp(self, seconds: float, expected: str) -> None:
+        assert server_container._docker_time_arg(seconds) == expected
+
+
+# ---------------------------------------------------------------------------
 # resolve_deployment
 # ---------------------------------------------------------------------------
 
@@ -224,6 +248,22 @@ class TestServerStopContainer:
         assert rc == server_stop.EXIT_OK
         assert call.call_args.args[1] == ["stop", "--time", "10", "agentalloy"]
 
+    def test_subsecond_timeout_rounds_up_not_zero(self) -> None:
+        # bughunt 4.10: ``--timeout 0.5`` must not become ``--time 0``.
+        args = argparse.Namespace(port=None, timeout=0.5, json=False, quiet=False)
+        with (
+            patch.object(server_proc.install_state, "load_state", return_value=_container_state()),
+            patch.object(server_container, "_state", return_value="running"),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                return_value=True,
+            ),
+            patch.object(server_container, "_runtime_call", return_value=_proc()) as call,
+        ):
+            rc = server_stop._run(args)
+        assert rc == server_stop.EXIT_OK
+        assert call.call_args.args[1] == ["stop", "--time", "1", "agentalloy"]
+
     def test_already_stopped_is_noop(self) -> None:
         with (
             patch.object(server_proc.install_state, "load_state", return_value=_container_state()),
@@ -312,6 +352,25 @@ class TestServerRestartContainer:
             rc = server_restart._run(_restart_args())
         assert rc == server_restart.EXIT_OK
         assert call.call_args.args[1] == ["restart", "--time", "10", "agentalloy"]
+
+    def test_subsecond_stop_timeout_rounds_up_not_zero(self) -> None:
+        # bughunt 4.10: ``stop_timeout=0.5`` must not become ``--time 0``.
+        args = argparse.Namespace(
+            port=None, host=server_proc.DEFAULT_HOST, stop_timeout=0.5, wait=1.0
+        )
+        with (
+            patch.object(server_proc.install_state, "load_state", return_value=_container_state()),
+            patch.object(server_container, "_state", return_value="running"),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                return_value=True,
+            ),
+            patch.object(server_container, "_runtime_call", return_value=_proc()) as call,
+            patch.object(server_proc, "health_ready", return_value=True),
+        ):
+            rc = server_restart._run(args)
+        assert rc == server_restart.EXIT_OK
+        assert call.call_args.args[1] == ["restart", "--time", "1", "agentalloy"]
 
     def test_stopped_container_is_started(self) -> None:
         with (
