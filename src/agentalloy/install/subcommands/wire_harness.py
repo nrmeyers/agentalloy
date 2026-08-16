@@ -629,6 +629,9 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
     sentinel_line_end = "# <!-- END agentalloy install -->"
     entry = "  - .agentalloy-aider-instructions.md"
     block = f"{sentinel_line_begin}\nread:\n{entry}\n{sentinel_line_end}"
+    # Tamper-check convention (uninstall / re-wire): the stored sha covers the
+    # content BETWEEN the sentinels, markers excluded.
+    inner = f"read:\n{entry}"
 
     if conf_path.exists():
         content = conf_path.read_text()
@@ -653,7 +656,7 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
             "action": "injected_block",
             "sentinel_begin": sentinel_line_begin,
             "sentinel_end": sentinel_line_end,
-            "content_sha256": _sha256(block),
+            "content_sha256": _sha256(inner),
             **({"original_content": original_content} if original_content is not None else {}),
         },
     ]
@@ -1080,6 +1083,9 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
         sentinel_end,
     ]
     block = "\n".join(block_lines)
+    # Tamper-check convention (uninstall / re-wire): the stored sha covers the
+    # content BETWEEN the sentinels, markers excluded.
+    inner = "\n".join(block_lines[1:-1])
 
     if conf_path.exists():
         content = conf_path.read_text()
@@ -1104,7 +1110,7 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
             "action": "injected_block",
             "sentinel_begin": sentinel_begin,
             "sentinel_end": sentinel_end,
-            "content_sha256": _sha256(block),
+            "content_sha256": _sha256(inner),
             **({"original_content": original_content} if original_content is not None else {}),
         },
     ]

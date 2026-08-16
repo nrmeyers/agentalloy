@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentalloy.app import create_app
+from agentalloy.web import config_api
 
 _CSRF = {"X-AgentAlloy-CSRF": "1"}
 
@@ -77,7 +78,14 @@ def test_put_validates_threshold_cross_field(client):
     assert "dedup_hard_threshold" in r.json()["detail"]["detail"]
 
 
-def test_put_writes_env_and_reload_applies(client, tmp_path: Path):
+def test_put_writes_env_and_reload_applies(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # _APPLIED_ENV is seeded at import time (real home); control it so the
+    # reload's unset pass can't pop keys from the test process env.
+    monkeypatch.setattr(
+        config_api, "_APPLIED_ENV", {"LOG_LEVEL": "INFO", "SDD_FAST_REQUIRE_APPROVAL": "0"}
+    )
     r = client.put(
         "/api/config",
         json={"log_level": "DEBUG", "sdd_fast_require_approval": True},
@@ -93,6 +101,56 @@ def test_put_writes_env_and_reload_applies(client, tmp_path: Path):
     assert r.status_code == 200
     assert os.environ["LOG_LEVEL"] == "DEBUG"
     assert client.get("/api/config").json()["sdd_fast_require_approval"] is True
+
+
+def test_reload_unsets_deleted_file_key(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """bughunt 6.6: a key removed from .env is unset on reload when the
+    process sourced it from the file (previously it stayed stale in env)."""
+    env_file = _env_file(tmp_path)
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text("LOG_LEVEL=INFO\nUPSTREAM_MODEL=filemodel\n")
+
+    # Simulate startup sourcing: the process holds both values from the file.
+    monkeypatch.setenv("UPSTREAM_MODEL", "filemodel")
+    monkeypatch.setattr(
+        config_api,
+        "_APPLIED_ENV",
+        {"LOG_LEVEL": "INFO", "UPSTREAM_MODEL": "filemodel"},
+    )
+
+    # UI deletion (null clears a nullable field) drops the key from the file.
+    r = client.put("/api/config", json={"upstream_model": None}, headers=_CSRF)
+    assert r.status_code == 200
+    assert "UPSTREAM_MODEL" not in env_file.read_text()
+
+    r = client.post("/api/config/reload", headers=_CSRF)
+    assert r.status_code == 200
+    assert os.environ.get("UPSTREAM_MODEL") is None  # actually unset, not stale
+    assert os.environ["LOG_LEVEL"] == "INFO"  # surviving key untouched
+    assert "UPSTREAM_MODEL" not in config_api._APPLIED_ENV
+
+
+def test_reload_never_unsets_shell_exported_key(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """bughunt 6.6: a key whose live value differs from the file's (shell
+    export won the wrapper's setdefault) is never unset by reload, even
+    after removal from the file."""
+    env_file = _env_file(tmp_path)
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text("LOG_LEVEL=INFO\n")
+
+    # Shell export won at startup: live value != file value → untracked.
+    monkeypatch.setenv("LOG_LEVEL", "shellvalue")
+    monkeypatch.setattr(config_api, "_APPLIED_ENV", {})
+
+    env_file.write_text("# empty\n")
+
+    r = client.post("/api/config/reload", headers=_CSRF)
+    assert r.status_code == 200
+    assert os.environ["LOG_LEVEL"] == "shellvalue"
 
 
 def test_put_preserves_unknown_env_lines(client, tmp_path: Path):

@@ -290,7 +290,11 @@ def _tool_name(tool: dict[str, Any]) -> str | None:
     if "name" in tool and "function" not in tool:
         return tool.get("name")
     # OpenAI format: {"type": "function", "function": {"name": "write_file", ...}}
-    fn = cast(dict[str, Any], tool.get("function"))
+    fn = tool.get("function")
+    if not isinstance(fn, dict):
+        # Built-in tools (e.g. web_search) carry neither name nor function.
+        return None
+    fn = cast(dict[str, Any], fn)
     return cast(str | None, fn.get("name"))
 
 
