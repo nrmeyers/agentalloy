@@ -78,9 +78,11 @@ _PHASE_RRF_CONFIG: dict[str, _RRFConfig] = {
 
 # Regex to extract high-signal technical terms for BM25 boosting.
 # Matches: file extensions, CamelCase classes, snake_case functions, version numbers, common tech terms.
+# Case-sensitive on purpose: the alternatives encode casing as the signal
+# (CamelCase, ALLCAPS, snake_case-with-digit). With IGNORECASE every word
+# would match, re-appending the whole task and diluting the BM25 query.
 _TECH_KEYWORD_RE = _re.compile(
-    r"\b(?:\.\w{2,4}|[A-Z][a-z]+\w*|[a-z_]+\d+\w*|[a-z]+-[a-z]+|[A-Z]{2,})\b",
-    _re.IGNORECASE,
+    r"\b(?:\.\w{2,4}|[A-Z][a-z]+\w*|[a-z_]+\d+\w*|[a-z]+-[a-z]+|[A-Z]{2,})\b"
 )
 
 
@@ -481,14 +483,17 @@ def _apply_card_boost(fused_ids: list[str], skill_of: dict[str, str]) -> list[st
             card_pos.setdefault(sid, pos)
 
     real = [fid for fid in fused_ids if not is_card_id(fid)]
+    # Fused position of each real fragment — same coordinate space as
+    # card_pos, so the min() below compares like with like.
+    fused_pos = {fid: pos for pos, fid in enumerate(fused_ids) if not is_card_id(fid)}
 
     # Stable re-sort: a fragment's effective rank is the better of its own
     # fused position and its skill's card position. Ties keep fused order.
     def effective_key(item: tuple[int, str]) -> tuple[int, int]:
         idx, fid = item
         sid = skill_of.get(fid)
-        cpos = card_pos.get(sid, idx) if sid is not None else idx
-        return (min(idx, cpos), idx)
+        cpos = card_pos.get(sid, fused_pos[fid]) if sid is not None else fused_pos[fid]
+        return (min(fused_pos[fid], cpos), idx)
 
     return [fid for _, fid in sorted(enumerate(real), key=effective_key)]
 

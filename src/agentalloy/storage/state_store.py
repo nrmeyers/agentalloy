@@ -658,43 +658,46 @@ class DuckDBStateStore:
         now = datetime.now()
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Check for lease conflict
-        existing = self.conn.execute(
-            "SELECT owner, lease_expires_at FROM sdd_state "
-            "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
-            (repo, sid, kind, key_part),
-        ).fetchone()
-
-        conflict = None
-        if existing and existing[0] and existing[0] != owner:
-            lease_expires = existing[1]
-            if lease_expires:
-                expires_dt = (
-                    datetime.fromisoformat(lease_expires)
-                    if isinstance(lease_expires, str)
-                    else lease_expires
-                )
-                if expires_dt > now:
-                    conflict = LeaseConflict(
-                        owner=existing[0],
-                        lease_expires_at=expires_dt,
-                        message=f"Session {existing[0]} holds the {kind}. Take over?",
-                    )
-
-        if existing:
-            self.conn.execute(
-                "UPDATE sdd_state SET value=?, owner=?, updated_at=?, lease_expires_at=? "
+        # Hold the store lock across probe + write so two concurrent writers
+        # on the same key cannot both see "no row" and both INSERT.
+        with nullcontext() if self._in_transaction else self.transaction():
+            # Check for lease conflict
+            existing = self.conn.execute(
+                "SELECT owner, lease_expires_at FROM sdd_state "
                 "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
-                (value, owner, ts, None, repo, sid, kind, key_part),
-            )
-        else:
-            lease_expires = ts if owner else None
-            self.conn.execute(
-                "INSERT INTO sdd_state "
-                "(repo, stream_id, kind, session_key, value, owner, updated_at, lease_expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (repo, sid, kind, session_key, value, owner, ts, lease_expires),
-            )
+                (repo, sid, kind, key_part),
+            ).fetchone()
+
+            conflict = None
+            if existing and existing[0] and existing[0] != owner:
+                lease_expires = existing[1]
+                if lease_expires:
+                    expires_dt = (
+                        datetime.fromisoformat(lease_expires)
+                        if isinstance(lease_expires, str)
+                        else lease_expires
+                    )
+                    if expires_dt > now:
+                        conflict = LeaseConflict(
+                            owner=existing[0],
+                            lease_expires_at=expires_dt,
+                            message=f"Session {existing[0]} holds the {kind}. Take over?",
+                        )
+
+            if existing:
+                self.conn.execute(
+                    "UPDATE sdd_state SET value=?, owner=?, updated_at=?, lease_expires_at=? "
+                    "WHERE repo=? AND stream_id=? AND kind=? AND COALESCE(session_key, '')=?",
+                    (value, owner, ts, None, repo, sid, kind, key_part),
+                )
+            else:
+                lease_expires = ts if owner else None
+                self.conn.execute(
+                    "INSERT INTO sdd_state "
+                    "(repo, stream_id, kind, session_key, value, owner, updated_at, lease_expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (repo, sid, kind, session_key, value, owner, ts, lease_expires),
+                )
 
         return StateWriteResult(
             success=True,
@@ -806,7 +809,10 @@ class DuckDBStateStore:
             else lease_expires
         )
 
-        if owner and owner != session_key and expires_dt > now:
+        # A NULL lease_expires_at means no active lease (e.g. the row was
+        # written with an owner but the lease lapsed or was never set) —
+        # symmetric with write()'s `if lease_expires:` guard.
+        if owner and owner != session_key and expires_dt is not None and expires_dt > now:
             return LeaseResult(
                 acquired=False,
                 owner=owner,
@@ -973,7 +979,7 @@ class DuckDBStateStore:
         semantics without re-deriving them. Fail-soft is the caller's job; this
         always writes when the row exists.
         """
-        with self.transaction():
+        with nullcontext() if self._in_transaction else self.transaction():
             raw = self.read("phase")
             if raw is None:
                 return
@@ -1674,8 +1680,9 @@ class DuckDBStateStore:
         stream_id = self._sid()
         conn = self.conn
 
-        conn.execute("BEGIN")
-        try:
+        # transaction() (not manual BEGIN/COMMIT) so the store lock is held
+        # across both UPDATEs and _txn.active stays consistent.
+        with self.transaction():
             contracts_result = conn.execute(
                 "UPDATE sdd_contract SET status='archived', updated_at=? "
                 "WHERE repo=? AND stream_id=? AND status != 'archived'",
@@ -1692,14 +1699,10 @@ class DuckDBStateStore:
             artifacts_count = artifacts_result.fetchall()
             artifacts_count = artifacts_count[0][0] if artifacts_count else 0
 
-            conn.execute("COMMIT")
-            return {
-                "contracts_archived": contracts_count,
-                "artifacts_archived": artifacts_count,
-            }
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        return {
+            "contracts_archived": contracts_count,
+            "artifacts_archived": artifacts_count,
+        }
 
     # -- approval marker -------------------------------------------------------
     # Thin wrappers over the generic sdd_state read/write, using the already
