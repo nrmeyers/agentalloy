@@ -18,6 +18,7 @@ from __future__ import annotations
 # reporting for this module rather than at the call site.
 # pyright: reportPrivateUsage=false
 import asyncio
+import concurrent.futures
 import contextlib
 import fnmatch
 from dataclasses import dataclass
@@ -33,6 +34,24 @@ _MAX_TOUCH_FILES = 200
 _MAX_DECISIONS = 8
 
 _SOLUTIONS_PREFIX = "docs/solutions/"
+
+
+def _run_coro(coro: Any) -> Any:
+    """Run *coro* to completion from a sync context.
+
+    ``build_decision_block`` is invoked synchronously from the compose path,
+    which runs on the FastAPI event loop. ``asyncio.run`` cannot be called from
+    a thread that already has a running loop, so when one is active we run the
+    coroutine in a worker thread with its own loop. ``related_decisions`` only
+    wraps synchronous work in ``asyncio.to_thread`` (no loop-bound resources),
+    so a fresh loop in a worker thread is safe.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 @dataclass(frozen=True)
@@ -196,7 +215,7 @@ def build_decision_block(
         try:
             from agentalloy.code_index.retrieval.hybrid import related_decisions
 
-            related_results = asyncio.run(related_decisions(state, slug, task_title, k=8))
+            related_results = _run_coro(related_decisions(state, slug, task_title, k=8))
             kept_qns = {d.qualified_name for d in kept}
             # Governed QN set: every decision with a GOVERNS edge into a touched
             # file (before superseded/instructions exclusion).  Phase 2 results

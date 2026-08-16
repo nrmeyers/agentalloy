@@ -14,7 +14,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agentalloy.api import proxy_passthrough_router
+from agentalloy.api import proxy_passthrough_router, proxy_router
 from agentalloy.app import create_app
 
 
@@ -207,6 +207,47 @@ class TestProxyPassthrough:
         data = resp.json()
         assert data["error"]["code"] == "upstream_unavailable"
 
+    def test_upstream_4xx_forwards_body_and_records_error(self, app_with_upstream: Any) -> None:
+        """Upstream 4xx forwards the upstream's own status + body to the caller
+        and records an llm_error (not llm_received) in telemetry (1.3 regression).
+
+        The old code fell through to the success telemetry path for 4xx,
+        recording a false llm_received. The fix routes 4xx through
+        _emit_llm_error and forwards the real status + body (5xx still maps to
+        a generic 503).
+        """
+        error_body = {"error": {"message": "rate limited", "type": "rate_limit"}}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json=error_body, request=request)
+
+        app_with_upstream.state.upstream_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://mock-upstream/v1",
+        )
+
+        with (
+            mock.patch.object(proxy_router, "_emit_llm_error") as m_err,
+            mock.patch.object(proxy_router, "_emit_llm_received") as m_recv,
+            TestClient(app_with_upstream) as client,
+        ):
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                    ],
+                },
+            )
+
+        # 4xx is forwarded with its real status + body (not a generic 503).
+        assert resp.status_code == 429
+        assert resp.json() == error_body
+        # Telemetry recorded an error, not a success.
+        m_err.assert_called_once()
+        m_recv.assert_not_called()
+
     def test_stream_flag_forwarded(self, app_with_upstream: Any) -> None:
         """Stream flag is forwarded in the request payload."""
         received_stream: bool | None = None
@@ -254,51 +295,51 @@ class TestProxyPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# Finish-reason guard tests
+# Surface-aware terminal-event guard tests (1.1)
 # ---------------------------------------------------------------------------
 
 
-class TestChunkHasFinishReason:
-    """Unit tests for _chunk_has_finish_reason helper."""
+class TestChunkHasTerminalEvent:
+    """Unit tests for the surface-aware _chunk_has_terminal_event helper (1.1).
 
-    def test_normal_chunk_with_finish_reason(self) -> None:
+    The old _chunk_has_finish_reason keyed on the OpenAI chat.completions
+    ``finish_reason`` shape, which never appears on the Anthropic Messages or
+    OpenAI Responses surfaces — so it always reported "no terminal event" and
+    the relay appended a mismatched corrective chunk to every stream. The fix
+    scans for the surface's own SSE terminal event instead.
+    """
+
+    def test_anthropic_message_stop_detected(self) -> None:
+        chunk = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "message_stop") is True
+
+    def test_responses_completed_detected(self) -> None:
+        chunk = 'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "response.completed") is True
+
+    def test_non_terminal_event_not_detected(self) -> None:
+        chunk = 'event: message_start\ndata: {"type":"message_start"}\n\n'
+        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "message_stop") is False
+
+    def test_openai_finish_reason_is_not_a_terminal_marker(self) -> None:
+        # The old detector's shape must NOT count as a terminal event for the
+        # Anthropic surface — that mismatch was the bug.
         chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
-        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
-
-    def test_chunk_with_content_filter_finish_reason(self) -> None:
-        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}\n\n'
-        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
-
-    def test_chunk_with_length_finish_reason(self) -> None:
-        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\n'
-        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
-
-    def test_chunk_no_finish_reason(self) -> None:
-        chunk = 'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n'
-        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is False
-
-    def test_done_marker(self) -> None:
-        assert proxy_passthrough_router._chunk_has_finish_reason("data: [DONE]\n\n") is False
+        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "message_stop") is False
 
     def test_empty_string(self) -> None:
-        assert proxy_passthrough_router._chunk_has_finish_reason("") is False
+        assert proxy_passthrough_router._chunk_has_terminal_event("", "message_stop") is False
 
-    def test_multi_chunk_with_finish_reason(self) -> None:
+    def test_multi_chunk_with_terminal_event(self) -> None:
         chunk = (
-            'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
-            'data: {"id":"c2","choices":[{"index":0,"delta":{}}]}\n\n'
+            'event: message_start\ndata: {"type":"message_start"}\n\n'
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
-        assert proxy_passthrough_router._chunk_has_finish_reason(chunk) is True
-
-    def test_incomplete_json_fallback(self) -> None:
-        # The JSON object is split but finish_reason is visible inside.
-        # The fallback should find it by scanning backwards.
-        text = '{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}'
-        assert proxy_passthrough_router._chunk_has_finish_reason(text) is True
+        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "message_stop") is True
 
 
 class TestProxyStreaming:
-    """Tests for finish_reason injection in streaming paths."""
+    """Tests for surface-aware terminal-event injection in streaming paths (1.1)."""
 
     def _make_mock_client(self, mock_response: mock.MagicMock) -> mock.MagicMock:
         """Build a mock AnthropicPassthroughClient with a stream context manager."""
@@ -316,10 +357,10 @@ class TestProxyStreaming:
             parts.append(chunk)
         return b"".join(parts).decode()
 
-    async def test_stream_missing_finish_reason_injected(self) -> None:
-        """Correction injected when stream has no finish_reason."""
-        sse_data = 'data: {"id":"test","object":"chat.completion.chunk"}\n\n'
-        correction = 'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
+    async def test_truncated_stream_injects_surface_terminal_event(self) -> None:
+        """The surface's terminal event is injected when the stream is truncated."""
+        sse_data = 'event: message_start\ndata: {"type":"message_start"}\n\n'
+        correction = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
         async def _aiter_raw():
             yield sse_data.encode()
@@ -329,26 +370,19 @@ class TestProxyStreaming:
         mock_response.aiter_raw.return_value = _aiter_raw()
         mock_response.headers = {"content-type": "text/event-stream"}
 
-        with (
-            mock.patch.object(
-                proxy_passthrough_router,
-                "_chunk_has_finish_reason",
-                side_effect=lambda _: False,
-            ),
-        ):
-            resp = await proxy_passthrough_router._forward_streaming(
-                self._make_mock_client(mock_response),
-                "test",
-                {},
-                sse_data.encode(),
-            )
-            body = await self._collect_body(resp)
-            assert sse_data in body
-            assert correction in body
+        resp = await proxy_passthrough_router._forward_streaming(
+            self._make_mock_client(mock_response),
+            "test",
+            {},
+            sse_data.encode(),
+        )
+        body = await self._collect_body(resp)
+        assert sse_data in body
+        assert correction in body
 
-    async def test_stream_no_finish_reason_injected(self) -> None:
-        """Correction injected for empty stream."""
-        correction = 'data: {"id": "chatcmpl-passthrough", "object": "chat.completion.chunk", "created": 0, "model": "passthrough", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n'
+    async def test_empty_stream_injects_surface_terminal_event(self) -> None:
+        """The terminal event is injected for an empty (fully truncated) stream."""
+        correction = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
         async def _aiter_raw():
             return
@@ -359,27 +393,18 @@ class TestProxyStreaming:
         mock_response.aiter_raw.return_value = _aiter_raw()
         mock_response.headers = {"content-type": "text/event-stream"}
 
-        with (
-            mock.patch.object(
-                proxy_passthrough_router,
-                "_chunk_has_finish_reason",
-                side_effect=lambda _: False,
-            ),
-        ):
-            resp = await proxy_passthrough_router._forward_streaming(
-                self._make_mock_client(mock_response),
-                "test",
-                {},
-                b"",
-            )
-            body = await self._collect_body(resp)
-            assert correction in body
-
-    async def test_stream_finish_reason_already_present_not_duplicated(self) -> None:
-        """Exactly one finish_reason when upstream already has one."""
-        sse_data = (
-            'data: {"id":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        resp = await proxy_passthrough_router._forward_streaming(
+            self._make_mock_client(mock_response),
+            "test",
+            {},
+            b"",
         )
+        body = await self._collect_body(resp)
+        assert correction in body
+
+    async def test_complete_stream_not_duplicated(self) -> None:
+        """Exactly one terminal event when upstream already carries it."""
+        sse_data = 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
         async def _aiter_raw():
             yield sse_data.encode()
@@ -389,21 +414,40 @@ class TestProxyStreaming:
         mock_response.aiter_raw.return_value = _aiter_raw()
         mock_response.headers = {"content-type": "text/event-stream"}
 
-        with (
-            mock.patch.object(
-                proxy_passthrough_router,
-                "_chunk_has_finish_reason",
-                side_effect=lambda _: True,
-            ),
-        ):
-            resp = await proxy_passthrough_router._forward_streaming(
-                self._make_mock_client(mock_response),
-                "test",
-                {},
-                sse_data.encode(),
-            )
-            body = await self._collect_body(resp)
-            assert body == sse_data
+        resp = await proxy_passthrough_router._forward_streaming(
+            self._make_mock_client(mock_response),
+            "test",
+            {},
+            sse_data.encode(),
+        )
+        body = await self._collect_body(resp)
+        assert body == sse_data
+
+    async def test_responses_surface_injects_its_own_terminal_event(self) -> None:
+        """The /v1/responses surface injects response.completed, not message_stop."""
+        sse_data = 'event: response.created\ndata: {"type":"response.created"}\n\n'
+        correction = 'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+
+        async def _aiter_raw():
+            yield sse_data.encode()
+
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.aiter_raw.return_value = _aiter_raw()
+        mock_response.headers = {"content-type": "text/event-stream"}
+
+        resp = await proxy_passthrough_router._forward_streaming(
+            self._make_mock_client(mock_response),
+            "test",
+            {},
+            sse_data.encode(),
+            path="/v1/responses",
+        )
+        body = await self._collect_body(resp)
+        assert sse_data in body
+        assert correction in body
+        # The Anthropic terminal event must NOT leak into the Responses surface.
+        assert "message_stop" not in body
 
 
 class TestEmbeddingsPassthrough:
@@ -503,3 +547,56 @@ class TestAnthropicConverter:
         }
         req = _proxy_request_from_anthropic(payload)
         assert req.tools is None  # background request → not a carrier
+
+
+class TestArtifactExtractionResponse:
+    """Tests for artifact extraction on the response path (1.5)."""
+
+    async def test_extracted_text_lands_in_first_block_rest_blanked(self) -> None:
+        """When artifact extraction fires, the cleaned text goes into the FIRST
+        text block and all other text blocks are blanked (1.5 regression).
+
+        The cleaned text is the join of ALL text blocks with markers stripped,
+        so it can't be split back per block (a marker may span blocks). The fix
+        puts the full cleaned text in the first block and blanks the rest to
+        avoid duplicating content or leaving unstripped markers behind.
+        """
+        from agentalloy.api.proxy_passthrough_router import _ArtifactExtractionContext
+
+        upstream_content = json.dumps(
+            {
+                "content": [
+                    {"type": "text", "text": "before <!-- artifact -->"},
+                    {"type": "text", "text": "middle <!-- artifact --> after"},
+                ]
+            }
+        ).encode()
+
+        upstream = mock.MagicMock()
+        upstream.status_code = 200
+        upstream.content = upstream_content
+        upstream.headers = {"content-type": "application/json"}
+
+        client = mock.MagicMock()
+        client.forward = mock.AsyncMock(return_value=upstream)
+
+        ctx = _ArtifactExtractionContext(
+            store=mock.MagicMock(), phase="design", slug="my-task"
+        )
+
+        fake_result = mock.MagicMock()
+        fake_result.extracted = True
+        fake_result.cleaned_text = "CLEANED-TEXT"
+
+        with mock.patch.object(
+            proxy_passthrough_router, "extract_and_store", return_value=fake_result
+        ):
+            resp = await proxy_passthrough_router._forward_once(
+                client, "test", {}, b"{}", artifact_extraction=ctx
+            )
+
+        body = json.loads(resp.body)
+        text_blocks = [b for b in body["content"] if b.get("type") == "text"]
+        assert len(text_blocks) == 2
+        assert text_blocks[0]["text"] == "CLEANED-TEXT"
+        assert text_blocks[1]["text"] == ""

@@ -235,6 +235,48 @@ class TestPostPhase:
         assert phase_row.phase == "spec"
 
 
+class TestRoutePhaseOffloop:
+    """The exit gate must run off the event loop (1.4)."""
+
+    def test_route_phase_runs_off_event_loop(
+        self, state_client: TestClient, state_store: DuckDBStateStore, monkeypatch
+    ) -> None:
+        """_route_phase does file I/O + embedding; it must be dispatched via
+        asyncio.to_thread so it can't block the event loop (1.4 regression).
+
+        The old code called it inline on the loop. We capture the event-loop
+        thread (via the handler's direct ``store.read_phase`` call) and the
+        thread _route_phase actually runs on, then assert they differ —
+        proving the gate is dispatched to a worker thread, regardless of the
+        executor's thread naming.
+        """
+        import threading
+
+        from agentalloy.api import state_router as sr
+
+        loop_threads: list[str] = []
+        route_threads: list[str] = []
+
+        def _fake_read_phase():
+            loop_threads.append(threading.current_thread().name)
+            return None
+
+        def _fake_route_phase(*_args, **_kwargs):
+            route_threads.append(threading.current_thread().name)
+            return None  # same-phase no-op → handler takes the fast path
+
+        monkeypatch.setattr(state_store, "read_phase", _fake_read_phase)
+        monkeypatch.setattr(sr, "_route_phase", _fake_route_phase)
+
+        resp = state_client.post("/state/phase", json={"value": "spec"})
+        assert resp.status_code == 200
+
+        assert len(route_threads) == 1
+        assert loop_threads, "expected a direct store.read_phase call on the loop"
+        # The gate must run on a different thread than the event loop.
+        assert route_threads[0] != loop_threads[0]
+
+
 class TestPostCursor:
     """POST /state/cursor."""
 

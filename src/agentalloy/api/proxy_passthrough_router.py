@@ -830,15 +830,21 @@ async def _forward_once(
                             store=artifact_extraction.store,
                         )
                         if result.extracted:
-                            # Replace text blocks with cleaned text
+                            # cleaned is the join of ALL text blocks with
+                            # markers stripped, so it can't be split back per
+                            # block (a marker may span blocks). Put the full
+                            # cleaned text in the first text block and blank
+                            # the rest to avoid duplicating content or leaving
+                            # unstripped markers behind.
                             cleaned = result.cleaned_text
-                            text_blocks_updated = False
-                            for b in content_blocks:
-                                if isinstance(b, dict) and b.get("type") == "text":
-                                    b["text"] = cleaned
-                                    text_blocks_updated = True
-                                    break  # only first text block gets cleaned
-                            if text_blocks_updated:
+                            text_blocks = [
+                                b
+                                for b in content_blocks
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            ]
+                            if text_blocks:
+                                for i, b in enumerate(text_blocks):
+                                    b["text"] = cleaned if i == 0 else ""
                                 response_json["content"] = content_blocks
                                 response_content = json.dumps(response_json).encode("utf-8")
         except Exception:
@@ -852,68 +858,35 @@ async def _forward_once(
     )
 
 
-def _chunk_has_finish_reason(text: str) -> bool:
-    """Scan an SSE text chunk for a ``finish_reason`` field in choices.
+# Terminal-event marker + corrective chunk per upstream surface. Neither
+# Anthropic Messages nor OpenAI Responses uses the chat.completions
+# ``finish_reason`` / ``data: [DONE]`` shape, so the corrective chunk must
+# match the surface or it corrupts the relayed stream. The detector scans for
+# the surface's SSE terminal event; an unknown surface gets an empty marker and
+# no corrective chunk (a mismatched chunk is worse than none).
+_SURFACE_TERMINAL: dict[str, tuple[str, bytes]] = {
+    "/v1/messages": (
+        "message_stop",
+        b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ),
+    "/v1/responses": (
+        "response.completed",
+        b'event: response.completed\ndata: {"type":"response.completed"}\n\n',
+    ),
+}
 
-    SSE chunks arrive as ``data: {json}\\n\\n`` or ``data: [DONE]\\n\\n``.
-    The iterator may split chunks mid-byte, so we scan for ``data: {`` and
-    try parsing the JSON object.
 
-    Args:
-        text: The decoded SSE chunk text.
+def _chunk_has_terminal_event(text: str, marker: str) -> bool:
+    """Return True if an SSE chunk carries the surface's terminal event.
 
-    Returns:
-        ``True`` if any JSON object in *text* carries a ``finish_reason`` key.
-
+    Anthropic Messages ends with ``event: message_stop``; OpenAI Responses ends
+    with ``event: response.completed``. These are SSE *event* lines (not
+    chat.completions ``finish_reason`` fields), so a substring scan of the raw
+    chunk is the reliable check. A false positive (model content that happens
+    to contain the marker) is harmless: it only suppresses the corrective
+    chunk, which is the correct outcome for a complete stream.
     """
-    # Fast path: strip the SSE prefix and try parsing the JSON.
-    stripped = text.strip()
-    if stripped.startswith("data: "):
-        try:
-            obj = json.loads(stripped[6:])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # Fallback: scan for ``data: {`` and try parsing the JSON object.
-    # This handles SSE chunks split mid-byte by the iterator.
-    search_start = 0
-    while True:
-        idx = text.find("data: {", search_start)
-        if idx == -1:
-            break
-        brace_end = text.find("\n", idx + 6)
-        if brace_end == -1:
-            brace_end = len(text)
-        try:
-            obj = json.loads(text[idx + 6 : brace_end])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
-        except (json.JSONDecodeError, ValueError):
-            pass
-        search_start = idx + 1
-
-    # Final fallback: try parsing the text directly as JSON (no SSE prefix).
-    # This handles raw JSON fragments that may have been relayed without the
-    # ``data: `` prefix.
-    try:
-        obj = json.loads(stripped)
-        if isinstance(obj, dict) and obj.get("choices"):
-            for choice in obj["choices"]:
-                fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                if fr is not None:
-                    return True
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    return False
+    return marker in text
 
 
 async def _forward_streaming(
@@ -955,19 +928,10 @@ async def _forward_streaming(
     # (2xx-gated inside on_status) so a 529 stream open never burns the cadence.
     on_status(upstream.status_code)
 
-    _CORRECTIVE_CHUNK = (
-        'data: '
-        + json.dumps(
-            {
-                "id": "chatcmpl-passthrough",
-                "object": "chat.completion.chunk",
-                "created": 0,
-                "model": "passthrough",
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            },
-        )
-        + '\n\n'
-    ).encode()
+    # Surface-aware terminal marker + corrective chunk (see _SURFACE_TERMINAL).
+    # An unknown path yields an empty marker and no corrective chunk, so the
+    # relay never injects a mismatched-format chunk into a foreign stream.
+    terminal_marker, corrective_chunk = _SURFACE_TERMINAL.get(path, ("", b""))
 
     # For streaming, tool call interception is complex (need to parse SSE chunks).
     # For now, skip interception in streaming mode — the tool definitions are still
@@ -976,15 +940,15 @@ async def _forward_streaming(
     # TODO: Add streaming interception for defense-in-depth.
 
     async def relay() -> AsyncIterator[bytes]:
-        has_finish_reason = False
+        has_terminal = False
         # Tee pattern: accumulate response text for artifact extraction while
         # yielding chunks to the client immediately (zero latency impact).
         stream_buffer: list[str] = []
         try:
             async for raw in upstream.aiter_raw():
                 text = raw.decode("utf-8", errors="replace")
-                if _chunk_has_finish_reason(text):
-                    has_finish_reason = True
+                if _chunk_has_terminal_event(text, terminal_marker):
+                    has_terminal = True
                 if artifact_extraction is not None:
                     stream_buffer.append(text)
                 yield raw
@@ -1004,9 +968,11 @@ async def _forward_streaming(
                     )
             except Exception:
                 logger.debug("streaming artifact extraction failed", exc_info=True)
-        if not has_finish_reason:
-            yield _CORRECTIVE_CHUNK
-            yield b'data: [DONE]\n\n'
+        # Safety net for a truncated upstream stream: emit the surface's
+        # terminal event only when it was genuinely absent. A complete stream
+        # already carries the terminal event, so this is a no-op in practice.
+        if not has_terminal and corrective_chunk:
+            yield corrective_chunk
 
     return StreamingResponse(
         relay(),
