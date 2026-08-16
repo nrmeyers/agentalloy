@@ -136,26 +136,37 @@ class TestPatternMatching:
 
     def test_touches_affects(self, populated_store: DuckDBCodeGraphStore) -> None:
         chunk = make_chunk(
-            body="Editing src/code_index/ingest/pipeline.py affects the jobs_store module.",
+            body="Editing src/code_index/ingest/pipeline.py affects src/code_index/store/jobs_store.py.",
         )
         edges = extract_entities_from_chunk(chunk, populated_store)
         touch_edges = [e for e in edges if e.kind == "TOUCHES"]
         assert len(touch_edges) >= 1
         assert touch_edges[0].kind == "TOUCHES"
-        # Target "jobs_store module" doesn't resolve; falls back to subject
-        # which resolves to pipeline.py
-        assert touch_edges[0].dst_fqn == "src/code_index/ingest/pipeline.py"
+        # Target resolves to the jobs_store module symbol
+        assert touch_edges[0].dst_fqn == "src/code_index/store/jobs_store.py"
+
+    def test_touches_unresolvable_target_dropped(self, populated_store: DuckDBCodeGraphStore) -> None:
+        """Regression 2.5d: an unresolved target is dropped, not re-pointed at
+        the subject (the old fallback inverted REQUIRES/TOUCHES direction)."""
+        chunk = make_chunk(
+            body="Editing src/code_index/ingest/pipeline.py affects the jobs_store module.",
+        )
+        edges = extract_entities_from_chunk(chunk, populated_store)
+        # "the jobs_store module" does not resolve to any symbol, so no TOUCHES
+        # edge is emitted at all.
+        assert [e for e in edges if e.kind == "TOUCHES"] == []
 
     def test_requires_depends_on(self, populated_store: DuckDBCodeGraphStore) -> None:
         chunk = make_chunk(
-            body="knowledge_push depends on agentalloy_query for the code index API.",
+            body="agentalloy.api.knowledge_push depends on src/auth/middleware.py "
+            "for the code index API.",
         )
         edges = extract_entities_from_chunk(chunk, populated_store)
         require_edges = [e for e in edges if e.kind == "REQUIRES"]
         assert len(require_edges) >= 1
         assert require_edges[0].kind == "REQUIRES"
-        # dst_fqn should be the resolved dependency
-        assert require_edges[0].dst_fqn == "agentalloy.api.knowledge_push"
+        # dst_fqn is the resolved dependency — the target, not the subject.
+        assert require_edges[0].dst_fqn == "src/auth/middleware.py"
 
     def test_command_backtick(self, populated_store: DuckDBCodeGraphStore) -> None:
         chunk = make_chunk(
@@ -502,18 +513,84 @@ class TestContractIngestion:
         """Multiple chunks produce aggregated entities."""
         chunks = [
             make_chunk(
-                body="src/auth/middleware.py must not be touched.",
+                body="The auth middleware must not touch src/auth/middleware.py.",
                 qualified_name="docs/design/a/approach.md::design",
                 file_path="docs/design/a/approach.md",
             ),
             make_chunk(
-                body="src/code_index/ingest/pipeline.py affects jobs_store.",
+                body="src/code_index/ingest/pipeline.py affects "
+                "src/code_index/store/jobs_store.py.",
                 qualified_name="docs/design/b/approach.md::design",
                 file_path="docs/design/b/approach.md",
             ),
         ]
         result = _index_entity_edges(populated_store, chunks, Settings())
         assert result.entities_written >= 2
+
+
+# ---------------------------------------------------------------------------
+# Regression 2.1: incremental reindex must not accumulate duplicate edges
+# ---------------------------------------------------------------------------
+
+
+class TestReindexDedup:
+    """The entity phase re-derives from every chunk on each run, so a doc's
+    prior entity edges are cleared before re-inserting the fresh ones (2.1).
+    ``upsert_edges`` is a plain INSERT with no natural key, so without the
+    delete-then-insert, N reindex runs leave N copies of the same edge.
+    """
+
+    def _entity_edge_count(self, store: DuckDBCodeGraphStore) -> int:
+        return int(
+            store.conn.execute(
+                "SELECT count(*) FROM edges WHERE kind IN "
+                "('REQUIRES','TOUCHES','CONSTRAINTS','COMMAND','STAKEHOLDER')"
+            ).fetchone()[0]
+        )
+
+    def test_reindex_twice_no_duplicate_edges(self, populated_store: DuckDBCodeGraphStore) -> None:
+        chunk = make_chunk(
+            qualified_name="docs/design/x/approach.md::design",
+            file_path="docs/design/x/approach.md",
+            body=(
+                "The auth middleware must not touch src/auth/middleware.py. "
+                "knowledge_push depends on agentalloy_query. "
+                "Legal flagged auth middleware for compliance. "
+                "Run `gh pr create` to open the PR."
+            ),
+        )
+        first = _index_entity_edges(populated_store, [chunk], Settings())
+        assert first.entities_written >= 1
+        count_after_first = self._entity_edge_count(populated_store)
+        assert count_after_first == first.entities_written
+
+        # A second run over the same chunks must not double the edge count.
+        second = _index_entity_edges(populated_store, [chunk], Settings())
+        assert second.entities_written >= 1
+        count_after_second = self._entity_edge_count(populated_store)
+        assert count_after_second == count_after_first
+
+    def test_reindex_across_two_docs_dedups_per_doc(self, populated_store: DuckDBCodeGraphStore) -> None:
+        """Two docs re-derived together: each doc's edges are cleared and
+        re-inserted, so the total stays flat across runs."""
+        chunks = [
+            make_chunk(
+                body="The auth middleware must not touch src/auth/middleware.py.",
+                qualified_name="docs/design/a/approach.md::design",
+                file_path="docs/design/a/approach.md",
+            ),
+            make_chunk(
+                body="agentalloy.api.knowledge_push depends on src/auth/middleware.py.",
+                qualified_name="docs/design/b/approach.md::design",
+                file_path="docs/design/b/approach.md",
+            ),
+        ]
+        _index_entity_edges(populated_store, chunks, Settings())
+        count_after_first = self._entity_edge_count(populated_store)
+        assert count_after_first >= 1
+        _index_entity_edges(populated_store, chunks, Settings())
+        count_after_second = self._entity_edge_count(populated_store)
+        assert count_after_second == count_after_first
 
 
 # ---------------------------------------------------------------------------

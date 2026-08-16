@@ -598,7 +598,15 @@ async def run_index_job(
         # --- graph phase (under the per-slug write lock) ----------------------
         _check_cancel()
         _progress("graph", 20.0)
-        await asyncio.to_thread(lock.acquire)
+        # Acquire via a non-blocking poll, not a blocking acquire: a blocking
+        # ``await asyncio.to_thread(lock.acquire)`` orphans its worker thread on
+        # cancellation — the thread keeps blocking and eventually grabs the
+        # lock, which the ``finally`` (``locked`` still False) never releases,
+        # deadlocking every later writer for this slug. A non-blocking check
+        # never holds the lock at a cancellation point, so a cancel here is safe.
+        while not await asyncio.to_thread(lock.acquire, blocking=False):
+            _check_cancel()
+            await asyncio.sleep(0.05)
         locked = True
         handles = open_code_index(settings, slug, role="service", repo_path=str(repo_path))
         graph, vectors = handles.graph, handles.vectors
@@ -733,6 +741,12 @@ async def run_index_job(
                 graph,
                 chunks=md.chunks,
                 settings=settings,
+            )
+            jobs.update_entity_result(
+                job_id,
+                written=entity_result.entities_written,
+                dropped=entity_result.entities_dropped,
+                counts_by_kind=entity_result.entity_counts_by_kind,
             )
             if entity_result.entities_written > 0:
                 logger.info(

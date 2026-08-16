@@ -283,22 +283,6 @@ def extract_entities_from_chunk(
                                     span=span_text,
                                     resolution_tier=tier,
                                 ))
-                            elif subject and subject != target:
-                                # Even if unresolved, the subject itself might be
-                                # a useful entity hint
-                                resolution_subj = _resolve_entity_target(
-                                    subject, chunk.file_path, graph,
-                                )
-                                if resolution_subj is not None:
-                                    fqn, tier = resolution_subj
-                                    raw_edges.append(EntityEdge(
-                                        kind=kind,
-                                        src_fqn=chunk.qualified_name,
-                                        dst_fqn=fqn,
-                                        file_path=chunk.file_path,
-                                        span=span_text,
-                                        resolution_tier=tier,
-                                    ))
                     elif len(groups) == 1:
                         # Single-group pattern (e.g. "X is prohibited"):
                         # the subject itself is the constrained entity.
@@ -391,17 +375,17 @@ def _index_entity_edges(
         remaining = max_per_job - len(all_entities)
         all_entities.extend(entities[:remaining])
 
-    # Apply job cap priority filtering
-    if len(all_entities) > max_per_job:
-        high_prio = [e for e in all_entities if e.kind in _HIGH_PRIORITY_KINDS]
-        low_prio = [e for e in all_entities if e.kind not in _HIGH_PRIORITY_KINDS]
-        all_entities = high_prio + low_prio[:max_per_job - len(high_prio)]
-        dropped_n = len(all_entities) - max_per_job  # not used for counting, for logging
-        if dropped_n > 0:
-            logger.info(
-                "entity extraction dropped %d edges (job cap at %d)",
-                dropped_n, max_per_job,
-            )
+    # Dedup: the entity phase re-derives from every chunk on each run, so a
+    # doc's prior entity edges must be cleared before re-inserting the fresh
+    # ones — otherwise incremental reindex accumulates N copies of the same
+    # edge (mirror of the GOVERNS doc-granular delete in _index_decisions).
+    # Only docs that still derive >=1 edge are cleared; a doc whose targets all
+    # became unresolvable (e.g. a rename) keeps its prior edges rather than
+    # being silently wiped (same keep-don't-lose stance as the GOVERNS
+    # derive-first/swap-second guard).
+    rederived_paths = sorted({e.file_path for e in all_entities})
+    if rederived_paths:
+        store.delete_entity_edges_for_docs(rederived_paths)
 
     # Convert to CodeEdge and upsert
     code_edges = _entity_edges_to_code_edges(all_entities)

@@ -241,3 +241,31 @@ async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
     results = await related_decisions(state, SLUG, "main decision", k=5, repo_path="/repo/test")
     entity_results = [r for r in results if r.connected_via is not None]
     assert len(entity_results) <= 3
+
+
+def test_in_list_quotes_and_escapes() -> None:
+    """Regression 2.4: ``_in_list`` single-quotes each value and escapes
+    embedded quotes, so the generated ``IN (...)`` filter is valid Lance SQL
+    (the old filter was built from raw qns and broke on any special char)."""
+    from agentalloy.code_index.store.vector_store import _in_list
+
+    assert _in_list(["a", "b"]) == "('a', 'b')"
+    assert _in_list(["it's"]) == "('it''s')"
+
+
+async def test_related_decisions_escapes_qn_filter(state: CodeIndexState) -> None:
+    """Regression 2.4: a decision qn containing a quote character still
+    matches (and does not break the Lance SQL filter) because the ``IN``
+    clause is built via ``_in_list``."""
+    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    qn = "docs/auth.md::it's-a-decision"
+    seed_index(
+        state.settings,
+        SLUG,
+        symbols=[_decision_symbol(qn, "It's a decision", "A decision with a quote in its heading.")],
+        vectors=[vector_row(qn, axis_vec(0), text="A decision with a quote in its heading.")],
+        fts=True,
+        repo_path="/repo/test",
+    )
+    results = await related_decisions(state, SLUG, "decision", k=5, repo_path="/repo/test")
+    assert [r.qualified_name for r in results] == [qn]

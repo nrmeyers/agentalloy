@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from agentalloy.code_index.ingest.embed_text import MAX_EMBED_TEXT_CHARS
 from agentalloy.code_index.store import open_code_index
+from agentalloy.code_index.store.vector_store import _in_list
 from agentalloy.storage.protocols import CodeGraphStore, CodeSearchHit, CodeSymbol
 
 if TYPE_CHECKING:
@@ -315,7 +316,7 @@ async def related_decisions(
             qns = handles.graph.decision_qns()
             if not qns:
                 return []
-            where = "qualified_name IN (" + ",".join(f"'{qn}'" for qn in qns) + ")"
+            where = f"qualified_name IN {_in_list(qns)}"
             dense = handles.vectors.search_similar(query_vec, k=_FETCH_K, where=where)
             bm25 = handles.vectors.search_bm25(query, k=_FETCH_K, where=where)
             ranked = _rrf_fuse([d.qualified_name for d in dense], [qn for qn, _ in bm25])

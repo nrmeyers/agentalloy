@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from agentalloy.code_index.ingest.embed_text import DOCUMENT_PREFIX
 from agentalloy.code_index.ingest.pipeline import IndexResult, run_index_job
-from agentalloy.code_index.store import CodeIndexJobsStore, open_code_index, open_jobs
+from agentalloy.code_index.store import (
+    CodeIndexJobsStore,
+    open_code_index,
+    open_jobs,
+    slug_write_lock,
+)
 from agentalloy.config import Settings
 
 from .conftest import PY_UTIL, FakeEmbedClient
@@ -418,3 +426,71 @@ async def test_embed_one_halving_gives_up_at_floor() -> None:
 
     with pytest.raises(RuntimeError):
         await _embed_one_with_halving(AlwaysRejects(), "m", "y" * 4000, min_chars=256)
+
+
+async def test_cancelled_graph_acquire_does_not_orphan_lock(
+    settings: Settings, fixture_repo: Path
+) -> None:
+    """Regression 2.2: cancelling the pipeline task while it waits for the
+    per-slug write lock must not orphan the lock.
+
+    The old blocking ``await asyncio.to_thread(lock.acquire)`` left a worker
+    thread blocking on the lock; on task cancel that thread kept blocking,
+    grabbed the lock the moment it was freed, and the ``finally`` (``locked``
+    still False) never released it — deadlocking every later writer for the
+    slug. The non-blocking poll never holds the lock at a cancellation point,
+    so a cancel is safe and the lock stays acquirable.
+    """
+    embed = FakeEmbedClient()
+    jobs = open_jobs(settings)
+    lock = slug_write_lock(SLUG)
+    try:
+        job = jobs.create_job(slug=SLUG, repo_path=str(fixture_repo))
+
+        # Hold the lock in a worker thread so the event loop stays free for the
+        # pipeline task to reach (and stall in) the graph phase.
+        acquired = threading.Event()
+        release = threading.Event()
+
+        def _hold() -> None:
+            assert lock.acquire()
+            acquired.set()
+            release.wait()
+            lock.release()
+
+        holder = threading.Thread(target=_hold, daemon=True)
+        holder.start()
+        assert acquired.wait(5.0), "holder thread failed to acquire the slug lock"
+
+        task = asyncio.create_task(
+            run(settings, embed, jobs, fixture_repo, job_id=job.job_id)
+        )
+        # Wait until the pipeline reaches the graph phase — with the lock held
+        # it is now stuck waiting for it.
+        deadline = time.monotonic() + 10.0
+        while (
+            jobs.get_job(job.job_id).phase != "graph"
+            and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(0.01)
+        assert jobs.get_job(job.job_id).phase == "graph", (
+            "pipeline never reached the graph phase while the lock was held"
+        )
+
+        # Cancel the task (service-shutdown path) while it waits on the lock.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Free the lock. Under the old blocking-acquire code the orphaned worker
+        # thread grabs it here and never releases it; give it a beat to do so.
+        release.set()
+        holder.join(5.0)
+        await asyncio.sleep(0.2)
+
+        # The cancelled wait must not have orphaned the lock: a fresh
+        # non-blocking acquire succeeds immediately.
+        assert lock.acquire(blocking=False), "slug lock was orphaned by the cancelled acquire"
+        lock.release()
+    finally:
+        jobs.close()
