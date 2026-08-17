@@ -1475,3 +1475,179 @@ class TestContractTransaction:
                     raise ValueError("abort")
             assert store.get_contract("ctr-1") is None
             assert store.list_contracts() == []
+
+
+# ---------------------------------------------------------------------------
+# Session registry (WI-2)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionRegistry:
+    """sdd_session rows: create/get/list/archive/activity/resume.
+
+    Every method is scoped to ``(repo, stream_id)``; the tests drive a
+    ``for_repo`` view so the scoping is exercised the same way the service
+    and CLI do it.
+    """
+
+    def test_create_and_get_roundtrip(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", task_slug="01-cache", phase="build")
+
+            got = s.get_session("sess-1")
+            assert got is not None
+            assert got["session_key"] == "sess-1"
+            assert got["task_slug"] == "01-cache"
+            assert got["phase"] == "build"
+            assert got["status"] == "active"
+            assert got["created_at"] is not None
+            assert got["last_active_at"] is not None
+
+    def test_create_session_is_idempotent(self, tmp_path: Path) -> None:
+        """Re-creating a session refreshes activity but does not clobber
+        task_slug/phase (the ON CONFLICT branch only touches last_active_at)."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", task_slug="01-cache", phase="build")
+            s.create_session("sess-1", task_slug="99-different", phase="design")
+
+            got = s.get_session("sess-1")
+            assert got is not None
+            assert got["task_slug"] == "01-cache"  # preserved
+            assert got["phase"] == "build"  # preserved
+            assert len(s.list_active_sessions()) == 1  # no duplicate row
+
+    def test_get_session_not_found(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            assert s.get_session("ghost") is None
+
+    def test_list_active_sessions_excludes_archived(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("a")
+            s.create_session("b")
+            s.create_session("c")
+            s.archive_session("c")
+
+            keys = {row["session_key"] for row in s.list_active_sessions()}
+            assert keys == {"a", "b"}
+
+    def test_list_active_sessions_orders_by_last_active_desc(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("a")
+            s.create_session("b")
+            # Pin distinct timestamps so ordering is deterministic (the
+            # second-precision clock can't be relied on to separate them).
+            s.conn.execute(
+                "UPDATE sdd_session SET last_active_at='2020-01-01 00:00:00' "
+                "WHERE repo=? AND stream_id=? AND session_key='a'",
+                ("test", "main"),
+            )
+            s.conn.execute(
+                "UPDATE sdd_session SET last_active_at='2021-01-01 00:00:00' "
+                "WHERE repo=? AND stream_id=? AND session_key='b'",
+                ("test", "main"),
+            )
+
+            keys = [row["session_key"] for row in s.list_active_sessions()]
+            assert keys == ["b", "a"]
+
+    def test_archive_session_active_only(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1")
+
+            assert s.archive_session("sess-1") is True
+            assert s.get_session("sess-1")["status"] == "archived"
+            # Archiving an already-archived session is a no-op.
+            assert s.archive_session("sess-1") is False
+            # Archiving an unknown session is a no-op.
+            assert s.archive_session("ghost") is False
+
+    def test_update_session_activity_updates_phase(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", phase="spec")
+
+            s.update_session_activity("sess-1", phase="build")
+            got = s.get_session("sess-1")
+            assert got is not None
+            assert got["phase"] == "build"
+
+            # Without a phase, only last_active_at is touched.
+            s.update_session_activity("sess-1")
+            assert s.get_session("sess-1")["phase"] == "build"
+
+    def test_resume_session_reactivates_archived(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", phase="build")
+            s.archive_session("sess-1")
+            assert s.get_session("sess-1")["status"] == "archived"
+
+            assert s.resume_session("sess-1") is True
+            got = s.get_session("sess-1")
+            assert got is not None
+            assert got["status"] == "active"
+
+    def test_resume_session_idempotent_on_active(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1")
+
+            assert s.resume_session("sess-1") is True
+            assert s.get_session("sess-1")["status"] == "active"
+
+    def test_resume_session_not_found(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            assert s.resume_session("ghost") is False
+
+    def test_repo_scoping_isolates_sessions(self, tmp_path: Path) -> None:
+        """Two repos share one DB; a session in one is invisible to the other."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            a = store.for_repo("repo-a", stream_id="main")
+            b = store.for_repo("repo-b", stream_id="main")
+            a.create_session("sess-1", task_slug="01-cache")
+
+            assert a.get_session("sess-1") is not None
+            assert b.get_session("sess-1") is None
+            assert [r["session_key"] for r in a.list_active_sessions()] == ["sess-1"]
+            assert b.list_active_sessions() == []
+
+    def test_create_session_readonly_refused(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+            writer.for_repo("test", stream_id="main").create_session("sess-1")
+        with DuckDBStateStore(db, read_only=True) as store:
+            s = store.for_repo("test", stream_id="main")
+            with pytest.raises(RuntimeError, match="cannot write"):
+                s.create_session("sess-2")
+            with pytest.raises(RuntimeError, match="cannot write"):
+                s.resume_session("sess-1")

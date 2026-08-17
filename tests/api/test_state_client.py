@@ -470,3 +470,92 @@ class TestErrorHandling:
         result = run_task_start("nonexistent", tmp_path)
         assert result["ok"] is False
         assert "No contract matching" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# CLI routing: session list / archive / resume
+# ---------------------------------------------------------------------------
+
+
+class TestSessionCli:
+    """The ``session`` verbs read and write the registry through the store.
+
+    The session functions resolve their repo from ``Path.cwd()`` (not a
+    ``root`` argument), so each test chdirs into ``tmp_path`` first.  The
+    autouse ``_bound_state_store`` fixture supplies the process store that
+    ``phase_access`` scopes against.
+    """
+
+    def test_list_empty(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands.session import run_session_list
+
+        monkeypatch.chdir(tmp_path)
+        rc = run_session_list(argparse.Namespace())
+        assert rc == 0
+        assert "No active sessions" in capsys.readouterr().out
+
+    def test_list_shows_active_sessions(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.install.subcommands.session import run_session_list
+
+        monkeypatch.chdir(tmp_path)
+        phase_access(tmp_path).session_handle().create_session(
+            "sess-1", task_slug="01-cache", phase="build"
+        )
+        rc = run_session_list(argparse.Namespace())
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "sess-1" in out
+        assert "01-cache" in out
+        assert "build" in out
+
+    def test_archive_success(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.install.subcommands.session import run_session_archive
+
+        monkeypatch.chdir(tmp_path)
+        phase_access(tmp_path).session_handle().create_session("sess-1")
+        rc = run_session_archive(argparse.Namespace(session_key="sess-1"))
+        assert rc == 0
+        assert "Archived session: sess-1" in capsys.readouterr().out
+
+    def test_archive_not_found(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands.session import run_session_archive
+
+        monkeypatch.chdir(tmp_path)
+        rc = run_session_archive(argparse.Namespace(session_key="ghost"))
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err
+
+    def test_resume_success(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands._state import phase_access
+        from agentalloy.install.subcommands.session import run_session_resume
+
+        monkeypatch.chdir(tmp_path)
+        handle = phase_access(tmp_path).session_handle()
+        handle.create_session("sess-1")
+        handle.archive_session("sess-1")
+        rc = run_session_resume(argparse.Namespace(session_key="sess-1"))
+        assert rc == 0
+        assert "Resumed session: sess-1" in capsys.readouterr().out
+        assert handle.get_session("sess-1")["status"] == "active"
+
+    def test_resume_not_found(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        import argparse
+
+        from agentalloy.install.subcommands.session import run_session_resume
+
+        monkeypatch.chdir(tmp_path)
+        rc = run_session_resume(argparse.Namespace(session_key="ghost"))
+        assert rc == 1
+        assert "not found" in capsys.readouterr().err

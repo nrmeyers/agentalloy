@@ -133,6 +133,10 @@ class PhaseAccess(Protocol):
         """
         ...
 
+    def session_handle(self) -> Any:
+        """The object for session management (list, archive, etc.)."""
+        ...
+
 
 @dataclass(frozen=True)
 class _StoreAccess:
@@ -158,6 +162,9 @@ class _StoreAccess:
         self.store.clear("phase")
 
     def contracts_handle(self) -> Any:
+        return self.store
+
+    def session_handle(self) -> Any:
         return self.store
 
 
@@ -214,6 +221,9 @@ class _ServiceAccess:
         self.client.clear_phase(repo_root=str(self.root))
 
     def contracts_handle(self) -> Any:
+        return self.client
+
+    def session_handle(self) -> Any:
         return self.client
 
 

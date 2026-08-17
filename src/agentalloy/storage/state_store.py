@@ -194,6 +194,21 @@ CREATE TABLE IF NOT EXISTS pr_lifecycle (
 
 CREATE INDEX IF NOT EXISTS idx_pr_lifecycle_task
     ON pr_lifecycle (repo, stream_id, task_slug);
+
+CREATE TABLE IF NOT EXISTS sdd_session (
+    repo               TEXT NOT NULL,
+    stream_id          TEXT NOT NULL DEFAULT '',
+    session_key        TEXT NOT NULL,
+    task_slug          TEXT,
+    phase              TEXT,
+    status             TEXT NOT NULL DEFAULT 'active',
+    created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_active_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo, stream_id, session_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sdd_session_status
+    ON sdd_session (repo, stream_id, status);
 """
 
 # State kinds and their properties
@@ -1703,6 +1718,136 @@ class DuckDBStateStore:
             "contracts_archived": contracts_count,
             "artifacts_archived": artifacts_count,
         }
+
+    # -- session management ----------------------------------------------------
+
+    def create_session(
+        self,
+        session_key: str,
+        *,
+        task_slug: str | None = None,
+        phase: str | None = None,
+    ) -> None:
+        """Create a new session record. Idempotent — if the session already
+        exists, update last_active_at.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        stream_id = self._sid()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            "INSERT INTO sdd_session (repo, stream_id, session_key, task_slug, phase, created_at, last_active_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (repo, stream_id, session_key) DO UPDATE SET last_active_at=excluded.last_active_at",
+            (repo, stream_id, session_key, task_slug, phase, ts, ts),
+        )
+
+    def get_session(self, session_key: str) -> dict[str, Any] | None:
+        """Get a session by session_key. Returns None if not found."""
+        repo = self._repo()
+        stream_id = self._sid()
+        row = self.conn.execute(
+            "SELECT session_key, task_slug, phase, status, created_at, last_active_at "
+            "FROM sdd_session WHERE repo=? AND stream_id=? AND session_key=?",
+            (repo, stream_id, session_key),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "session_key": row[0],
+            "task_slug": row[1],
+            "phase": row[2],
+            "status": row[3],
+            "created_at": row[4],
+            "last_active_at": row[5],
+        }
+
+    def list_active_sessions(self) -> list[dict[str, Any]]:
+        """List all active sessions for this repo+stream, ordered by last_active_at desc."""
+        repo = self._repo()
+        stream_id = self._sid()
+        rows = self.conn.execute(
+            "SELECT session_key, task_slug, phase, status, created_at, last_active_at "
+            "FROM sdd_session WHERE repo=? AND stream_id=? AND status='active' "
+            "ORDER BY last_active_at DESC",
+            (repo, stream_id),
+        ).fetchall()
+        return [
+            {
+                "session_key": r[0],
+                "task_slug": r[1],
+                "phase": r[2],
+                "status": r[3],
+                "created_at": r[4],
+                "last_active_at": r[5],
+            }
+            for r in rows
+        ]
+
+    def archive_session(self, session_key: str) -> bool:
+        """Archive a session by setting status='archived'. Returns True if updated."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        stream_id = self._sid()
+        result = self.conn.execute(
+            "UPDATE sdd_session SET status='archived' "
+            "WHERE repo=? AND stream_id=? AND session_key=? AND status='active'",
+            (repo, stream_id, session_key),
+        )
+        count = result.fetchall()
+        return bool(count) and count[0][0] > 0
+
+    def update_session_activity(
+        self,
+        session_key: str,
+        *,
+        phase: str | None = None,
+    ) -> None:
+        """Update a session's last_active_at and optionally its phase."""
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        stream_id = self._sid()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if phase is not None:
+            self.conn.execute(
+                "UPDATE sdd_session SET last_active_at=?, phase=? "
+                "WHERE repo=? AND stream_id=? AND session_key=?",
+                (ts, phase, repo, stream_id, session_key),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE sdd_session SET last_active_at=? "
+                "WHERE repo=? AND stream_id=? AND session_key=?",
+                (ts, repo, stream_id, session_key),
+            )
+
+    def resume_session(self, session_key: str) -> bool:
+        """Re-activate a session (archived → active) and refresh last_active_at.
+
+        Idempotent for an already-active session (just refreshes activity).
+        Returns True when the session is known for this repo+stream (active or
+        archived); False when no such session exists.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        repo = self._repo()
+        stream_id = self._sid()
+        exists = self.conn.execute(
+            "SELECT 1 FROM sdd_session WHERE repo=? AND stream_id=? AND session_key=?",
+            (repo, stream_id, session_key),
+        ).fetchone()
+        if not exists:
+            return False
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            "UPDATE sdd_session SET status='active', last_active_at=? "
+            "WHERE repo=? AND stream_id=? AND session_key=?",
+            (ts, repo, stream_id, session_key),
+        )
+        return True
 
     # -- approval marker -------------------------------------------------------
     # Thin wrappers over the generic sdd_state read/write, using the already

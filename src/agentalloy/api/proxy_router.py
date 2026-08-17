@@ -131,6 +131,47 @@ def _build_openai_artifact_context(
     return _OpenAIArtifactContext(store=store, phase=signal_result.phase, slug=slug)
 
 
+def _contract_slug(contract_id: str | None) -> str | None:
+    """Derive a display slug from a contract store key or contracts-relative path.
+
+    ``current_contract`` is a store key (e.g. ``"01-cache"``) or a contracts-
+    relative path (e.g. ``"active/build/01-cache.md"``); the slug is the stem
+    without extension.  Mirrors the derivation in ``proxy_signal.evaluate_signal``.
+    """
+    if not contract_id:
+        return None
+    stem = contract_id.split("/")[-1]
+    return stem.rsplit(".", 1)[0] if "." in stem else stem
+
+
+def _register_session(
+    cwd: Path,
+    session_key: str,
+    phase: str | None,
+    task_slug: str | None,
+) -> None:
+    """Record this session in the persistent registry (WI-2), 2xx-gated.
+
+    Idempotent upsert: ensures the session row exists, refreshes
+    ``last_active_at``, and keeps ``phase``/``task_slug`` current so a new
+    session's orientation flow can see where the last one left off.  Soft — a
+    registry failure must never break a proxy request, and this is a no-op when
+    no store is bound (a proxy running outside the service process).
+    """
+    try:
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        if store is None:
+            return
+        scoped = scoped_state_store(store, cwd)
+        scoped.create_session(session_key, task_slug=task_slug, phase=phase)
+        scoped.update_session_activity(session_key, phase=phase)
+    except Exception:
+        logger.debug("Session registry update failed", exc_info=True)
+
+
 def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
     """Return the ComposeOrchestrator via dependency overrides or app.state."""
     # Try the dependency override pattern (same as compose_router)
@@ -1204,9 +1245,16 @@ async def proxy_chat_completions(
     trace_category = "paused" if signal_result and signal_result.paused_mode else None
 
     def _commit(status: int) -> None:
-        """Commit the deferred cadence markers, 2xx-gated. No-op if nothing composed."""
+        """Commit the deferred cadence markers + session registry, 2xx-gated."""
         if inject_outcome is not None:
             commit_outcome(cwd, inject_outcome, upstream_ok=200 <= status < 300)
+        if 200 <= status < 300 and session_key and signal_result is not None:
+            _register_session(
+                cwd,
+                session_key,
+                signal_result.phase,
+                _contract_slug(signal_result.current_contract),
+            )
 
     # --- Step 5: Forward to upstream ---
     try:

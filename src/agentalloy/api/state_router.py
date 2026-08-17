@@ -626,6 +626,53 @@ async def get_artifact(
     return ArtifactResponse(**cleaned)
 
 
+@router.get(
+    "/sessions/active",
+    summary="List active sessions for this repo+stream",
+)
+async def list_active_sessions(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> list[dict[str, Any]]:
+    """List all active sessions for this repo+stream, ordered by last_active_at desc."""
+    return await asyncio.to_thread(store.list_active_sessions)
+
+
+@router.post(
+    "/sessions/archive",
+    summary="Archive a session by session_key",
+)
+async def archive_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Archive a session by session_key. Returns {"archived": bool}."""
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    archived = await asyncio.to_thread(store.archive_session, session_key)
+    return {"archived": archived}
+
+
+@router.post(
+    "/sessions/resume",
+    summary="Re-activate a session by session_key",
+)
+async def resume_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Re-activate a session (archived → active) and refresh last_active_at.
+
+    Returns ``{"resumed": bool}`` — True when the session is known (active or
+    archived), False when no such session exists for this repo+stream.
+    """
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    resumed = await asyncio.to_thread(store.resume_session, session_key)
+    return {"resumed": resumed}
+
+
 @router.post(
     "/archive-all",
     summary="Archive all active contracts and artifacts",
