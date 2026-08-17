@@ -518,6 +518,56 @@ class StateClient:
         except (urllib.error.URLError, OSError) as exc:
             raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
+    # -- session management ------------------------------------------------
+
+    def list_active_sessions(self) -> list[dict[str, Any]]:
+        """List all active sessions for this repo+stream."""
+        try:
+            resp = urllib.request.urlopen(
+                self._url("/state/sessions/active"),
+                timeout=self._timeout,
+            )
+            return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def archive_session(self, session_key: str) -> bool:
+        """Archive a session by session_key. Returns True if archived."""
+        try:
+            result = self._post(
+                "/state/sessions/archive",
+                {"session_key": session_key},
+            )
+            return result.get("archived", False)
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def resume_session(self, session_key: str) -> bool:
+        """Re-activate a session by session_key. Returns True if the session is known."""
+        try:
+            result = self._post(
+                "/state/sessions/resume",
+                {"session_key": session_key},
+            )
+            return result.get("resumed", False)
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
     # -- internal helpers ------------------------------------------------
 
     def _url(

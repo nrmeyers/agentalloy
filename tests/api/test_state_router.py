@@ -1301,3 +1301,82 @@ class TestArchiveAll:
         assert contract is not None
         criteria = contract.get("success_criteria") or []
         assert len(criteria) == 0
+
+
+# ---------------------------------------------------------------------------
+# Session registry endpoints (WI-2)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionEndpoints:
+    """/state/sessions/{active,archive,resume} — the session registry routes.
+
+    The ``state_store`` fixture is opened under the same ``(repo, stream_id)``
+    the routes resolve from the request, so rows seeded through it are visible
+    to the client (and vice versa).
+    """
+
+    def test_list_active_sessions_empty(self, state_client: TestClient) -> None:
+        resp = state_client.get("/state/sessions/active")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_list_active_sessions_returns_seeded(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="01-cache", phase="build")
+        state_store.create_session("sess-2", task_slug="02-api", phase="build")
+
+        resp = state_client.get("/state/sessions/active")
+        assert resp.status_code == 200
+        rows = resp.json()
+        keys = {r["session_key"] for r in rows}
+        assert keys == {"sess-1", "sess-2"}
+        by_key = {r["session_key"]: r for r in rows}
+        assert by_key["sess-1"]["task_slug"] == "01-cache"
+        assert by_key["sess-1"]["phase"] == "build"
+        assert by_key["sess-2"]["task_slug"] == "02-api"
+
+    def test_archive_session_success(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", phase="build")
+
+        resp = state_client.post("/state/sessions/archive", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"archived": True}
+        # The row is now archived and dropped from the active list.
+        assert state_store.get_session("sess-1")["status"] == "archived"
+        assert state_client.get("/state/sessions/active").json() == []
+
+    def test_archive_session_not_found(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/archive", json={"session_key": "ghost"})
+        assert resp.status_code == 200
+        assert resp.json() == {"archived": False}
+
+    def test_archive_missing_session_key_is_400(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/archive", json={})
+        assert resp.status_code == 400
+
+    def test_resume_session_reactivates_archived(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", phase="build")
+        state_store.archive_session("sess-1")
+        assert state_store.get_session("sess-1")["status"] == "archived"
+
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"resumed": True}
+        assert state_store.get_session("sess-1")["status"] == "active"
+        keys = {r["session_key"] for r in state_client.get("/state/sessions/active").json()}
+        assert keys == {"sess-1"}
+
+    def test_resume_session_not_found(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "ghost"})
+        assert resp.status_code == 200
+        assert resp.json() == {"resumed": False}
+
+    def test_resume_missing_session_key_is_400(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/resume", json={})
+        assert resp.status_code == 400
