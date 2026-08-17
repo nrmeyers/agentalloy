@@ -1086,11 +1086,16 @@ async def evaluate_signal(
     )
 
     # 3. Build predicate context
+    # Pass the store handle so exit-gate predicates (contract_exists,
+    # artifact_exists) evaluate against real store data instead of failing
+    # open (UNKNOWN) or returning blind NOT_MET. banner_store is the same
+    # soft repo+stream-scoped handle _banner_for_turn already uses.
     ctx = _build_predicate_context(
         project_root=cwd,
         phase=phase,
         prompt_text=task,
         session_key=session_key,
+        store=banner_store,
         # Proxy has no file/tool events — only prompt text
     )
 
@@ -1176,8 +1181,15 @@ async def evaluate_signal(
                 _route_step,
             )
 
-            out = _route_step(phase, lane, store=ctx.store)
-            to_phase = out.to_phase if out.should_transition else to_phase
+            # Pass project_root=cwd so evaluate_phase_gate resolves path-based
+            # predicates and the approval gate against the real repo, not the
+            # proxy's process cwd (the uv tool dir).
+            out = _route_step(phase, lane, project_root=cwd, store=ctx.store)
+            # Defensive: only write to_phase when the gate allows the transition.
+            # Never use the graph's ungated terminal result (always 'ship' for the
+            # full lane) as a fallback write target — the graph is "reactive, not
+            # driving" per its docstring. When the gate blocks, stay put.
+            to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
                 # test-plan.md into plan so the plan gate is satisfied on first
