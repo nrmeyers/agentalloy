@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from agentalloy.install.subcommands import (
     add,
@@ -194,6 +195,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Self-heal: a worktree created outside the post-checkout hook (e.g. by an
+    # agent harness) never ran `auto-wire-worktree`, so it has no repo-local
+    # wiring or token of its own — context banners then key off the main
+    # checkout (anomalies A1/A2). Soft-fail and marker-gated, so the common
+    # case is a cheap no-op.
+    auto_wire_worktree.run_auto_wire_worktree(Path.cwd())
 
     if args.subcommand is None:
         parser.print_help(sys.stderr)

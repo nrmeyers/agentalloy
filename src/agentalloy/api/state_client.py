@@ -438,7 +438,7 @@ class StateClient:
         """Fetch a single artifact by (phase, slug, name), or None if absent."""
         path = f"/state/artifact/{urllib.parse.quote(phase, safe='')}/{urllib.parse.quote(slug, safe='')}/{urllib.parse.quote(name, safe='')}"
         req = urllib.request.Request(
-            f"{self.base_url}{path}",
+            self._url(path),
             headers={"Accept": "application/json"},
         )
         try:

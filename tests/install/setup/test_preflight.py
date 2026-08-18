@@ -3,14 +3,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentalloy.install.subcommands import preflight
 from agentalloy.install.subcommands.preflight import (
+    _check_cli_on_path,  # pyright: ignore[reportPrivateUsage]
     _check_llama_server_present,  # pyright: ignore[reportPrivateUsage]
     _check_llama_server_reachable,  # pyright: ignore[reportPrivateUsage]
+    _find_agentalloy_binary,  # pyright: ignore[reportPrivateUsage]
     _try_brew_install,  # pyright: ignore[reportPrivateUsage]
 )
 
@@ -425,3 +429,75 @@ class TestRunPreflightContainerPhase:
         assert "name_conflicts" not in names
         assert "volume" not in names
         assert seen == []  # no podman default fabricated
+
+
+class TestCheckCliOnPath:
+    """``_check_cli_on_path`` / ``_find_agentalloy_binary`` — anomaly A5.
+
+    A uv tool install whose entry point was not linked into ``~/.local/bin``
+    leaves the real binary in the tool venv's own ``bin/``. The PATH
+    remediation must point at the dir that ACTUALLY holds the binary, not the
+    canonical ``~/.local/bin`` (which would be a wrong, copy-pasteable line).
+    """
+
+    def test_passes_when_resolvable_and_canonical_dir_on_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        home = Path.home()
+        monkeypatch.setenv("PATH", f"{home}/.local/bin:/usr/bin")
+        monkeypatch.setattr(
+            preflight.shutil,
+            "which",
+            lambda name: f"{home}/.local/bin/agentalloy" if name == "agentalloy" else None,
+        )
+        result = _check_cli_on_path()
+        assert result["passed"] is True
+        assert "agentalloy at" in result["detail"]
+
+    def test_remediation_points_at_uv_tool_venv_bin_when_not_on_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        """A5: binary only in the uv tool venv's bin/ → remediation exports THAT dir."""
+        tool_dir = tmp_path / "uvtools"
+        bin_dir = tool_dir / "agentalloy" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "agentalloy").write_text("#!/bin/sh\nexit 0\n")
+
+        # Not resolvable on PATH, and the canonical dir is not in PATH.
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setenv("UV_TOOL_DIR", str(tool_dir))
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        monkeypatch.setattr(preflight.shutil, "which", lambda name: None)
+
+        result = _check_cli_on_path()
+        assert result["passed"] is False
+        # The remediation must point at the real bin dir (resolved), not the
+        # canonical ~/.local/bin which does not hold the binary.
+        assert f'export PATH="{bin_dir.resolve()}:$PATH"' in result["remediation"]
+        canonical = str(Path.home() / ".local" / "bin")
+        assert f'export PATH="{canonical}:$PATH"' not in result["remediation"]
+
+    def test_remediation_falls_back_to_canonical_dir_when_binary_not_found(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        """Binary nowhere to be found → remediation falls back to ~/.local/bin."""
+        # Empty XDG_DATA_HOME so the default uv tools location is empty; no UV_TOOL_DIR.
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "empty-xdg"))
+        monkeypatch.delenv("UV_TOOL_DIR", raising=False)
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setattr(preflight.shutil, "which", lambda name: None)
+
+        result = _check_cli_on_path()
+        assert result["passed"] is False
+        canonical = str(Path.home() / ".local" / "bin")
+        assert f'export PATH="{canonical}:$PATH"' in result["remediation"]
+
+    def test_find_binary_returns_path_when_on_path(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(preflight.shutil, "which", lambda name: "/usr/local/bin/agentalloy")
+        assert _find_agentalloy_binary() == Path("/usr/local/bin/agentalloy")
+
+    def test_find_binary_none_when_nowhere(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "empty"))
+        monkeypatch.delenv("UV_TOOL_DIR", raising=False)
+        monkeypatch.setattr(preflight.shutil, "which", lambda name: None)
+        assert _find_agentalloy_binary() is None
