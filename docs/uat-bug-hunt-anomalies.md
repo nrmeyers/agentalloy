@@ -118,7 +118,9 @@ The artifact is listed but not retrievable.
 
 **Repro:** `which agentalloy` → not found; the full path works.
 
-**Fix:** out of scope for this cycle — note as a follow-up (the installer could add the uv tool bin dir to PATH, or document the full path).
+**Root cause:** `preflight`'s `_check_cli_on_path` correctly detects the missing CLI and prints an `export PATH=…` line, but it hard-assumes the binary is in the canonical `~/.local/bin`. A uv tool install whose entry point was not linked there (`--no-install-bin` / a custom `--bin-dir` / a wiped `~/.local/bin`) leaves the real binary in the tool venv's own `bin/`, so the printed line pointed at a dir that does not hold the binary — a wrong, copy-pasteable remediation.
+
+**Fix (in scope):** add `_find_agentalloy_binary()` to `preflight`, which resolves the binary via `shutil.which` and, failing that, searches the known uv tool venv locations (`$UV_TOOL_DIR/agentalloy/bin`, `$XDG_DATA_HOME/uv/tools/agentalloy/bin`). `_check_cli_on_path` now points its `export PATH=…` line at the dir that **actually** holds the binary (falling back to `~/.local/bin` only when the binary cannot be located). Non-invasive: it prints the exact line, it does not rewrite shell profiles. Verified against the live env — it now emits `export PATH="/home/nmeyers/.local/share/uv/tools/agentalloy/bin:$PATH"`.
 
 ---
 
@@ -130,7 +132,7 @@ The artifact is listed but not retrievable.
 | A2 | Worktree never registered (no `.agentalloy/` / stream / wiring) | High | Yes |
 | A3 | Shell guard over-broad (cross-root `cd` denied) | Medium | No (follow-up) |
 | A4 | README doc drift (phase is store-backed) | Low | No (false positive) |
-| A5 | `agentalloy` binary not on PATH | Low | No (follow-up) |
+| A5 | `agentalloy` binary not on PATH | Low | Yes (preflight PATH remediation) |
 | A6 | `artifact-show` drops `repo_root` → 404 on a listed artifact | High | Yes |
 
 The High anomalies split into two roots. **A1 + A2** share one: **AgentAlloy lacks first-class git-worktree support** — worktrees created outside `agentalloy worktree` are never wired, and the global harness config carries a stale `/proj` token that pins the banner to the main root. **A6** is a separate, independent defect: `StateClient.get_artifact` is the only state call that bypasses `_url()`, so it drops the `repo_root` disambiguator and reads the wrong repo.

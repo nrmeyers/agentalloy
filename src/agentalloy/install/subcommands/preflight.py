@@ -117,6 +117,37 @@ def _path_entries() -> list[str]:
     return [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
 
 
+def _find_agentalloy_binary() -> Path | None:
+    """Locate the ``agentalloy`` binary even when it is not on PATH.
+
+    ``shutil.which`` only sees PATH. A uv tool install normally links the
+    entry point into the canonical user-bin dir (``~/.local/bin``), but a
+    ``--no-install-bin`` / custom ``--bin-dir`` install — or a wiped
+    ``~/.local/bin`` — leaves the real binary in the tool venv's own
+    ``bin/``. Search the known uv tool venv locations so the remediation can
+    point at the dir that actually holds it (anomaly A5).
+    """
+    on_path = shutil.which("agentalloy")
+    if on_path:
+        return Path(on_path)
+
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    tool_roots: list[Path] = []
+    uv_tool_dir = os.environ.get("UV_TOOL_DIR")
+    if uv_tool_dir:
+        tool_roots.append(Path(uv_tool_dir))
+    tool_roots.append(data_home / "uv" / "tools")
+
+    for root in tool_roots:
+        candidate = root / "agentalloy" / "bin" / "agentalloy"
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
 def _check_cli_on_path() -> dict[str, Any]:
     """Verify ``agentalloy`` resolves and the canonical user-bin dir is on PATH.
 
@@ -146,9 +177,18 @@ def _check_cli_on_path() -> dict[str, Any]:
         parts.append(f"{expected} not in PATH")
     error = "; ".join(parts)
 
+    # Point the remediation at the dir that ACTUALLY holds the binary. The
+    # canonical line assumes ~/.local/bin, but a uv tool install whose entry
+    # point was not linked there leaves the real binary in the tool venv's
+    # own bin/ — the canonical line would then be wrong (anomaly A5).
+    bin_dir = expected
+    located = _find_agentalloy_binary()
+    if located is not None and str(located.parent) != expected:
+        bin_dir = str(located.parent)
+
     remediation = (
         f"Add this line to your shell profile (~/.bashrc, ~/.zshrc) and "
-        f'restart the shell:\n\n    export PATH="{expected}:$PATH"\n\n'
+        f'restart the shell:\n\n    export PATH="{bin_dir}:$PATH"\n\n'
         f"Then re-run `agentalloy preflight`. If `uv tool install --editable .` "
         f"has not been run yet, run it first."
     )
