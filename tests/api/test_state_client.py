@@ -210,6 +210,32 @@ class TestStateClientReads:
         finally:
             thread.join(timeout=2.0)
 
+    def test_get_artifact_url_carries_repo_root(self) -> None:
+        """A6: artifact reads must carry repo_root, like every other call.
+
+        ``get_artifact`` built its URL from ``self.base_url`` directly, so a
+        client speaking for a non-default repo sent the read with no
+        ``repo_root`` and landed in the service's default repo — the artifact
+        showed in ``artifact-list`` (which does carry the param) but not in
+        ``artifact-show``. The fix routes it through ``_url`` like the rest.
+        """
+        thread, log = _start_fake_service(19990)
+        try:
+            client = StateClient(
+                base_url="http://127.0.0.1:19990",
+                repo_root="/home/user/some-repo",
+            )
+            # The fake service answers /state/* with non-JSON, so the parse
+            # raises; we only care that the request went out with repo_root.
+            with contextlib.suppress(Exception):
+                client.get_artifact("plan", "uat-bug-hunt", "tasks.artifact")
+            artifact_requests = [r for r in log if "GET /state/artifact/" in r]
+            assert artifact_requests, "get_artifact made no request"
+            assert any("repo_root=" in r for r in artifact_requests)
+            assert "repo_root=%2Fhome%2Fuser%2Fsome-repo" in artifact_requests[0]
+        finally:
+            thread.join(timeout=2.0)
+
 
 # ---------------------------------------------------------------------------
 # CLI routing: phase set

@@ -166,3 +166,109 @@ class TestRunAutoWireWorktree:
         plain = tmp_path / "plain"
         plain.mkdir()
         assert run_auto_wire_worktree(plain) == 0
+
+
+class TestCliBootstrapAutoWire:
+    """A2: the CLI bootstrap self-heals an unwired worktree.
+
+    The post-checkout hook only fires for worktrees created via ``git worktree
+    add``; a worktree created by an agent harness skips it and stays unwired, so
+    it has no repo-local wiring or token of its own and context banners key off
+    the main checkout (anomalies A1/A2). The fix runs ``run_auto_wire_worktree``
+    from ``main()`` on every bootstrap; it is soft-fail and marker-gated, so the
+    common case is a cheap no-op.
+    """
+
+    def test_main_invokes_auto_wire_with_cwd(self, worktree: Path, monkeypatch) -> None:
+        import agentalloy.install.__main__ as install_main
+
+        monkeypatch.chdir(worktree)
+        expected = Path.cwd()
+        with patch.object(install_main, "auto_wire_worktree") as mock_aw:
+            rc = install_main.main([])
+        # Bare `agentalloy` (no subcommand) exits EXIT_USER but still self-heals.
+        assert rc == install_main.EXIT_USER
+        mock_aw.run_auto_wire_worktree.assert_called_once_with(expected)
+
+    def test_main_self_heals_unwired_worktree(
+        self, repo: Path, worktree: Path, monkeypatch
+    ) -> None:
+        """Running the CLI from an unwired worktree wires it (AC2)."""
+        import agentalloy.install.__main__ as install_main
+
+        (repo / ".agentalloy").mkdir()
+        (repo / ".agentalloy" / "upstream").write_text(
+            "url: http://localhost:9999/v1\nmodel: test-model\nkey_env: MY_KEY\n"
+        )
+        state = {
+            "harness_files_written": [
+                {"harness": "hermes-agent", "repo_root": str(repo), "path": "x"},
+            ]
+        }
+
+        def fake_adopt_and_wire(harness, root, **kw):
+            cfg = root / ".agentalloy" / "config"
+            cfg.parent.mkdir(parents=True, exist_ok=True)
+            cfg.write_text("lifecycle_mode: full\n")
+            return None, {"ok": True}
+
+        monkeypatch.chdir(worktree)
+        with (
+            patch("agentalloy.install.state.load_state", return_value=state),
+            patch("agentalloy.install.subcommands.add.resolve_port", return_value=47950),
+            patch(
+                "agentalloy.install.subcommands.add.adopt_and_wire",
+                side_effect=fake_adopt_and_wire,
+            ),
+        ):
+            install_main.main([])
+        assert (worktree / ".agentalloy" / "config").exists()
+
+    def test_main_auto_wire_is_idempotent(
+        self, repo: Path, worktree: Path, monkeypatch
+    ) -> None:
+        """A second bootstrap is a no-op: the marker short-circuits (AC3)."""
+        import agentalloy.install.__main__ as install_main
+
+        (repo / ".agentalloy").mkdir()
+        (repo / ".agentalloy" / "upstream").write_text(
+            "url: http://localhost:9999/v1\nmodel: m\n"
+        )
+        state = {
+            "harness_files_written": [
+                {"harness": "hermes-agent", "repo_root": str(repo), "path": "x"},
+            ]
+        }
+
+        def fake_adopt_and_wire(harness, root, **kw):
+            cfg = root / ".agentalloy" / "config"
+            cfg.parent.mkdir(parents=True, exist_ok=True)
+            cfg.write_text("lifecycle_mode: full\n")
+            return None, {"ok": True}
+
+        monkeypatch.chdir(worktree)
+        with (
+            patch("agentalloy.install.state.load_state", return_value=state),
+            patch("agentalloy.install.subcommands.add.resolve_port", return_value=47950),
+            patch(
+                "agentalloy.install.subcommands.add.adopt_and_wire",
+                side_effect=fake_adopt_and_wire,
+            ) as mock_wire,
+        ):
+            install_main.main([])
+            install_main.main([])
+        # Wired on the first bootstrap; the marker makes the second a no-op.
+        assert mock_wire.call_count == 1
+        assert (worktree / ".agentalloy" / "config").exists()
+
+    def test_main_leaves_a_non_worktree_checkout_alone(self, repo: Path, monkeypatch) -> None:
+        """The main checkout (not a worktree) is never auto-wired (AC3)."""
+        import agentalloy.install.__main__ as install_main
+
+        (repo / ".agentalloy").mkdir()
+        monkeypatch.chdir(repo)
+        with patch(
+            "agentalloy.install.subcommands.add.adopt_and_wire"
+        ) as mock_wire:
+            install_main.main([])
+        mock_wire.assert_not_called()
