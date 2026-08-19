@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -487,6 +488,27 @@ class TestOfferIndex:
         ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
         assert submitted == []
 
+    def test_already_active_job_points_at_status_not_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A 409 'already active' from the service is not a start failure (B2)."""
+        import sys as _sys
+
+        submitted = self._seams(
+            monkeypatch, slugs=[], job={"already_active": True, "job_id": "j9"}
+        )
+        monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
+        job = ciw.offer_index(tmp_path, 47950)
+        assert job is not None and job["already_active"] is True
+        assert submitted == [tmp_path]
+        err = capsys.readouterr().err
+        assert "already active (id=j9)" in err
+        assert "agentalloy code status" in err
+        assert "could not start" not in err
+
 
 class TestDetectTarget:
     """detect_target() resolves the correct file for each harness target."""
@@ -594,3 +616,56 @@ class TestServiceBaseUrl:
 
         assert len(seen) == 3
         assert all(url.startswith("http://127.0.0.1:1/") for url in seen), seen
+
+
+class TestSubmitIndexJob409:
+    """A 409 'already active' from /code/index is not a start failure (B2).
+
+    ``urlopen`` raises ``urllib.error.HTTPError`` (a ``URLError`` subclass) on
+    the 409. The old generic ``except (URLError, ...)`` swallowed it into
+    ``None``, so ``offer_index`` printed the misleading "could not start ... run
+    manually" even though the job was running. The specific ``HTTPError``
+    handler must precede the generic one and map 409 to ``already_active``.
+    """
+
+    def _http_error(self, code: int, detail: object) -> urllib.error.HTTPError:
+        import io
+        import json as _json
+
+        body = _json.dumps({"detail": detail}).encode("utf-8")
+        return urllib.error.HTTPError(
+            "http://127.0.0.1:1/code/index", code, "Conflict", {}, io.BytesIO(body)
+        )
+
+    def _raise(self, monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+        def _fake_urlopen(req: Any, timeout: float = 0) -> Any:
+            raise exc
+
+        monkeypatch.setattr(ciw.urllib.request, "urlopen", _fake_urlopen)
+
+    def test_409_already_active_parses_job_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._raise(
+            monkeypatch,
+            self._http_error(409, "an index job for slug 'org__repo' is already active: j9"),
+        )
+        result = ciw.submit_index_job(47950, Path("/tmp/repo"))
+        assert result == {"already_active": True, "job_id": "j9"}
+
+    def test_409_without_detail_still_already_active(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._raise(monkeypatch, self._http_error(409, ""))
+        result = ciw.submit_index_job(47950, Path("/tmp/repo"))
+        assert result == {"already_active": True, "job_id": None}
+
+    def test_other_http_error_is_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._raise(monkeypatch, self._http_error(500, "boom"))
+        assert ciw.submit_index_job(47950, Path("/tmp/repo")) is None
+
+    def test_unreachable_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._raise(monkeypatch, urllib.error.URLError("refused"))
+        assert ciw.submit_index_job(47950, Path("/tmp/repo")) is None

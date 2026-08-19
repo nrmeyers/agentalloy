@@ -17,16 +17,16 @@
   &nbsp;
   <img src="https://img.shields.io/badge/packs-41-orange" alt="41 packs" />
   &nbsp;
-  <img src="https://img.shields.io/badge/skills-711-orange" alt="711 skills" />
+  <img src="https://img.shields.io/badge/skills-355-orange" alt="355 skills" />
   &nbsp;
-  <img src="https://img.shields.io/badge/v9.0.0-Knowledge%20module-brightgreen" alt="v9.0.0: Knowledge module" />
+  <img src="https://img.shields.io/badge/v9.2.1-Worktree%20auto--wire%20%2B%20UAT%20bug--hunt-brightgreen" alt="v9.2.1: Worktree auto-wire + UAT bug hunt" />
 </p>
 
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
 **AgentAlloy** is a **just-in-time context engine**: one local service, three context modules.
 
-- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 355-skill corpus across 39 packs) that fit *this* moment. Nothing changed means nothing injected.
+- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 355-skill corpus across 41 packs) that fit *this* moment. Nothing changed means nothing injected.
 - **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs ("what breaks if I change this?") and budgeted context bundles. The agent **queries it**; nothing is pushed. The composed instructions teach the agent when to ask: check blast radius at design, pull a grounded bundle at build, map regression scope at qa.
 - **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index — no separate store, no new process, no separate toggle: a deterministic `_index_decisions` pass links each decision (an existing lifecycle doc: `docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand (`agentalloy knowledge why <symbol>`) or let it push: at design/build, when a work-item's scope touches governed code, the governing decision's rationale is composed into context without asking. See [Knowledge module (decisions)](#knowledge-module-decisions).
 
@@ -270,7 +270,7 @@ For harnesses that speak the Model Context Protocol instead of taking a proxy, A
 
 ## Packs shipping in-tree
 
-The corpus is **packs** — opt-in groups of related skills. `main` ships **39 packs / 355 declared skills** organized across 10 tiers:
+The corpus is **packs** — opt-in groups of related skills. `main` ships **41 packs / 355 declared skills** organized across 9 tiers:
 
 <table>
 <tr><th>Tier</th><th>Packs</th></tr>

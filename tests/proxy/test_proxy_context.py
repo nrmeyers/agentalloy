@@ -92,16 +92,46 @@ class TestResolveWorkingDir:
             result = resolve_working_dir(req)
         assert result == Path("/env/project")
 
-    def test_project_dir_override_wins(self, tmp_path: Path) -> None:
-        """TC6: project_dir_override (the decoded /proj token) beats metadata.cwd."""
+    def test_project_dir_override_wins_when_metadata_absent(self, tmp_path: Path) -> None:
+        """TC6: with no metadata.cwd, the decoded /proj token still wins."""
+        req = ProxyRequest(model="gpt-4", messages=_MSG, metadata=None)
+        with mock.patch.dict(os.environ, {"AGENTALLOY_PROJECT_DIR": "/env/project"}):
+            result = resolve_working_dir(req, project_dir_override=tmp_path)
+        assert result == tmp_path
+
+    def test_project_dir_override_and_metadata_agree(self, tmp_path: Path) -> None:
+        """Token and metadata.cwd naming the same realpath resolve to that repo."""
+        req = ProxyRequest(
+            model="gpt-4",
+            messages=_MSG,
+            metadata={"cwd": str(tmp_path)},
+        )
+        with mock.patch.dict(os.environ, {"AGENTALLOY_PROJECT_DIR": "/env/project"}):
+            result = resolve_working_dir(req, project_dir_override=tmp_path)
+        assert result == tmp_path
+
+    def test_metadata_cwd_wins_over_disagreeing_token(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A stale token that disagrees with metadata.cwd loses to the per-request signal.
+
+        The token is captured once at session start; a session that started in the
+        wrong directory (or predates a re-wire) carries a stale token. The
+        per-request metadata.cwd must override it and the mismatch must be
+        surfaced (anomalies B1/B4/B5).
+        """
         req = ProxyRequest(
             model="gpt-4",
             messages=_MSG,
             metadata={"cwd": "/some/other/dir"},
         )
-        with mock.patch.dict(os.environ, {"AGENTALLOY_PROJECT_DIR": "/env/project"}):
+        with (
+            mock.patch.dict(os.environ, {"AGENTALLOY_PROJECT_DIR": "/env/project"}),
+            caplog.at_level("WARNING", logger="agentalloy.api.proxy_context"),
+        ):
             result = resolve_working_dir(req, project_dir_override=tmp_path)
-        assert result == tmp_path
+        assert result == Path("/some/other/dir")
+        assert any("/proj token" in rec.message for rec in caplog.records)
 
     def test_override_none_falls_through(self, tmp_path: Path) -> None:
         """An explicit None override is equivalent to not passing one."""

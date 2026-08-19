@@ -109,6 +109,7 @@ docs/fast/
 
 # Per-session scratch handoff notes (regenerable; never part of the repo).
 HANDOFF.md
+docs/uat-bug-hunt-anomalies.md
 docs/reviews/
 docs/plan/
 docs/audit/

@@ -227,7 +227,14 @@ def registry_slugs(port: int) -> list[str] | None:
 
 
 def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
-    """POST /code/index for *repo_path*; the job snapshot, or None on failure."""
+    """POST /code/index for *repo_path*; the job snapshot, or None on failure.
+
+    A 409 means an index job for this repo is *already active* — the endpoint
+    rejects the duplicate but the running job is unaffected. That is not a
+    failure, so the result carries ``already_active`` (plus the in-flight job's
+    id, parsed from the 409 detail) rather than ``None``; the caller prints an
+    "already active" pointer instead of the misleading "could not start".
+    """
     payload = json.dumps({"repo_path": str(repo_path), "force": False}).encode("utf-8")
     try:
         req = urllib.request.Request(
@@ -238,6 +245,18 @@ def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
         )
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
             body = json.loads(resp.read())
+    except urllib.error.HTTPError as err:
+        if err.code == 409:
+            job_id: str | None = None
+            try:
+                detail = json.loads(err.read()).get("detail", "")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                detail = ""
+            if isinstance(detail, str):
+                # "an index job for slug 'x' is already active: <job_id>"
+                job_id = detail.rsplit(":", 1)[-1].strip() or None
+            return {"already_active": True, "job_id": job_id}
+        return None
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
     if not isinstance(body, dict):
@@ -279,6 +298,13 @@ def offer_index(root: Path, port: int, *, assume_yes: bool = False) -> dict[str,
             file=sys.stderr,
         )
         return None
+    if job.get("already_active"):
+        print(
+            f"  code-index: an index job is already active (id={job.get('job_id')}); "
+            "follow it with `agentalloy code status`",
+            file=sys.stderr,
+        )
+        return job
     print(
         f"  code-index: index job started (id={job.get('id')}); "
         "follow it with `agentalloy code status`",

@@ -1374,3 +1374,91 @@ class TestOrientationAnnounceCadence:
         assert result.pending_orientation is not None
         _, pending_sessions = result.pending_orientation
         assert len(pending_sessions) <= proxy_signal._MAX_ANNOUNCED_SESSIONS
+
+
+class TestTransitionTriggerOffEventLoop:
+    """Regression guard: the transition trigger must not block the event loop.
+
+    ``check_transition_trigger`` performs synchronous reranker/embed network I/O
+    (up to two sequential blocking HTTP calls to the local reranker, each with a
+    600ms timeout). It runs inside ``async def evaluate_signal`` on the single
+    uvicorn event loop that serves every repo. While it ran on the loop, a slow
+    or unreachable reranker stalled every concurrent request. The fix offloads
+    it to a worker thread (``asyncio.to_thread``), matching the gate-eval path.
+
+    This test drives ``evaluate_signal`` with a trigger that blocks its calling
+    thread, and asserts (a) the trigger ran on a worker thread, not the loop
+    thread, and (b) a concurrent event-loop heartbeat kept ticking during the
+    block — i.e. the loop stayed responsive to other requests.
+    """
+
+    def test_trigger_runs_off_event_loop_and_loop_stays_responsive(self, tmp_path: Path) -> None:
+        import threading
+        import time
+
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")  # steady-state turn (the realistic slow case)
+
+        block_seconds = 0.30
+        loop_thread_id: list[int] = []
+        trigger_thread_id: list[int] = []
+        stops: list[float] = []
+        stop_flag: list[bool] = [False]
+
+        def fake_trigger(*args: Any, **kwargs: Any) -> None:
+            # Record the thread this sync call actually runs on, then block the
+            # calling thread long enough to expose an event-loop stall if the
+            # trigger were still running on the loop.
+            trigger_thread_id.append(threading.get_ident())
+            time.sleep(block_seconds)
+            return None
+
+        async def heartbeat(stops: list[float], stop_flag: list[bool]) -> None:
+            while not stop_flag[0]:
+                stops.append(time.monotonic())
+                await asyncio.sleep(0.005)
+
+        async def scenario() -> Any:
+            loop_thread_id.append(threading.get_ident())
+            hb = asyncio.create_task(heartbeat(stops, stop_flag))
+            try:
+                with (
+                    mock.patch(
+                        "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                        return_value=_skill(["deploy"]),
+                    ),
+                    mock.patch(
+                        "agentalloy.api.proxy_signal.check_transition_trigger",
+                        side_effect=fake_trigger,
+                    ),
+                ):
+                    return await evaluate_signal(
+                        _req("the build is done, ready to ship"),
+                        tmp_path,
+                        session_id=SESSION,
+                    )
+            finally:
+                stop_flag[0] = True
+                hb.cancel()
+
+        asyncio.run(scenario())
+
+        # The trigger ran on a worker thread, not the event-loop thread.
+        assert trigger_thread_id, "check_transition_trigger was not consulted"
+        assert loop_thread_id, "loop thread id not captured"
+        assert trigger_thread_id[0] != loop_thread_id[0], (
+            "check_transition_trigger ran on the event-loop thread — it must be "
+            "offloaded to a worker thread so its blocking rerank/embed I/O cannot "
+            "stall the shared uvicorn event loop"
+        )
+
+        # The loop stayed responsive while the trigger blocked a worker thread:
+        # the heartbeat kept ticking, so no single gap approaches the block.
+        assert len(stops) >= 3, "heartbeat did not sample long enough"
+        gaps = [b - a for a, b in zip(stops, stops[1:], strict=False)]
+        max_gap = max(gaps)
+        assert max_gap < block_seconds / 2, (
+            f"event loop stalled for {max_gap:.3f}s while the trigger blocked a "
+            f"worker thread for {block_seconds:.2f}s — the trigger is still "
+            f"running on the event loop (max heartbeat gap {max_gap:.3f}s)"
+        )
