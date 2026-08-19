@@ -539,6 +539,38 @@ _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
 }
 
 
+def _is_forward_skip(current_phase: str, target_phase: str) -> bool:
+    """True when the transition jumps *forward* over one or more main-chain
+    phases (e.g. ``spec → build``, skipping ``design`` and ``plan``).
+
+    The SDD flow is a linear pipeline — you advance one phase at a time — so a
+    forward skip is never a valid transition and is blocked by
+    :func:`evaluate_phase_gate`. Backward moves (``qa → build``), bail routes
+    (``sdd-fast → spec``), and resets (``ship → intake``) are *not* skips; they
+    fall through to the unguarded path.
+
+    Lane phases (``sdd-fast`` / ``add-skill`` / ``sdd-flow``) sit off the main
+    chain; their only forward edge is their declared linear next (``_NEXT``), so
+    a move involving a lane endpoint is never treated as a main-chain skip here.
+    """
+    rank = {
+        "intake": 0,
+        "spec": 1,
+        "design": 2,
+        "plan": 3,
+        "build": 4,
+        "qa": 5,
+        "ship": 6,
+    }
+    cur = rank.get(current_phase)
+    tgt = rank.get(target_phase)
+    if cur is None or tgt is None:
+        return False  # a lane endpoint → not a main-chain skip
+    # A skip is a forward move that is not the immediate linear next
+    # (``tgt == cur + 1`` is the linear next; ``tgt > cur + 1`` skips ≥1 phase).
+    return tgt > cur + 1
+
+
 def evaluate_phase_gate(
     current_phase: str | None,
     target_phase: str,
@@ -554,11 +586,15 @@ def evaluate_phase_gate(
     operator-facing guidance without re-evaluating the gate.
 
     Rules:
+    - Forward-skip guard: a transition that jumps forward over one or more
+      main-chain phases (e.g. spec → build) is refused — the flow advances one
+      phase at a time. Not waivable by ``override`` (unlike the completeness
+      gate). Backward / bail / reset moves are not skips and stay unguarded.
     - Approval gate: forward transitions out of approval-gated phases
       (spec/design/add-skill) require a recorded human approval marker
       (unforgeable by --force).
     - ``override=True`` skips the forward gate (artifact completeness)
-      but NOT the approval gate.
+      but NOT the approval gate (nor the forward-skip guard).
     - If ``project_root`` is ``None`` (no repo context), the gate is
       skipped and the write is allowed (fail open).
     - If ``current_phase`` is ``None`` (fresh repo), the gate is skipped.
@@ -576,6 +612,31 @@ def evaluate_phase_gate(
     # Same-phase write — no gate needed
     if current_phase is None or current_phase == target_phase:
         return None
+
+    # Forward-skip guard: the SDD flow is a linear pipeline — you advance one
+    # phase at a time. A transition that jumps forward over one or more main-chain
+    # phases (e.g. spec → build, skipping design + plan) is never a valid
+    # transition and is blocked here. This closes the hole where a non-linear
+    # forward target fell through the "backward / bail / non-linear → unguarded"
+    # early-returns below and bypassed BOTH the approval gate and the exit-artifact
+    # completeness gate — the bug that let a workflow advance spec → build with no
+    # design/plan artifacts.
+    #
+    # Deliberately NOT waived by ``override`` (--force): --force exists to waive an
+    # incomplete *artifact* on a legitimate linear advance, not to skip phases of the
+    # workflow. Backward, bail, and reset moves are not forward skips and fall
+    # through to the unguarded path below.
+    if _is_forward_skip(current_phase, target_phase):
+        return {
+            "result": "forward_skip",
+            "reason": "forward_skip",
+            "advisories": [
+                f"Refusing to advance '{current_phase}' → '{target_phase}': that skips "
+                f"one or more workflow phases. The SDD flow advances one phase at a "
+                f"time — run the intermediate phase(s) in order. (Not waivable by "
+                f"--force.)"
+            ],
+        }
 
     # Approval gate: forward transitions out of approval-gated phases
     # require a recorded human approval marker. --force does NOT bypass

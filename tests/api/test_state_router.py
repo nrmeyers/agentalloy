@@ -341,10 +341,12 @@ class TestLeaseConflict:
         state_store.conn.execute(
             "INSERT INTO sdd_state "
             "(repo, stream_id, kind, session_key, value, owner, updated_at, lease_expires_at) "
-            "VALUES (?, ?, ?, '', 'spec', ?, ?, ?)",
+            "VALUES (?, ?, ?, '', 'build', ?, ?, ?)",
             (repo, stream_id, "phase", "s1", ts, future),
         )
-        resp = state_client.post("/state/phase", json={"value": "build", "owner": "s2"})
+        resp = state_client.post(
+            "/state/phase", json={"value": "qa", "override": True, "owner": "s2"}
+        )
         assert resp.status_code == 409
         body = resp.json()
         detail = body["detail"]
@@ -539,7 +541,7 @@ class TestTA4:
         phase write is rolled back when the contract write fails — acceptance
         criterion A3 requires both writes to be one transactional unit.
         """
-        state_store.write("phase", "intake")
+        state_store.write("phase", "build")
 
         def _raise_put_contract(
             contract_id: str,
@@ -557,10 +559,11 @@ class TestTA4:
 
         with patch.object(state_store, "put_contract", side_effect=_raise_put_contract):
             payload = {
-                "value": "build",
+                "value": "qa",
+                "override": True,
                 "contract": {
                     "contract_id": "ctr-ta4-rollback",
-                    "phase": "build",
+                    "phase": "qa",
                     "slug": "test-slug",
                 },
             }
@@ -569,8 +572,8 @@ class TestTA4:
         # The handler returns 500 when the transaction fails
         assert resp.status_code == 500
 
-        # Phase should be rolled back (not "build")
-        assert state_store.read("phase") == "intake"
+        # Phase should be rolled back (not "qa")
+        assert state_store.read("phase") == "build"
         # No contract row should exist
         assert state_store.get_contract("ctr-ta4-rollback") is None
 

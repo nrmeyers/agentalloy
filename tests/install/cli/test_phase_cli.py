@@ -332,6 +332,38 @@ class TestGuardedAdvance:
         run_phase_set("sdd-fast", root=repo_root)
         assert run_phase_set("spec", root=repo_root)["phase"] == "spec"
 
+    def test_forward_skip_is_blocked(self, repo_root: Path) -> None:
+        """Regression: a non-linear *forward* jump (spec → build) used to slip
+        through the "backward / bail / non-linear → unguarded" early-return and
+        bypass BOTH the approval gate and the exit-artifact completeness gate —
+        the bug that advanced a workflow to build with no design/plan artifacts.
+
+        It is now refused (reason='forward_skip'), --force cannot waive it, and
+        the phase row stays put."""
+        run_phase_set("spec", root=repo_root)
+        for force in (False, True):
+            result = run_phase_set("build", root=repo_root, force=force)
+            assert result["blocked"] is True
+            assert result["reason"] == "forward_skip"
+            assert result["phase"] == "spec"  # unchanged
+            assert result["target"] == "build"
+            assert any("skips" in a for a in result["advisories"])
+        # The row is still spec — the skip never landed.
+        assert run_phase_get(root=repo_root)["phase"] == "spec"
+
+    def test_forward_skip_blocked_even_with_artifacts_and_approval(
+        self, repo_root: Path
+    ) -> None:
+        """Even a fully complete + approved spec cannot jump to build — the
+        intermediate design + plan phases must run in order."""
+        run_phase_set("spec", root=repo_root)
+        _write_spec_doc(repo_root)
+        _approve(repo_root, "spec", "docs/spec/*.md")
+        result = run_phase_set("build", root=repo_root, force=True)
+        assert result["blocked"] is True
+        assert result["reason"] == "forward_skip"
+        assert run_phase_get(root=repo_root)["phase"] == "spec"
+
     def test_ship_to_intake_reset_is_unguarded(self, repo_root: Path) -> None:
         # TC23 (partial): the ship→intake reset is not a linear-forward edge → unguarded.
         run_phase_set("ship", root=repo_root)
@@ -908,22 +940,22 @@ class TestDesignToPlanMigration:
         assert not _design_artifacts_in_plan(repo_root)
 
     def test_backward_transition_skips_migration(self, repo_root: Path) -> None:
-        """A backward transition to plan (spec→plan) skips migration."""
-        # Set to spec (forward), then do a backward transition to plan.
-        run_phase_set("spec", root=repo_root)
-        _approve(repo_root, "spec", "docs/spec/*.md")
-        run_phase_set("design", root=repo_root)
+        """A backward transition into plan does not run the design→plan migration.
+
+        The original spec→plan case here was mislabeled "backward" — spec (rank 1)
+        → plan (rank 3) is a *forward skip* (it skips design), which the
+        forward-skip guard now refuses. A genuine backward origin (qa, rank 5 →
+        plan, rank 3) is unguarded and lands in plan without migrating: the
+        migration is scoped to the design→plan edge only.
+        """
+        # Seed design artifacts so the negative assertion below is non-vacuous —
+        # there IS something that could have been migrated into plan.
         _write_design_tasks(repo_root)
 
-        # Now set to spec (backward), then set to plan (forward from spec perspective,
-        # but current=="design", so this is actually design→plan forward).
-        # To test a non-design→plan transition, go spec→plan directly (backward).
-        run_phase_clear(root=repo_root)
-        run_phase_set("spec", root=repo_root)
-        _approve(repo_root, "spec", "docs/spec/*.md")
-
-        # spec→plan is backward — current is "spec", not "design" → no migration.
-        run_phase_set("plan", root=repo_root, force=True)
+        # qa (rank 5) → plan (rank 3) is a genuine backward move: unguarded, and
+        # it never runs the design→plan migration (current != "design").
+        run_phase_set("qa", root=repo_root)
+        run_phase_set("plan", root=repo_root)
         assert run_phase_get(root=repo_root)["phase"] == "plan"
-        # No migration happened because current != "design".
+        # No migration happened because current ("qa") != "design".
         assert not _design_artifacts_in_plan(repo_root)

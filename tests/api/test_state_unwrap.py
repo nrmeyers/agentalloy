@@ -192,17 +192,17 @@ class TestPhaseWrite:
         store, client = wired
         repo = tmp_path / "repo"
         view = scoped_state_store(store, repo)
-        view.write_phase("design", actor="cli", mode="free", paused_since="2026-07-28T00:00:00Z")
+        view.write_phase("build", actor="cli", mode="free", paused_since="2026-07-28T00:00:00Z")
 
         client.post(
             "/state/phase",
-            json={"value": "build", "override": True},
+            json={"value": "qa", "override": True},
             params={"repo_root": str(repo)},
         )
 
         after = view.read_phase()
         assert after is not None
-        assert (after.phase, after.mode) == ("build", "free")
+        assert (after.phase, after.mode) == ("qa", "free")
         assert after.paused_since == "2026-07-28T00:00:00Z"
 
     def test_a_contract_advance_keeps_blob_semantics_too(self, wired, tmp_path: Path) -> None:
@@ -210,23 +210,23 @@ class TestPhaseWrite:
         store, client = wired
         repo = tmp_path / "repo"
         view = scoped_state_store(store, repo)
-        view.write_phase("design", actor="cli", mode="free")
+        view.write_phase("build", actor="cli", mode="free")
 
         resp = client.post(
             "/state/phase",
             json={
-                "value": "build",
+                "value": "qa",
                 "override": True,
-                "contract": {"contract_id": "c-1", "phase": "build", "slug": "unwrap"},
+                "contract": {"contract_id": "c-1", "phase": "qa", "slug": "unwrap"},
             },
             params={"repo_root": str(repo)},
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["value"] == "build"
+        assert resp.json()["value"] == "qa"
         after = view.read_phase()
         assert after is not None
-        assert (after.phase, after.mode) == ("build", "free")
+        assert (after.phase, after.mode) == ("qa", "free")
 
 
 class TestGenericKindRoute:
