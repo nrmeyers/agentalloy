@@ -207,3 +207,101 @@ jobs:
         # human-by-default stdout (not a raw JSON dump) + valid --json.
         # Same script the clean-room container runs (container/Containerfile.cleanroom).
         run: bash scripts/cleanroom-smoke.sh
+
+  # Derives the SemVer bump from the PR's Conventional-Commit title and writes
+  # pyproject.toml + uv.lock onto the head branch (RELEASE.md §4). scripts/
+  # version_bump.py owns the (unit-tested) logic; this job is the I/O + push
+  # shell.
+  #
+  # Runs LAST — needs: every other CI job — so the bump commit is pushed to the
+  # head branch only once the PR is otherwise green. The old standalone
+  # version-bump.yml fired in parallel and pushed the bump before the other jobs
+  # had verdicts, so a head-branch move (or a fix pushed while CI ran) left the
+  # bump commit stranded and forced a rebase-for-version-bump. Gating it behind
+  # the four jobs means the push only happens on a green PR.
+  #
+  # PR events only: the job reads pull_request.title / .base.sha, which do not
+  # exist on push: main.
+  #
+  # TWO INVARIANTS (see RELEASE.md §4):
+  # - The bump commit MUST be pushed with a NON-default token (secret
+  #   BUMP_TOKEN). A GITHUB_TOKEN push would not retrigger CI and would deadlock
+  #   auto-merge on the required checks.
+  # - This job is a REQUIRED status check. It only goes green on the
+  #   fully-bumped SHA (idempotent no-op once bumped), so auto-merge can never
+  #   fire on the un-bumped commit. The deliberate `exit 1` after the push keeps
+  #   the un-bumped SHA red; the push retriggers this job on the bumped SHA,
+  #   where the idempotency guard exits 0 — so the bumped commit is the only one
+  #   that goes green, and merge can only fire there.
+  version-bump:
+    needs: [quality, container-tests, web-build, pipx-smoke]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # the bump commit is pushed with BUMP_TOKEN, not GITHUB_TOKEN
+    steps:
+      - name: Check out PR head branch
+        uses: actions/checkout@v4
+        with:
+          # head_ref = the PR's source branch (not the detached merge ref), so
+          # we can commit + push back to it. fetch-depth 0: the script reads the
+          # base commit's pyproject and the base..HEAD diff.
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          # Prefer BUMP_TOKEN so the bump commit's push triggers CI. Fall back
+          # to github.token when the secret is unset (an unset secret is an
+          # empty string, which actions/checkout rejects outright) — that keeps
+          # no-bump PRs green; a shipped PR that actually needs a bump fails
+          # loudly below instead of silently pushing a CI-dead commit.
+          token: ${{ secrets.BUMP_TOKEN || github.token }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Compute and apply version bump
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
+        run: |
+          set -euo pipefail
+          next=$(uv run python scripts/version_bump.py \
+            --title "$PR_TITLE" --base-sha "$BASE_SHA")
+
+          if [ -z "$next" ]; then
+            echo "No version bump warranted (no shipped-surface change, or already bumped)."
+            exit 0
+          fi
+
+          # A bump is needed. It MUST be pushed with BUMP_TOKEN — a github.token
+          # push wouldn't retrigger CI and would deadlock auto-merge. Fail with
+          # a clear message rather than push a CI-dead commit.
+          if [ -z "$BUMP_TOKEN" ]; then
+            echo "::error::Version bump to $next is required, but the BUMP_TOKEN secret is not set. Add a fine-grained PAT (Contents + Pull requests: write) as BUMP_TOKEN — see RELEASE.md §4."
+            exit 1
+          fi
+
+          echo "Deriving bump → v$next"
+          # Exactly one top-level `version = "..."` line in pyproject.toml.
+          sed -i -E "s/^version = \"[^\"]+\"/version = \"$next\"/" pyproject.toml
+          uv lock
+
+          git config user.name "agentalloy-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "chore: bump version to $next" \
+            -m "Automated bump derived from the PR title's Conventional-Commit type." \
+            -m "Co-Authored-By: agentalloy-release-bot <release-bot@users.noreply.github.com>"
+          git push origin "HEAD:${{ github.head_ref }}"
+
+          # Fail THIS run so the stale (un-bumped) SHA never shows a green
+          # version-bump — otherwise a merge fired on the pre-bump commit races
+          # (and beats) the push above, landing an un-versioned squash on main
+          # (this is exactly how PR #437 shipped 7.0.7 for a feat that derived
+          # 7.1.0). The push retriggers this job on the bumped SHA, where the
+          # idempotency guard finds version != base and exits 0 — so the bumped
+          # commit is the ONLY one that goes green, and merge can only fire there.
+          echo "::error::Pushed bump commit (v$next). Failing this run so the un-bumped SHA stays red; the bumped SHA's re-run will go green."
+          exit 1

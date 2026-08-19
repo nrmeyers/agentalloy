@@ -62,11 +62,12 @@ Conventional Commits with a scope: `type(scope): subject`.
 
 ### CI gates (required checks, enforced by branch protection)
 
-Five required checks on `main`: **`quality`**, **`container-tests`**,
-**`pipx-smoke`**, **`web-build`** (`.github/workflows/ci.yml`), and
-**`version-bump`** (`.github/workflows/version-bump.yml`, §4 — derives the
-version bump; required so auto-merge can't fire on an un-bumped SHA). A PR
-cannot merge red.
+Five required checks on `main`, all in `.github/workflows/ci.yml`:
+**`quality`**, **`container-tests`**, **`pipx-smoke`**, **`web-build`**, and
+**`version-bump`** (§4 — derives the version bump; required so auto-merge can't
+fire on an un-bumped SHA). `version-bump` runs **last** — it `needs:` the other
+four jobs, so the bump commit is pushed to the head branch only once the PR is
+otherwise green. A PR cannot merge red.
 
 - `quality`: `uv sync --frozen --no-dev` → ruff check → ruff format
   --check (formatting is checked **separately** from lint; run `uv run ruff
@@ -116,10 +117,13 @@ version at all.
 
 ### The bump is automatic — you do not choose the tier or edit `pyproject`
 
-`Version Bump` (`.github/workflows/version-bump.yml`) derives and applies the
-bump on every PR. You never open a `chore(release)` PR and never hand-edit the
-version. Two deterministic gates (`scripts/version_bump.py`, unit-tested in
-`tests/test_version_bump.py`):
+The **`version-bump`** job in `.github/workflows/ci.yml` derives and applies the
+bump on every PR. It runs **last** — after `quality`, `container-tests`,
+`web-build`, and `pipx-smoke` are all green — so the bump commit is pushed to
+the head branch only once the PR is otherwise green (a head-branch move or a fix
+pushed mid-CI no longer strands an early bump and forces a rebase). You never
+open a `chore(release)` PR and never hand-edit the version. Two deterministic
+gates (`scripts/version_bump.py`, unit-tested in `tests/test_version_bump.py`):
 
 - **Whether to bump — shipped-surface path gate.** A bump happens only when the
   PR's diff touches the **shipped surface**: `src/` (incl. `src/agentalloy/_packs/`),
@@ -173,8 +177,8 @@ Notes and escapes:
 ## 5. Cutting a release
 
 The cut is **automated**: when a PR carrying a version bump (auto-derived and
-committed to the branch by `Version Bump`, per §4) merges to main and that
-commit's CI goes green, `Release Cut` (`.github/workflows/release-cut.yml`)
+committed to the branch by the `version-bump` job, per §4) merges to main and
+that commit's CI goes green, `Release Cut` (`.github/workflows/release-cut.yml`)
 creates the GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed
 from the bumping PR, generated notes) and dispatches `Container Build & Publish`
 on the new tag. Merging the bumped PR IS cutting the release — nothing to run.
@@ -217,8 +221,9 @@ build itself; don't also dispatch it.
 - [ ] Branch off `main`, one logical change.
 - [ ] Conventional-Commit messages + `Co-Authored-By` trailer.
 - [ ] PR title's Conventional-Commit type is correct — it drives the automatic
-      version bump (§4). `Version Bump` writes `pyproject.toml` + `uv.lock` on the
-      branch; you don't hand-bump. Touched pack `version` still bumped by hand.
+      version bump (§4). The `version-bump` job writes `pyproject.toml` +
+      `uv.lock` on the branch; you don't hand-bump. Touched pack `version`
+      still bumped by hand.
 - [ ] Pre-commit hooks installed (`uv run pre-commit install`) — they auto-format
       on every commit, preventing formatting leaks into PRs.
 - [ ] Local gate green: `scripts/local-ci.sh` (or the individual commands below).
