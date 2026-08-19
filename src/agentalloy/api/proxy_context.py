@@ -81,17 +81,50 @@ def resolve_working_dir(request: ProxyRequest, project_dir_override: Path | None
     1. ``request.metadata["cwd"]`` — explicit harness-supplied directory
     2. ``AGENTALLOY_PROJECT_DIR`` environment variable
     3. ``Path.cwd()`` — proxy process working directory (last resort)
-    """
-    # 0. Highest precedence: the decoded per-repo discriminator token. Resolving
-    #    from the URL means the proxy never depends on its own cwd.
-    if project_dir_override is not None:
-        return project_dir_override
 
-    # 1. Check metadata.cwd (harness-supplied)
+    When both the token and ``metadata.cwd`` are present and they disagree,
+    ``metadata.cwd`` (the per-request signal) wins over the token (the
+    session-start snapshot), and a warning is logged. The token is captured
+    once at session start from the ``settings.json`` resolved against the
+    session's *initial* cwd, so a session that started in the wrong directory
+    (or a continued session that predates a re-wire) carries a stale token.
+    Preferring the per-request signal prevents that stale token from silently
+    anchoring the proxy to the wrong repo (anomalies B1/B4/B5).
+    """
+    # Extract metadata.cwd (harness-supplied) up front so it can be cross-checked
+    # against the token below.
+    metadata_cwd: Path | None = None
     if request.metadata is not None:
         cwd = request.metadata.get("cwd")
         if cwd:
-            return Path(cwd)
+            metadata_cwd = Path(cwd)
+
+    # 0. Highest precedence: the decoded per-repo discriminator token. Resolving
+    #    from the URL means the proxy never depends on its own cwd.
+    if project_dir_override is not None:
+        # When both the token and metadata.cwd are present and they disagree,
+        # prefer metadata.cwd (the per-request signal) over the token (the
+        # session-start snapshot) and surface the mismatch. A stale token must
+        # not silently override the session's actual working directory
+        # (anomalies B1/B4/B5).
+        if metadata_cwd is not None:
+            token_real = os.path.realpath(project_dir_override)
+            metadata_real = os.path.realpath(metadata_cwd)
+            if metadata_real != token_real:
+                logger.warning(
+                    "/proj token (%s) disagrees with metadata.cwd (%s); "
+                    "preferring metadata.cwd (per-request signal) over the "
+                    "session-start token. The token may be stale — re-wire the "
+                    "harness or restart the session in the correct directory.",
+                    token_real,
+                    metadata_real,
+                )
+                return metadata_cwd
+        return project_dir_override
+
+    # 1. metadata.cwd (harness-supplied)
+    if metadata_cwd is not None:
+        return metadata_cwd
 
     # 2. Check env var
     env_dir = os.environ.get("AGENTALLOY_PROJECT_DIR")

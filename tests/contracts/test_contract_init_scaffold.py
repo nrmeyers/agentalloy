@@ -305,3 +305,155 @@ class TestWorkItemStamp:
         assert _inject_work_item(content, None) == content
         stamped = _inject_work_item(content, "km")
         assert _inject_work_item(stamped, "other") == stamped  # idempotent, no second line
+
+
+class TestInitBodyFileFrontmatter:
+    """B3: `contract init --body-file` must not emit a second frontmatter block.
+
+    When the supplied body already carries YAML frontmatter, `_init` merges it
+    over the template's block (body's content fields win; the template supplies
+    the identity fields) so the stored contract has exactly one frontmatter
+    block, and forwards the parsed structured fields to the store (the read
+    path pulls them from stored columns, not a body re-parse).
+    """
+
+    def _run_init(self, tmp_path: Path, *, body: str | None, body_file: str | None):
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands.contract import _init
+
+        captured: list[dict] = []
+
+        def fake_create_contract(payload: dict) -> dict:
+            captured.append(payload)
+            return {"contract_id": payload["contract_id"]}
+
+        mock_client = MagicMock(spec=StateClient)
+        mock_client.is_running.return_value = True
+        mock_client.create_contract = fake_create_contract
+
+        args = argparse.Namespace(
+            phase="spec",
+            slug="my-task",
+            route="full",
+            body=body,
+            body_file=body_file,
+            json=False,
+            quiet=True,
+        )
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            with patch("agentalloy.install.state._repo_root", return_value=tmp_path):
+                rc = _init(args)
+        return rc, captured
+
+    def test_body_with_frontmatter_yields_single_block(self, tmp_path: Path) -> None:
+        body = (
+            "---\n"
+            "domain_tags:\n"
+            "  - NestJS\n"
+            "  - JWT\n"
+            "scope:\n"
+            "  touches:\n"
+            "    - src/auth/**\n"
+            "  avoids:\n"
+            "    - src/billing/**\n"
+            "success_criteria:\n"
+            "  - Existing auth tests still pass\n"
+            "---\n\n"
+            "# My Task\n\n"
+            "Prose body.\n"
+        )
+        rc, captured = self._run_init(tmp_path, body=body, body_file=None)
+        assert rc == 0
+        assert len(captured) == 1
+        content = captured[0]["body"]
+        # Exactly one frontmatter block: the text starts with '---', has exactly
+        # one more '---' delimiter, and nothing else.
+        assert content.startswith("---\n")
+        assert content.count("\n---\n") == 1
+        # The body's prose survived the merge.
+        assert "# My Task" in content
+        assert "Prose body." in content
+        # Structured fields were forwarded to the store payload.
+        assert captured[0]["scope_touches"] == ["src/auth/**"]
+        assert captured[0]["scope_avoids"] == ["src/billing/**"]
+        assert captured[0]["domain_tags"] == ["NestJS", "JWT"]
+        assert captured[0]["success_criteria"] == ["Existing auth tests still pass"]
+
+    def test_identity_fields_come_from_template(self, tmp_path: Path) -> None:
+        # A body that tries to override the identity fields must not — the
+        # template (i.e. the CLI args) supplies phase/task_slug/route.
+        body = (
+            "---\n"
+            "phase: build\n"
+            "task_slug: rogue-slug\n"
+            "route: fast\n"
+            "scope:\n"
+            "  touches:\n"
+            "    - src/x/**\n"
+            "---\n\n"
+            "# Body\n"
+        )
+        rc, captured = self._run_init(tmp_path, body=body, body_file=None)
+        assert rc == 0
+        content = captured[0]["body"]
+        # The stored identity fields reflect the CLI args, not the body.
+        assert captured[0]["phase"] == "spec"
+        assert captured[0]["slug"] == "my-task"
+        assert captured[0]["route"] == "full"
+        # The frontmatter block in the body carries the template's identity.
+        assert "phase: spec" in content
+        assert "task_slug: my-task" in content
+        assert "route: full" in content
+        # The body's content field still won where it was allowed.
+        assert captured[0]["scope_touches"] == ["src/x/**"]
+
+    def test_body_without_frontmatter_keeps_template_block(self, tmp_path: Path) -> None:
+        rc, captured = self._run_init(
+            tmp_path, body="# Just prose\n\nNo frontmatter here.\n", body_file=None
+        )
+        assert rc == 0
+        content = captured[0]["body"]
+        assert content.startswith("---\n")
+        assert content.count("\n---\n") == 1
+        assert "# Just prose" in content
+        # No structured fields forwarded (body had none).
+        assert "scope_touches" not in captured[0]
+        assert "success_criteria" not in captured[0]
+
+    def test_body_file_path_is_read(self, tmp_path: Path) -> None:
+        body = (
+            "---\n"
+            "scope:\n"
+            "  touches:\n"
+            "    - src/y/**\n"
+            "---\n\n"
+            "# From File\n"
+        )
+        (tmp_path / "body.md").write_text(body)
+        rc, captured = self._run_init(
+            tmp_path, body=None, body_file=str(tmp_path / "body.md")
+        )
+        assert rc == 0
+        content = captured[0]["body"]
+        assert content.count("\n---\n") == 1
+        assert "# From File" in content
+        assert captured[0]["scope_touches"] == ["src/y/**"]
+
+    def test_malformed_frontmatter_treated_as_prose(self, tmp_path: Path) -> None:
+        # Starts with '---' but the block is not closed — keep the whole body as
+        # prose. The template's identity block is preserved so the stored contract
+        # still parses as a SINGLE frontmatter contract (the stray '---' in the
+        # prose is a horizontal rule, not a second parsed block).
+        from agentalloy.contracts import _split_frontmatter
+
+        body = "---\nunclosed frontmatter\nstill prose\n"
+        rc, captured = self._run_init(tmp_path, body=body, body_file=None)
+        assert rc == 0
+        content = captured[0]["body"]
+        assert content.startswith("---\n")
+        # Parses as exactly one frontmatter block with the template's identity.
+        fm, prose = _split_frontmatter(content)
+        assert fm["phase"] == "spec"
+        assert fm["task_slug"] == "my-task"
+        assert "unclosed frontmatter" in prose

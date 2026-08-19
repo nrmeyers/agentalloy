@@ -415,19 +415,74 @@ def _init(args: argparse.Namespace) -> int:
         .replace("{task_slug_title}", title)
     )
 
-    # Override body with --body or --body-file if provided
+    # Override body with --body or --body-file if provided.
+    #
+    # When the supplied body already carries a YAML frontmatter block, merge it
+    # over the template's frontmatter (the body's content fields win; the
+    # template supplies the identity fields phase/task_slug/route/created_at)
+    # so the stored contract has exactly ONE frontmatter block. The merged
+    # structured fields are also forwarded to the store — the read path
+    # (`contract show` / the exit gate) pulls them from the stored columns, not
+    # a re-parse of the body, so without this they would stay null and render
+    # as an empty scope / success-criteria.
+    structured_fields: dict[str, Any] = {}
     body_override = getattr(args, "body", None)
     body_file = getattr(args, "body_file", None)
     if body_file is not None:
         body_override = sys.stdin.read() if body_file == "-" else Path(body_file).read_text()
     if body_override is not None:
-        # Replace just the body portion (after frontmatter) of the template
-        fm_end = content.find("\n---\n", 4)
-        if fm_end != -1:
-            frontmatter = content[: fm_end + 5]
-            content = frontmatter + "\n" + body_override
+        from agentalloy.contracts import (  # noqa: PLC0415
+            ContractMalformed,
+            _split_frontmatter,
+        )
+
+        body_fm: dict[str, Any] | None = None
+        body_prose = body_override
+        if body_override.startswith("---"):
+            try:
+                parsed_fm, parsed_prose = _split_frontmatter(body_override)
+                if parsed_fm:
+                    body_fm, body_prose = parsed_fm, parsed_prose
+            except ContractMalformed:
+                # Starts with '---' but isn't valid frontmatter — keep the whole
+                # body as prose rather than emitting a second frontmatter block.
+                pass
+
+        if body_fm is None:
+            # Body carries no frontmatter: keep the template's block, append prose.
+            fm_end = content.find("\n---\n", 4)
+            if fm_end != -1:
+                frontmatter = content[: fm_end + 5]
+                content = frontmatter + "\n" + body_override
+            else:
+                content = body_override
         else:
-            content = body_override
+            # Body carries frontmatter: merge it over the template's so the
+            # stored contract has a single block. Content fields come from the
+            # body; identity fields come from the template (the CLI args).
+            import yaml  # noqa: PLC0415
+
+            try:
+                template_fm, _ = _split_frontmatter(content)
+            except Exception:
+                template_fm = {}
+            merged_fm = {**template_fm, **body_fm}
+            for _identity in ("phase", "task_slug", "route", "created_at"):
+                if _identity in template_fm:
+                    merged_fm[_identity] = template_fm[_identity]
+            content = (
+                "---\n"
+                + yaml.safe_dump(merged_fm, sort_keys=False).rstrip()
+                + "\n---\n\n"
+                + body_prose
+            )
+            scope = merged_fm.get("scope") or {}
+            structured_fields = {
+                "domain_tags": merged_fm.get("domain_tags"),
+                "scope_touches": scope.get("touches"),
+                "scope_avoids": scope.get("avoids"),
+                "success_criteria": merged_fm.get("success_criteria"),
+            }
 
     # Stamp work_item for build contracts
     if phase == "build":
@@ -439,17 +494,26 @@ def _init(args: argparse.Namespace) -> int:
     # Generate contract_id from phase + slug
     contract_id = f"{phase}/{slug}"
 
-    # Store via StateClient
+    # Store via StateClient. The base payload always carries the body; the
+    # structured fields are added only when the body supplied its own
+    # frontmatter, so a plain `contract init` (no --body/--body-file) is
+    # unchanged.
+    payload: dict[str, Any] = {
+        "contract_id": contract_id,
+        "phase": phase,
+        "slug": slug,
+        "route": route,
+        "body": content,
+    }
+    for _key, _value in structured_fields.items():
+        # Omit None and empty lists so the store's columns stay null when the
+        # body's frontmatter leaves a field blank — matching the pre-fix
+        # behaviour where a plain `contract init` stored nulls.
+        if _value is not None and _value != []:
+            payload[_key] = _value
+
     try:
-        result_data = client.create_contract(
-            {
-                "contract_id": contract_id,
-                "phase": phase,
-                "slug": slug,
-                "route": route,
-                "body": content,
-            },
-        )
+        result_data = client.create_contract(payload)
     except StateClientError as exc:
         print(f"Error: {exc.message}", file=sys.stderr)
         return 1

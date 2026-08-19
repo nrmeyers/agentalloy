@@ -1138,7 +1138,10 @@ async def evaluate_signal(
     #    for every phase, including intake — there is no unconditional bypass. On
     #    a turn carrying no completion/approval signal the trigger does not fire,
     #    so an in-progress phase stays silent unless it is also an entry turn.
-    match: PreFilterMatch | None = check_transition_trigger(
+    #    Runs in a worker thread (like the gate eval below) so the reranker /
+    #    embed network I/O never blocks the single uvicorn event loop.
+    match: PreFilterMatch | None = await asyncio.to_thread(
+        check_transition_trigger,
         signal_keywords,
         exit_gates,
         ctx,
@@ -1261,10 +1264,10 @@ async def evaluate_signal(
         advisories.append(ac_feedback)
 
     # Did any semantic gate / transition-trigger intent hit an embed failure this
-    # turn? Read off the shared ctx (the trigger ran on this thread, the gates in
-    # the worker thread — both mutate the same diagnostics sink, and to_thread
-    # has already joined). Carried into telemetry so a silently-degraded gate is
-    # queryable instead of only a WARNING line.
+    # turn? Read off the shared ctx (the trigger and the gates each ran in a
+    # worker thread via to_thread — both mutate the same diagnostics sink, and
+    # both have already joined). Carried into telemetry so a silently-degraded
+    # gate is queryable instead of only a WARNING line.
     phase_gate_embed_failed = ctx.embed_failed
 
     # State leg: structured JSON context briefing for the LLM. Built on every
