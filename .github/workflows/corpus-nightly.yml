@@ -53,7 +53,9 @@ jobs:
         run: uv sync --frozen
 
       - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
-        timeout-minutes: 3
+        # apt-get update can stall on a slow hosted-runner mirror; 3 min was
+        # too tight and killed the whole nightly before any test ran (#628/#629).
+        timeout-minutes: 10
         run: |
           set -euxo pipefail
           # pull-models (v1.3.3+) downloads a prebuilt llama-server itself, so we
@@ -197,7 +199,9 @@ jobs:
         run: uv sync --frozen
 
       - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
-        timeout-minutes: 3
+        # apt-get update can stall on a slow hosted-runner mirror; 3 min was
+        # too tight and killed the whole nightly before any test ran (#628/#629).
+        timeout-minutes: 10
         run: |
           set -euxo pipefail
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
@@ -299,7 +303,9 @@ jobs:
         run: uv sync --frozen
 
       - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
-        timeout-minutes: 3
+        # apt-get update can stall on a slow hosted-runner mirror; 3 min was
+        # too tight and killed the whole nightly before any test ran (#628/#629).
+        timeout-minutes: 10
         run: |
           set -euxo pipefail
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
