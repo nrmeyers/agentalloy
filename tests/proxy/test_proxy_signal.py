@@ -1455,7 +1455,7 @@ class TestTransitionTriggerOffEventLoop:
         # The loop stayed responsive while the trigger blocked a worker thread:
         # the heartbeat kept ticking, so no single gap approaches the block.
         assert len(stops) >= 3, "heartbeat did not sample long enough"
-        gaps = [b - a for a, b in zip(stops, stops[1:])]
+        gaps = [b - a for a, b in zip(stops, stops[1:], strict=False)]
         max_gap = max(gaps)
         assert max_gap < block_seconds / 2, (
             f"event loop stalled for {max_gap:.3f}s while the trigger blocked a "
