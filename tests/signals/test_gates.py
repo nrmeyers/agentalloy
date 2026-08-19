@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 
 from agentalloy.signals.gates import (
+    _is_forward_skip,
     _near_miss_candidates,
     aggregate,
     decide_transition,
     evaluate_node,
+    evaluate_phase_gate,
 )
 from agentalloy.signals.graph import _PHASE_GRAPH
 from agentalloy.signals.predicates import PredicateContext, PredicateResult
@@ -692,3 +694,85 @@ def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
     )
     assert result == MET
     assert evals[0].advisory is None
+
+
+# ---------------------------------------------------------------------------
+# Forward-skip guard — a non-linear forward transition (spec → build) must be
+# blocked, not fall through the "backward / bail / non-linear → unguarded"
+# early-return that used to bypass BOTH the approval and completeness gates.
+# ---------------------------------------------------------------------------
+
+
+def test_is_forward_skip_detects_main_chain_jumps():
+    # Skipping one or more main-chain phases is a forward skip.
+    assert _is_forward_skip("spec", "build") is True  # skips design + plan
+    assert _is_forward_skip("spec", "qa") is True  # skips design + plan + build
+    assert _is_forward_skip("intake", "spec") is False  # linear next
+    assert _is_forward_skip("design", "plan") is False  # linear next
+    assert _is_forward_skip("plan", "build") is False  # linear next
+    assert _is_forward_skip("build", "qa") is False  # linear next
+
+
+def test_is_forward_skip_allows_backward_bail_and_reset():
+    # Backward moves, bail routes, and resets are NOT forward skips.
+    assert _is_forward_skip("qa", "build") is False  # backward
+    assert _is_forward_skip("design", "spec") is False  # backward
+    assert _is_forward_skip("ship", "intake") is False  # reset
+    assert _is_forward_skip("build", "intake") is False  # reset
+    assert _is_forward_skip("sdd-fast", "spec") is False  # bail (lane endpoint)
+
+
+def test_is_forward_skip_lane_endpoints_are_never_main_chain_skips():
+    # Lane phases sit off the main chain; their moves are handled by the
+    # linear-next logic, not the main-chain skip check.
+    assert _is_forward_skip("sdd-fast", "qa") is False  # lane → main (declared next)
+    assert _is_forward_skip("add-skill", "intake") is False  # lane → main
+    assert _is_forward_skip("sdd-flow", "intake") is False  # lane → main
+    assert _is_forward_skip("intake", "sdd-fast") is False  # main → lane (intake lane select)
+
+
+def test_evaluate_phase_gate_blocks_forward_skip(tmp_path: Path):
+    """The exact reported bug: spec → build (skipping design + plan) is refused,
+    even with no artifacts and no approval, and even under --force."""
+    for force in (False, True):
+        verdict = evaluate_phase_gate("spec", "build", tmp_path, override=force)
+        assert verdict is not None
+        assert verdict["reason"] == "forward_skip"
+        assert any("skips" in a for a in verdict["advisories"])
+
+
+def test_evaluate_phase_gate_forward_skip_not_waived_by_override(tmp_path: Path):
+    """--force waives the completeness gate but NOT the forward-skip guard."""
+    assert evaluate_phase_gate("spec", "build", tmp_path, override=True) is not None
+    assert evaluate_phase_gate("spec", "build", tmp_path, override=False) is not None
+
+
+def test_evaluate_phase_gate_linear_forward_not_flagged_as_skip(tmp_path: Path):
+    """A legitimate linear advance (spec → design) is NOT a forward skip.
+
+    With a store present and no approval recorded, it is blocked on the
+    *approval* gate (reason 'approval'), not the skip guard — proving the guard
+    fires only on real forward skips. (Without a store the approval gate fails
+    open, so a store is required to observe the approval block deterministically.)
+    """
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    try:
+        verdict = evaluate_phase_gate("spec", "design", tmp_path, override=False, store=store)
+        assert verdict is not None
+        assert verdict["reason"] == "approval"
+    finally:
+        store.close()
+
+
+def test_evaluate_phase_gate_backward_unguarded(tmp_path: Path):
+    """Backward moves remain unguarded (gate returns None → allowed)."""
+    assert evaluate_phase_gate("qa", "build", tmp_path, override=False) is None
+    assert evaluate_phase_gate("ship", "intake", tmp_path, override=False) is None
+
+
+def test_evaluate_phase_gate_same_phase_unguarded(tmp_path: Path):
+    """A same-phase write is a no-op and never gated."""
+    assert evaluate_phase_gate("spec", "spec", tmp_path, override=False) is None
+    assert evaluate_phase_gate(None, "build", tmp_path, override=False) is None
