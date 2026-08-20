@@ -379,6 +379,66 @@ class TestEvaluateSignal:
             result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path))
         assert result.should_compose is True  # announce survives the write failure
 
+    def test_non_banner_turn_still_binds_store_for_gate(self, tmp_path: Path) -> None:
+        """Regression (8f7f354): the gate's store handle must bind on EVERY carrier
+        turn, not only banner-cadence ticks. The old shape gated the bind on
+        emit_banner, so between ticks ctx.store was None — the approval branch
+        skipped and UNKNOWN failed the gate open (pipeline collapse).
+
+        build cadence is 10: turn 1 is the phase-entry banner (emit), turn 2 is a
+        non-banner tick — the exact turn the bug starved. A sentinel proves the
+        bound handle reaches _route_step on that turn.
+        """
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")
+        sentinel = object()
+        counter = {"state": ("", "", 0)}
+
+        def _fake_read(project_root: Path) -> tuple[str | None, str | None, int]:
+            p, s, c = counter["state"]
+            return p or None, s or None, c
+
+        def _fake_write(project_root: Path, phase: str, session: str | None, count: int) -> None:
+            counter["state"] = (phase, session or "", count)
+
+        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='deploy'")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["deploy"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=mock_match,
+            ),
+            mock.patch(
+                "agentalloy.signals.graph._route_step",
+                return_value=_no_transition(),
+            ) as mock_route,
+            mock.patch("agentalloy.api.proxy_signal._banner_store", return_value=sentinel),
+            mock.patch(
+                "agentalloy.signals.skill_loader._read_banner_turn",
+                side_effect=_fake_read,
+            ),
+            mock.patch(
+                "agentalloy.signals.skill_loader._write_banner_turn_atomic",
+                side_effect=_fake_write,
+            ),
+        ):
+            first = asyncio.run(
+                evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION)
+            )
+            second = asyncio.run(
+                evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION)
+            )
+        assert first.banner is not None  # turn 1: phase-entry banner emits
+        assert second.banner is None  # turn 2: non-banner cadence tick
+        # Both turns must hand a live store to the gate — the second one is the
+        # regression turn (non-banner, formerly store=None).
+        assert mock_route.call_count == 2
+        for call in mock_route.call_args_list:
+            assert call.kwargs["store"] is sentinel
+
     def test_empty_user_message_returns_none_task(self, tmp_path: Path) -> None:
         _set_phase(tmp_path, "build")
         with mock.patch(

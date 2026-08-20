@@ -752,8 +752,7 @@ def test_evaluate_phase_gate_linear_forward_not_flagged_as_skip(tmp_path: Path):
 
     With a store present and no approval recorded, it is blocked on the
     *approval* gate (reason 'approval'), not the skip guard — proving the guard
-    fires only on real forward skips. (Without a store the approval gate fails
-    open, so a store is required to observe the approval block deterministically.)
+    fires only on real forward skips.
     """
     store = DuckDBStateStore(tmp_path / "test_state.db")
     store.open()
@@ -764,6 +763,22 @@ def test_evaluate_phase_gate_linear_forward_not_flagged_as_skip(tmp_path: Path):
         assert verdict["reason"] == "approval"
     finally:
         store.close()
+
+
+def test_evaluate_phase_gate_approval_blocks_without_store(tmp_path: Path):
+    """Fail-closed: an approval-gated advance blocks when the store is unreachable.
+
+    Regression for the pipeline-collapse bug (8f7f354): the approval branch was
+    gated on ``store is not None``, so a None store silently skipped the check
+    and every approval gate passed — six unearned phase advances in one run.
+    An un-checkable approval checkpoint must block, not waive itself, and the
+    block is NOT waivable by ``override``.
+    """
+    for force in (False, True):
+        verdict = evaluate_phase_gate("spec", "design", tmp_path, override=force, store=None)
+        assert verdict is not None
+        assert verdict["reason"] == "approval"
+        assert any("unreachable" in a for a in verdict["advisories"])
 
 
 def test_evaluate_phase_gate_backward_unguarded(tmp_path: Path):

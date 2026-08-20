@@ -1215,10 +1215,12 @@ async def proxy_chat_completions(
     # compose guard, outside apply_signal -- and commits no cadence marker, so it
     # survives the harness rebuilding its history from scratch each turn. Ordered
     # last: it writes a different message than the banner, so a failure here cannot
-    # cost the banner. Must NOT flip `composed`. No system message in the request is
-    # a no-op (the helper deliberately does not create one -- the harness owns the
-    # message array); the prose is a compliance improvement, not a correctness
-    # dependency, and legs 1 and 2 still land on the user message.
+    # cost the banner. Must NOT flip `composed`. The helper merges the phase-stamped
+    # prose block into the FIRST system message (llama.cpp accepts a single system
+    # message) and CREATES one when the request has none, so the prose lands even on
+    # system-message-less harnesses; idempotent by marker, so re-injection on every
+    # carrier turn is safe. The prose is a compliance improvement, not a correctness
+    # dependency, and legs 1 and 2 still land on the user message regardless.
     if (
         signal_result is not None
         and signal_result.workflow_system_prose
