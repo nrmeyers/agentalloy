@@ -592,15 +592,18 @@ def evaluate_phase_gate(
       gate). Backward / bail / reset moves are not skips and stay unguarded.
     - Approval gate: forward transitions out of approval-gated phases
       (spec/design/add-skill) require a recorded human approval marker
-      (unforgeable by --force).
+      (unforgeable by --force). For store-backed approval phases, an
+      unreachable store (``store is None``) blocks fail-closed — an
+      un-checkable approval checkpoint must not waive itself.
     - ``override=True`` skips the forward gate (artifact completeness)
       but NOT the approval gate (nor the forward-skip guard).
     - If ``project_root`` is ``None`` (no repo context), the gate is
       skipped and the write is allowed (fail open).
     - If ``current_phase`` is ``None`` (fresh repo), the gate is skipped.
     - If the phase hasn't changed (same-phase write), the gate is skipped.
-    - ``UNKNOWN`` fails open — an embed-server outage must not wedge
-      phase writes.
+    - The completeness gate treats ``UNKNOWN`` as allow — an embed-server
+      outage must not wedge phase writes. That fail-open policy applies
+      ONLY to the artifact completeness gate, never to the approval gate.
     """
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         PredicateContext,
@@ -643,6 +646,7 @@ def evaluate_phase_gate(
     # this checkpoint.
     if target_phase == _get_next().get(current_phase) and approval_required(current_phase):
         approval_blocked = False
+        store_unreachable = False
         if current_phase in _APPROVAL_STORE_NAME_GLOB and project_root:
             name_glob = _APPROVAL_STORE_NAME_GLOB[current_phase]
             if store is not None:
@@ -658,6 +662,16 @@ def evaluate_phase_gate(
                 )
                 result = eval_approval_recorded({"since_name_glob": name_glob}, ctx)
                 approval_blocked = result == PredicateResult.NOT_MET
+            else:
+                # Fail closed: this phase's approval gate is store-backed and
+                # cannot run at all without a store handle. Allowing the
+                # advance would waive the human checkpoint — the hole behind
+                # the pipeline-collapse regression (8f7f354), where a None
+                # store on non-banner turns let every approval gate silently
+                # pass. An un-checkable checkpoint must block, not waive
+                # itself. Not waivable by override (checked below).
+                approval_blocked = True
+                store_unreachable = True
         else:
             since = _APPROVAL_SINCE.get(current_phase, "")
             # Exit artifact doesn't exist yet — skip approval gate, let the
@@ -671,14 +685,23 @@ def evaluate_phase_gate(
                 result = eval_approval_recorded({"since": since}, ctx)
                 approval_blocked = result == PredicateResult.NOT_MET
         if approval_blocked:
+            advisory = (
+                f"'{current_phase}' requires human approval before advancing "
+                f"to '{target_phase}'. Present the work for approval; the phase "
+                f"advances automatically once the user approves."
+            )
+            if store_unreachable:
+                advisory = (
+                    f"'{current_phase}' requires human approval before advancing "
+                    f"to '{target_phase}', and the state store is unreachable, so "
+                    f"the approval check cannot run. Blocking fail-closed — an "
+                    f"un-checkable approval gate must not waive itself. "
+                    f"Retry once the state store is available."
+                )
             return {
                 "result": "approval",
                 "reason": "approval",
-                "advisories": [
-                    f"'{current_phase}' requires human approval before advancing "
-                    f"to '{target_phase}'. Present the work for approval; the phase "
-                    f"advances automatically once the user approves.",
-                ],
+                "advisories": [advisory],
             }
 
     # Override flag: skip the forward (completeness) gate

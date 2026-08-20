@@ -1009,9 +1009,14 @@ async def evaluate_signal(
             except OSError:
                 logger.debug("banner-turns write failed", exc_info=True)
 
-    # Store handle for the banner's store-backed artifact status (#587 §1). Read-only
-    # here; a None handle degrades the banner to its plain per-phase directive.
-    banner_store = _banner_store(cwd) if emit_banner else None
+    # Store handle for the gate AND the banner. Bound unconditionally on every
+    # carrier turn: the approval gate and store-backed exit predicates must
+    # evaluate on non-banner turns too — gating the bind on `emit_banner` made
+    # `ctx.store` None between banner ticks, which skipped the approval branch
+    # and let UNKNOWN fail the gate open (pipeline-collapse regression, 8f7f354).
+    # Read-only here; a None handle degrades the banner to its plain per-phase
+    # directive but still blocks approval-gated transitions.
+    gate_store = _banner_store(cwd)
 
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
@@ -1031,7 +1036,7 @@ async def evaluate_signal(
                 fallback_gates,
                 cwd,
                 slug=contract_slug,
-                store=banner_store,
+                store=gate_store,
                 is_phase_entry=banner_is_phase_entry,
                 mutate=mutate,
             ),
@@ -1080,22 +1085,23 @@ async def evaluate_signal(
         exit_gates,
         cwd,
         slug=contract_slug,
-        store=banner_store,
+        store=gate_store,
         is_phase_entry=banner_is_phase_entry,
         mutate=mutate,
     )
 
     # 3. Build predicate context
     # Pass the store handle so exit-gate predicates (contract_exists,
-    # artifact_exists) evaluate against real store data instead of failing
-    # open (UNKNOWN) or returning blind NOT_MET. banner_store is the same
-    # soft repo+stream-scoped handle _banner_for_turn already uses.
+    # artifact_exists) and the approval gate evaluate against real store data
+    # instead of failing open (UNKNOWN) or returning blind NOT_MET. gate_store
+    # is bound unconditionally above — it must reach the gate on every carrier
+    # turn, not just banner ticks.
     ctx = _build_predicate_context(
         project_root=cwd,
         phase=phase,
         prompt_text=task,
         session_key=session_key,
-        store=banner_store,
+        store=gate_store,
         # Proxy has no file/tool events — only prompt text
     )
 
