@@ -95,24 +95,32 @@ def get_vector_store(request: Request) -> TelemetryStore | None:
 
 @dataclass(frozen=True)
 class _OpenAIArtifactContext:
-    """Context for artifact extraction on the OpenAI response path."""
+    """Context for artifact extraction on the OpenAI response path.
+
+    ``slug`` is ``None`` during intake (no active contract yet) — artifact
+    writes are skipped then, but contract markers still land in the store
+    scoped to ``project_root`` (the session's real repo, never process cwd).
+    """
 
     store: Any
     phase: str
-    slug: str
+    slug: str | None = None
+    project_root: Path | None = None
 
 
 def _build_openai_artifact_context(
     request: Any,
     signal_result: Any,
+    project_dir: Path | None = None,
 ) -> _OpenAIArtifactContext | None:
     """Build artifact extraction context for the OpenAI router.
 
-    Returns ``None`` when extraction is disabled or no contract is active.
+    Returns ``None`` when extraction is disabled or no phase is active.
+    ``slug`` is ``None`` when no active contract exists (e.g. at intake before
+    the first contract is written) — the artifact write path skips then, but
+    contract-marker extraction can still write the first contract.
     """
     if signal_result is None or not getattr(signal_result, "phase", None):
-        return None
-    if not getattr(signal_result, "current_contract", None):
         return None
     try:
         from agentalloy.config import get_settings
@@ -128,7 +136,12 @@ def _build_openai_artifact_context(
         return None
 
     slug = signal_result.current_contract
-    return _OpenAIArtifactContext(store=store, phase=signal_result.phase, slug=slug)
+    return _OpenAIArtifactContext(
+        store=store,
+        phase=signal_result.phase,
+        slug=slug,
+        project_root=project_dir,
+    )
 
 
 def _contract_slug(contract_id: str | None) -> str | None:
@@ -737,7 +750,7 @@ def _stream_upstream_response(
                         stream_buffer.append(chunk)
                     yield chunk
             # After stream ends, run artifact extraction on accumulated text.
-            if artifact_extraction is not None and stream_buffer:
+            if artifact_extraction is not None and artifact_extraction.slug and stream_buffer:
                 try:
                     full_text = "".join(stream_buffer)
                     if "<!--" in full_text:
@@ -751,6 +764,26 @@ def _stream_upstream_response(
                         )
                 except Exception:
                     logger.debug("streaming artifact extraction failed", exc_info=True)
+            # Contract-marker extraction (anomaly D-1): capture the first contract
+            # an agent authors during intake. Streaming markers are not stripped
+            # (the client has already received them; harmless HTML comments); the
+            # contract lands in the store scoped to the session project root.
+            if (
+                artifact_extraction is not None
+                and artifact_extraction.project_root is not None
+                and stream_buffer
+            ):
+                try:
+                    full_text = "".join(stream_buffer)
+                    if "<!--" in full_text:
+                        from agentalloy.api.contract_extractor import extract_and_store as extract_contract_and_store
+
+                        extract_contract_and_store(
+                            full_text,
+                            project_root=artifact_extraction.project_root,
+                        )
+                except Exception:
+                    logger.debug("streaming contract extraction failed", exc_info=True)
             if not has_finish_reason:
                 yield _CORRECTIVE_CHUNK
                 yield 'data: [DONE]\n\n'
@@ -1322,7 +1355,7 @@ async def proxy_chat_completions(
             else None
         )
         # Build artifact extraction context for streaming path
-        stream_artifact_ctx = _build_openai_artifact_context(request, signal_result)
+        stream_artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
         return _stream_upstream_response(
             upstream_client,
             chat_url,
@@ -1597,7 +1630,7 @@ async def proxy_chat_completions(
     pause_mode = signal_result.paused_mode if signal_result else False
 
     # Build artifact extraction context if enabled
-    artifact_ctx = _build_openai_artifact_context(request, signal_result)
+    artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
 
     if current_phase and not pause_mode:
         try:
@@ -1689,8 +1722,9 @@ async def proxy_chat_completions(
             logger.warning("tool call interception failed; forwarding as-is", exc_info=True)
 
     # Artifact extraction: parse markers from response text, write to store,
-    # strip markers from the forwarded response.
-    if artifact_ctx is not None:
+    # strip markers from the forwarded response. Skipped when no active contract
+    # (slug is None, e.g. at intake before the first contract).
+    if artifact_ctx is not None and artifact_ctx.slug:
         try:
             choices = body.get("choices", [])
             if choices and isinstance(choices[0], dict):
@@ -1709,6 +1743,29 @@ async def proxy_chat_completions(
                         message["content"] = result.cleaned_text
         except Exception:
             logger.debug("artifact extraction failed on OpenAI response", exc_info=True)
+
+    # Contract-marker extraction (anomaly D-1): bootstrap the first contract an
+    # agent authors during intake. Writes to the store scoped to the session's
+    # project root (never process cwd) and strips the marker from the response.
+    if artifact_ctx is not None and artifact_ctx.project_root is not None:
+        try:
+            choices = body.get("choices", [])
+            if choices and isinstance(choices[0], dict):
+                message = choices[0].get("message", {})
+                content = message.get("content", "")
+                if isinstance(content, str) and "<!--" in content:
+                    from agentalloy.api.contract_extractor import (
+                        extract_and_store as extract_contract_and_store,
+                    )
+
+                    result = extract_contract_and_store(
+                        content,
+                        project_root=artifact_ctx.project_root,
+                    )
+                    if result.extracted:
+                        message["content"] = result.cleaned_text
+        except Exception:
+            logger.debug("contract extraction failed on OpenAI response", exc_info=True)
 
     return JSONResponse(
         status_code=resp.status_code,

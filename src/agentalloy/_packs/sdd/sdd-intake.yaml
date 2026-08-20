@@ -122,9 +122,14 @@ raw_prose: |
   ## 2. Hand off the next phase's work-item
 
   Intake doesn't keep a contract of its own — it writes the **work-item the next
-  phase picks up**. A contract is auto-created for the phase you're transitioning
-  to. State that the phase is complete. The phase advances automatically once
-  exit gates pass.
+  phase picks up**. Create that downstream contract with a contract marker on
+  the chosen route's phase (`spec`, `sdd-fast`, `add-skill`, or `sdd-flow`):
+
+  `<!-- agentalloy:contract phase=<phase> slug=<task-slug> route=<route> -->...<!-- /agentalloy:contract -->`
+
+  Later phases auto-propagate an existing contract on transition, but the FIRST
+  one has nothing to propagate from — intake authors it. State that the phase is
+  complete. The phase advances automatically once exit gates pass.
 
   Write the body as a concrete restatement of what the user wants. That body
   becomes the next phase's retrieval prompt. Set `scope.touches`. Writing the

@@ -195,6 +195,15 @@ def _add_actions(
         "or describe the artifact naturally and the system will capture it."
     )
 
+    # Contract recording is always available; it is how intake authors the first
+    # downstream contract (there is no current contract to auto-propagate yet).
+    actions["record_contract"] = (
+        "To create the next phase's contract, include a contract marker in your "
+        "response: <!-- agentalloy:contract phase=<phase> slug=<slug> route=<route> "
+        ">...<!-- /agentalloy:contract -->. The body becomes the next phase's "
+        "retrieval prompt; the system records it scoped to this repo."
+    )
+
     # Phase advance depends on gate status
     unmet = gates_unmet or []
     if not unmet:

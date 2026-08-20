@@ -20,5 +20,10 @@ task + phase on demand. Use the `agentalloy_query` tool (if available) or
 **Recording artifacts.** Include artifact markers in your response to record
 them: `<!-- agentalloy:artifact name=<name> -->...<!-- /agentalloy:artifact -->`
 
+**Creating a contract.** In intake, author the next phase's contract with a
+contract marker: `<!-- agentalloy:contract phase=<phase> slug=<slug> route=<route> -->...<!-- /agentalloy:contract -->`.
+The body becomes the next phase's retrieval prompt. This is how the first
+contract gets created (auto-creation only propagates an existing one).
+
 Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship`
 (fast lane: `intake`, `sdd-fast`, `qa`, `ship`).

@@ -328,8 +328,15 @@ async def passthrough_openai_responses(
             body_to_send = raw_body
 
     # --- Forward (shared with the Anthropic passthrough; only the path differs). ---
-    # Build artifact extraction context if enabled
-    artifact_ctx = _build_artifact_context(request, signal)
+    # Build artifact extraction context if enabled. A bad /proj token is
+    # soft-failed (project_dir None) so the response path never 500s on it.
+    try:
+        _project_dir = decode_proj_token(token)
+    except ValueError:
+        _project_dir = None
+    artifact_ctx = _build_artifact_context(
+        request, signal, project_dir=_project_dir
+    )
 
     if stream_flag:
         return await _forward_streaming(

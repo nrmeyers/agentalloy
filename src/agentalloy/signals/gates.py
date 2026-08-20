@@ -150,16 +150,21 @@ def _build_contract_exists_advisory(args: dict[str, Any], ctx: PredicateContext)
     """Advisory for ``contract_exists`` NOT_MET during intake.
 
     When the intake phase's ``contract_exists`` gate fires but no contracts exist
-    in the next phase, tell the agent the concrete action: write the contract and
-    present it for approval, then STOP. This gives intake's gate forward gear
-    instead of echoing the posture silently.
+    in the next phase, tell the agent the concrete action: emit a contract marker
+    (the agent-facing way to create the first contract) and present it for
+    approval, then STOP. This gives intake's gate forward gear instead of echoing
+    the posture, by pointing at a real tool the agent has (anomaly D-1).
     """
     target_phase = str(args.get("phase", "spec"))
     to_phase = _get_next().get(target_phase, target_phase)
     return (
         f"You are in intake, but no contracts exist for phase '{target_phase}'. "
-        f"Create a contract for '{target_phase}' with slug <task-slug>, "
-        f"then PRESENT it in full and STOP — do not draft solutions. "
+        f"Emit a contract marker to create it: "
+        f"<!-- agentalloy:contract phase={target_phase} slug=<task-slug> route=<route> -->"
+        f"<body>"
+        f"<!-- /agentalloy:contract -->. "
+        f"Fill the body with a concrete restatement of what the user wants, then "
+        f"PRESENT it in full and STOP — do not draft solutions. "
         f"The user will advance to '{to_phase}' once they approve the contract."
     )
 
