@@ -32,6 +32,7 @@ from fastapi.responses import StreamingResponse
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.artifact_extractor import extract_and_store
+from agentalloy.api.contract_extractor import extract_and_store as extract_contract_and_store
 from agentalloy.api.proxy_apply import (
     InjectOutcome,
     _compose_block,  # noqa: F401 — re-exported for callers/tests
@@ -73,30 +74,35 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class _ArtifactExtractionContext:
-    """Context for artifact extraction on the response path.
+    """Context for artifact/contract extraction on the response path.
 
-    Carries the store, phase, and contract slug needed to write extracted
-    artifacts. ``None`` means extraction is disabled (feature flag off, or
-    no contract active).
+    Carries the store, phase, contract slug, and the session's real project
+    root needed to write extracted artifacts and contracts. ``slug`` is ``None``
+    during intake (no active contract yet) — artifact writes are skipped then,
+    but contract markers still land in the scoped store. ``None`` means
+    extraction is disabled (feature flag off, or no phase).
     """
 
     store: Any
     phase: str
-    slug: str
+    slug: str | None = None
+    project_root: Path | None = None
 
 
 def _build_artifact_context(
     request: Any,
     signal: SignalResult | None,
+    project_dir: Path | None = None,
 ) -> _ArtifactExtractionContext | None:
     """Build the artifact extraction context from request state and signal.
 
     Returns ``None`` when extraction is disabled (feature flag off, no signal,
-    no phase, or no active contract). Soft: never raises.
+    or no phase). ``slug`` is ``None`` when no active contract exists (e.g. at
+    intake before the first contract is written) — the artifact write path skips
+    then, but contract-marker extraction can still write the first contract.
+    Soft: never raises.
     """
     if signal is None or not signal.phase:
-        return None
-    if not signal.current_contract:
         return None
     try:
         from agentalloy.config import get_settings
@@ -111,9 +117,12 @@ def _build_artifact_context(
     if store is None:
         return None
 
-    # Derive slug from contract_id (the store key, e.g. "auth-refactor")
+    # Derive slug from contract_id (the store key, e.g. "auth-refactor"); may be
+    # None at intake when the first contract has not been written yet.
     slug = signal.current_contract
-    return _ArtifactExtractionContext(store=store, phase=signal.phase, slug=slug)
+    return _ArtifactExtractionContext(
+        store=store, phase=signal.phase, slug=slug, project_root=project_dir
+    )
 
 
 router = APIRouter()
@@ -728,7 +737,7 @@ async def passthrough_anthropic_messages(
     pause_mode = signal.paused_mode if signal else False
 
     # Build artifact extraction context if enabled
-    artifact_ctx = _build_artifact_context(request, signal)
+    artifact_ctx = _build_artifact_context(request, signal, project_dir=project_dir)
 
     if stream_flag:
         return await _forward_streaming(
@@ -809,8 +818,9 @@ async def _forward_once(
             pass
 
     # Artifact extraction: parse markers from response text, write to store,
-    # strip markers from the forwarded response.
-    if artifact_extraction is not None:
+    # strip markers from the forwarded response. Skipped when no active
+    # contract (slug is None, e.g. at intake before the first contract).
+    if artifact_extraction is not None and artifact_extraction.slug:
         try:
             response_json = json.loads(response_content)
             if isinstance(response_json, dict) and "content" in response_json:
@@ -849,6 +859,42 @@ async def _forward_once(
                                 response_content = json.dumps(response_json).encode("utf-8")
         except Exception:
             logger.debug("artifact extraction failed on response", exc_info=True)
+
+    # Contract-marker extraction: bootstrap the first contract during intake.
+    # Writes to the store scoped to the session's project root (never the
+    # process cwd) and strips the marker from the forwarded response (mirrors
+    # the artifact handling above). Runs even with no active contract — that is
+    # precisely the intake gap this closes (anomaly D-1).
+    if artifact_extraction is not None and artifact_extraction.project_root is not None:
+        try:
+            response_json = json.loads(response_content)
+            if isinstance(response_json, dict) and "content" in response_json:
+                content_blocks = response_json.get("content", [])
+                if isinstance(content_blocks, list):
+                    full_text = "".join(
+                        b.get("text", "")
+                        for b in content_blocks
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                    if "<!--" in full_text:
+                        result = extract_contract_and_store(
+                            full_text,
+                            project_root=artifact_extraction.project_root,
+                        )
+                        if result.extracted:
+                            cleaned = result.cleaned_text
+                            text_blocks = [
+                                b
+                                for b in content_blocks
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            ]
+                            if text_blocks:
+                                for i, b in enumerate(text_blocks):
+                                    b["text"] = cleaned if i == 0 else ""
+                                response_json["content"] = content_blocks
+                                response_content = json.dumps(response_json).encode("utf-8")
+        except Exception:
+            logger.debug("contract extraction failed on response", exc_info=True)
 
     return Response(
         content=response_content,
@@ -956,7 +1002,8 @@ async def _forward_streaming(
             await cm.__aexit__(None, None, None)
         # After stream ends, run artifact extraction on accumulated text.
         # This runs in the background — the response is already fully sent.
-        if artifact_extraction is not None and stream_buffer:
+        # Skipped when no active contract (slug None, e.g. at intake).
+        if artifact_extraction is not None and artifact_extraction.slug and stream_buffer:
             try:
                 full_text = "".join(stream_buffer)
                 if "<!--" in full_text:
@@ -968,6 +1015,24 @@ async def _forward_streaming(
                     )
             except Exception:
                 logger.debug("streaming artifact extraction failed", exc_info=True)
+        # Contract-marker extraction on accumulated text (anomaly D-1): capture
+        # the first contract an agent authors during intake. Streaming markers
+        # are not stripped — the client has already received them (harmless HTML
+        # comments); the contract is written scoped to the session project root.
+        if (
+            artifact_extraction is not None
+            and artifact_extraction.project_root is not None
+            and stream_buffer
+        ):
+            try:
+                full_text = "".join(stream_buffer)
+                if "<!--" in full_text:
+                    extract_contract_and_store(
+                        full_text,
+                        project_root=artifact_extraction.project_root,
+                    )
+            except Exception:
+                logger.debug("streaming contract extraction failed", exc_info=True)
         # Safety net for a truncated upstream stream: emit the surface's
         # terminal event only when it was genuinely absent. A complete stream
         # already carries the terminal event, so this is a no-op in practice.
