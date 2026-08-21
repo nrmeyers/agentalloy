@@ -201,9 +201,7 @@ function UpstreamCard({
           Pick a repo above to view and edit its active chat upstream.
         </p>
       ) : upstream?.exists === false ? (
-        <p className="text-sm text-[var(--text-tertiary)]">
-          This repo has no .agentalloy/upstream file yet, so there is no active chat entry to edit.
-        </p>
+        <p className="text-sm text-[var(--text-tertiary)]">No per-repo upstream for this repo.</p>
       ) : upstream?.detail ? (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
           {upstream.detail}
@@ -216,13 +214,17 @@ function UpstreamCard({
             </div>
           )}
           <FormField label="URL">
-            <TextInput value={form.url} onChange={(v) => set('url', v)} />
+            <TextInput value={form.url} onChange={(v) => set('url', v)} placeholder="upstream URL" />
           </FormField>
           <FormField label="Model">
-            <TextInput value={form.model} onChange={(v) => set('model', v)} />
+            <TextInput value={form.model} onChange={(v) => set('model', v)} placeholder="model" />
           </FormField>
           <FormField label="Key Env Var" hint="Name of the env var holding the API key">
-            <TextInput value={form.key_env} onChange={(v) => set('key_env', v)} />
+            <TextInput
+              value={form.key_env}
+              onChange={(v) => set('key_env', v)}
+              placeholder="env var name"
+            />
           </FormField>
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
