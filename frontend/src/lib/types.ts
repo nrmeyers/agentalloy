@@ -47,6 +47,38 @@ export interface ReloadResult {
 }
 
 // ---------------------------------------------------------------------------
+// Per-repo Upstream (/api/upstream) — the active chat entry of a repo's
+// .agentalloy/upstream file. Distinct from ConfigData, which edits the global
+// user-scoped .env.
+// ---------------------------------------------------------------------------
+
+export interface UpstreamConfig {
+  repo_root: string;
+  /** false = no upstream file for this repo yet. */
+  exists: boolean;
+  /** Harness key of the active chat entry; "" for a legacy flat file, null when none. */
+  harness: string | null;
+  url: string | null;
+  model: string | null;
+  /** Name of the env var holding the key — never the secret itself. */
+  key_env: string | null;
+  /** Set when the file exists but is malformed/unreadable. */
+  detail: string | null;
+}
+
+export interface UpstreamUpdate {
+  url: string;
+  model: string;
+  key_env?: string | null;
+}
+
+export interface UpstreamUpdateResult {
+  status: string;
+  repo_root: string;
+  harness: string;
+}
+
+// ---------------------------------------------------------------------------
 // Telemetry (/telemetry/*)
 // ---------------------------------------------------------------------------
 

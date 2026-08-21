@@ -38,6 +38,9 @@ import type {
   SkillVersionsResponse,
   TracesParams,
   TracesResponse,
+  UpstreamConfig,
+  UpstreamUpdate,
+  UpstreamUpdateResult,
   WizardFileWriteRequest,
   WizardFileWriteResult,
   WizardInstallRequest,
@@ -160,6 +163,32 @@ export function updateConfig(partial: ConfigUpdate): Promise<ConfigUpdateResult>
 
 export function reloadConfig(): Promise<ReloadResult> {
   return request<ReloadResult>('/api/config/reload', { method: 'POST' });
+}
+
+// --- Per-repo Upstream (/api/upstream) ---------------------------------------
+
+/**
+ * Read a repo's active chat upstream from its .agentalloy/upstream file.
+ * `repo_root` is the absolute path (from the repo dropdown); omitted = the
+ * deployed repo. Returns exists=false (not an error) when no file is present.
+ */
+export function getUpstream(repoRoot?: string): Promise<UpstreamConfig> {
+  return request<UpstreamConfig>(`/api/upstream${query({ repo_root: repoRoot })}`);
+}
+
+/**
+ * Edit a repo's active chat upstream (edit-only). 400 = no active chat entry
+ * ({"detail": {"error": "no_active_upstream", ...}}) or empty url/model.
+ */
+export function updateUpstream(
+  repoRoot: string,
+  body: UpstreamUpdate,
+): Promise<UpstreamUpdateResult> {
+  return request<UpstreamUpdateResult>(`/api/upstream${query({ repo_root: repoRoot })}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 // --- Telemetry ---------------------------------------------------------------
