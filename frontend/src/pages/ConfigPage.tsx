@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useConfig, useReloadConfig, useUpdateConfig } from '../hooks/useConfig';
+import { useRepos } from '../hooks/useRepos';
+import { useUpstream, useUpdateUpstream } from '../hooks/useUpstream';
 import {
   Card,
   ErrorState,
@@ -127,6 +129,123 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Per-repo chat upstream editor (the active entry of <repo>/.agentalloy/upstream).
+ * Distinct from the global upstream fields above, which edit the user-scoped .env.
+ * Repo selection is owned by the parent so the card can be reset on switch.
+ */
+function UpstreamCard({
+  selectedRepo,
+  onSelectRepo,
+}: {
+  selectedRepo: string | undefined;
+  onSelectRepo: (repo: string | undefined) => void;
+}) {
+  const { data: repos } = useRepos();
+  const { data: upstream } = useUpstream(selectedRepo, selectedRepo !== undefined);
+  const update = useUpdateUpstream();
+
+  const [form, setForm] = useState({ url: '', model: '', key_env: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-seed the form whenever a different repo is selected or its upstream
+  // (re)loads; never clobber in-progress edits on a background refetch.
+  useEffect(() => {
+    if (upstream) {
+      setForm({
+        url: upstream.url ?? '',
+        model: upstream.model ?? '',
+        key_env: upstream.key_env ?? '',
+      });
+      setError(null);
+    }
+  }, [selectedRepo, upstream]);
+
+  const set = (key: keyof typeof form, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setError(null);
+  };
+
+  const handleSave = async () => {
+    if (!selectedRepo) return;
+    try {
+      await update.mutateAsync({
+        repoRoot: selectedRepo,
+        body: { url: form.url.trim(), model: form.model.trim(), key_env: form.key_env.trim() || null },
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold mb-4">Per-Repo Upstream</h2>
+      <FormField label="Repo" hint="The .agentalloy/upstream file is read from this repo's root">
+        <select
+          value={selectedRepo ?? ''}
+          onChange={(e) => onSelectRepo(e.target.value || undefined)}
+          className={inputClass}
+        >
+          <option value="">Select a repo…</option>
+          {(repos?.repos ?? []).map((r) => (
+            <option key={r.repo_root} value={r.repo_root}>
+              {r.repo_root}
+            </option>
+          ))}
+        </select>
+      </FormField>
+
+      {!selectedRepo ? (
+        <p className="text-sm text-[var(--text-tertiary)]">
+          Pick a repo above to view and edit its active chat upstream.
+        </p>
+      ) : upstream?.exists === false ? (
+        <p className="text-sm text-[var(--text-tertiary)]">No per-repo upstream for this repo.</p>
+      ) : upstream?.detail ? (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
+          {upstream.detail}
+        </div>
+      ) : (
+        <>
+          {upstream?.harness && (
+            <div className="mb-4 text-sm text-[var(--text-secondary)]">
+              Active harness: <span className="font-mono">{upstream.harness}</span>
+            </div>
+          )}
+          <FormField label="URL">
+            <TextInput value={form.url} onChange={(v) => set('url', v)} placeholder="upstream URL" />
+          </FormField>
+          <FormField label="Model">
+            <TextInput value={form.model} onChange={(v) => set('model', v)} placeholder="model" />
+          </FormField>
+          <FormField label="Key Env Var" hint="Name of the env var holding the API key">
+            <TextInput
+              value={form.key_env}
+              onChange={(v) => set('key_env', v)}
+              placeholder="env var name"
+            />
+          </FormField>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button
+              onClick={handleSave}
+              disabled={update.isPending}
+              className="px-4 py-2 bg-brand text-white rounded-md text-sm hover:bg-brand-dark disabled:opacity-50"
+            >
+              {update.isPending ? 'Saving…' : 'Save Upstream'}
+            </button>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function ConfigPage() {
   const { data: config, isLoading, error, refetch } = useConfig();
   const update = useUpdateConfig();
@@ -135,6 +254,7 @@ export function ConfigPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showKey, setShowKey] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState<string | undefined>(undefined);
 
   // Seed the form once when config first loads; never clobber in-progress edits
   // on background refetches.
@@ -256,6 +376,8 @@ export function ConfigPage() {
           />
         </FormField>
       </Card>
+
+      <UpstreamCard key={selectedRepo ?? 'none'} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} />
 
       <Card>
         <h2 className="text-lg font-semibold mb-4">Embedding</h2>

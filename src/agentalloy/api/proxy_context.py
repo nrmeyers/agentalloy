@@ -287,3 +287,45 @@ def read_upstream(cwd: Path, *, harness: str | None = None) -> UpstreamFile:
     if not isinstance(entry, dict):
         return UpstreamFile(kind="error", detail=f"{path}[{requested}] is not a mapping")
     return _parse_upstream_entry(cast("dict[str, object]", entry), path)
+
+
+def resolve_chat_upstream_key(cwd: Path) -> str | None:
+    """Return the key of the entry the chat scope resolves to, or ``None``.
+
+    The write-side counterpart of :func:`read_upstream` with ``harness=None``:
+    that function returns the entry's *values* but not its *key*, and a writer
+    (e.g. the web upstream config endpoint) needs the key to update the right
+    entry without clobbering the others. The two must stay in lockstep — a
+    drift here means the UI edits an entry the proxy never forwards to.
+
+    Returns:
+    * ``""`` — a legacy flat file (``url`` at the top level); the top level is
+      the chat scope.
+    * a harness key — the first non-passthrough key of a namespaced map.
+    * ``None`` — no file, a malformed file, or a map with only passthrough
+      entries (nothing to edit; a writer must 400, not invent an entry).
+    """
+    path = cwd / UPSTREAM_FILE
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as e:
+        logger.warning("could not read %s: %s", path, e)
+        return None
+
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        logger.warning("malformed %s: %s", path, e)
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    data = cast("dict[str, Any]", parsed)
+
+    # Legacy flat shape: the top level is the chat scope.
+    if "url" in data and isinstance(data["url"], str):
+        return ""
+
+    # Namespaced shape: first non-passthrough key, mirroring read_upstream.
+    return next((key for key in data if key not in _PASSTHROUGH_HARNESS_KEYS), None)
