@@ -6,7 +6,11 @@ import types
 from pathlib import Path
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
-from agentalloy.api.proxy_context import Upstream, read_upstream
+from agentalloy.api.proxy_context import (
+    Upstream,
+    read_upstream,
+    resolve_chat_upstream_key,
+)
 from agentalloy.api.proxy_router import (
     _get_or_create_upstream_client,
     _passthrough_base_url,
@@ -110,6 +114,64 @@ class TestReadUpstream:
         assert read_upstream(tmp_path).kind == "valid"
         assert read_upstream(tmp_path, harness="claude-code").kind == "absent"
         assert read_upstream(tmp_path, harness="codex").kind == "absent"
+
+
+class TestResolveChatUpstreamKey:
+    """The write path needs the *key* the chat scope resolves to — read_upstream
+    returns only the values. This must mirror read_upstream(harness=None) exactly
+    so the UI and the proxy can never disagree on which entry is 'active'."""
+
+    def test_namespaced_first_non_passthrough(self, tmp_path: Path) -> None:
+        _write_upstream(
+            tmp_path,
+            "claude-code:\n  url: https://api.anthropic.com\n  model: c1\n"
+            "qwen-code:\n  url: http://h:9000/v1\n  model: m1\n",
+        )
+        assert resolve_chat_upstream_key(tmp_path) == "qwen-code"
+
+    def test_namespaced_skips_leading_passthrough(self, tmp_path: Path) -> None:
+        # claude-code first, but it's a passthrough — the chat key is the next one.
+        _write_upstream(
+            tmp_path,
+            "claude-code:\n  url: https://api.anthropic.com\n  model: c1\n"
+            "codex:\n  url: https://api.openai.com\n  model: o1\n"
+            "qwen-code:\n  url: http://h:9000/v1\n  model: m1\n",
+        )
+        assert resolve_chat_upstream_key(tmp_path) == "qwen-code"
+
+    def test_legacy_flat_is_top_level(self, tmp_path: Path) -> None:
+        # A flat file's chat scope is the top level, signalled by the empty key.
+        _write_upstream(tmp_path, "url: http://h:9000/v1\nmodel: m1\n")
+        assert resolve_chat_upstream_key(tmp_path) == ""
+
+    def test_absent_file_is_none(self, tmp_path: Path) -> None:
+        assert resolve_chat_upstream_key(tmp_path) is None
+
+    def test_passthrough_only_is_none(self, tmp_path: Path) -> None:
+        _write_upstream(
+            tmp_path,
+            "claude-code:\n  url: https://api.anthropic.com\n  model: c1\n"
+            "codex:\n  url: https://api.openai.com\n  model: o1\n",
+        )
+        assert resolve_chat_upstream_key(tmp_path) is None
+
+    def test_malformed_is_none(self, tmp_path: Path) -> None:
+        _write_upstream(tmp_path, "url: [unclosed\n")
+        assert resolve_chat_upstream_key(tmp_path) is None
+
+    def test_agrees_with_read_upstream(self, tmp_path: Path) -> None:
+        # The invariant: whenever read_upstream(harness=None) is valid, the
+        # resolver names the key whose entry read_upstream would return.
+        _write_upstream(
+            tmp_path,
+            "codex:\n  url: https://api.openai.com\n  model: o1\n"
+            "qwen-code:\n  url: http://h:9000/v1\n  model: m1\n  key_env: OPENAI_API_KEY\n",
+        )
+        key = resolve_chat_upstream_key(tmp_path)
+        chat = read_upstream(tmp_path)
+        assert key == "qwen-code"
+        assert chat.kind == "valid" and chat.upstream is not None
+        assert chat.upstream.model == "m1"
 
 
 def _fake_app() -> types.SimpleNamespace:
