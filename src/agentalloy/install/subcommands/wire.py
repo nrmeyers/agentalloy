@@ -631,6 +631,25 @@ def _render_wired_list(result: dict[str, Any]) -> None:
     print_rich("  [dim]Phase: check state panel in LLM context, or run `agentalloy phase`[/dim]\n")
 
 
+def _code_index_harness(cwd: Path, harnesses: list[str]) -> str:
+    """Pick the harness that owns the code-index block for this wiring.
+
+    The first wired harness whose code-index carrier resolves to a file in
+    *cwd* (see :func:`code_index_wiring.detect_target`). When none do —
+    proxy-only harnesses (claude-code, qwen-code, codex) and home-scoped ones
+    resolve to ``None`` — fall back to the first wired harness: no block is
+    written for it, but the module's legacy-block migration and index offer
+    still run. Never ``None``: a ``None`` harness would default to creating
+    ``CLAUDE.md``, which is wrong for every non-claude-code wiring.
+    """
+    from agentalloy.install import code_index_wiring
+
+    for h in harnesses:
+        if code_index_wiring.detect_target(cwd, h) is not None:
+            return h
+    return harnesses[0]
+
+
 def _run(args: argparse.Namespace) -> int:
     cwd = Path.cwd().resolve()
 
@@ -743,16 +762,12 @@ def _run(args: argparse.Namespace) -> int:
     # up an existing (or legacy codebase-indexer) block instead. Best-effort.
     from agentalloy.install import code_index_wiring
 
-    # Pass claude-code if any wired harness is claude-code (so CLAUDE.md is
-    # a valid fallback target); otherwise pass None to avoid creating a
-    # Claude Code carrier for non-claude-code harnesses.
-    _ci_harness = "claude-code" if "claude-code" in harnesses else None
     ci_actions = code_index_wiring.maybe_wire(
         cwd,
         port,
         quiet=True,
         assume_yes=bool(getattr(args, "assume_yes", False)),
-        harness=_ci_harness,
+        harness=_code_index_harness(cwd, harnesses),
     )
     if ci_actions:
         result["code_index_wiring"] = ci_actions
