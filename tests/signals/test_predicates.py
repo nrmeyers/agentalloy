@@ -170,6 +170,82 @@ def test_tests_present_extra_globs(tmp_path: Path):
     assert eval_tests_present({"extra_globs": ["**/*_test.go"]}, _ctx(tmp_path)) == MET
 
 
+def _make_store_with_phase_ref(tmp_path: Path, sha: str = "abc123") -> None:
+    """A store with a build phase row + phase-entry ref stamped (no contract).
+
+    ``tests_present`` is phase-scoped by the phase-entry ref, not by a contract,
+    so this is all the setup the diff-aware path needs.
+    """
+    store = _make_store(tmp_path)
+    _write_phase_start_ref(store, sha)
+    store.close()
+
+
+def test_tests_present_met_when_phase_added_test_file(tmp_path: Path) -> None:
+    # The build wrote a test this phase: the diff includes it → MET.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    _make_store_with_phase_ref(tmp_path)
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["tests/test_x.py"], []),
+    ):
+        assert eval_tests_present({}, ctx) == MET
+
+
+def test_tests_present_not_met_when_tests_preexist_but_phase_touched_none(tmp_path: Path) -> None:
+    # F2: tests exist from prior work, but this phase only touched source → NOT_MET.
+    # A repo-wide existence glob would have passed this vacuously.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_old.py").write_text("def test_old(): pass\n")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mod.py").write_text("x = 1\n")
+    _make_store_with_phase_ref(tmp_path)
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["src/mod.py"], []),
+    ):
+        assert eval_tests_present({}, ctx) == NOT_MET
+
+
+def test_tests_present_met_when_phase_modified_test_file(tmp_path: Path) -> None:
+    # Modifying an existing test (working tree) also counts as writing tests.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    _make_store_with_phase_ref(tmp_path)
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory([], ["tests/test_x.py"]),
+    ):
+        assert eval_tests_present({}, ctx) == MET
+
+
+def test_tests_present_fail_open_when_no_phase_start_ref(tmp_path: Path) -> None:
+    # Store present but no phase-entry ref → can't prove the phase wrote tests;
+    # degrade to existence → MET (never NOT_MET on an infra gap).
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    _make_store(tmp_path).close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    assert eval_tests_present({}, ctx) == MET
+
+
+def test_tests_present_fail_open_when_git_fails(tmp_path: Path) -> None:
+    # Phase-entry ref present but git fails → infra gap; fail open to existence.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    _make_store_with_phase_ref(tmp_path)
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=OSError("no git"),
+    ):
+        assert eval_tests_present({}, ctx) == MET
+
+
 # ---------------------------------------------------------------------------
 # artifact_contains
 # ---------------------------------------------------------------------------

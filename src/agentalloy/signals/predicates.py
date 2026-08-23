@@ -352,18 +352,24 @@ def _path_in_excluded_dir(rel: Path) -> bool:
 
 
 def eval_tests_present(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
-    """Stack-aware test-presence gate: MET if any recognized test file exists.
+    """MET iff the build added or modified a recognized test file this phase.
 
-    Replaces a hardcoded ``tests/**/*.py`` glob so a JS/TS repo with Vitest/Jest tests
-    satisfies ``build -> qa`` without ``--force``. Detection:
+    Stack-aware: always recognizes pytest layouts (``tests/**/*.py``,
+    ``**/test_*.py``, ``**/*_test.py``); when a root ``package.json`` exists it
+    also recognizes Vitest/Jest (``**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts}``).
+    ``args.extra_globs`` (repo-relative globs) lets a pack add a stack (Go,
+    Rust, ...) without a code change.
 
-    - always: ``tests/**/*.py``, ``**/test_*.py``, ``**/*_test.py`` (pytest)
-    - when a root ``package.json`` exists: ``**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts}``
-    - ``args.extra_globs`` (list of repo-relative globs): a pack can add a stack (Go,
-      Rust, ...) without a code change.
+    Vendored/output dirs (``node_modules``, ``dist``, ``.venv``, ...) are
+    excluded so their bundled tests never satisfy the gate.
 
-    Vendored/output dirs (``node_modules``, ``dist``, ``.venv``, ...) are excluded so their
-    bundled tests never satisfy the gate. Returns MET/NOT_MET; never raises.
+    Phase-aware: a repo-wide existence glob is vacuous — a multi-surface work
+    item passed while the repo merely *had* test files from prior work. When
+    the phase-entry ref is available, the gate instead requires the phase's
+    diff (committed + working tree) to include a recognized test file, so the
+    build proves it wrote tests rather than inheriting them. Without a ref, or
+    on a git failure, it degrades to the existence check — fail-open, never
+    NOT_MET on an infra gap (the absent-vs-unavailable convention).
     """
     root = ctx.project_root
     patterns: list[str] = ["tests/**/*.py", "**/test_*.py", "**/*_test.py"]
@@ -375,15 +381,30 @@ def eval_tests_present(args: dict[str, Any], ctx: PredicateContext) -> Predicate
     if isinstance(extra, list):
         patterns.extend(str(g) for g in cast(list[Any], extra))
 
+    # Recognized test files that exist, repo-relative. None at all → NOT_MET
+    # regardless of the phase diff.
+    test_files: set[str] = set()
     for pattern in patterns:
         for f in _glob_files(root, pattern):
             try:
                 rel = f.relative_to(root)
             except ValueError:
-                rel = f
+                continue
             if not _path_in_excluded_dir(rel):
-                return PredicateResult.MET
-    return PredicateResult.NOT_MET
+                test_files.add(rel.as_posix())
+    if not test_files:
+        return PredicateResult.NOT_MET
+
+    # Phase-scoped proof: require the build to have added/modified one of them.
+    base_ref = _read_phase_start_ref(root, store=ctx.store)
+    if not base_ref:
+        return PredicateResult.MET  # no marker → can't prove the phase wrote tests; fail open
+    changed = _changed_paths_since(root, base_ref)
+    if changed is None:
+        return PredicateResult.MET  # git failed → infra; fail open to existence
+    if test_files.intersection(changed):
+        return PredicateResult.MET
+    return PredicateResult.NOT_MET  # tests exist, but the phase touched none of them
 
 
 def _section_present(section: str, headings: list[str]) -> bool:
