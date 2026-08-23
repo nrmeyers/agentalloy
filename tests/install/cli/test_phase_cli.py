@@ -351,9 +351,7 @@ class TestGuardedAdvance:
         # The row is still spec — the skip never landed.
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
-    def test_forward_skip_blocked_even_with_artifacts_and_approval(
-        self, repo_root: Path
-    ) -> None:
+    def test_forward_skip_blocked_even_with_artifacts_and_approval(self, repo_root: Path) -> None:
         """Even a fully complete + approved spec cannot jump to build — the
         intermediate design + plan phases must run in order."""
         run_phase_set("spec", root=repo_root)

@@ -791,8 +791,7 @@ class TestReadWrite:
 
                 assert not errors, errors
                 count = store.scalar(
-                    "SELECT COUNT(*) FROM sdd_state "
-                    "WHERE kind='cursor' AND session_key=?",
+                    "SELECT COUNT(*) FROM sdd_state WHERE kind='cursor' AND session_key=?",
                     (key,),
                 )
                 assert count == 1, f"round {i}: expected 1 row, got {count}"

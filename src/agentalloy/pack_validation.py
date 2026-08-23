@@ -385,7 +385,7 @@ def check_version_gate(
     for entry in installed_packs:
         if str(entry.get("name", "")) == pack_name:
             ts = entry.get("installed_at")
-            ts_val = int(ts) if isinstance(ts, (int, float)) else 0
+            ts_val = int(ts) if isinstance(ts, int | float) else 0
             if prior is None or ts_val >= prior_ts:
                 prior = entry
                 prior_ts = ts_val

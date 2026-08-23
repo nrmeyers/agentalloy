@@ -109,7 +109,6 @@ class _OpenAIArtifactContext:
 
 
 def _build_openai_artifact_context(
-    request: Any,
     signal_result: Any,
     project_dir: Path | None = None,
 ) -> _OpenAIArtifactContext | None:
@@ -119,6 +118,10 @@ def _build_openai_artifact_context(
     ``slug`` is ``None`` when no active contract exists (e.g. at intake before
     the first contract is written) — the artifact write path skips then, but
     contract-marker extraction can still write the first contract.
+
+    The store is the process state store scoped to the session's real repo —
+    the same ``for_repo`` bucket the state leg reads from. The corpus
+    ``app.state.store`` has no ``set_artifact`` and would soft-fail every write.
     """
     if signal_result is None or not getattr(signal_result, "phase", None):
         return None
@@ -131,8 +134,17 @@ def _build_openai_artifact_context(
     except Exception:
         return None
 
-    store = getattr(request.app.state, "store", None)
-    if store is None:
+    try:
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        if store is None:
+            return None
+        if project_dir is not None:
+            store = scoped_state_store(store, Path(project_dir).resolve())
+    except Exception:
+        logger.debug("artifact context store resolution failed", exc_info=True)
         return None
 
     slug = signal_result.current_contract
@@ -709,7 +721,7 @@ def _stream_upstream_response(
             )
 
         _CORRECTIVE_CHUNK = (
-            'data: '
+            "data: "
             + json.dumps(
                 {
                     "id": "chatcmpl-proxy",
@@ -719,7 +731,7 @@ def _stream_upstream_response(
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 },
             )
-            + '\n\n'
+            + "\n\n"
         )
 
         try:
@@ -776,7 +788,9 @@ def _stream_upstream_response(
                 try:
                     full_text = "".join(stream_buffer)
                     if "<!--" in full_text:
-                        from agentalloy.api.contract_extractor import extract_and_store as extract_contract_and_store
+                        from agentalloy.api.contract_extractor import (
+                            extract_and_store as extract_contract_and_store,
+                        )
 
                         extract_contract_and_store(
                             full_text,
@@ -786,7 +800,7 @@ def _stream_upstream_response(
                     logger.debug("streaming contract extraction failed", exc_info=True)
             if not has_finish_reason:
                 yield _CORRECTIVE_CHUNK
-                yield 'data: [DONE]\n\n'
+                yield "data: [DONE]\n\n"
             _finish_received()
         except httpx.HTTPStatusError as exc:
             logger.warning("Upstream streaming HTTP status error: %s", exc)
@@ -1355,7 +1369,7 @@ async def proxy_chat_completions(
             else None
         )
         # Build artifact extraction context for streaming path
-        stream_artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
+        stream_artifact_ctx = _build_openai_artifact_context(signal_result, project_dir=cwd)
         return _stream_upstream_response(
             upstream_client,
             chat_url,
@@ -1630,7 +1644,7 @@ async def proxy_chat_completions(
     pause_mode = signal_result.paused_mode if signal_result else False
 
     # Build artifact extraction context if enabled
-    artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
+    artifact_ctx = _build_openai_artifact_context(signal_result, project_dir=cwd)
 
     if current_phase and not pause_mode:
         try:
@@ -1649,6 +1663,7 @@ async def proxy_chat_completions(
                                 _command_writes_to_code,
                                 build_instructive_denial_message,
                             )
+
                             # Check if any tool calls are gated
                             gated_indices = []
                             for i, tc in enumerate(tool_calls):
@@ -1663,10 +1678,18 @@ async def proxy_chat_completions(
                                         elif fn_name in SHELL_TOOL_NAMES:
                                             args_str = fn.get("arguments", "{}")
                                             try:
-                                                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                                args = (
+                                                    json.loads(args_str)
+                                                    if isinstance(args_str, str)
+                                                    else args_str
+                                                )
                                                 command = args.get("command", "")
                                                 # Check writes to code
-                                                if _command_writes_to_code(command) or _command_advances_phase_without_approval(command, current_phase):
+                                                if _command_writes_to_code(
+                                                    command
+                                                ) or _command_advances_phase_without_approval(
+                                                    command, current_phase
+                                                ):
                                                     gated_indices.append((i, fn_name))
                                             except (json.JSONDecodeError, AttributeError):
                                                 pass
@@ -1681,9 +1704,15 @@ async def proxy_chat_completions(
                                     args_str = fn.get("arguments", "{}")
                                     is_phase_advance = False
                                     try:
-                                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                        args = (
+                                            json.loads(args_str)
+                                            if isinstance(args_str, str)
+                                            else args_str
+                                        )
                                         command = args.get("command", "")
-                                        is_phase_advance = _command_advances_phase_without_approval(command, current_phase)
+                                        is_phase_advance = _command_advances_phase_without_approval(
+                                            command, current_phase
+                                        )
                                     except (json.JSONDecodeError, AttributeError):
                                         pass
 
@@ -1710,7 +1739,8 @@ async def proxy_chat_completions(
                                 message["content"] = content.strip()
                                 # Remove the gated tool calls
                                 message["tool_calls"] = [
-                                    tc for i, tc in enumerate(tool_calls)
+                                    tc
+                                    for i, tc in enumerate(tool_calls)
                                     if i not in [idx for idx, _ in gated_indices]
                                 ]
                                 if not message["tool_calls"]:

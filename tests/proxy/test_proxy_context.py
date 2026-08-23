@@ -167,7 +167,6 @@ class TestProjToken:
         assert decode_proj_token(encode_proj_token(link)) == Path(os.path.realpath(real))
 
     def test_rejects_malformed_token(self) -> None:
-
         for junk in ("not!base64!", "", "Zm9v"):  # last decodes to "foo" (relative → reject)
             with pytest.raises(ValueError):
                 decode_proj_token(junk)

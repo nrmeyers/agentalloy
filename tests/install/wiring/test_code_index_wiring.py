@@ -9,6 +9,9 @@ from typing import Any
 import pytest
 
 from agentalloy.install import code_index_wiring as ciw
+from agentalloy.install.subcommands.wire import (
+    _code_index_harness,  # pyright: ignore[reportPrivateUsage]
+)
 
 LEGACY_BLOCK = (
     f"{ciw.LEGACY_SENTINEL_BEGIN}\n"
@@ -497,9 +500,7 @@ class TestOfferIndex:
         """A 409 'already active' from the service is not a start failure (B2)."""
         import sys as _sys
 
-        submitted = self._seams(
-            monkeypatch, slugs=[], job={"already_active": True, "job_id": "j9"}
-        )
+        submitted = self._seams(monkeypatch, slugs=[], job={"already_active": True, "job_id": "j9"})
         monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
         job = ciw.offer_index(tmp_path, 47950)
         assert job is not None and job["already_active"] is True
@@ -643,9 +644,7 @@ class TestSubmitIndexJob409:
 
         monkeypatch.setattr(ciw.urllib.request, "urlopen", _fake_urlopen)
 
-    def test_409_already_active_parses_job_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_409_already_active_parses_job_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(
             monkeypatch,
             self._http_error(409, "an index job for slug 'org__repo' is already active: j9"),
@@ -653,19 +652,83 @@ class TestSubmitIndexJob409:
         result = ciw.submit_index_job(47950, Path("/tmp/repo"))
         assert result == {"already_active": True, "job_id": "j9"}
 
-    def test_409_without_detail_still_already_active(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_409_without_detail_still_already_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(monkeypatch, self._http_error(409, ""))
         result = ciw.submit_index_job(47950, Path("/tmp/repo"))
         assert result == {"already_active": True, "job_id": None}
 
-    def test_other_http_error_is_a_failure(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_other_http_error_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(monkeypatch, self._http_error(500, "boom"))
         assert ciw.submit_index_job(47950, Path("/tmp/repo")) is None
 
     def test_unreachable_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(monkeypatch, urllib.error.URLError("refused"))
         assert ciw.submit_index_job(47950, Path("/tmp/repo")) is None
+
+
+class TestWireCodeIndexHarnessSelection:
+    """_code_index_harness() picks the block owner for `wire` (never None).
+
+    The old rule (`"claude-code" if claude-code in harnesses else None`)
+    passed None for every non-claude-code wiring, and detect_target(None)
+    defaults to creating CLAUDE.md — so `wire qwen-code` left a stray
+    CLAUDE.md behind. The selection must resolve each wired harness's own
+    carrier and fall back to a harness that writes no block.
+    """
+
+    def test_proxy_only_harness_falls_back_to_itself(self, tmp_path: Path) -> None:
+        """qwen-code alone: no carrier resolves, so it owns (no) block."""
+        assert _code_index_harness(tmp_path, ["qwen-code"]) == "qwen-code"
+
+    def test_claude_code_alone_falls_back_to_itself(self, tmp_path: Path) -> None:
+        assert _code_index_harness(tmp_path, ["claude-code"]) == "claude-code"
+
+    def test_all_proxy_only_picks_first(self, tmp_path: Path) -> None:
+        assert _code_index_harness(tmp_path, ["codex", "qwen-code"]) == "codex"
+
+    def test_skips_proxy_only_for_markdown_harness(self, tmp_path: Path) -> None:
+        """claude-code + cursor: the block belongs to cursor's carrier."""
+        (tmp_path / ".cursor" / "rules").mkdir(parents=True)
+        (tmp_path / ".cursor" / "rules" / "agentalloy.mdc").write_text("---\n")
+        assert _code_index_harness(tmp_path, ["claude-code", "cursor"]) == "cursor"
+
+    def test_first_harness_with_target_wins(self, tmp_path: Path) -> None:
+        (tmp_path / ".cursor" / "rules").mkdir(parents=True)
+        (tmp_path / ".cursor" / "rules" / "agentalloy.mdc").write_text("---\n")
+        (tmp_path / "GEMINI.md").write_text("# Gemini\n")
+        assert _code_index_harness(tmp_path, ["cursor", "antigravity"]) == "cursor"
+
+    def test_markdown_harness_resolves_shared_target(self, tmp_path: Path) -> None:
+        (tmp_path / "GEMINI.md").write_text("# Gemini\n")
+        assert _code_index_harness(tmp_path, ["antigravity"]) == "antigravity"
+
+    def test_proxy_only_selection_writes_no_claude_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The end-to-end invariant: `wire qwen-code` leaves no CLAUDE.md."""
+        _fake_slug(monkeypatch)
+        picked = _code_index_harness(tmp_path, ["qwen-code"])
+        ciw.wire_code_index_block(tmp_path, 47950, harness=picked)
+        assert not (tmp_path / "CLAUDE.md").exists()
+
+    def test_fresh_repo_no_carrier_writes_no_block_and_no_claude_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No carrier exists yet: no block anywhere, and no CLAUDE.md created."""
+        _fake_slug(monkeypatch)
+        picked = _code_index_harness(tmp_path, ["cursor"])
+        assert picked == "cursor"
+        ciw.wire_code_index_block(tmp_path, 47950, harness=picked)
+        assert not (tmp_path / "CLAUDE.md").exists()
+        assert not (tmp_path / ".cursor" / "rules" / "agentalloy-code-index.mdc").exists()
+
+    def test_mixed_selection_writes_to_markdown_carrier_not_claude_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _fake_slug(monkeypatch)
+        (tmp_path / "AGENTS.md").write_text("# Agents\n")
+        picked = _code_index_harness(tmp_path, ["qwen-code", "hermes-agent"])
+        assert picked == "hermes-agent"
+        ciw.wire_code_index_block(tmp_path, 47950, harness=picked)
+        assert not (tmp_path / "CLAUDE.md").exists()
+        assert ciw.SENTINEL_BEGIN in (tmp_path / "AGENTS.md").read_text()

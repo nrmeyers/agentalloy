@@ -257,7 +257,9 @@ class TestQueryToolValidation:
         assert resp["error"]["code"] == mcp_server.INVALID_PARAMS
 
     def test_code_search_calls_endpoint(self) -> None:
-        mock_data = [{"heading": "test_func", "file_path": "src/test.py", "snippet": "def test_func()"}]
+        mock_data = [
+            {"heading": "test_func", "file_path": "src/test.py", "snippet": "def test_func()"}
+        ]
         with patch.object(mcp_server, "_http_get", return_value=mock_data):
             resp = self._call_query({"action": "code_search", "query": "test_func"})
         assert "error" not in resp
@@ -265,7 +267,12 @@ class TestQueryToolValidation:
         assert "test_func" in content
 
     def test_contract_detail_calls_endpoint(self) -> None:
-        mock_data = {"contract_id": "auth", "phase": "build", "slug": "auth", "body": "Implement auth"}
+        mock_data = {
+            "contract_id": "auth",
+            "phase": "build",
+            "slug": "auth",
+            "body": "Implement auth",
+        }
         with patch.object(mcp_server, "_http_get", return_value=mock_data):
             resp = self._call_query({"action": "contract_detail", "slug": "auth"})
         assert "error" not in resp
@@ -274,7 +281,10 @@ class TestQueryToolValidation:
 
     def test_service_unreachable_returns_error(self) -> None:
         import urllib.error
-        with patch.object(mcp_server, "_http_get", side_effect=urllib.error.URLError("connection refused")):
+
+        with patch.object(
+            mcp_server, "_http_get", side_effect=urllib.error.URLError("connection refused")
+        ):
             resp = self._call_query({"action": "code_search", "query": "test"})
         assert "error" in resp
         assert "unreachable" in resp["error"]["message"]
@@ -285,7 +295,12 @@ class TestQueryToolValidation:
 
     def test_knowledge_entities_calls_endpoint(self) -> None:
         mock_data = [
-            {"kind": "CONSTRAINTS", "src": "docs/auth.md", "dst": "src/auth.py", "span": "rate_limit"},
+            {
+                "kind": "CONSTRAINTS",
+                "src": "docs/auth.md",
+                "dst": "src/auth.py",
+                "span": "rate_limit",
+            },
         ]
         with patch.object(mcp_server, "_http_get", return_value=mock_data):
             resp = self._call_query({"action": "knowledge_entities", "query": "src/auth.py"})

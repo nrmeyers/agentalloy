@@ -160,6 +160,7 @@ def test_finalize_query_text_prefix_and_cap() -> None:
 def _decision_symbol(qn: str, heading: str, body: str) -> CodeSymbol:
     """A MarkdownDoc symbol that acts as a decision chunk."""
     from .conftest import make_symbol
+
     return make_symbol(
         qn,
         kind="MarkdownDoc",
@@ -171,17 +172,25 @@ def _decision_symbol(qn: str, heading: str, body: str) -> CodeSymbol:
 
 async def test_related_decisions_no_entity_edges(state: CodeIndexState) -> None:
     """No regression: semantic-only results when no entity edges exist."""
-    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    state.jobs.upsert_repo(
+        slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir
+    )
     seed_index(
         state.settings,
         SLUG,
         symbols=[
-            _decision_symbol("docs/auth.md::rate-limiting", "Rate Limiting", "Limit requests per user."),
-            _decision_symbol("docs/auth.md::auth-middleware", "Auth Middleware", "Middleware for auth."),
+            _decision_symbol(
+                "docs/auth.md::rate-limiting", "Rate Limiting", "Limit requests per user."
+            ),
+            _decision_symbol(
+                "docs/auth.md::auth-middleware", "Auth Middleware", "Middleware for auth."
+            ),
         ],
         vectors=[
             vector_row("docs/auth.md::rate-limiting", axis_vec(0), text="Limit requests per user."),
-            vector_row("docs/auth.md::auth-middleware", axis_vec(0, 1), text="Middleware for auth."),
+            vector_row(
+                "docs/auth.md::auth-middleware", axis_vec(0, 1), text="Middleware for auth."
+            ),
         ],
         fts=True,
         repo_path="/repo/test",
@@ -194,7 +203,9 @@ async def test_related_decisions_no_entity_edges(state: CodeIndexState) -> None:
 
 async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
     """Entity expansion capped at 3."""
-    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    state.jobs.upsert_repo(
+        slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir
+    )
     symbols = [
         _decision_symbol("docs/main.md::main-decision", "Main", "Main decision about everything."),
     ]
@@ -202,23 +213,29 @@ async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
     for i in range(5):
         dst = f"src.mod{i}.fn"
         symbols.append(make_symbol(dst, docstring=f"Module {i} function."))
-        edges.append(CodeEdge(
-            src="docs/main.md::main-decision",
-            dst=dst,
-            kind="TOUCHES",
-            file_path="docs/main.md",
-        ))
-        edges.append(CodeEdge(
-            src=f"docs/extra{i}.md::decision-{i}",
-            dst=dst,
-            kind="GOVERNS",
-            file_path=f"docs/extra{i}.md",
-        ))
-        symbols.append(_decision_symbol(
-            f"docs/extra{i}.md::decision-{i}",
-            f"Decision {i}",
-            f"Extra decision {i}.",
-        ))
+        edges.append(
+            CodeEdge(
+                src="docs/main.md::main-decision",
+                dst=dst,
+                kind="TOUCHES",
+                file_path="docs/main.md",
+            )
+        )
+        edges.append(
+            CodeEdge(
+                src=f"docs/extra{i}.md::decision-{i}",
+                dst=dst,
+                kind="GOVERNS",
+                file_path=f"docs/extra{i}.md",
+            )
+        )
+        symbols.append(
+            _decision_symbol(
+                f"docs/extra{i}.md::decision-{i}",
+                f"Decision {i}",
+                f"Extra decision {i}.",
+            )
+        )
 
     seed_index(
         state.settings,
@@ -226,11 +243,15 @@ async def test_related_decisions_entity_cap(state: CodeIndexState) -> None:
         symbols=symbols,
         edges=edges,
         vectors=[
-            vector_row("docs/main.md::main-decision", axis_vec(0), text="Main decision about everything."),
-        ] + [
+            vector_row(
+                "docs/main.md::main-decision", axis_vec(0), text="Main decision about everything."
+            ),
+        ]
+        + [
             vector_row(f"src.mod{i}.fn", axis_vec(0), text=f"Module {i} function.")
             for i in range(5)
-        ] + [
+        ]
+        + [
             vector_row(f"docs/extra{i}.md::decision-{i}", axis_vec(1), text=f"Extra decision {i}.")
             for i in range(5)
         ],
@@ -257,12 +278,16 @@ async def test_related_decisions_escapes_qn_filter(state: CodeIndexState) -> Non
     """Regression 2.4: a decision qn containing a quote character still
     matches (and does not break the Lance SQL filter) because the ``IN``
     clause is built via ``_in_list``."""
-    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir)
+    state.jobs.upsert_repo(
+        slug=SLUG, repo_path="/repo/test", data_dir=state.settings.code_index_data_dir
+    )
     qn = "docs/auth.md::it's-a-decision"
     seed_index(
         state.settings,
         SLUG,
-        symbols=[_decision_symbol(qn, "It's a decision", "A decision with a quote in its heading.")],
+        symbols=[
+            _decision_symbol(qn, "It's a decision", "A decision with a quote in its heading.")
+        ],
         vectors=[vector_row(qn, axis_vec(0), text="A decision with a quote in its heading.")],
         fts=True,
         repo_path="/repo/test",

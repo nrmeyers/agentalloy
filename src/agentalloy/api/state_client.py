@@ -24,6 +24,17 @@ from typing import Any, cast
 DEFAULT_PORT_FALLBACK = 47950
 
 
+def resolve_base_url() -> str:
+    """Base URL of the local state service.
+
+    ``STATE_SERVICE_URL`` when set, else ``http://127.0.0.1:<port>`` with the
+    port from install state (the same value the service binds), falling back
+    to 47950.  Shared by :class:`StateClient` and the state-leg panel so the
+    URL an agent is told to call is the URL the client actually uses.
+    """
+    return os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}"
+
+
 def _configured_port() -> int:
     """Return the port the local service binds, per install state.
 
@@ -77,11 +88,7 @@ class StateClient:
 
     def __post_init__(self) -> None:
         if self.base_url is None:
-            object.__setattr__(
-                self,
-                "base_url",
-                os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}",
-            )
+            object.__setattr__(self, "base_url", resolve_base_url())
         if self.repo_root is None:
             object.__setattr__(self, "repo_root", str(Path.cwd()))
 

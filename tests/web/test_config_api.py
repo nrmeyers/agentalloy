@@ -78,9 +78,7 @@ def test_put_validates_threshold_cross_field(client):
     assert "dedup_hard_threshold" in r.json()["detail"]["detail"]
 
 
-def test_put_writes_env_and_reload_applies(
-    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_put_writes_env_and_reload_applies(client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # _APPLIED_ENV is seeded at import time (real home); control it so the
     # reload's unset pass can't pop keys from the test process env.
     monkeypatch.setattr(
@@ -103,9 +101,7 @@ def test_put_writes_env_and_reload_applies(
     assert client.get("/api/config").json()["sdd_fast_require_approval"] is True
 
 
-def test_reload_unsets_deleted_file_key(
-    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_reload_unsets_deleted_file_key(client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """bughunt 6.6: a key removed from .env is unset on reload when the
     process sourced it from the file (previously it stayed stale in env)."""
     env_file = _env_file(tmp_path)

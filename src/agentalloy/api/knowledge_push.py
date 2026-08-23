@@ -140,7 +140,7 @@ def _render(decisions: list[DecisionRow]) -> str:
         lines.append(f"- **{heading}** — `{source}`")
     lines.append("")
     lines.append(
-        'Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>'
+        "Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>"
         ' · action=`knowledge_related` query="<topic>"'
     )
     return "\n".join(lines).rstrip()
@@ -161,16 +161,14 @@ def _render_entities(entity_edges: list[Any]) -> str:
         "",
     ]
     for e in entity_edges[:10]:
-        dst = e.dst if hasattr(e, 'dst') and e.dst else "(standalone)"
-        src = e.src if hasattr(e, 'src') else ""
-        kind = e.kind if hasattr(e, 'kind') else ""
-        span = e.span if hasattr(e, 'span') and e.span else ""
+        dst = e.dst if hasattr(e, "dst") and e.dst else "(standalone)"
+        src = e.src if hasattr(e, "src") else ""
+        kind = e.kind if hasattr(e, "kind") else ""
+        span = e.span if hasattr(e, "span") and e.span else ""
         span_preview = span[:80] if span else "(no span)"
         lines.append(f"- **{kind}**: `{src}` → `{dst}` (`{span_preview}`)")
     lines.append("")
-    lines.append(
-        'Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>'
-    )
+    lines.append("Pull full content: `agentalloy_query` action=`knowledge_why` query=<fqn>")
     return "\n".join(lines).rstrip()
 
 

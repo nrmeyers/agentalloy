@@ -102,7 +102,9 @@ class TestLoadStateCorrupt:
             install_state.load_state()
         assert exc.value.code == 3
 
-    def test_string_schema_version_exits_3(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_string_schema_version_exits_3(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _state_file(tmp_path, monkeypatch).write_text('{"schema_version": "abc"}')
         with pytest.raises(SystemExit) as exc:
             install_state.load_state()

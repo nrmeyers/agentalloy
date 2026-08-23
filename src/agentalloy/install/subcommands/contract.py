@@ -918,9 +918,15 @@ def add_parser(
 
     # show
     show_p = sub.add_parser("show", help="Display a contract by ID.")
-    show_p.add_argument("contract_id", nargs="?", default=None, help="Contract ID (phase/slug) or slug.")
-    show_p.add_argument("--phase", default=None, help="Phase (alternative to positional contract_id).")
-    show_p.add_argument("--slug", default=None, help="Slug (alternative to positional contract_id).")
+    show_p.add_argument(
+        "contract_id", nargs="?", default=None, help="Contract ID (phase/slug) or slug."
+    )
+    show_p.add_argument(
+        "--phase", default=None, help="Phase (alternative to positional contract_id)."
+    )
+    show_p.add_argument(
+        "--slug", default=None, help="Slug (alternative to positional contract_id)."
+    )
     add_json_flag(show_p)
 
     # validate
@@ -1035,7 +1041,9 @@ def add_parser(
     list_p = sub.add_parser("list", help="List contracts (optionally filtered).")
     list_p.add_argument("--phase", default=None, help="Filter by phase.")
     list_p.add_argument("--slug", default=None, help="Filter by slug (substring match).")
-    list_p.add_argument("--all", action="store_true", default=False, help="Include archived contracts.")
+    list_p.add_argument(
+        "--all", action="store_true", default=False, help="Include archived contracts."
+    )
     add_json_flag(list_p)
 
     p.set_defaults(func=_run)

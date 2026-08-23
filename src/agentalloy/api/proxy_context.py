@@ -276,9 +276,7 @@ def read_upstream(cwd: Path, *, harness: str | None = None) -> UpstreamFile:
     # Namespaced shape: mapping of harness -> {url, model, key_env, ...}.
     requested = harness
     if requested is None or requested == CHAT_UPSTREAM_HARNESS:
-        requested = next(
-            (key for key in data if key not in _PASSTHROUGH_HARNESS_KEYS), None
-        )
+        requested = next((key for key in data if key not in _PASSTHROUGH_HARNESS_KEYS), None)
         if requested is None:
             return UpstreamFile(kind="absent")
     entry = data.get(requested)

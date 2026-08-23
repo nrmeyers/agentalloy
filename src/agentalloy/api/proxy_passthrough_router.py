@@ -90,17 +90,20 @@ class _ArtifactExtractionContext:
 
 
 def _build_artifact_context(
-    request: Any,
     signal: SignalResult | None,
     project_dir: Path | None = None,
 ) -> _ArtifactExtractionContext | None:
-    """Build the artifact extraction context from request state and signal.
+    """Build the artifact extraction context from signal and project root.
 
     Returns ``None`` when extraction is disabled (feature flag off, no signal,
     or no phase). ``slug`` is ``None`` when no active contract exists (e.g. at
     intake before the first contract is written) — the artifact write path skips
     then, but contract-marker extraction can still write the first contract.
     Soft: never raises.
+
+    The store is the process state store scoped to the session's real repo —
+    the same ``for_repo`` bucket the state leg reads from. The corpus
+    ``app.state.store`` has no ``set_artifact`` and would soft-fail every write.
     """
     if signal is None or not signal.phase:
         return None
@@ -113,8 +116,17 @@ def _build_artifact_context(
     except Exception:
         return None
 
-    store = getattr(request.app.state, "store", None)
-    if store is None:
+    try:
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        if store is None:
+            return None
+        if project_dir is not None:
+            store = scoped_state_store(store, Path(project_dir).resolve())
+    except Exception:
+        logger.debug("artifact context store resolution failed", exc_info=True)
         return None
 
     # Derive slug from contract_id (the store key, e.g. "auth-refactor"); may be
@@ -737,7 +749,7 @@ async def passthrough_anthropic_messages(
     pause_mode = signal.paused_mode if signal else False
 
     # Build artifact extraction context if enabled
-    artifact_ctx = _build_artifact_context(request, signal, project_dir=project_dir)
+    artifact_ctx = _build_artifact_context(signal, project_dir=project_dir)
 
     if stream_flag:
         return await _forward_streaming(
@@ -804,15 +816,14 @@ async def _forward_once(
                 content_blocks = response_json.get("content", [])
                 if isinstance(content_blocks, list):
                     from agentalloy.providers.base import intercept_gated_tool_calls
+
                     modified_blocks, was_modified = intercept_gated_tool_calls(
                         content_blocks, phase, pause_mode=pause_mode
                     )
                     if was_modified:
                         response_json["content"] = modified_blocks
                         response_content = json.dumps(response_json).encode("utf-8")
-                        logger.info(
-                            "intercepted gated tool calls in phase %s", phase
-                        )
+                        logger.info("intercepted gated tool calls in phase %s", phase)
         except (json.JSONDecodeError, KeyError):
             # Not JSON or unexpected structure — forward as-is
             pass

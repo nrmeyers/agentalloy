@@ -462,16 +462,11 @@ async def test_cancelled_graph_acquire_does_not_orphan_lock(
         holder.start()
         assert acquired.wait(5.0), "holder thread failed to acquire the slug lock"
 
-        task = asyncio.create_task(
-            run(settings, embed, jobs, fixture_repo, job_id=job.job_id)
-        )
+        task = asyncio.create_task(run(settings, embed, jobs, fixture_repo, job_id=job.job_id))
         # Wait until the pipeline reaches the graph phase — with the lock held
         # it is now stuck waiting for it.
         deadline = time.monotonic() + 10.0
-        while (
-            jobs.get_job(job.job_id).phase != "graph"
-            and time.monotonic() < deadline
-        ):
+        while jobs.get_job(job.job_id).phase != "graph" and time.monotonic() < deadline:
             await asyncio.sleep(0.01)
         assert jobs.get_job(job.job_id).phase == "graph", (
             "pipeline never reached the graph phase while the lock was held"

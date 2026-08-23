@@ -422,18 +422,9 @@ class TestInitBodyFileFrontmatter:
         assert "success_criteria" not in captured[0]
 
     def test_body_file_path_is_read(self, tmp_path: Path) -> None:
-        body = (
-            "---\n"
-            "scope:\n"
-            "  touches:\n"
-            "    - src/y/**\n"
-            "---\n\n"
-            "# From File\n"
-        )
+        body = "---\nscope:\n  touches:\n    - src/y/**\n---\n\n# From File\n"
         (tmp_path / "body.md").write_text(body)
-        rc, captured = self._run_init(
-            tmp_path, body=None, body_file=str(tmp_path / "body.md")
-        )
+        rc, captured = self._run_init(tmp_path, body=None, body_file=str(tmp_path / "body.md"))
         assert rc == 0
         content = captured[0]["body"]
         assert content.count("\n---\n") == 1

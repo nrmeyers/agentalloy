@@ -18,7 +18,7 @@ from agentalloy.api.proxy_injection import (
     inject_into_anthropic_messages,
     inject_into_openai_messages,
 )
-from agentalloy.api.state_leg import build_state_leg
+from agentalloy.api.state_leg import _extract_routed_findings, build_state_leg
 
 # ---------------------------------------------------------------------------
 # build_state_leg() — JSON shape and content
@@ -155,6 +155,207 @@ class TestBuildStateLeg:
         state = json.loads(result)
         assert "contract" not in state
 
+    def test_no_repo_root_omits_scope(self) -> None:
+        result = build_state_leg("build")
+        assert result is not None
+        state = json.loads(result)
+        assert "scope" not in state
+
+    def test_scope_present_when_repo_root_given(self) -> None:
+        result = build_state_leg("build", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        assert state["scope"]["repo_root"] == "/home/u/dev/agentalloy"
+        assert state["scope"]["repo"] == "agentalloy"
+        assert state["scope"]["stream_id"]
+        assert state["scope"]["service"]
+
+    def test_scope_query_hint_carries_service_and_params(self) -> None:
+        result = build_state_leg("build", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        scope = state["scope"]
+        query = state["actions"]["query"]
+        assert scope["service"] in query
+        assert f"?repo_root={scope['repo_root']}" in query
+        assert f"?repo={scope['repo']}" in query
+
+
+# ---------------------------------------------------------------------------
+# _extract_routed_findings() — QA artifact parsing
+# ---------------------------------------------------------------------------
+
+
+class TestExtractRoutedFindings:
+    def test_no_routed_findings_section(self) -> None:
+        content = "# slug\n\n## Checks\n\ngreen\n\n## Review\n\nclean\n"
+        assert _extract_routed_findings(content) == []
+
+    def test_empty_routed_findings_section(self) -> None:
+        content = "## Checks\n\nok\n\n## Routed Findings\n\n## Review\n\nclean\n"
+        assert _extract_routed_findings(content) == []
+
+    def test_single_finding(self) -> None:
+        content = (
+            "## Checks\n\nok\n\n"
+            "## Routed Findings\n\n"
+            "### Missing test harness\n"
+            "- route: build\n"
+            "- severity: required\n"
+            "- description: frontend has no test harness\n\n"
+            "## Review\n\nclean\n"
+        )
+        findings = _extract_routed_findings(content)
+        assert len(findings) == 1
+        assert "Missing test harness" in findings[0]
+        assert "route: build" in findings[0]
+
+    def test_multiple_findings(self) -> None:
+        content = (
+            "## Routed Findings\n\n"
+            "### Missing test harness\n"
+            "- route: build\n"
+            "- severity: required\n\n"
+            "### Off-by-one in date calc\n"
+            "- route: build\n"
+            "- severity: Critical\n"
+        )
+        findings = _extract_routed_findings(content)
+        assert len(findings) == 2
+        assert "Missing test harness" in findings[0]
+        assert "Off-by-one" in findings[1]
+
+    def test_finding_at_end_of_content(self) -> None:
+        content = "## Routed Findings\n\n### Only finding\n- route: build\n- severity: required\n"
+        findings = _extract_routed_findings(content)
+        assert len(findings) == 1
+        assert "Only finding" in findings[0]
+
+    def test_multiline_finding_body(self) -> None:
+        content = (
+            "## Routed Findings\n\n"
+            "### Complex defect\n"
+            "- route: build\n"
+            "- severity: Critical\n"
+            "- description: |\n"
+            "  The auth middleware skips validation\n"
+            "  when the token header is present but empty.\n"
+        )
+        findings = _extract_routed_findings(content)
+        assert len(findings) == 1
+        assert "auth middleware" in findings[0]
+
+
+# ---------------------------------------------------------------------------
+# build_state_leg() — routed findings integration
+# ---------------------------------------------------------------------------
+
+
+class TestBuildStateLegRoutedFindings:
+    def _store_with_qa_artifact(self, content: str) -> MagicMock:
+        store = MagicMock()
+        store.get_contract.return_value = {
+            "contract_id": "build/auth-refactor",
+            "phase": "build",
+            "slug": "auth-refactor",
+            "domain_tags": "[]",
+            "scope_touches": "[]",
+            "scope_avoids": "[]",
+            "success_criteria": "[]",
+            "related_contracts": "[]",
+            "body": "Fix routed findings",
+            "created_at": "2026-01-01T00:00:00",
+            "route": "full",
+        }
+        store.list_artifacts.return_value = [
+            {"name": "qa.artifact", "content": content},
+        ]
+        return store
+
+    def test_routed_findings_surfaced_in_state_leg(self) -> None:
+        qa_content = (
+            "## Checks\n\nok\n\n"
+            "## Review\n\nclean\n\n"
+            "## Routed Findings\n\n"
+            "### Missing test harness\n"
+            "- route: build\n"
+            "- severity: required\n"
+            "- description: frontend has no test harness\n"
+        )
+        store = self._store_with_qa_artifact(qa_content)
+        result = build_state_leg(
+            "build",
+            store=store,
+            contract_id="build/auth-refactor",
+        )
+        assert result is not None
+        state = json.loads(result)
+        assert "routed_findings" in state
+        assert len(state["routed_findings"]) == 1
+        assert "Missing test harness" in state["routed_findings"][0]
+
+    def test_no_routed_findings_omits_key(self) -> None:
+        qa_content = "## Checks\n\nok\n\n## Review\n\nclean\n"
+        store = self._store_with_qa_artifact(qa_content)
+        result = build_state_leg(
+            "build",
+            store=store,
+            contract_id="build/auth-refactor",
+        )
+        assert result is not None
+        state = json.loads(result)
+        assert "routed_findings" not in state
+
+    def test_no_qa_artifact_omits_key(self) -> None:
+        store = MagicMock()
+        store.get_contract.return_value = {
+            "contract_id": "build/auth-refactor",
+            "phase": "build",
+            "slug": "auth-refactor",
+            "domain_tags": "[]",
+            "scope_touches": "[]",
+            "scope_avoids": "[]",
+            "success_criteria": "[]",
+            "related_contracts": "[]",
+            "body": "Build something",
+            "created_at": "2026-01-01T00:00:00",
+            "route": "full",
+        }
+        store.list_artifacts.return_value = []
+        result = build_state_leg(
+            "build",
+            store=store,
+            contract_id="build/auth-refactor",
+        )
+        assert result is not None
+        state = json.loads(result)
+        assert "routed_findings" not in state
+
+    def test_store_failure_omits_routed_findings(self) -> None:
+        store = MagicMock()
+        store.get_contract.return_value = {
+            "contract_id": "build/auth-refactor",
+            "phase": "build",
+            "slug": "auth-refactor",
+            "domain_tags": "[]",
+            "scope_touches": "[]",
+            "scope_avoids": "[]",
+            "success_criteria": "[]",
+            "related_contracts": "[]",
+            "body": "Build something",
+            "created_at": "2026-01-01T00:00:00",
+            "route": "full",
+        }
+        store.list_artifacts.side_effect = RuntimeError("db error")
+        result = build_state_leg(
+            "build",
+            store=store,
+            contract_id="build/auth-refactor",
+        )
+        assert result is not None
+        state = json.loads(result)
+        assert "routed_findings" not in state
+
 
 # ---------------------------------------------------------------------------
 # State injection — Anthropic surface
@@ -172,9 +373,7 @@ class TestAnthropicStateInjection:
                 {"role": "user", "content": "latest user"},
             ],
         }
-        result = inject_into_anthropic_messages(
-            payload, STATE_JSON, phase="build", kind="state"
-        )
+        result = inject_into_anthropic_messages(payload, STATE_JSON, phase="build", kind="state")
         last = result["messages"][1]["content"]
         assert STATE_MARKER_BEGIN in last
         assert STATE_MARKER_END in last
@@ -189,9 +388,7 @@ class TestAnthropicStateInjection:
                 {"role": "user", "content": [{"type": "text", "text": "hi"}]},
             ],
         }
-        result = inject_into_anthropic_messages(
-            payload, STATE_JSON, phase="build", kind="state"
-        )
+        result = inject_into_anthropic_messages(payload, STATE_JSON, phase="build", kind="state")
         content = result["messages"][0]["content"]
         assert isinstance(content, list)
         joined = "\n".join(b.get("text", "") for b in content)

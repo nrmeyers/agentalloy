@@ -186,22 +186,24 @@ def test_entities_endpoint(client: TestClient) -> None:
         repo_path="/repo/demo",
     )
     try:
-        handles.graph.upsert_edges([
-            CodeEdge(
-                src="docs/auth.md",
-                dst="pkg.util.helper",
-                kind="CONSTRAINTS",
-                file_path="docs/auth.md",
-                span="rate_limit",
-            ),
-            CodeEdge(
-                src="docs/auth.md",
-                dst="pkg.util.caller",
-                kind="TOUCHES",
-                file_path="docs/auth.md",
-                span="caller_fn",
-            ),
-        ])
+        handles.graph.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/auth.md",
+                    dst="pkg.util.helper",
+                    kind="CONSTRAINTS",
+                    file_path="docs/auth.md",
+                    span="rate_limit",
+                ),
+                CodeEdge(
+                    src="docs/auth.md",
+                    dst="pkg.util.caller",
+                    kind="TOUCHES",
+                    file_path="docs/auth.md",
+                    span="caller_fn",
+                ),
+            ]
+        )
     finally:
         handles.close()
 
@@ -229,10 +231,19 @@ def test_entities_endpoint_kind_filter(client: TestClient) -> None:
         repo_path="/repo/demo",
     )
     try:
-        handles.graph.upsert_edges([
-            CodeEdge(src="docs/a.md", dst="pkg.util.helper", kind="CONSTRAINTS", file_path="docs/a.md"),
-            CodeEdge(src="docs/b.md", dst="pkg.util.helper", kind="TOUCHES", file_path="docs/b.md"),
-        ])
+        handles.graph.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/a.md",
+                    dst="pkg.util.helper",
+                    kind="CONSTRAINTS",
+                    file_path="docs/a.md",
+                ),
+                CodeEdge(
+                    src="docs/b.md", dst="pkg.util.helper", kind="TOUCHES", file_path="docs/b.md"
+                ),
+            ]
+        )
     finally:
         handles.close()
 
@@ -258,9 +269,13 @@ def test_entities_endpoint_name_fallback(client: TestClient) -> None:
         repo_path="/repo/demo",
     )
     try:
-        handles.graph.upsert_edges([
-            CodeEdge(src="docs/a.md", dst="pkg.util.helper", kind="REQUIRES", file_path="docs/a.md"),
-        ])
+        handles.graph.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/a.md", dst="pkg.util.helper", kind="REQUIRES", file_path="docs/a.md"
+                ),
+            ]
+        )
     finally:
         handles.close()
 

@@ -425,12 +425,8 @@ class TestEvaluateSignal:
                 side_effect=_fake_write,
             ),
         ):
-            first = asyncio.run(
-                evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION)
-            )
-            second = asyncio.run(
-                evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION)
-            )
+            first = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION))
+            second = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION))
         assert first.banner is not None  # turn 1: phase-entry banner emits
         assert second.banner is None  # turn 2: non-banner cadence tick
         # Both turns must hand a live store to the gate — the second one is the

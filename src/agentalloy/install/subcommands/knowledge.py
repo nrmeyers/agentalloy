@@ -65,7 +65,10 @@ def _run_why(args: argparse.Namespace) -> int:
         if snippet:
             text = snippet.strip()
             first, _, rest = text.partition("\n")
-            if first.startswith("#") and first.lstrip("#").strip().casefold() == heading.strip().casefold():
+            if (
+                first.startswith("#")
+                and first.lstrip("#").strip().casefold() == heading.strip().casefold()
+            ):
                 text = rest.strip()
             if text:
                 print(text)

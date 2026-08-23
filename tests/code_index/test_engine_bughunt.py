@@ -124,9 +124,7 @@ def test_3_1_relative_import(
     module_parts = module_qn.split(".")[1:]
     if is_init_file:
         (tmp_path / Path(*module_parts)).mkdir(parents=True)
-        (tmp_path / Path(*module_parts) / "__init__.py").write_text(
-            source + "\n", encoding="utf-8"
-        )
+        (tmp_path / Path(*module_parts) / "__init__.py").write_text(source + "\n", encoding="utf-8")
     else:
         (tmp_path / Path(*module_parts[:-1])).mkdir(parents=True, exist_ok=True)
         (tmp_path / Path(*module_parts[:-1]) / f"{module_parts[-1]}.py").write_text(
@@ -210,9 +208,7 @@ def test_3_3_nested_class_calls_use_nested_qn(tmp_path: Path) -> None:
     assert nested_src in call_srcs, (
         f"expected nested CALLS src {nested_src!r}; got {sorted(call_srcs)}"
     )
-    assert buggy_src not in call_srcs, (
-        f"buggy non-nested CALLS src {buggy_src!r} is present"
-    )
+    assert buggy_src not in call_srcs, f"buggy non-nested CALLS src {buggy_src!r} is present"
 
 
 # ---------------------------------------------------------------------------

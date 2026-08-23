@@ -40,10 +40,10 @@ def _find_glob_literals_in_code(file_path: Path) -> list[tuple[int, str]]:
     docstring_lines: set[int] = set()
     for node in ast.walk(tree):
         if (
-            isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
             and node.body
             and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, (ast.Constant,))
+            and isinstance(node.body[0].value, ast.Constant)
             and isinstance(node.body[0].value.value, str)
         ):
             doc_node = node.body[0]

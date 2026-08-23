@@ -160,11 +160,24 @@ raw_prose: |
   ## Review
 
   <findings labelled by severity + the spec/non-goals/drift verdict>
+
+  ## Routed Findings
+
+  <when findings route back to an earlier phase, list each one here as a
+  structured entry so the receiving phase can act on it without re-deriving.
+  Omit this section on a clean report. Format:>
+
+  ### <short title>
+  - route: <build|design|spec>
+  - severity: <Critical|required>
+  - description: <what's wrong and what the receiving phase should do>
   <!-- /agentalloy:artifact -->
   ```
 
   A clean report — green bar,
   every AC met, no open Critical or required finding — clears the way to ship.
+  A report with routed findings does not advance to ship — the findings are
+  the worklist for the phase that owns the fix.
 
   On a clean report, seed **ship's work-item** before you go, using an artifact marker:
 
@@ -212,14 +225,18 @@ raw_prose: |
 
   Anything open routes by *cause*, and you don't fix code here: the report is
   the worklist for the phase that does. Don't advance to ship with an open
-  Critical or required finding — route it back instead.
+  Critical or required finding — route it back instead. Populate the
+  **Routed Findings** section of the qa artifact with one entry per finding,
+  each tagged with its route target (`build`, `design`, or `spec`), so the
+  receiving phase's state leg carries the worklist forward without
+  re-derivation.
 
-  - **code defect** → state that the phase is complete. The phase advances automatically once exit gates pass.; build reproduces it as a
-    failing test first, so the bug earns a regression test on the way out.
-  - **design flaw** (the approach is wrong, not just the code) →
-    state that the phase is complete. The phase advances automatically once exit gates pass.
-  - **spec gap** (an acceptance criterion was wrong or missing) →
-    state that the phase is complete. The phase advances automatically once exit gates pass.
+  - **code defect** → route to build; build reproduces it as a failing test
+    first, so the bug earns a regression test on the way out.
+  - **design flaw** (the approach is wrong, not just the code) → route to
+    design.
+  - **spec gap** (an acceptance criterion was wrong or missing) → route to
+    spec.
   - **nit / optional** → fix in place; it's not a blocker and doesn't need a
     test of its own.
 
