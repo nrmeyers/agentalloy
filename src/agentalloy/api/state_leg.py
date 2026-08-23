@@ -79,6 +79,9 @@ def build_state_leg(
 
     if store is not None:
         _add_contract_state(state, store, contract_id, phase)
+        slug = state.get("contract", {}).get("slug")
+        if slug:
+            _add_routed_findings(state, store, slug)
 
     _add_gate_status(state, gates_met, gates_unmet)
     _add_actions(state, phase, gates_unmet, scope)
@@ -197,6 +200,73 @@ def _load_artifact_status(
         }
 
     return result
+
+
+def _extract_routed_findings(content: str) -> list[str]:
+    """Parse ``## Routed Findings`` entries from a QA artifact body.
+
+    Returns a list of individual finding blocks (markdown strings).  Each
+    finding starts with a ``###`` heading inside the ``## Routed Findings``
+    section and extends to the next ``###`` or ``##`` heading.  Returns an
+    empty list when the section is absent or has no entries.
+    """
+    lines = content.split("\n")
+    in_section = False
+    findings: list[str] = []
+    current: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "## Routed Findings":
+            in_section = True
+            continue
+        if in_section and stripped.startswith("## ") and not stripped.startswith("### "):
+            break
+        if not in_section:
+            continue
+        if stripped.startswith("### "):
+            if current:
+                findings.append("\n".join(current).strip())
+            current = [line]
+        elif in_section:
+            if current:
+                current.append(line)
+
+    if current:
+        findings.append("\n".join(current).strip())
+
+    return findings
+
+
+def _add_routed_findings(
+    state: dict[str, Any],
+    store: Any,
+    slug: str,
+) -> None:
+    """Surface QA-routed findings in the state leg when present.
+
+    Loads the QA artifact for *slug*, parses its ``## Routed Findings``
+    section, and adds the entries as ``state["routed_findings"]``.  Soft:
+    any failure leaves the state without routed findings rather than
+    raising.  The section's absence (clean QA report) means no key is
+    added — the receiving phase sees nothing and proceeds normally.
+    """
+    try:
+        rows = store.list_artifacts("qa", slug=slug, name_glob="*.artifact")
+    except Exception:
+        logger.debug("state_leg: qa artifact load failed for slug=%s", slug, exc_info=True)
+        return
+
+    if not rows:
+        return
+
+    content = rows[0].get("content", "")
+    if not content:
+        return
+
+    findings = _extract_routed_findings(content)
+    if findings:
+        state["routed_findings"] = findings
 
 
 def _add_gate_status(

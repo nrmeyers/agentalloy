@@ -91,22 +91,33 @@ raw_prose: |
   before you move on. No new decisions here — if you're inventing architecture
   or acceptance, you're in the wrong phase.
 
-  ## 1. Load the plan
+  ## 1. Pick up routed findings (if any)
+
+  Check your state panel for a `routed_findings` block. When present, these
+  are findings QA routed back for build to fix — a structured worklist with
+  each finding's route target, severity, and description. **Start here.**
+  Address each routed finding before continuing to the plan's task list:
+  reproduce the defect as a failing test, then fix it (TDD as in §3). You
+  do not need to re-derive what QA already found — the finding tells you
+  what's wrong and what to do. Once all routed findings are resolved,
+  proceed to the plan.
+
+  ## 2. Load the plan
 
   Read the plan artifacts — `tasks.artifact` (your worklist) and `test-plan.artifact` (the unit
   cases each task must pass), the design artifact (approach.artifact, the how + decisions you're
   implementing against), plus the spec artifact (the acceptance behind it
   all). Check your state panel for task progress and the ordered list of build contracts.
 
-  ## 2. Work each task in sequence
+  ## 3. Work each task in sequence
 
   Don't author contracts here — plan did. For each task, top to bottom, state that the current task is complete. The next task loads automatically.
 
   The proxy front-loads the domain skills matching that task **plus the task itself**, before you write a
   line. You don't decide which skills you need — they arrive with the task. Then
-  implement it test-first (§3). One task at a time; check your state panel to see where you are. (If the skills don't arrive: use `agentalloy_query` with action=`contract_detail` to read the full contract.)
+  implement it test-first (§4). One task at a time; check your state panel to see where you are. (If the skills don't arrive: use `agentalloy_query` with action=`contract_detail` to read the full contract.)
 
-  ## 3. TDD: red → green → refactor, one case at a time
+  ## 4. TDD: red → green → refactor, one case at a time
 
   Plan already decided what proves each task — work its test cases from
   `test-plan.artifact`, don't re-derive them. For the task you're on, take each case:
@@ -129,14 +140,14 @@ raw_prose: |
   stay green on broken code, so pin known inputs and assert the exact semantic
   result.
 
-  ## 4. Stay inside the scope you declared
+  ## 5. Stay inside the scope you declared
 
   Work within the current task contract's `scope.touches`. Spreading wider than you planned is
   the signal to stop and check: is this scope creep (cut it), or did design miss
   something (fix it there — state that the phase is complete. The phase advances automatically once exit gates pass.)? Don't quietly grow
   the blast radius.
 
-  ## 5. Done when
+  ## 6. Done when
 
   Every case in `test-plan.artifact` is a passing test (plus the edges you added), the
   full suite is green with no regressions, the source artifact exists, and the
