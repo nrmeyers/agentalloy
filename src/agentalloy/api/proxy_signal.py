@@ -1308,6 +1308,7 @@ async def evaluate_signal(
                 contract_id=contract_id,
                 gates_met=gates_met,
                 gates_unmet=gates_unmet,
+                repo_root=cwd,
             )
         except Exception:
             logger.debug("state_leg build failed for phase=%s", phase, exc_info=True)

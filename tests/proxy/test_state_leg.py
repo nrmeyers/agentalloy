@@ -155,6 +155,31 @@ class TestBuildStateLeg:
         state = json.loads(result)
         assert "contract" not in state
 
+    def test_no_repo_root_omits_scope(self) -> None:
+        result = build_state_leg("build")
+        assert result is not None
+        state = json.loads(result)
+        assert "scope" not in state
+
+    def test_scope_present_when_repo_root_given(self) -> None:
+        result = build_state_leg("build", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        assert state["scope"]["repo_root"] == "/home/u/dev/agentalloy"
+        assert state["scope"]["repo"] == "agentalloy"
+        assert state["scope"]["stream_id"]
+        assert state["scope"]["service"]
+
+    def test_scope_query_hint_carries_service_and_params(self) -> None:
+        result = build_state_leg("build", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        scope = state["scope"]
+        query = state["actions"]["query"]
+        assert scope["service"] in query
+        assert f"?repo_root={scope['repo_root']}" in query
+        assert f"?repo={scope['repo']}" in query
+
 
 # ---------------------------------------------------------------------------
 # State injection — Anthropic surface

@@ -18,7 +18,13 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
+
+from agentalloy.api.state_client import resolve_base_url
+from agentalloy.code_index.slug import repo_slug
+from agentalloy.storage.stream_id import resolve_stream_id
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,7 @@ def build_state_leg(
     contract_id: str | None = None,
     gates_met: list[str] | None = None,
     gates_unmet: list[str] | None = None,
+    repo_root: Path | str | None = None,
 ) -> str | None:
     """Build the structured state JSON for injection.
 
@@ -54,6 +61,11 @@ def build_state_leg(
     gates_met / gates_unmet:
         Gate names from the signal layer's evaluation. Surfaced so the LLM
         knows what's passing and what's blocking.
+    repo_root:
+        The project root this panel describes. When given, a ``scope`` object
+        is added so an agent hitting the service over HTTP can target the
+        right bucket (state endpoints take ``?repo_root=``, code-index
+        endpoints take ``?repo=<slug>``) instead of reverse-engineering it.
     """
     if not phase:
         return None
@@ -63,13 +75,43 @@ def build_state_leg(
         "mode": "paused" if paused_mode else "workflow",
     }
 
+    scope = _add_scope(state, repo_root)
+
     if store is not None:
         _add_contract_state(state, store, contract_id, phase)
 
     _add_gate_status(state, gates_met, gates_unmet)
-    _add_actions(state, phase, gates_unmet)
+    _add_actions(state, phase, gates_unmet, scope)
 
     return json.dumps(state, indent=2)
+
+
+@lru_cache(maxsize=256)
+def _repo_slug_for(root: str) -> str:
+    """Slug the repo root for the scope panel (cached — git probe per miss)."""
+    return repo_slug(Path(root))
+
+
+def _add_scope(state: dict[str, Any], repo_root: Path | str | None) -> dict[str, Any] | None:
+    """Expose the active (repo, stream) scope this panel describes.
+
+    The service serves every repo from one store; a call without the right
+    scope lands in a different bucket and reads back empty.  An agent with no
+    other view of the deployment had to reverse-engineer this — surface it.
+    Returns the scope dict (also stored on ``state["scope"]``) so the action
+    hints can quote its values verbatim.
+    """
+    if repo_root is None:
+        return None
+    root = Path(repo_root)
+    scope: dict[str, Any] = {
+        "repo_root": str(root),
+        "repo": _repo_slug_for(str(root)),
+        "stream_id": resolve_stream_id(root),
+        "service": resolve_base_url(),
+    }
+    state["scope"] = scope
+    return scope
 
 
 def _add_contract_state(
@@ -180,6 +222,7 @@ def _add_actions(
     state: dict[str, Any],
     phase: str,
     gates_unmet: list[str] | None,
+    scope: dict[str, Any] | None = None,
 ) -> None:
     """Add available action hints based on current state.
 
@@ -221,10 +264,25 @@ def _add_actions(
     else:
         actions["blocked"] = f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."
 
-    # Query tool is always available
-    actions["query"] = (
-        "Use the agentalloy_query tool for code search, symbol lookup, "
-        "knowledge rationale, artifact bodies, or related decisions."
-    )
+    # Query tool is always available. When the scope is known, make the hint
+    # self-sufficient: the tool is not in every harness's reachable tool set,
+    # so the fallback (raw HTTP against the local service) must carry the
+    # base URL and the scoping params inline — one worked example, no more.
+    if scope is not None:
+        service = scope["service"]
+        actions["query"] = (
+            "Deep-dive lookups beyond this summary (artifact bodies, contract "
+            "detail, code search, symbol lookup, governing decisions): use the "
+            "agentalloy_query tool when it is in your tool set; if it is not, "
+            f"GET the service directly, e.g. "
+            f"{service}/state/artifact/{phase}/<slug>/<name>?repo_root={scope['repo_root']}. "
+            f"/state/* and /contracts/* are scoped by ?repo_root=; /code/search/* "
+            f"by ?repo={scope['repo']}."
+        )
+    else:
+        actions["query"] = (
+            "Use the agentalloy_query tool for code search, symbol lookup, "
+            "knowledge rationale, artifact bodies, or related decisions."
+        )
 
     state["actions"] = actions
