@@ -334,9 +334,7 @@ async def passthrough_openai_responses(
         _project_dir = decode_proj_token(token)
     except ValueError:
         _project_dir = None
-    artifact_ctx = _build_artifact_context(
-        request, signal, project_dir=_project_dir
-    )
+    artifact_ctx = _build_artifact_context(signal, project_dir=_project_dir)
 
     if stream_flag:
         return await _forward_streaming(

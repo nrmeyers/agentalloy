@@ -109,7 +109,6 @@ class _OpenAIArtifactContext:
 
 
 def _build_openai_artifact_context(
-    request: Any,
     signal_result: Any,
     project_dir: Path | None = None,
 ) -> _OpenAIArtifactContext | None:
@@ -119,6 +118,10 @@ def _build_openai_artifact_context(
     ``slug`` is ``None`` when no active contract exists (e.g. at intake before
     the first contract is written) — the artifact write path skips then, but
     contract-marker extraction can still write the first contract.
+
+    The store is the process state store scoped to the session's real repo —
+    the same ``for_repo`` bucket the state leg reads from. The corpus
+    ``app.state.store`` has no ``set_artifact`` and would soft-fail every write.
     """
     if signal_result is None or not getattr(signal_result, "phase", None):
         return None
@@ -131,8 +134,17 @@ def _build_openai_artifact_context(
     except Exception:
         return None
 
-    store = getattr(request.app.state, "store", None)
-    if store is None:
+    try:
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        if store is None:
+            return None
+        if project_dir is not None:
+            store = scoped_state_store(store, Path(project_dir).resolve())
+    except Exception:
+        logger.debug("artifact context store resolution failed", exc_info=True)
         return None
 
     slug = signal_result.current_contract
@@ -1355,7 +1367,7 @@ async def proxy_chat_completions(
             else None
         )
         # Build artifact extraction context for streaming path
-        stream_artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
+        stream_artifact_ctx = _build_openai_artifact_context(signal_result, project_dir=cwd)
         return _stream_upstream_response(
             upstream_client,
             chat_url,
@@ -1630,7 +1642,7 @@ async def proxy_chat_completions(
     pause_mode = signal_result.paused_mode if signal_result else False
 
     # Build artifact extraction context if enabled
-    artifact_ctx = _build_openai_artifact_context(request, signal_result, project_dir=cwd)
+    artifact_ctx = _build_openai_artifact_context(signal_result, project_dir=cwd)
 
     if current_phase and not pause_mode:
         try:

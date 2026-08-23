@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import unittest.mock as mock
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -600,3 +601,77 @@ class TestArtifactExtractionResponse:
         assert len(text_blocks) == 2
         assert text_blocks[0]["text"] == "CLEANED-TEXT"
         assert text_blocks[1]["text"] == ""
+
+
+class TestArtifactContextStoreScoping:
+    """The artifact context must resolve the *scoped* state store.
+
+    Regression for the corpus-store bug: the context used to hand extraction a
+    store with no ``set_artifact`` (or the unscoped process store), so every
+    extracted artifact soft-failed. The store must be the same ``for_repo``
+    bucket the state leg reads from — a write through it must be visible via
+    ``scoped_state_store(process_store(), root)`` and invisible to the unscoped
+    process store.
+    """
+
+    @staticmethod
+    def _signal(phase: str = "design", contract: str | None = "my-task") -> Any:
+        sig = mock.MagicMock()
+        sig.phase = phase
+        sig.current_contract = contract
+        return sig
+
+    @staticmethod
+    def _assert_scoped(ctx: Any, root: Path) -> None:
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        assert ctx is not None
+        assert ctx.store is not None
+
+        # Write through the context's store, then read it back via the SAME
+        # scoped bucket the state leg uses.
+        ctx.store.set_artifact("design", "my-task", "spec.md", "# scoped write\n")
+
+        scoped = scoped_state_store(process_store(), root)
+        scoped_rows = scoped.list_artifacts("design", slug="my-task")
+        assert any(r.get("name") == "spec.artifact" for r in scoped_rows)
+
+        # And it must NOT leak into the unscoped (default-bucket) process store.
+        unscoped_rows = process_store().list_artifacts("design", slug="my-task")
+        assert not any(r.get("name") == "spec.artifact" for r in unscoped_rows)
+
+    def test_passthrough_context_scoped_to_project(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from agentalloy.api.proxy_passthrough_router import _build_artifact_context
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "true")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        ctx = _build_artifact_context(self._signal(), project_dir=root)
+        self._assert_scoped(ctx, root)
+
+    def test_openai_context_scoped_to_project(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from agentalloy.api.proxy_router import _build_openai_artifact_context
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "true")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        ctx = _build_openai_artifact_context(self._signal(), project_dir=root)
+        self._assert_scoped(ctx, root)
+
+    def test_passthrough_context_none_when_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from agentalloy.api.proxy_passthrough_router import _build_artifact_context
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "false")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        assert _build_artifact_context(self._signal(), project_dir=root) is None
