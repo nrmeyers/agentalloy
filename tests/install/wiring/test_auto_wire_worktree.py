@@ -224,16 +224,12 @@ class TestCliBootstrapAutoWire:
             install_main.main([])
         assert (worktree / ".agentalloy" / "config").exists()
 
-    def test_main_auto_wire_is_idempotent(
-        self, repo: Path, worktree: Path, monkeypatch
-    ) -> None:
+    def test_main_auto_wire_is_idempotent(self, repo: Path, worktree: Path, monkeypatch) -> None:
         """A second bootstrap is a no-op: the marker short-circuits (AC3)."""
         import agentalloy.install.__main__ as install_main
 
         (repo / ".agentalloy").mkdir()
-        (repo / ".agentalloy" / "upstream").write_text(
-            "url: http://localhost:9999/v1\nmodel: m\n"
-        )
+        (repo / ".agentalloy" / "upstream").write_text("url: http://localhost:9999/v1\nmodel: m\n")
         state = {
             "harness_files_written": [
                 {"harness": "hermes-agent", "repo_root": str(repo), "path": "x"},
@@ -267,8 +263,6 @@ class TestCliBootstrapAutoWire:
 
         (repo / ".agentalloy").mkdir()
         monkeypatch.chdir(repo)
-        with patch(
-            "agentalloy.install.subcommands.add.adopt_and_wire"
-        ) as mock_wire:
+        with patch("agentalloy.install.subcommands.add.adopt_and_wire") as mock_wire:
             install_main.main([])
         mock_wire.assert_not_called()

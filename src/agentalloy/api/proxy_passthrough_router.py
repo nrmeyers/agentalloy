@@ -816,15 +816,14 @@ async def _forward_once(
                 content_blocks = response_json.get("content", [])
                 if isinstance(content_blocks, list):
                     from agentalloy.providers.base import intercept_gated_tool_calls
+
                     modified_blocks, was_modified = intercept_gated_tool_calls(
                         content_blocks, phase, pause_mode=pause_mode
                     )
                     if was_modified:
                         response_json["content"] = modified_blocks
                         response_content = json.dumps(response_json).encode("utf-8")
-                        logger.info(
-                            "intercepted gated tool calls in phase %s", phase
-                        )
+                        logger.info("intercepted gated tool calls in phase %s", phase)
         except (json.JSONDecodeError, KeyError):
             # Not JSON or unexpected structure — forward as-is
             pass

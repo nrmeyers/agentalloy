@@ -407,22 +407,28 @@ def build_instructive_denial_message(
     ]
 
     if approval_required:
-        message_parts.extend([
-            f"To advance from {phase}, you must complete the deliverable, then run `agentalloy approve {phase}` to get human sign-off before advancing.",
-            "",
-            f"Next: {next_phase}",
-        ])
+        message_parts.extend(
+            [
+                f"To advance from {phase}, you must complete the deliverable, then run `agentalloy approve {phase}` to get human sign-off before advancing.",
+                "",
+                f"Next: {next_phase}",
+            ]
+        )
     else:
-        message_parts.extend([
-            "To advance, complete the deliverable and the phase will auto-advance.",
-            "",
-            f"Next: {next_phase}",
-        ])
+        message_parts.extend(
+            [
+                "To advance, complete the deliverable and the phase will auto-advance.",
+                "",
+                f"Next: {next_phase}",
+            ]
+        )
 
-    message_parts.extend([
-        "",
-        f"Focus on completing the {phase} artifacts. Do not attempt to write code.",
-    ])
+    message_parts.extend(
+        [
+            "",
+            f"Focus on completing the {phase} artifacts. Do not attempt to write code.",
+        ]
+    )
 
     return "\n".join(message_parts)
 
@@ -456,13 +462,13 @@ def intercept_gated_tool_calls(
             # Check if it's a direct write tool
             if tool_name in GATED_TOOL_NAMES:
                 # Replace with denial message
-                denial = build_instructive_denial_message(
-                    phase, tool_name, owed_artifacts
+                denial = build_instructive_denial_message(phase, tool_name, owed_artifacts)
+                new_blocks.append(
+                    {
+                        "type": "text",
+                        "text": denial,
+                    }
                 )
-                new_blocks.append({
-                    "type": "text",
-                    "text": denial,
-                })
                 modified = True
                 continue
 
@@ -470,13 +476,13 @@ def intercept_gated_tool_calls(
             if tool_name in SHELL_TOOL_NAMES and isinstance(tool_input, dict):
                 command = tool_input.get("command", "")
                 if _command_writes_to_code(command):
-                    denial = build_instructive_denial_message(
-                        phase, tool_name, owed_artifacts
+                    denial = build_instructive_denial_message(phase, tool_name, owed_artifacts)
+                    new_blocks.append(
+                        {
+                            "type": "text",
+                            "text": denial,
+                        }
                     )
-                    new_blocks.append({
-                        "type": "text",
-                        "text": denial,
-                    })
                     modified = True
                     continue
 
@@ -490,10 +496,12 @@ def intercept_gated_tool_calls(
                         f"2. Run `agentalloy approve {phase}` to get human sign-off\n\n"
                         f"Do not attempt to advance the phase without approval."
                     )
-                    new_blocks.append({
-                        "type": "text",
-                        "text": denial,
-                    })
+                    new_blocks.append(
+                        {
+                            "type": "text",
+                            "text": denial,
+                        }
+                    )
                     modified = True
                     continue
 
@@ -503,9 +511,9 @@ def intercept_gated_tool_calls(
 
 
 # Shell tool names that can execute arbitrary commands
-SHELL_TOOL_NAMES: frozenset[str] = frozenset({
-    "run_shell_command", "shell", "bash", "terminal", "execute_command"
-})
+SHELL_TOOL_NAMES: frozenset[str] = frozenset(
+    {"run_shell_command", "shell", "bash", "terminal", "execute_command"}
+)
 
 # Patterns that indicate writing to files
 _SHELL_WRITE_PATTERNS: tuple[str, ...] = (
@@ -529,6 +537,7 @@ _SHELL_WRITE_PATTERNS: tuple[str, ...] = (
 def _command_writes_to_code(command: str) -> bool:
     """Check if a shell command writes to src/ or tests/ directories."""
     import re
+
     return any(re.search(pattern, command) for pattern in _SHELL_WRITE_PATTERNS)
 
 
@@ -543,6 +552,7 @@ def _command_advances_phase_without_approval(command: str, current_phase: str) -
     from a phase that requires approval.
     """
     import re
+
     # Match: agentalloy phase set <phase>
     pattern = r"agentalloy\s+phase\s+set\s+(\S+)"
     match = re.search(pattern, command)

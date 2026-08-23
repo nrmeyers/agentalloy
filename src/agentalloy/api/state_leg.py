@@ -219,9 +219,7 @@ def _add_actions(
                 "The phase advances automatically once exit gates pass."
             )
     else:
-        actions["blocked"] = (
-            f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."
-        )
+        actions["blocked"] = f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."
 
     # Query tool is always available
     actions["query"] = (

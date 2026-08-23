@@ -316,7 +316,9 @@ class TestChunkHasTerminalEvent:
 
     def test_responses_completed_detected(self) -> None:
         chunk = 'event: response.completed\ndata: {"type":"response.completed"}\n\n'
-        assert proxy_passthrough_router._chunk_has_terminal_event(chunk, "response.completed") is True
+        assert (
+            proxy_passthrough_router._chunk_has_terminal_event(chunk, "response.completed") is True
+        )
 
     def test_non_terminal_event_not_detected(self) -> None:
         chunk = 'event: message_start\ndata: {"type":"message_start"}\n\n'
@@ -581,9 +583,7 @@ class TestArtifactExtractionResponse:
         client = mock.MagicMock()
         client.forward = mock.AsyncMock(return_value=upstream)
 
-        ctx = _ArtifactExtractionContext(
-            store=mock.MagicMock(), phase="design", slug="my-task"
-        )
+        ctx = _ArtifactExtractionContext(store=mock.MagicMock(), phase="design", slug="my-task")
 
         fake_result = mock.MagicMock()
         fake_result.extracted = True

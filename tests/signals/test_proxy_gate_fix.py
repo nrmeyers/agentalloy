@@ -69,7 +69,12 @@ class TestArtifactExistsWithRealStore:
     def test_artifact_present_returns_met(self, store: DuckDBStateStore, tmp_path: Path) -> None:
         """With a real store and an artifact, the gate passes (MET)."""
         # Set a spec artifact.
-        store.set_artifact("spec", "widget", "spec.artifact", "# spec\n\n## Acceptance Criteria\n\n- x\n\n## Out of Scope\n\n- y\n")
+        store.set_artifact(
+            "spec",
+            "widget",
+            "spec.artifact",
+            "# spec\n\n## Acceptance Criteria\n\n- x\n\n## Out of Scope\n\n- y\n",
+        )
         ctx = PredicateContext(project_root=tmp_path, current_phase="spec", store=store)
         result = eval_artifact_exists({"phase": "spec", "name": "*.artifact"}, ctx)
         assert result == PredicateResult.MET
@@ -86,17 +91,13 @@ class TestStoreNoneBehavior:
     evaluations. These tests document the store=None behavior for regression.
     """
 
-    def test_contract_exists_store_none_returns_not_met(
-        self, tmp_path: Path
-    ) -> None:
+    def test_contract_exists_store_none_returns_not_met(self, tmp_path: Path) -> None:
         """With store=None, eval_contract_exists returns NOT_MET (blind)."""
         ctx = PredicateContext(project_root=tmp_path, current_phase="intake", store=None)
         result = eval_contract_exists({"phase": "spec"}, ctx)
         assert result == PredicateResult.NOT_MET
 
-    def test_artifact_exists_store_none_returns_unknown(
-        self, tmp_path: Path
-    ) -> None:
+    def test_artifact_exists_store_none_returns_unknown(self, tmp_path: Path) -> None:
         """With store=None, eval_artifact_exists returns UNKNOWN (fails open)."""
         ctx = PredicateContext(project_root=tmp_path, current_phase="spec", store=None)
         result = eval_artifact_exists({"phase": "spec", "name": "*.artifact"}, ctx)

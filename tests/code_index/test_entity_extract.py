@@ -81,14 +81,36 @@ def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
 def populated_store(tmp_path: Path) -> DuckDBCodeGraphStore:
     s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
     s.migrate()
-    s.upsert_symbols([
-        sym("src/auth/middleware.py", kind="Module", file_path="src/auth/middleware.py"),
-        sym("src/code_index/ingest/pipeline.py", kind="Module", file_path="src/code_index/ingest/pipeline.py"),
-        sym("src/code_index/store/graph_store.py", kind="Module", file_path="src/code_index/store/graph_store.py"),
-        sym("src/code_index/store/jobs_store.py", kind="Module", file_path="src/code_index/store/jobs_store.py"),
-        sym("agentalloy.api.knowledge_push", kind="Module", file_path="src/agentalloy/api/knowledge_push.py"),
-        sym("agentalloy.code_index.ingest.entity_extract", kind="Module", file_path="src/agentalloy/code_index/ingest/entity_extract.py"),
-    ])
+    s.upsert_symbols(
+        [
+            sym("src/auth/middleware.py", kind="Module", file_path="src/auth/middleware.py"),
+            sym(
+                "src/code_index/ingest/pipeline.py",
+                kind="Module",
+                file_path="src/code_index/ingest/pipeline.py",
+            ),
+            sym(
+                "src/code_index/store/graph_store.py",
+                kind="Module",
+                file_path="src/code_index/store/graph_store.py",
+            ),
+            sym(
+                "src/code_index/store/jobs_store.py",
+                kind="Module",
+                file_path="src/code_index/store/jobs_store.py",
+            ),
+            sym(
+                "agentalloy.api.knowledge_push",
+                kind="Module",
+                file_path="src/agentalloy/api/knowledge_push.py",
+            ),
+            sym(
+                "agentalloy.code_index.ingest.entity_extract",
+                kind="Module",
+                file_path="src/agentalloy/code_index/ingest/entity_extract.py",
+            ),
+        ]
+    )
     return s
 
 
@@ -145,7 +167,9 @@ class TestPatternMatching:
         # Target resolves to the jobs_store module symbol
         assert touch_edges[0].dst_fqn == "src/code_index/store/jobs_store.py"
 
-    def test_touches_unresolvable_target_dropped(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_touches_unresolvable_target_dropped(
+        self, populated_store: DuckDBCodeGraphStore
+    ) -> None:
         """Regression 2.5d: an unresolved target is dropped, not re-pointed at
         the subject (the old fallback inverted REQUIRES/TOUCHES direction)."""
         chunk = make_chunk(
@@ -222,11 +246,22 @@ class TestBoundedExtraction:
         edges = extract_entities_from_chunk(chunk, populated_store, max_entities=1)
         assert len(edges) <= 1
 
-    def test_edges_per_job_cap(self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_edges_per_job_cap(
+        self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """When max_per_job=2, the index function caps total entities across all chunks."""
         import agentalloy.code_index.ingest.entity_extract as ee_mod
+
         _builtin_getattr = getattr
-        monkeypatch.setattr(ee_mod, "_getattr", lambda obj, name, *default: 2 if name == "code_index_max_edges_per_job" else _builtin_getattr(obj, name, *default))
+        monkeypatch.setattr(
+            ee_mod,
+            "_getattr",
+            lambda obj, name, *default: (
+                2
+                if name == "code_index_max_edges_per_job"
+                else _builtin_getattr(obj, name, *default)
+            ),
+        )
         chunks = [
             make_chunk(body="src/auth/middleware.py must not be touched."),
             make_chunk(body="src/code_index/ingest/pipeline.py affects jobs_store."),
@@ -235,11 +270,22 @@ class TestBoundedExtraction:
         result = _index_entity_edges(populated_store, chunks, Settings())
         assert result.entities_written <= 2
 
-    def test_entity_exhausted_flag(self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_entity_exhausted_flag(
+        self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """When a chunk produces >= max_entities, entities_exhausted is True."""
         import agentalloy.code_index.ingest.entity_extract as ee_mod
+
         _builtin_getattr = getattr
-        monkeypatch.setattr(ee_mod, "_getattr", lambda obj, name, *default: 1 if name == "code_index_max_entities_per_doc" else _builtin_getattr(obj, name, *default))
+        monkeypatch.setattr(
+            ee_mod,
+            "_getattr",
+            lambda obj, name, *default: (
+                1
+                if name == "code_index_max_entities_per_doc"
+                else _builtin_getattr(obj, name, *default)
+            ),
+        )
         chunk = make_chunk(
             body=(
                 "src/auth/middleware.py must not touch src/code_index/ingest/pipeline.py. "
@@ -305,49 +351,54 @@ class TestQueryEdgesByKind:
     """UT-4: query_edges(kind) returns correct edges."""
 
     def test_typed_edges_for_fqn(self, populated_store: DuckDBCodeGraphStore) -> None:
-        populated_store.upsert_edges([
-            CodeEdge(
-                src="docs/design/x/approach.md::design",
-                dst="src/auth/middleware.py",
-                kind="CONSTRAINTS",
-                file_path="docs/design/x/approach.md",
-                span="middleware must not touch",
-                resolution_tier=1,
-            ),
-            CodeEdge(
-                src="docs/design/x/approach.md::design",
-                dst="src/code_index/ingest/pipeline.py",
-                kind="TOUCHES",
-                file_path="docs/design/x/approach.md",
-                span="editing pipeline affects",
-                resolution_tier=1,
-            ),
-        ])
+        populated_store.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/design/x/approach.md::design",
+                    dst="src/auth/middleware.py",
+                    kind="CONSTRAINTS",
+                    file_path="docs/design/x/approach.md",
+                    span="middleware must not touch",
+                    resolution_tier=1,
+                ),
+                CodeEdge(
+                    src="docs/design/x/approach.md::design",
+                    dst="src/code_index/ingest/pipeline.py",
+                    kind="TOUCHES",
+                    file_path="docs/design/x/approach.md",
+                    span="editing pipeline affects",
+                    resolution_tier=1,
+                ),
+            ]
+        )
         edges = populated_store.typed_edges_for_fqn("src/auth/middleware.py")
         kinds = {e.kind for e in edges}
         assert "CONSTRAINTS" in kinds
 
     def test_typed_edges_from_chunks(self, populated_store: DuckDBCodeGraphStore) -> None:
-        populated_store.upsert_edges([
-            CodeEdge(
-                src="docs/design/x/approach.md::design",
-                dst="",
-                kind="COMMAND",
-                file_path="docs/design/x/approach.md",
-                span="gh pr create",
-                resolution_tier=0,
-            ),
-            CodeEdge(
-                src="docs/design/x/approach.md::design",
-                dst="",
-                kind="STAKEHOLDER",
-                file_path="docs/design/x/approach.md",
-                span="legal flagged",
-                resolution_tier=0,
-            ),
-        ])
+        populated_store.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/design/x/approach.md::design",
+                    dst="",
+                    kind="COMMAND",
+                    file_path="docs/design/x/approach.md",
+                    span="gh pr create",
+                    resolution_tier=0,
+                ),
+                CodeEdge(
+                    src="docs/design/x/approach.md::design",
+                    dst="",
+                    kind="STAKEHOLDER",
+                    file_path="docs/design/x/approach.md",
+                    span="legal flagged",
+                    resolution_tier=0,
+                ),
+            ]
+        )
         edges = populated_store.typed_edges_from_chunks(
-            ["docs/design/x/approach.md::design"], limit=5,
+            ["docs/design/x/approach.md::design"],
+            limit=5,
         )
         kinds = {e.kind for e in edges}
         assert "COMMAND" in kinds
@@ -377,8 +428,15 @@ class TestDecisionBlockEntities:
             span: str
 
         edges = [
-            MockEdge(kind="CONSTRAINTS", src="docs/design/x/approach.md::design", dst="src/auth/middleware.py", span="middleware must not touch"),
-            MockEdge(kind="COMMAND", src="docs/design/x/approach.md::design", dst="", span="gh pr create"),
+            MockEdge(
+                kind="CONSTRAINTS",
+                src="docs/design/x/approach.md::design",
+                dst="src/auth/middleware.py",
+                span="middleware must not touch",
+            ),
+            MockEdge(
+                kind="COMMAND", src="docs/design/x/approach.md::design", dst="", span="gh pr create"
+            ),
         ]
         text = _render_entities(edges)
         # _render_entities renders a markdown heading block
@@ -388,10 +446,12 @@ class TestDecisionBlockEntities:
 
     def test_render_entities_empty_returns_empty_string(self) -> None:
         from agentalloy.api.knowledge_push import _render_entities
+
         assert _render_entities([]) == ""
 
     def test_decisionpush_gains_entity_edges_field(self) -> None:
         from agentalloy.api.knowledge_push import DecisionPush
+
         push = DecisionPush(
             text="test",
             count=1,
@@ -410,20 +470,23 @@ class TestPipelineIntegration:
     """UT-6: entity extraction pass runs alongside GOVERNS path, zero interference."""
 
     def test_index_entity_edges_does_not_modify_gov_edges(
-        self, populated_store: DuckDBCodeGraphStore,
+        self,
+        populated_store: DuckDBCodeGraphStore,
     ) -> None:
         """Entity extraction writes typed edges without affecting GOVERNS edges."""
         # Set up a GOVERNS edge
-        populated_store.upsert_edges([
-            CodeEdge(
-                src="docs/solutions/x.md::solution",
-                dst="src/auth/middleware.py",
-                kind="GOVERNS",
-                file_path="docs/solutions/x.md",
-                span="middleware.py",
-                resolution_tier=1,
-            ),
-        ])
+        populated_store.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/solutions/x.md::solution",
+                    dst="src/auth/middleware.py",
+                    kind="GOVERNS",
+                    file_path="docs/solutions/x.md",
+                    span="middleware.py",
+                    resolution_tier=1,
+                ),
+            ]
+        )
         gov_count_before = populated_store.count_govern_edges_for_doc("docs/solutions/x.md")
 
         # Run entity extraction
@@ -440,24 +503,26 @@ class TestPipelineIntegration:
 
     def test_entity_and_gov_edges_coexist(self, populated_store: DuckDBCodeGraphStore) -> None:
         """Both GOVERNS and typed edges can coexist in the same graph."""
-        populated_store.upsert_edges([
-            CodeEdge(
-                src="docs/solutions/x.md::solution",
-                dst="src/auth/middleware.py",
-                kind="GOVERNS",
-                file_path="docs/solutions/x.md",
-                span="middleware.py",
-                resolution_tier=1,
-            ),
-            CodeEdge(
-                src="docs/design/x/approach.md::design",
-                dst="src/auth/middleware.py",
-                kind="CONSTRAINTS",
-                file_path="docs/design/x/approach.md",
-                span="middleware must not touch",
-                resolution_tier=1,
-            ),
-        ])
+        populated_store.upsert_edges(
+            [
+                CodeEdge(
+                    src="docs/solutions/x.md::solution",
+                    dst="src/auth/middleware.py",
+                    kind="GOVERNS",
+                    file_path="docs/solutions/x.md",
+                    span="middleware.py",
+                    resolution_tier=1,
+                ),
+                CodeEdge(
+                    src="docs/design/x/approach.md::design",
+                    dst="src/auth/middleware.py",
+                    kind="CONSTRAINTS",
+                    file_path="docs/design/x/approach.md",
+                    span="middleware must not touch",
+                    resolution_tier=1,
+                ),
+            ]
+        )
         # governing_decisions returns DecisionRow (markdown docs), not edges
         gov = populated_store.governing_decisions("src/auth/middleware.py")
         assert len(gov) >= 1
@@ -570,7 +635,9 @@ class TestReindexDedup:
         count_after_second = self._entity_edge_count(populated_store)
         assert count_after_second == count_after_first
 
-    def test_reindex_across_two_docs_dedups_per_doc(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_reindex_across_two_docs_dedups_per_doc(
+        self, populated_store: DuckDBCodeGraphStore
+    ) -> None:
         """Two docs re-derived together: each doc's edges are cleared and
         re-inserted, so the total stays flat across runs."""
         chunks = [
@@ -628,6 +695,7 @@ class TestSettings:
 
     def test_settings_has_code_index_attrs(self) -> None:
         from agentalloy.config import Settings
+
         s = Settings()
         # Settings is a pydantic model — attrs are optional
         assert isinstance(s, Settings)

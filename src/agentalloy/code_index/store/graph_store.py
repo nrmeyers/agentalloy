@@ -548,13 +548,11 @@ class DuckDBCodeGraphStore:
         kind_ph = ", ".join("?" for _ in kinds)
         path_ph = ", ".join("?" for _ in paths)
         n = self._scalar(
-            f"SELECT count(*) FROM edges WHERE kind IN ({kind_ph}) "
-            f"AND file_path IN ({path_ph})",
+            f"SELECT count(*) FROM edges WHERE kind IN ({kind_ph}) AND file_path IN ({path_ph})",
             [*kinds, *paths],
         )
         self.conn.execute(
-            f"DELETE FROM edges WHERE kind IN ({kind_ph}) "
-            f"AND file_path IN ({path_ph})",
+            f"DELETE FROM edges WHERE kind IN ({kind_ph}) AND file_path IN ({path_ph})",
             [*kinds, *paths],
         )
         return int(n or 0)
@@ -606,7 +604,10 @@ class DuckDBCodeGraphStore:
         ]
 
     def typed_edges_from_chunks(
-        self, chunk_qns: Sequence[str], *, limit: int = 20,
+        self,
+        chunk_qns: Sequence[str],
+        *,
+        limit: int = 20,
     ) -> list[CodeEdge]:
         """Typed edges rooted at any of the given chunk qualified names or file paths.
 

@@ -151,6 +151,7 @@ _STAKEHOLDER_PATTERNS = [
 
 # --- entity extraction ------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class EntityEdge:
     """A typed entity edge extracted from prose, not a structural call/contains edge.
@@ -183,7 +184,9 @@ def _resolve_entity_target(
     Returns ``(fqn, tier)`` or None if no resolution.
     """
     # Clean up trailing prose artifacts (e.g. "the", "module", "class")
-    clean = re.sub(r'^(?:the\s+)?(?:module|class|function|method)\s+', '', candidate, flags=re.IGNORECASE).strip()
+    clean = re.sub(
+        r"^(?:the\s+)?(?:module|class|function|method)\s+", "", candidate, flags=re.IGNORECASE
+    ).strip()
 
     # Tier 1: exact match
     sym = graph.symbol(clean)
@@ -252,14 +255,16 @@ def extract_entities_from_chunk(
                         span_key = f"{kind}::{span_text}"
                         if span_key not in seen_spans:
                             seen_spans.add(span_key)
-                            raw_edges.append(EntityEdge(
-                                kind=kind,
-                                src_fqn=chunk.qualified_name,
-                                dst_fqn="",
-                                file_path=chunk.file_path,
-                                span=span_text,
-                                resolution_tier=0,
-                            ))
+                            raw_edges.append(
+                                EntityEdge(
+                                    kind=kind,
+                                    src_fqn=chunk.qualified_name,
+                                    dst_fqn="",
+                                    file_path=chunk.file_path,
+                                    span=span_text,
+                                    resolution_tier=0,
+                                )
+                            )
                 else:
                     # Resolved edges — need target
                     if len(groups) >= 2:
@@ -271,18 +276,22 @@ def extract_entities_from_chunk(
                         if span_key not in seen_spans:
                             seen_spans.add(span_key)
                             resolution = _resolve_entity_target(
-                                target, chunk.file_path, graph,
+                                target,
+                                chunk.file_path,
+                                graph,
                             )
                             if resolution is not None:
                                 fqn, tier = resolution
-                                raw_edges.append(EntityEdge(
-                                    kind=kind,
-                                    src_fqn=chunk.qualified_name,
-                                    dst_fqn=fqn,
-                                    file_path=chunk.file_path,
-                                    span=span_text,
-                                    resolution_tier=tier,
-                                ))
+                                raw_edges.append(
+                                    EntityEdge(
+                                        kind=kind,
+                                        src_fqn=chunk.qualified_name,
+                                        dst_fqn=fqn,
+                                        file_path=chunk.file_path,
+                                        span=span_text,
+                                        resolution_tier=tier,
+                                    )
+                                )
                     elif len(groups) == 1:
                         # Single-group pattern (e.g. "X is prohibited"):
                         # the subject itself is the constrained entity.
@@ -292,18 +301,22 @@ def extract_entities_from_chunk(
                         if span_key not in seen_spans:
                             seen_spans.add(span_key)
                             resolution = _resolve_entity_target(
-                                subject, chunk.file_path, graph,
+                                subject,
+                                chunk.file_path,
+                                graph,
                             )
                             if resolution is not None:
                                 fqn, tier = resolution
-                                raw_edges.append(EntityEdge(
-                                    kind=kind,
-                                    src_fqn=chunk.qualified_name,
-                                    dst_fqn=fqn,
-                                    file_path=chunk.file_path,
-                                    span=span_text,
-                                    resolution_tier=tier,
-                                ))
+                                raw_edges.append(
+                                    EntityEdge(
+                                        kind=kind,
+                                        src_fqn=chunk.qualified_name,
+                                        dst_fqn=fqn,
+                                        file_path=chunk.file_path,
+                                        span=span_text,
+                                        resolution_tier=tier,
+                                    )
+                                )
 
     # Sort by kind priority (REQUIRES first), then by span
     kind_order = {k: i for i, k in enumerate(_EDGE_KINDS)}
@@ -313,6 +326,7 @@ def extract_entities_from_chunk(
 
 
 # --- index entry point ------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class EntityIndexResult:
@@ -356,10 +370,10 @@ def _index_entity_edges(
     Bounded by ``MAX_ENTITIES_PER_DOC`` and ``MAX_EDGES_PER_JOB`` (readable
     from ``settings`` with defaults below).
     """
-    max_per_doc = _getattr(settings, "code_index_max_entities_per_doc",
-                           _DEFAULT_MAX_ENTITIES_PER_DOC)
-    max_per_job = _getattr(settings, "code_index_max_edges_per_job",
-                           _DEFAULT_MAX_EDGES_PER_JOB)
+    max_per_doc = _getattr(
+        settings, "code_index_max_entities_per_doc", _DEFAULT_MAX_ENTITIES_PER_DOC
+    )
+    max_per_job = _getattr(settings, "code_index_max_edges_per_job", _DEFAULT_MAX_EDGES_PER_JOB)
 
     all_entities: list[EntityEdge] = []
     exhausted = False
@@ -368,7 +382,9 @@ def _index_entity_edges(
         if len(all_entities) >= max_per_job:
             break
         entities = extract_entities_from_chunk(
-            chunk, store, max_entities=max_per_doc,
+            chunk,
+            store,
+            max_entities=max_per_doc,
         )
         if len(entities) >= max_per_doc:
             exhausted = True

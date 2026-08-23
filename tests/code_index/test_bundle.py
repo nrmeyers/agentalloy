@@ -18,6 +18,7 @@ from .conftest import FixedEmbedClient, axis_vec, calls_edge, make_symbol, seed_
 def _governs_edge(src: str, dst: str) -> CodeEdge:
     return CodeEdge(src=src, dst=dst, kind="GOVERNS", file_path=src.split("::")[0])
 
+
 SLUG = "repo"
 
 

@@ -18,7 +18,6 @@ from agentalloy.api.contract_extractor import (
 )
 from agentalloy.storage.state_store import bind_process_store, open_state_store
 
-
 # ---------------------------------------------------------------------------
 # extract_contracts() — pure extraction
 # ---------------------------------------------------------------------------
@@ -93,15 +92,15 @@ Done."""
         result = extract_contracts(text)
         assert len(result.contracts) == 2
         assert [c.slug for c in result.contracts] == ["a", "b"]
+
+
 # ---------------------------------------------------------------------------
 # write_contracts() — scoped store write
 # ---------------------------------------------------------------------------
 
 
 class TestWriteContracts:
-    def test_writes_into_project_root_scope_not_base_default(
-        self, tmp_path: Path
-    ) -> None:
+    def test_writes_into_project_root_scope_not_base_default(self, tmp_path: Path) -> None:
         """The marker lands in the session repo's scope, never the base default."""
         db = tmp_path / "state.duck"
         # Bind a base store whose *default* repo is deliberately wrong.

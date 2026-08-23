@@ -132,8 +132,8 @@ def _scoped_store(project_root: Path) -> Any | None:
     Views share the connection and must not be closed.
     """
     try:
-        from agentalloy.storage.state_store import process_store
         from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
     except Exception:
         return None
     base = process_store()
@@ -161,9 +161,7 @@ def write_contracts(
 
     store = _scoped_store(project_root)
     if store is None:
-        logger.debug(
-            "contract write skipped: no scoped store for project_root=%s", project_root
-        )
+        logger.debug("contract write skipped: no scoped store for project_root=%s", project_root)
         return 0
 
     written = 0

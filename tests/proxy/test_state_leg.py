@@ -172,9 +172,7 @@ class TestAnthropicStateInjection:
                 {"role": "user", "content": "latest user"},
             ],
         }
-        result = inject_into_anthropic_messages(
-            payload, STATE_JSON, phase="build", kind="state"
-        )
+        result = inject_into_anthropic_messages(payload, STATE_JSON, phase="build", kind="state")
         last = result["messages"][1]["content"]
         assert STATE_MARKER_BEGIN in last
         assert STATE_MARKER_END in last
@@ -189,9 +187,7 @@ class TestAnthropicStateInjection:
                 {"role": "user", "content": [{"type": "text", "text": "hi"}]},
             ],
         }
-        result = inject_into_anthropic_messages(
-            payload, STATE_JSON, phase="build", kind="state"
-        )
+        result = inject_into_anthropic_messages(payload, STATE_JSON, phase="build", kind="state")
         content = result["messages"][0]["content"]
         assert isinstance(content, list)
         joined = "\n".join(b.get("text", "") for b in content)

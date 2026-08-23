@@ -141,7 +141,9 @@ class TestWriteArtifacts:
         written = write_artifacts(artifacts, phase="spec", slug="auth", store=store)
 
         assert written == 1
-        store.set_artifact.assert_called_once_with("spec", "auth", "spec.artifact", "## Acceptance\n...")
+        store.set_artifact.assert_called_once_with(
+            "spec", "auth", "spec.artifact", "## Acceptance\n..."
+        )
 
     def test_empty_artifacts_no_write(self) -> None:
         store = MagicMock()

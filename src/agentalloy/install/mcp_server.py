@@ -96,9 +96,8 @@ _QUERY_TOOL_DEFINITION: dict[str, Any] = {
             "action": {
                 "type": "string",
                 "enum": list(_QUERY_ACTIONS.keys()),
-                "description": "The query to perform. " + " ".join(
-                    f"{k}: {v}" for k, v in _QUERY_ACTIONS.items()
-                ),
+                "description": "The query to perform. "
+                + " ".join(f"{k}: {v}" for k, v in _QUERY_ACTIONS.items()),
             },
             "query": {
                 "type": "string",
@@ -260,7 +259,9 @@ def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict
         elif action == "knowledge_entities":
             if not query:
                 return _err(
-                    request_id, INVALID_PARAMS, "'query' (FQN or short name) required for knowledge_entities"
+                    request_id,
+                    INVALID_PARAMS,
+                    "'query' (FQN or short name) required for knowledge_entities",
                 )
             kind_param = args.get("kind")
             kind_qs = f"&kind={_urlencode(kind_param)}" if kind_param else ""
@@ -280,9 +281,7 @@ def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict
         elif action == "contract_detail":
             contract_id = slug or query
             if not contract_id:
-                return _err(
-                    request_id, INVALID_PARAMS, "'slug' or 'query' (contract ID) required"
-                )
+                return _err(request_id, INVALID_PARAMS, "'slug' or 'query' (contract ID) required")
             data = _http_get(port, f"/contracts/{_urlencode(contract_id)}")
             text = _format_contract(data)
 

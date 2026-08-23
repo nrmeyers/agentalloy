@@ -497,9 +497,7 @@ class TestOfferIndex:
         """A 409 'already active' from the service is not a start failure (B2)."""
         import sys as _sys
 
-        submitted = self._seams(
-            monkeypatch, slugs=[], job={"already_active": True, "job_id": "j9"}
-        )
+        submitted = self._seams(monkeypatch, slugs=[], job={"already_active": True, "job_id": "j9"})
         monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
         job = ciw.offer_index(tmp_path, 47950)
         assert job is not None and job["already_active"] is True
@@ -643,9 +641,7 @@ class TestSubmitIndexJob409:
 
         monkeypatch.setattr(ciw.urllib.request, "urlopen", _fake_urlopen)
 
-    def test_409_already_active_parses_job_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_409_already_active_parses_job_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(
             monkeypatch,
             self._http_error(409, "an index job for slug 'org__repo' is already active: j9"),
@@ -653,16 +649,12 @@ class TestSubmitIndexJob409:
         result = ciw.submit_index_job(47950, Path("/tmp/repo"))
         assert result == {"already_active": True, "job_id": "j9"}
 
-    def test_409_without_detail_still_already_active(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_409_without_detail_still_already_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(monkeypatch, self._http_error(409, ""))
         result = ciw.submit_index_job(47950, Path("/tmp/repo"))
         assert result == {"already_active": True, "job_id": None}
 
-    def test_other_http_error_is_a_failure(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_other_http_error_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._raise(monkeypatch, self._http_error(500, "boom"))
         assert ciw.submit_index_job(47950, Path("/tmp/repo")) is None
 

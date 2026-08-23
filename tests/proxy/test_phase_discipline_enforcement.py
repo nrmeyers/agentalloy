@@ -1,6 +1,5 @@
 """Tests for phase discipline enforcement (tool call interception)."""
 
-
 from agentalloy.providers.base import (
     _command_advances_phase_without_approval,
     _command_writes_to_code,
@@ -44,36 +43,24 @@ class TestCommandAdvancesPhaseWithoutApproval:
     """Tests for _command_advances_phase_without_approval."""
 
     def test_spec_phase_blocked(self):
-        assert _command_advances_phase_without_approval(
-            "agentalloy phase set design", "spec"
-        )
+        assert _command_advances_phase_without_approval("agentalloy phase set design", "spec")
 
     def test_design_phase_blocked(self):
-        assert _command_advances_phase_without_approval(
-            "agentalloy phase set plan", "design"
-        )
+        assert _command_advances_phase_without_approval("agentalloy phase set plan", "design")
 
     def test_plan_phase_blocked(self):
-        assert _command_advances_phase_without_approval(
-            "agentalloy phase set build", "plan"
-        )
+        assert _command_advances_phase_without_approval("agentalloy phase set build", "plan")
 
     def test_build_phase_allowed(self):
         # build phase doesn't require approval
-        assert not _command_advances_phase_without_approval(
-            "agentalloy phase set qa", "build"
-        )
+        assert not _command_advances_phase_without_approval("agentalloy phase set qa", "build")
 
     def test_intake_phase_allowed(self):
         # intake phase doesn't require approval
-        assert not _command_advances_phase_without_approval(
-            "agentalloy phase set spec", "intake"
-        )
+        assert not _command_advances_phase_without_approval("agentalloy phase set spec", "intake")
 
     def test_non_phase_command_allowed(self):
-        assert not _command_advances_phase_without_approval(
-            "agentalloy code index", "spec"
-        )
+        assert not _command_advances_phase_without_approval("agentalloy code index", "spec")
 
 
 class TestBuildInstructiveDenialMessage:
@@ -106,9 +93,7 @@ class TestInterceptGatedToolCalls:
     """Tests for intercept_gated_tool_calls."""
 
     def test_blocks_write_file_in_spec(self):
-        blocks = [
-            {"type": "tool_use", "name": "write_file", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "write_file", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "spec")
         assert modified
         assert len(result) == 1
@@ -116,33 +101,25 @@ class TestInterceptGatedToolCalls:
         assert "denied" in result[0]["text"].lower()
 
     def test_blocks_edit_in_design(self):
-        blocks = [
-            {"type": "tool_use", "name": "edit", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "edit", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "design")
         assert modified
         assert result[0]["type"] == "text"
 
     def test_blocks_notebook_edit_in_intake(self):
-        blocks = [
-            {"type": "tool_use", "name": "notebook_edit", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "notebook_edit", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "intake")
         assert modified
         assert result[0]["type"] == "text"
 
     def test_allows_write_file_in_build(self):
-        blocks = [
-            {"type": "tool_use", "name": "write_file", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "write_file", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "build")
         assert not modified
         assert result == blocks
 
     def test_allows_read_file_in_spec(self):
-        blocks = [
-            {"type": "tool_use", "name": "read_file", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "read_file", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "spec")
         assert not modified
         assert result == blocks
@@ -189,9 +166,7 @@ class TestInterceptGatedToolCalls:
         assert "approval" in result[0]["text"].lower()
 
     def test_pause_mode_bypasses_all(self):
-        blocks = [
-            {"type": "tool_use", "name": "write_file", "id": "1", "input": {}}
-        ]
+        blocks = [{"type": "tool_use", "name": "write_file", "id": "1", "input": {}}]
         result, modified = intercept_gated_tool_calls(blocks, "spec", pause_mode=True)
         assert not modified
         assert result == blocks

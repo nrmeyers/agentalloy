@@ -721,7 +721,7 @@ def _stream_upstream_response(
             )
 
         _CORRECTIVE_CHUNK = (
-            'data: '
+            "data: "
             + json.dumps(
                 {
                     "id": "chatcmpl-proxy",
@@ -731,7 +731,7 @@ def _stream_upstream_response(
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 },
             )
-            + '\n\n'
+            + "\n\n"
         )
 
         try:
@@ -788,7 +788,9 @@ def _stream_upstream_response(
                 try:
                     full_text = "".join(stream_buffer)
                     if "<!--" in full_text:
-                        from agentalloy.api.contract_extractor import extract_and_store as extract_contract_and_store
+                        from agentalloy.api.contract_extractor import (
+                            extract_and_store as extract_contract_and_store,
+                        )
 
                         extract_contract_and_store(
                             full_text,
@@ -798,7 +800,7 @@ def _stream_upstream_response(
                     logger.debug("streaming contract extraction failed", exc_info=True)
             if not has_finish_reason:
                 yield _CORRECTIVE_CHUNK
-                yield 'data: [DONE]\n\n'
+                yield "data: [DONE]\n\n"
             _finish_received()
         except httpx.HTTPStatusError as exc:
             logger.warning("Upstream streaming HTTP status error: %s", exc)
@@ -1661,6 +1663,7 @@ async def proxy_chat_completions(
                                 _command_writes_to_code,
                                 build_instructive_denial_message,
                             )
+
                             # Check if any tool calls are gated
                             gated_indices = []
                             for i, tc in enumerate(tool_calls):
@@ -1675,10 +1678,18 @@ async def proxy_chat_completions(
                                         elif fn_name in SHELL_TOOL_NAMES:
                                             args_str = fn.get("arguments", "{}")
                                             try:
-                                                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                                args = (
+                                                    json.loads(args_str)
+                                                    if isinstance(args_str, str)
+                                                    else args_str
+                                                )
                                                 command = args.get("command", "")
                                                 # Check writes to code
-                                                if _command_writes_to_code(command) or _command_advances_phase_without_approval(command, current_phase):
+                                                if _command_writes_to_code(
+                                                    command
+                                                ) or _command_advances_phase_without_approval(
+                                                    command, current_phase
+                                                ):
                                                     gated_indices.append((i, fn_name))
                                             except (json.JSONDecodeError, AttributeError):
                                                 pass
@@ -1693,9 +1704,15 @@ async def proxy_chat_completions(
                                     args_str = fn.get("arguments", "{}")
                                     is_phase_advance = False
                                     try:
-                                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                        args = (
+                                            json.loads(args_str)
+                                            if isinstance(args_str, str)
+                                            else args_str
+                                        )
                                         command = args.get("command", "")
-                                        is_phase_advance = _command_advances_phase_without_approval(command, current_phase)
+                                        is_phase_advance = _command_advances_phase_without_approval(
+                                            command, current_phase
+                                        )
                                     except (json.JSONDecodeError, AttributeError):
                                         pass
 
@@ -1722,7 +1739,8 @@ async def proxy_chat_completions(
                                 message["content"] = content.strip()
                                 # Remove the gated tool calls
                                 message["tool_calls"] = [
-                                    tc for i, tc in enumerate(tool_calls)
+                                    tc
+                                    for i, tc in enumerate(tool_calls)
                                     if i not in [idx for idx, _ in gated_indices]
                                 ]
                                 if not message["tool_calls"]:

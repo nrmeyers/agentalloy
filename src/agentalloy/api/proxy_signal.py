@@ -792,15 +792,27 @@ def _auto_create_next_contract(
         scope_avoids_raw = row.get("scope_avoids", "[]")
         domain_tags_raw = row.get("domain_tags", "[]")
         try:
-            scope_touches = _json.loads(scope_touches_raw) if isinstance(scope_touches_raw, str) else scope_touches_raw
+            scope_touches = (
+                _json.loads(scope_touches_raw)
+                if isinstance(scope_touches_raw, str)
+                else scope_touches_raw
+            )
         except Exception:
             scope_touches = []
         try:
-            scope_avoids = _json.loads(scope_avoids_raw) if isinstance(scope_avoids_raw, str) else scope_avoids_raw
+            scope_avoids = (
+                _json.loads(scope_avoids_raw)
+                if isinstance(scope_avoids_raw, str)
+                else scope_avoids_raw
+            )
         except Exception:
             scope_avoids = []
         try:
-            domain_tags = _json.loads(domain_tags_raw) if isinstance(domain_tags_raw, str) else domain_tags_raw
+            domain_tags = (
+                _json.loads(domain_tags_raw)
+                if isinstance(domain_tags_raw, str)
+                else domain_tags_raw
+            )
         except Exception:
             domain_tags = []
 
@@ -815,7 +827,9 @@ def _auto_create_next_contract(
         )
         logger.info(
             "Auto-created contract for phase=%s slug=%s (from %s)",
-            to_phase, slug, current_contract_id,
+            to_phase,
+            slug,
+            current_contract_id,
         )
 
         # Re-seed the cursor to the new contract so the next turn picks it up
@@ -826,7 +840,9 @@ def _auto_create_next_contract(
 
     except Exception:
         logger.debug(
-            "auto-create contract failed for phase=%s", to_phase, exc_info=True,
+            "auto-create contract failed for phase=%s",
+            to_phase,
+            exc_info=True,
         )
 
 
@@ -1222,7 +1238,10 @@ async def evaluate_signal(
                     # This runs AFTER _write_phase_atomic (which clears cursors), so
                     # we re-seed the cursor to the new contract if creation succeeds.
                     _auto_create_next_contract(
-                        cwd, to_phase, contract_id, ctx.store,
+                        cwd,
+                        to_phase,
+                        contract_id,
+                        ctx.store,
                     )
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
                     # mode="workflow" is not a guess: this whole branch is only
