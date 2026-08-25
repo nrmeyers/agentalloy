@@ -291,6 +291,84 @@ class TestClaudeCodeUnwireCleanup:
         uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
         assert not (claude / "settings.local.json").exists()  # nothing left → removed
 
+    def test_unwire_removes_posture_blocks(self, tmp_path: Path) -> None:
+        """Unwire removes the enforcement-posture permissions block AgentAlloy wrote.
+
+        Both shapes — the denied-phase deny list and the unlocked ``[]`` — are
+        recognized; a posture left behind would keep denying writes after unwire.
+        """
+        from agentalloy.install.subcommands import uninstall_proxy
+        from agentalloy.providers.base import DENY_PATTERNS
+
+        for posture in ({"deny": list(DENY_PATTERNS)}, {"deny": []}):
+            claude = tmp_path / ".claude"
+            claude.mkdir(exist_ok=True)
+            settings = claude / "settings.local.json"
+            settings.write_text(json.dumps({"permissions": posture}))
+            removed = uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+            assert removed == [settings]
+            assert not settings.exists()  # only our posture was present → removed
+
+    def test_unwire_removes_posture_and_env_together(self, tmp_path: Path) -> None:
+        """Full wire→posture→unwire flow leaves no settings.local.json behind."""
+        from agentalloy.install.subcommands import uninstall_proxy
+        from agentalloy.install.subcommands.wire_harness import _apply_claude_code_posture
+        from agentalloy.providers.base import DENY_PATTERNS
+
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        _apply_claude_code_posture(tmp_path, "spec")  # denied phase → deny list
+        settings = tmp_path / ".claude" / "settings.local.json"
+        data = json.loads(settings.read_text())
+        assert data["permissions"] == {"deny": list(DENY_PATTERNS)}  # precondition
+
+        uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        assert not settings.exists()  # both AgentAlloy blocks gone → file removed
+
+    def test_unwire_preserves_user_deny_patterns(self, tmp_path: Path) -> None:
+        """A user's own deny patterns (not the posture list) survive unwire."""
+        from agentalloy.install.subcommands import uninstall_proxy
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        token = encode_proj_token(tmp_path)
+        (claude / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "permissions": {"deny": ["Write(secrets/**)"]},
+                    "env": {"ANTHROPIC_BASE_URL": f"http://localhost:7070/proj/{token}"},
+                }
+            )
+        )
+        uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        data = json.loads((claude / "settings.local.json").read_text())
+        assert "env" not in data  # our proxy env removed
+        assert data["permissions"] == {"deny": ["Write(secrets/**)"]}  # user's preserved
+
+    def test_unwire_preserves_permissions_with_extra_keys(self, tmp_path: Path) -> None:
+        """Posture deny list + an allow key = user-owned block; left untouched."""
+        from agentalloy.install.subcommands import uninstall_proxy
+        from agentalloy.providers.base import DENY_PATTERNS
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        token = encode_proj_token(tmp_path)
+        (claude / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "permissions": {
+                        "allow": ["Bash(ls)"],
+                        "deny": list(DENY_PATTERNS),
+                    },
+                    "env": {"ANTHROPIC_BASE_URL": f"http://localhost:7070/proj/{token}"},
+                }
+            )
+        )
+        uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        data = json.loads((claude / "settings.local.json").read_text())
+        assert "env" not in data
+        assert data["permissions"]["allow"] == ["Bash(ls)"]
+        assert data["permissions"]["deny"] == list(DENY_PATTERNS)  # block preserved whole
+
     def _run_unwire(self, tmp_path: Path, st: dict, monkeypatch: pytest.MonkeyPatch) -> None:
         from agentalloy.install.subcommands.uninstall import uninstall
 

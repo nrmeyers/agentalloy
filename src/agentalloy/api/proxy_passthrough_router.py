@@ -79,27 +79,35 @@ class _ArtifactExtractionContext:
     Carries the store, phase, contract slug, and the session's real project
     root needed to write extracted artifacts and contracts. ``slug`` is ``None``
     during intake (no active contract yet) — artifact writes are skipped then,
-    but contract markers still land in the scoped store. ``None`` means
-    extraction is disabled (feature flag off, or no phase).
+    but contract markers still land in the scoped store. ``None`` means no
+    phase is active (or the state store is unavailable).
+
+    ``artifact_enabled`` mirrors the ``artifact_extraction_enabled`` feature
+    flag: when off, artifact writes are skipped but contract-marker extraction
+    still runs — the two are independent (contract markers bootstrap the first
+    contract at intake, which the feature flag must not gate).
     """
 
     store: Any
     phase: str
     slug: str | None = None
     project_root: Path | None = None
+    artifact_enabled: bool = True
 
 
 def _build_artifact_context(
     signal: SignalResult | None,
     project_dir: Path | None = None,
 ) -> _ArtifactExtractionContext | None:
-    """Build the artifact extraction context from signal and project root.
+    """Build the artifact/contract extraction context from signal and root.
 
-    Returns ``None`` when extraction is disabled (feature flag off, no signal,
-    or no phase). ``slug`` is ``None`` when no active contract exists (e.g. at
-    intake before the first contract is written) — the artifact write path skips
-    then, but contract-marker extraction can still write the first contract.
-    Soft: never raises.
+    Returns ``None`` when no signal or phase is active, or the state store is
+    unavailable. When ``artifact_extraction_enabled`` is off the context is
+    still built (with ``artifact_enabled=False``) — contract-marker extraction
+    is independent of the flag and must keep working so intake can record its
+    first contract. ``slug`` is ``None`` when no active contract exists (e.g.
+    at intake before the first contract is written) — the artifact write path
+    skips then. Soft: never raises.
 
     The store is the process state store scoped to the session's real repo —
     the same ``for_repo`` bucket the state leg reads from. The corpus
@@ -107,12 +115,11 @@ def _build_artifact_context(
     """
     if signal is None or not signal.phase:
         return None
+    artifact_enabled = True
     try:
         from agentalloy.config import get_settings
 
-        settings = get_settings()
-        if not settings.artifact_extraction_enabled:
-            return None
+        artifact_enabled = get_settings().artifact_extraction_enabled
     except Exception:
         return None
 
@@ -133,7 +140,11 @@ def _build_artifact_context(
     # None at intake when the first contract has not been written yet.
     slug = signal.current_contract
     return _ArtifactExtractionContext(
-        store=store, phase=signal.phase, slug=slug, project_root=project_dir
+        store=store,
+        phase=signal.phase,
+        slug=slug,
+        project_root=project_dir,
+        artifact_enabled=artifact_enabled,
     )
 
 
@@ -830,8 +841,14 @@ async def _forward_once(
 
     # Artifact extraction: parse markers from response text, write to store,
     # strip markers from the forwarded response. Skipped when no active
-    # contract (slug is None, e.g. at intake before the first contract).
-    if artifact_extraction is not None and artifact_extraction.slug:
+    # contract (slug is None, e.g. at intake before the first contract) or
+    # when the artifact feature flag is off (contract extraction below still
+    # runs).
+    if (
+        artifact_extraction is not None
+        and artifact_extraction.artifact_enabled
+        and artifact_extraction.slug
+    ):
         try:
             response_json = json.loads(response_content)
             if isinstance(response_json, dict) and "content" in response_json:
@@ -1013,8 +1030,15 @@ async def _forward_streaming(
             await cm.__aexit__(None, None, None)
         # After stream ends, run artifact extraction on accumulated text.
         # This runs in the background — the response is already fully sent.
-        # Skipped when no active contract (slug None, e.g. at intake).
-        if artifact_extraction is not None and artifact_extraction.slug and stream_buffer:
+        # Skipped when no active contract (slug None, e.g. at intake) or when
+        # the artifact feature flag is off (contract extraction below still
+        # runs).
+        if (
+            artifact_extraction is not None
+            and artifact_extraction.artifact_enabled
+            and artifact_extraction.slug
+            and stream_buffer
+        ):
             try:
                 full_text = "".join(stream_buffer)
                 if "<!--" in full_text:
