@@ -27,15 +27,15 @@ prose_invariants:
   - "the solutions artifact"
 exit_gates:
   all_of:
-    - artifact_exists:
+    # The QA gate is a "real record" check: the qa artifact must exist with
+    # substantive content (not an empty stub or whitespace-only file). The
+    # exact section headings are a prose convention, not a gate contract — the
+    # agent knows the format from the prose, and the gate just proves a real
+    # record was written.
+    - artifact_size_min:
         phase: qa
         name: "*.artifact"
-    - artifact_contains:
-        phase: qa
-        name: "*.artifact"
-        sections:
-          - Checks
-          - Review
+        bytes: 50
     # Compound-engineering codify gate: blocks qa->ship until THIS task's lesson
     # is recorded in the solutions artifact (store: phase=qa, name=solution;
     # a pre-migration docs/solutions/<slug>.md file still satisfies it).

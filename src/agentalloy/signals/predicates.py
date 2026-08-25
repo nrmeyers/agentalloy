@@ -668,8 +668,35 @@ def store_section_completeness(
 
 
 def eval_artifact_size_min(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
-    pattern = args.get("path", "")
+    """MET when the matched artifacts carry at least ``bytes`` of content.
+
+    Two addressing modes, mirroring :func:`eval_artifact_exists`:
+
+    * store-backed (``phase`` + optional ``name`` glob): sums the stripped
+      content length of every matching store row — the SDD path, where the
+      artifact lives in the store, not on disk.
+    * filesystem (``path`` glob): sums the on-disk size of every matching file.
+
+    ``bytes`` defaults to 0 (existence-only). A gate that wants to prove a
+    *real* record (not an empty stub or whitespace-only file) sets a small
+    floor, e.g. ``bytes: 50``.
+    """
     min_bytes = args.get("bytes", 0)
+    phase = args.get("phase")
+    if phase is not None:
+        rows = _list_store_artifacts(ctx, phase=str(phase), name_glob=args.get("name"))
+        if rows is None:
+            return PredicateResult.UNKNOWN
+        if not rows:
+            return PredicateResult.NOT_MET
+        total = 0
+        for row in rows:
+            content = row.get("content")
+            if content is None:
+                return PredicateResult.UNKNOWN
+            total += len(content.strip())
+        return PredicateResult.MET if total >= min_bytes else PredicateResult.NOT_MET
+    pattern = args.get("path", "")
     if not pattern:
         return PredicateResult.UNKNOWN
     files = _glob_files(ctx.project_root, pattern)

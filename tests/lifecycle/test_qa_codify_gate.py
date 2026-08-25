@@ -183,11 +183,14 @@ def test_store_error_falls_back_to_disk(tmp_path: Path):
     assert eval_lessons_recorded({"phase": "qa"}, _ctx(tmp_path, store)) == PredicateResult.MET
 
 
-def test_lesson_name_is_not_swept_up_by_the_qa_md_glob(tmp_path: Path):
-    """Regression: the qa exit gate globs `name: "*.md"` and artifact_contains
-    requires EVERY matching row to carry ## Checks/## Review. If the lesson were
-    named solution.md, writing it would break the gate beside it — so the name
-    carries no .md suffix and the glob must miss it."""
+def test_lesson_name_is_bare_word_not_filename():
+    """The lesson name is a store key, not a filename.
+
+    The on-disk shape (``docs/solutions/<slug>.md``) belongs to the synthetic
+    ingest path (``lessons_artifact.lesson_doc_path``), not the store name.
+    No gate globs ``*.md`` any more, so this pins the naming shape rather than
+    a live glob: the name must stay the bare word ``solution``.
+    """
     assert not fnmatch(LESSON_NAME, "*.md")
 
 
@@ -201,15 +204,18 @@ def test_store_lesson_coexists_with_the_qa_report_artifact(tmp_path: Path):
     """End-to-end, through the real forward gate and a real store — the claim
     the whole migration rests on.
 
-    The qa exit gate globs `name: "*.artifact"` and ``artifact_contains``
-    demands ## Checks/## Review of EVERY row that glob matches. Writing the
-    lesson alongside the qa report must therefore clear the gate, not break it.
-    A lesson named ``solution.artifact`` would fail here; ``solution`` does not.
+    The qa exit gate globs `name: "*.artifact"` and sums the size of every row
+    the glob matches. The lesson is named `solution` (no `.artifact`), so it
+    does not match the glob and does not count toward the report's size floor —
+    writing it alongside the report must clear the gate, not break it.
     """
     _qa_contract(tmp_path)
     scoped = _store_for(tmp_path)
     scoped.set_artifact(
-        "qa", SLUG, "report.artifact", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+        "qa",
+        SLUG,
+        "report.artifact",
+        "# qa\n\n## Checks\n\nfull suite green, lint clean\n\n## Review\n\nno findings\n",
     )
     scoped.set_artifact(LESSON_PHASE, SLUG, LESSON_NAME, "# lesson\n\nwhat worked\n")
 
@@ -218,33 +224,33 @@ def test_store_lesson_coexists_with_the_qa_report_artifact(tmp_path: Path):
     assert blocked is False, f"store-backed qa+lesson should clear the gate; got {advisories}"
 
 
-def test_md_suffixed_lesson_would_break_the_qa_gate(tmp_path: Path):
+def test_lesson_name_is_not_swept_up_by_the_qa_artifact_glob():
     """Proves the name choice is load-bearing rather than cosmetic.
 
-    Identical to the test above except the lesson is stored as ``solution.artifact``.
-    The qa gate's ``*.artifact`` glob then sweeps it up and ``artifact_contains``
-    demands ## Checks/## Review of it, so the gate blocks — recording the lesson
-    would have broken the edge it is supposed to open. This test failing means
+    The qa exit gate globs ``name: "*.artifact"`` and sums the size of every
+    matching row, and the state leg reads the first matching row as the report
+    (parsing ``## Routed Findings``). A lesson stored as ``solution.artifact``
+    would be swept into both — its bytes would count toward the report's size
+    floor and it could shadow the report for the state leg. The bare name
+    ``solution`` keeps the glob scoped to the report. This test failing means
     someone gave LESSON_NAME an .artifact suffix.
+    """
+    assert not fnmatch(LESSON_NAME, "*.artifact")
+
+
+def test_store_qa_report_without_lesson_still_blocks(tmp_path: Path):
+    """The companion: the codify gate is what's holding the edge, not the report.
+
+    The report satisfies the size gate on its own (a real ``*.artifact`` row
+    above the floor), so the only leaf that can block is the codify gate.
     """
     _qa_contract(tmp_path)
     scoped = _store_for(tmp_path)
     scoped.set_artifact(
-        "qa", SLUG, "report.artifact", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
-    )
-    scoped.set_artifact("qa", SLUG, "solution.artifact", "# lesson\n\nwhat worked\n")
-
-    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, scoped)
-
-    assert blocked is True
-
-
-def test_store_qa_report_without_lesson_still_blocks(tmp_path: Path):
-    """The companion: the codify gate is what's holding the edge, not the report."""
-    _qa_contract(tmp_path)
-    scoped = _store_for(tmp_path)
-    scoped.set_artifact(
-        "qa", SLUG, "report.md", "# qa\n\n## Checks\n\nall green\n\n## Review\n\nclean\n"
+        "qa",
+        SLUG,
+        "report.artifact",
+        "# qa\n\n## Checks\n\nfull suite green, lint clean\n\n## Review\n\nno findings\n",
     )
 
     blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, scoped)

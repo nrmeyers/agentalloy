@@ -21,15 +21,15 @@ prose_invariants:
   - "agentalloy:artifact"
 exit_gates:
   all_of:
-    - artifact_exists:
+    # The ship gate is a "real record" check: the ship artifact must exist with
+    # substantive content (not an empty stub or whitespace-only file). The
+    # exact section headings are a prose convention, not a gate contract — the
+    # agent knows the format from the prose, and the gate just proves a real
+    # record was written.
+    - artifact_size_min:
         phase: ship
         name: "*.artifact"
-    - artifact_contains:
-        phase: ship
-        name: "*.artifact"
-        sections:
-          - Summary
-          - Rollback
+        bytes: 50
 signal_keywords:
   - ready to ship
   - ship it

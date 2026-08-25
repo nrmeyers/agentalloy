@@ -43,14 +43,15 @@ def canonicalize_artifact_name(phase: str, name: str) -> str:
 
     The lesson artifact (``name="solution"``) is a special case: it is stored
     under the bare name so it does NOT match the qa exit gate's ``*.artifact``
-    glob (which would require ``## Checks``/``## Review`` sections on its
-    content).
+    glob — a matching row would have its bytes counted toward the report's
+    size floor and could shadow the report for the state leg.
     """
     if phase not in STORE_BACKED_PHASES:
         return name
     # The lesson artifact (solution) is intentionally NOT canonicalized —
-    # the qa exit gate's *.artifact glob would then sweep it up and demand
-    # ## Checks/## Review of its content, breaking the gate.
+    # the qa exit gate's *.artifact glob would then sweep it up (its bytes
+    # would count toward the report's size floor) and the state leg could
+    # read it as the report.
     if name == "solution":
         return name
     stem = name

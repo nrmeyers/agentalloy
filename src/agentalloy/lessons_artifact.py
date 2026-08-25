@@ -9,10 +9,12 @@ One module so the four consumers cannot drift: the codify gate
 The lesson is a store artifact keyed ``(phase='qa', slug=<work-item>,
 name='solution')``. Two shape decisions are load-bearing:
 
-* **No ``.md`` suffix on the name.** The qa exit gate globs ``name: "*.md"`` and
-  ``artifact_contains`` requires EVERY matching row to carry ``## Checks`` and
-  ``## Review``. A ``solution.md`` row would be swept up by that glob, so writing
-  the lesson would break the qa artifact gate sitting beside the codify gate.
+* **The name is the bare word ``solution`` — no ``.artifact`` suffix.** The qa
+  exit gate globs ``name: "*.artifact"`` and sums the byte size of every
+  matching row, and the state leg reads the first matching row as the qa report
+  (parsing ``## Routed Findings``). A ``solution.artifact`` row would be swept
+  into both — its bytes would count toward the report's size floor and it could
+  shadow the report — so the lesson must not match that glob.
 * **The synthetic path keeps the old on-disk shape.** Ingest emits lesson chunks
   under ``docs/solutions/<slug>.md`` — the same repo-relative path the pre-store
   file had. That is what lets ``_DECISION_SOURCE_GLOBS`` and
