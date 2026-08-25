@@ -95,29 +95,38 @@ def get_vector_store(request: Request) -> TelemetryStore | None:
 
 @dataclass(frozen=True)
 class _OpenAIArtifactContext:
-    """Context for artifact extraction on the OpenAI response path.
+    """Context for artifact/contract extraction on the OpenAI response path.
 
     ``slug`` is ``None`` during intake (no active contract yet) — artifact
     writes are skipped then, but contract markers still land in the store
     scoped to ``project_root`` (the session's real repo, never process cwd).
+
+    ``artifact_enabled`` mirrors the ``artifact_extraction_enabled`` feature
+    flag: when off, artifact writes are skipped but contract-marker extraction
+    still runs — the two are independent (contract markers bootstrap the first
+    contract at intake, which the feature flag must not gate).
     """
 
     store: Any
     phase: str
     slug: str | None = None
     project_root: Path | None = None
+    artifact_enabled: bool = True
 
 
 def _build_openai_artifact_context(
     signal_result: Any,
     project_dir: Path | None = None,
 ) -> _OpenAIArtifactContext | None:
-    """Build artifact extraction context for the OpenAI router.
+    """Build artifact/contract extraction context for the OpenAI router.
 
-    Returns ``None`` when extraction is disabled or no phase is active.
-    ``slug`` is ``None`` when no active contract exists (e.g. at intake before
-    the first contract is written) — the artifact write path skips then, but
-    contract-marker extraction can still write the first contract.
+    Returns ``None`` when no phase is active or the state store is
+    unavailable. When ``artifact_extraction_enabled`` is off the context is
+    still built (with ``artifact_enabled=False``) — contract-marker extraction
+    is independent of the flag and must keep working so intake can record its
+    first contract. ``slug`` is ``None`` when no active contract exists (e.g.
+    at intake before the first contract is written) — the artifact write path
+    skips then.
 
     The store is the process state store scoped to the session's real repo —
     the same ``for_repo`` bucket the state leg reads from. The corpus
@@ -125,12 +134,11 @@ def _build_openai_artifact_context(
     """
     if signal_result is None or not getattr(signal_result, "phase", None):
         return None
+    artifact_enabled = True
     try:
         from agentalloy.config import get_settings
 
-        settings = get_settings()
-        if not settings.artifact_extraction_enabled:
-            return None
+        artifact_enabled = get_settings().artifact_extraction_enabled
     except Exception:
         return None
 
@@ -153,6 +161,7 @@ def _build_openai_artifact_context(
         phase=signal_result.phase,
         slug=slug,
         project_root=project_dir,
+        artifact_enabled=artifact_enabled,
     )
 
 
@@ -762,7 +771,14 @@ def _stream_upstream_response(
                         stream_buffer.append(chunk)
                     yield chunk
             # After stream ends, run artifact extraction on accumulated text.
-            if artifact_extraction is not None and artifact_extraction.slug and stream_buffer:
+            # Skipped when the artifact feature flag is off (contract-marker
+            # extraction below still runs).
+            if (
+                artifact_extraction is not None
+                and artifact_extraction.artifact_enabled
+                and artifact_extraction.slug
+                and stream_buffer
+            ):
                 try:
                     full_text = "".join(stream_buffer)
                     if "<!--" in full_text:
@@ -1753,8 +1769,9 @@ async def proxy_chat_completions(
 
     # Artifact extraction: parse markers from response text, write to store,
     # strip markers from the forwarded response. Skipped when no active contract
-    # (slug is None, e.g. at intake before the first contract).
-    if artifact_ctx is not None and artifact_ctx.slug:
+    # (slug is None, e.g. at intake before the first contract) or when the
+    # artifact feature flag is off (contract extraction below still runs).
+    if artifact_ctx is not None and artifact_ctx.artifact_enabled and artifact_ctx.slug:
         try:
             choices = body.get("choices", [])
             if choices and isinstance(choices[0], dict):

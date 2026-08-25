@@ -665,13 +665,94 @@ class TestArtifactContextStoreScoping:
         ctx = _build_openai_artifact_context(self._signal(), project_dir=root)
         self._assert_scoped(ctx, root)
 
-    def test_passthrough_context_none_when_flag_off(
+    async def test_contract_marker_extracted_when_flag_off(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """D-1 regression: with the artifact flag OFF, a contract marker in the
+        response is still extracted, written to the scoped store, and stripped
+        from the forwarded body. The flag gates artifact writes only."""
+        from agentalloy.api.proxy_passthrough_router import (
+            _build_artifact_context,
+            _forward_once,
+        )
+        from agentalloy.api.state_router import scoped_state_store
+        from agentalloy.storage.state_store import process_store
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "false")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        ctx = _build_artifact_context(self._signal(phase="intake", contract=None), project_dir=root)
+        assert ctx is not None and ctx.artifact_enabled is False
+
+        marker = (
+            "<!-- agentalloy:contract phase=intake slug=first-task -->"
+            "# First contract\n"
+            "<!-- /agentalloy:contract -->"
+        )
+        upstream_content = json.dumps(
+            {"content": [{"type": "text", "text": f"ok {marker}"}]}
+        ).encode()
+        upstream = mock.MagicMock()
+        upstream.status_code = 200
+        upstream.content = upstream_content
+        upstream.headers = {"content-type": "application/json"}
+        client = mock.MagicMock()
+        client.forward = mock.AsyncMock(return_value=upstream)
+
+        resp = await _forward_once(client, "", {}, b"{}", artifact_extraction=ctx)
+        body = json.loads(resp.body)
+        text = body["content"][0]["text"]
+        assert "agentalloy:contract" not in text  # marker stripped from the relay
+
+        scoped = scoped_state_store(process_store(), root)
+        row = scoped.get_contract("first-task")
+        assert row is not None
+        assert row["phase"] == "intake"
+        assert "# First contract" in row["body"]
+
+    def test_passthrough_context_disabled_when_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Flag off → context still built (artifact_enabled=False) so contract
+        extraction keeps running; only artifact writes are gated (D-1)."""
         from agentalloy.api.proxy_passthrough_router import _build_artifact_context
 
         monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "false")
         root = tmp_path / "repo"
         root.mkdir()
 
+        ctx = _build_artifact_context(self._signal(), project_dir=root)
+        assert ctx is not None
+        assert ctx.artifact_enabled is False
+        assert ctx.project_root == root
+
+    def test_openai_context_disabled_when_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from agentalloy.api.proxy_router import _build_openai_artifact_context
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "false")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        ctx = _build_openai_artifact_context(self._signal(), project_dir=root)
+        assert ctx is not None
+        assert ctx.artifact_enabled is False
+        assert ctx.project_root == root
+
+    def test_passthrough_context_none_when_store_unbound(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Store out of reach → context is None (extraction disabled entirely)."""
+        from agentalloy.api.proxy_passthrough_router import _build_artifact_context
+        from agentalloy.storage.state_store import bind_process_store
+
+        monkeypatch.setenv("ARTIFACT_EXTRACTION_ENABLED", "true")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        # The autouse _bound_state_store fixture re-binds per test and unbinds
+        # in teardown, so a plain unbind here is safe.
+        bind_process_store(None)
         assert _build_artifact_context(self._signal(), project_dir=root) is None
