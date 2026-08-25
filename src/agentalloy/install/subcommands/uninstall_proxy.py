@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from agentalloy.providers.base import DENY_PATTERNS
+
 
 def _remove_sentinel_block(content: str) -> str:
     """Remove content between agentalloy sentinels.
@@ -184,14 +186,34 @@ def _unwire_proxy_claude_code(root: Path) -> list[Path]:
     return []
 
 
-def _unwire_proxy_claude_code_settings(root: Path) -> list[Path]:
-    """Strip the AgentAlloy proxy URL from ``<root>/.claude/settings.local.json``.
+def _is_posture_permissions(value: Any) -> bool:
+    """True iff *value* is exactly an AgentAlloy enforcement-posture block.
 
-    Surgical, mirroring the cline cleanup: removes only ``env.ANTHROPIC_BASE_URL``
+    ``_apply_claude_code_posture`` writes ``data["permissions"]`` as either
+    ``{"deny": []}`` (unlocked) or ``{"deny": list(DENY_PATTERNS)}`` (denied
+    phase) — a single ``deny`` key holding one of those two values. Anything
+    else (allow lists, custom patterns, extra keys) is user-owned.
+    """
+    if not isinstance(value, dict):
+        return False
+    perms = cast("dict[str, Any]", value)
+    if set(perms) != {"deny"}:
+        return False
+    return perms["deny"] == [] or perms["deny"] == list(DENY_PATTERNS)
+
+
+def _unwire_proxy_claude_code_settings(root: Path) -> list[Path]:
+    """Strip AgentAlloy-owned blocks from ``<root>/.claude/settings.local.json``.
+
+    Surgical, mirroring the cline cleanup: removes ``env.ANTHROPIC_BASE_URL``
     when it points at our ``/proj/`` discriminator (so a user's own base URL is
-    left alone), drops the ``env`` block if it becomes empty, and preserves every
-    other key (permissions, MCP toggles, …). The file is rewritten in place; it is
-    only unlinked if our edit leaves it completely empty (``{}``).
+    left alone), drops the ``env`` block if it becomes empty, and removes the
+    ``permissions`` block when it is exactly the enforcement posture
+    ``_apply_claude_code_posture`` writes (``{"deny": []}`` or
+    ``{"deny": DENY_PATTERNS}``) — a posture left behind after unwire would keep
+    denying writes in a repo AgentAlloy no longer owns. Every other key (user
+    permissions, MCP toggles, …) is preserved. The file is rewritten in place;
+    it is only unlinked if our edits leave it completely empty (``{}``).
 
     A record-driven restore is deliberately NOT used for this file: it would
     revert unrelated edits the user made to settings.local.json after wiring.
@@ -210,17 +232,22 @@ def _unwire_proxy_claude_code_settings(root: Path) -> list[Path]:
     if not isinstance(raw, dict):
         return []
     data = cast("dict[str, Any]", raw)
+    changed = False
     env_raw = data.get("env")
-    if not isinstance(env_raw, dict):
+    if isinstance(env_raw, dict):
+        env = cast("dict[str, Any]", env_raw)
+        url = env.get("ANTHROPIC_BASE_URL")
+        if isinstance(url, str) and "/proj/" in url:
+            env.pop("ANTHROPIC_BASE_URL", None)
+            changed = True
+            if not env:
+                data.pop("env", None)
+    if _is_posture_permissions(data.get("permissions")):
+        data.pop("permissions", None)
+        changed = True
+    if not changed:
+        # Nothing AgentAlloy-owned present — leave the user's file untouched.
         return []
-    env = cast("dict[str, Any]", env_raw)
-    url = env.get("ANTHROPIC_BASE_URL")
-    if not (isinstance(url, str) and "/proj/" in url):
-        # Not ours (or already gone) — leave the user's own base URL untouched.
-        return []
-    env.pop("ANTHROPIC_BASE_URL", None)
-    if not env:
-        data.pop("env", None)
     if data:
         settings_path.write_text(json.dumps(data, indent=2) + "\n")
     else:
