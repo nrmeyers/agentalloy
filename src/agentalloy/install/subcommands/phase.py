@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.api.state_client import StateClientError
-from agentalloy.api.state_router import _route_phase
+from agentalloy.api.state_router import _rewrite_posture, _route_phase
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
 from agentalloy.storage.artifact_naming import ARTIFACT_EXT
 
@@ -354,6 +354,17 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     # declined/redirected write cannot be reported as land in the target phase
     # (#501).
     phase_actual = state.phase if state and state.phase else phase
+
+    # Rewrite the Tier A enforcement posture for wired harnesses after a
+    # successful write. Posture is a pure function of (phase, mode), so every
+    # write that changes either input must recompute it — mirrors the HTTP
+    # path (state_router.write_phase), which rewrites unconditionally:
+    # idempotent on a same-phase no-op, and it repairs a posture a prior
+    # transition's soft-failed rewrite left stale. ``mode`` is read back off
+    # the just-committed row rather than re-derived in-process — the CLI may
+    # run out-of-process (HTTP store), where the derivation is unsafe. Soft:
+    # a failure never blocks the phase advance.
+    _rewrite_posture(Path(root), phase_actual, state.mode if state else None)
     data: dict[str, Any] = {
         "phase": phase_actual,
         "started_at": state.started_at if state else _now_iso(),

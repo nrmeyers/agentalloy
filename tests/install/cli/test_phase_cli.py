@@ -6,6 +6,7 @@ Maps to plan: agentalloy phase CLI — set/get/clear phase lock file.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pytest
@@ -469,6 +470,62 @@ class TestApprovalGate:
         assert result["blocked"] is True
         assert result["reason"] == "approval"
         assert any("approval" in a for a in result["advisories"])
+
+
+class TestPhaseSetPostureRewrite:
+    """#535 — a CLI ``phase set`` on a wired Tier A harness must rewrite the
+    enforcement posture after the phase write: posture is a pure function of
+    ``(phase, mode)``, so every write that changes the phase must recompute it
+    (mirrors the HTTP path, ``state_router.write_phase``). A soft-failing
+    rewrite never blocks the advance."""
+
+    @staticmethod
+    def _wire_claude_code(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import wire_harness
+
+        monkeypatch.setattr(
+            wire_harness.install_state,
+            "load_state",
+            lambda _root: {
+                "harness_files_written": [
+                    {"repo_root": str(root), "harness": "claude-code"},
+                ]
+            },
+        )
+
+    def test_forward_transition_rewrites_posture(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings = repo_root / ".claude" / "settings.local.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text('{"env": {"KEEP": "1"}}\n')
+        self._wire_claude_code(repo_root, monkeypatch)
+
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is False
+        assert result["phase"] == "design"
+
+        data = json.loads(settings.read_text())
+        assert data["env"] == {"KEEP": "1"}  # other keys preserved
+        assert "Write(src/**)" in data["permissions"]["deny"]  # design posture
+
+    def test_posture_rewrite_soft_fail_does_not_block(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import patch
+
+        from agentalloy.install.subcommands import wire_harness
+
+        self._wire_claude_code(repo_root, monkeypatch)
+        with patch.object(
+            wire_harness,
+            "rewrite_enforcement_posture",
+            side_effect=RuntimeError("disk full"),
+        ):
+            result = run_phase_set("build", root=repo_root)
+        assert result["blocked"] is False
+        assert result["phase"] == "build"
+        assert run_phase_get(root=repo_root)["phase"] == "build"
 
 
 class TestShipResetAutoArchive:
