@@ -147,11 +147,10 @@ def run_workflow_resume(root: Path | None = None) -> dict[str, Any]:
     """Leave workflow pause: clear ``mode``/``paused_since``, restoring the exact prior
     phase. Idempotent — a repo not in pause returns ``changed=False``.
 
-    Also clears the daily-reminder marker so a later ``workflow pause`` starts a
-    fresh 24h clock. The announced marker is deliberately left alone: while
-    paused, it holds the pause sentinel, which mismatches every real phase — so
-    the next proxy request re-orients (intake included) as a first request.
-    Affects every session in the repo.
+    The announced marker is deliberately left alone: while paused, it holds the
+    pause sentinel, which mismatches every real phase — so the next proxy request
+    re-orients (intake included) as a first request. Affects every session in the
+    repo.
 
     Re-engages the enforcement posture for the restored phase — this is the
     dangerous polarity: if the rewrite were inert here the way it used to be
@@ -159,7 +158,6 @@ def run_workflow_resume(root: Path | None = None) -> dict[str, Any]:
     leaving writes open after the escape hatch closes.
     """
     from agentalloy.install.state import _repo_root
-    from agentalloy.signals.skill_loader import _clear_state
 
     root = root or _repo_root()
     access = phase_access(root)
@@ -174,7 +172,6 @@ def run_workflow_resume(root: Path | None = None) -> dict[str, Any]:
     except StateClientError as exc:
         fail_on_state_error(exc)
         raise  # unreachable
-    _clear_state(root, "pause-reminded")
     return {"phase": phase, "mode": "workflow", "changed": True}
 
 

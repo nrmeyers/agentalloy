@@ -22,10 +22,10 @@ exit_gates:
   all_of:
     - artifact_exists:
         phase: spec
-        name: "*.artifact"
+        name: spec.artifact
     - artifact_contains:
         phase: spec
-        name: "*.artifact"
+        name: spec.artifact
         sections:
           - Acceptance Criteria
           - Out of Scope
@@ -39,7 +39,7 @@ exit_gates:
     # BEFORE the user tries to advance. Matches the design node at
     # sdd-design-and-planning.yaml.
     - approval_recorded:
-        since_name_glob: "*.artifact"
+        since_name_glob: spec.artifact
 signal_keywords:
   - done with spec
   - ready to design

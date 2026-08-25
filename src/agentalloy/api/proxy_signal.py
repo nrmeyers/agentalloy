@@ -244,10 +244,6 @@ def _resolve_current_contract(
     the contract's store key.  The cursor is seeded to the phase's first
     work-item on entry and advanced by ``agentalloy task next``.
     """
-    from agentalloy.signals.skill_loader import ensure_migrated
-
-    ensure_migrated(cwd)
-
     # Try scoped cursor first, then shared cursor
     cursor_val = _read_cursor(cwd, session_key)
     if not cursor_val:

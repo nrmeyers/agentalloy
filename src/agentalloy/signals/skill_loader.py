@@ -16,7 +16,6 @@ import contextlib
 import logging
 import os
 import subprocess
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -301,86 +300,6 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
 # ``_state_view``.
 
 
-# Proxy-exclusive cadence keys that still live on disk. These churn on (nearly)
-# every proxied turn, and a write inside the repo tree mid-session trips harness
-# file-watchers — Claude Code injects a "a background process modified <file>"
-# reminder that reads as suspicious to the agent and the user. Only the proxy
-# reads/writes these keys, so they can live outside the repo without splitting
-# state with the host CLI (which touches only ``cursor``);
-# ``AGENTALLOY_RUNTIME_STATE_DIR`` (set by the container run to a path on the
-# persistent data volume) relocates them, keyed by the repo's ``/proj`` token.
-# Unset (host CLI, dev, tests) they stay repo-local as before.
-#
-# ``announced`` and ``banner-turns`` moved to the store (see below) and are no
-# longer in this set.
-_RUNTIME_STATE_KEYS = frozenset({"composed", "pause-reminded"})
-
-
-def _state_file(project_root: Path, name: str) -> Path:
-    """Resolve the backing file for cadence key *name* of *project_root*."""
-    runtime_dir = os.environ.get("AGENTALLOY_RUNTIME_STATE_DIR")
-    if runtime_dir and name in _RUNTIME_STATE_KEYS:
-        from agentalloy.api.proxy_context import encode_proj_token
-
-        return Path(runtime_dir) / encode_proj_token(project_root) / name
-    return project_root / ".agentalloy" / name
-
-
-def _read_state(project_root: Path, name: str) -> str | None:
-    """Read a single-line cadence-state file (see ``_state_file`` for location).
-
-    Returns ``None`` when the file is absent, unreadable, or empty. Shared by the
-    announce-state (``announced``), the work-item cursor (``cursor``), the
-    last-composed cursor (``composed``), and the banner pacer (``banner-turns``) —
-    all single-value durable cadence keys. A relocated key falls back to the
-    legacy in-repo ``.agentalloy/<name>`` so pre-relocation cadence survives the
-    move (the legacy copy is removed on the next write).
-    """
-    state_file = _state_file(project_root, name)
-    legacy_file = project_root / ".agentalloy" / name
-    for candidate in (state_file, legacy_file):
-        if not candidate.exists():
-            continue
-        try:
-            value = candidate.read_text(encoding="utf-8").strip() or None
-        except OSError:
-            value = None
-        if value is not None:
-            return value
-    return None
-
-
-def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
-    """Atomically write *value* to the cadence key *name*.
-
-    Mirrors ``_write_phase_atomic``: a per-writer temp file + ``os.replace`` so
-    the watcher and the async proxy never leave a half-written file when they
-    race without a shared lock. For a relocated key, any legacy in-repo copy is
-    removed best-effort so per-turn churn in the repo stops immediately.
-    """
-    state_file = _state_file(project_root, name)
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_file.with_name(f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(f"{value}\n", encoding="utf-8")
-        os.replace(tmp, state_file)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
-    legacy_file = project_root / ".agentalloy" / name
-    if legacy_file != state_file:
-        with contextlib.suppress(OSError):
-            legacy_file.unlink()
-
-
-def _clear_state(project_root: Path, name: str) -> None:
-    """Remove the cadence key *name* if present (both locations). Never raises."""
-    for candidate in {_state_file(project_root, name), project_root / ".agentalloy" / name}:
-        with contextlib.suppress(OSError):
-            candidate.unlink()
-
-
 # Cap on how many distinct session keys we remember as "already oriented" for a
 # phase. Bounds the announced file and lets a few concurrent sessions in the same
 # repo+phase coexist without re-announcing each other every turn (LRU-ish: oldest
@@ -557,126 +476,17 @@ def _write_cursor_atomic(project_root: Path, cursor: str, session_key: str | Non
         logger.warning("cursor write failed for %s", project_root, exc_info=True)
 
 
-def ensure_migrated(project_root: Path) -> int:
-    """Auto-migrate legacy flat contracts into the store on first read.
-
-    .. note:: Legacy migration — contracts are now store-backed; ``.md`` contract
-       files on disk are sunset.  This function exists only to upgrade repos that
-       still carry pre-migration contract files.
-
-    Handles two migration steps in sequence:
-    1. **Flat → tree**: moves contracts from flat layout into
-       ``contracts/active/<phase>/`` on disk (so step 2 can find them).
-    2. **Tree → store**: delegates to :meth:`DuckDBStateStore.migrate_disk_contracts`
-       which writes every tree-layout contract into the DuckDB store and
-       removes the now-redundant disk files.
-
-    Returns the total number of files migrated across both steps.
-    Best-effort — never raises into the signal path.
-    """
-    import yaml
-
-    from agentalloy.storage.state_store import open_state_store
-
-    contracts_root = project_root / ".agentalloy" / "contracts"
-    flat_migrated = 0
-
-    # ── Step 1: flat → tree on disk ──────────────────────────────────────
-    if contracts_root.is_dir():
-        # Collect files that are NOT already under active/ or archive/
-        for pattern_root in ("*", "*/*.md"):
-            for fpath in sorted(contracts_root.glob(pattern_root)):
-                if not fpath.is_file():
-                    continue
-                parts = fpath.relative_to(contracts_root).parts
-                # Skip if already in active/archive
-                if len(parts) >= 2 and parts[0] in ("active", "archive"):
-                    continue
-                try:
-                    raw = fpath.read_text(encoding="utf-8")
-                    front = raw.split("---", 2)
-                    meta = yaml.safe_load(front[1]) or {} if len(front) >= 3 else {}  # type: ignore[assignment]
-                    phase = meta.get("phase") or (  # type: ignore[assignment]
-                        parts[0]
-                        if len(parts) == 2 and parts[0] not in ("active", "archive")
-                        else "active"
-                    )
-                    dest = contracts_root / "active" / phase / fpath.name  # type: ignore[assignment]
-                    dest.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[assignment]
-                    dest.write_text(raw, encoding="utf-8")  # type: ignore[assignment]
-                    fpath.unlink()
-                    flat_migrated += 1
-                except Exception:
-                    pass  # best-effort
-
-        # Update cursor if it points to a flat path
-        cursor_file = project_root / ".agentalloy" / "cursor"
-        try:
-            old_cursor = cursor_file.read_text().strip()
-            if (
-                old_cursor
-                and "/" in old_cursor
-                and old_cursor.split("/")[0] not in ("active", "archive")
-            ):
-                # Flat cursor like "build/01-a.md" → "active/build/01-a.md"
-                parts = old_cursor.split("/")
-                new_cursor = "active/" + old_cursor
-                cursor_file.write_text(new_cursor)
-        except Exception:
-            pass
-
-    # ── Step 2: tree → store ─────────────────────────────────────────────
-    from agentalloy.api.state_router import _repo_key_for, _stream_key_for
-    from agentalloy.storage.state_store import bind_process_store, process_store
-
-    db_path = project_root / ".agentalloy" / "state.db"
-
-    # Reuse an already-bound store (e.g. from test fixtures) so announce /
-    # composed / cursor state seeded by the test remains readable.  Fall back
-    # to opening a new store when nothing is bound (e.g. CLI paths).
-    bound = process_store()
-    store = bound if bound is not None else open_state_store(db_path)
-
-    try:
-        # Scope to project_root so writes and reads match _state_view
-        scoped = store.for_repo(
-            _repo_key_for(str(project_root)), stream_id=_stream_key_for(str(project_root))
-        )
-        result = scoped.migrate_disk_contracts([str(project_root)])
-        store_migrated = result.get("migrated", 0)
-        if store_migrated:
-            logger.info("auto-migrated %d contract(s) into the store", store_migrated)
-        collisions = result.get("errors", 0)
-        if collisions:
-            logger.warning(
-                "contracts migration: %d error(s) — run `agentalloy contracts migrate` to review",
-                collisions,
-            )
-        # Bind the scoped store so _state_view / _phase_view can read it
-        bind_process_store(scoped)
-        return flat_migrated + store_migrated
-    except Exception:
-        logger.debug("auto-migrate store step skipped (non-fatal)", exc_info=True)
-        return flat_migrated
-
-
 def _clear_all_cursors(project_root: Path) -> None:
     """Remove the shared cursor AND every session-scoped ``cursor.<hash>``.
 
     Used on a phase transition (including ``phase set intake``) so a stale
     per-session cursor from the old phase cannot bleed its work-item into the new
-    one — the scoped file resolves by filename, not by phase. Never raises.
+    one. Never raises.
     """
-    # Clear the store (disk fallback is sunset).
     view = _state_view(project_root)
     if view is not None:
         with contextlib.suppress(Exception):
             view.clear("cursor", all_sessions=True)
-    _clear_state(project_root, "cursor")
-    with contextlib.suppress(OSError):
-        for f in (project_root / ".agentalloy").glob("cursor.*"):
-            with contextlib.suppress(OSError):
-                f.unlink()
 
 
 def _read_composed(project_root: Path) -> str | None:

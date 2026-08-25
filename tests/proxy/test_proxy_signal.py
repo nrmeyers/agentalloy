@@ -638,10 +638,23 @@ class TestMissingProjectRootWarning:
 
 
 def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
-    d = tmp_path / ".agentalloy" / "contracts" / "active" / phase
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{name}.md").write_text(
-        f"---\nphase: {phase}\ntask_slug: {name}\ndomain_tags: [pytest]\n---\n# {name}\nbody\n"
+    """Seed a contract into the store (contracts are store-backed; no disk file)."""
+    from agentalloy.api.state_router import _repo_key_for, _stream_key_for
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    if store is None:
+        return
+    scoped = store.for_repo(
+        _repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path))
+    )
+    scoped.put_contract(
+        name,
+        phase=phase,
+        slug=name,
+        domain_tags=["pytest"],
+        body=f"# {name}\nbody\n",
+        status="active",
     )
 
 

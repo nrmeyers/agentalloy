@@ -59,10 +59,10 @@ _APPROVAL_SINCE = {
     "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 _APPROVAL_STORE_NAME_GLOB = {
-    "spec": "*.artifact",
-    "design": "*.artifact",
+    "spec": "spec.artifact",
+    "design": "approach.artifact",
     "plan": "*.artifact",  # tasks.artifact + test-plan.artifact
-    "sdd-fast": "*.artifact",
+    "sdd-fast": "fast.artifact",
 }
 
 

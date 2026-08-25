@@ -141,3 +141,5 @@ MagicMock/
 # only the .keep marker is tracked.
 corpus-seed/*
 !corpus-seed/.keep
+
+gha-creds-*.json
