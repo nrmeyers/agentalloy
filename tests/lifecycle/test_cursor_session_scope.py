@@ -105,8 +105,9 @@ class TestResolveWithSessionKey:
         _write_cursor_atomic(tmp_path, "active/build/03-log.md", _KEY_B)
         cid_a, _ = resolve_current_contract(tmp_path, "build", _KEY_A)
         cid_b, _ = resolve_current_contract(tmp_path, "build", _KEY_B)
-        assert cid_a == "active/build/01-cache.md"
-        assert cid_b == "active/build/03-log.md"
+        # Each session resolves its OWN cursor, unwrapped to the store key.
+        assert cid_a == "01-cache"
+        assert cid_b == "03-log"
 
     def test_keyless_fanout_strict_no_cursor(self, tmp_path: Path) -> None:
         # No scoped file, no shared cursor, ≥2 contracts → strict resolver
