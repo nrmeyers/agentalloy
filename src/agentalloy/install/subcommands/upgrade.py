@@ -1324,6 +1324,17 @@ def upgrade(
 
     summary["actions"].extend(actions)
     summary["warnings"].extend(warnings)
+
+    # Post-upgrade: OrientDB migration (opt-in)
+    from agentalloy.install.subcommands.migrate_orient import post_upgrade_migration
+
+    migration_actions, migration_warnings = post_upgrade_migration(
+        interactive=interactive,
+        assume_yes=assume_yes,
+    )
+    summary["actions"].extend(migration_actions)
+    summary["warnings"].extend(migration_warnings)
+
     # Announce default-off modules the user's .env predates — one line each,
     # never a prompt. The container recreate above already honors a toggle
     # that IS in the .env (env_forwarding); this covers the one that isn't.

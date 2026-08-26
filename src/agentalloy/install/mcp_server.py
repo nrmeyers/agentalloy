@@ -79,6 +79,8 @@ _QUERY_ACTIONS = {
     "knowledge_why": "Read the design decision governing a specific symbol.",
     "knowledge_related": "Find decisions related to a topic query.",
     "knowledge_entities": "List typed entity edges (CONSTRAINTS, TOUCHES, REQUIRES, COMMAND, STAKEHOLDER) touching a symbol.",
+    "path": "Find shortest path between two symbols (OrientDB backend only).",
+    "communities": "Find community cluster around a symbol (OrientDB backend only).",
     "artifact_body": "Read the full body of a recorded phase artifact.",
     "contract_detail": "Read the full detail of a contract by ID.",
     "telemetry": "Recent composition traces with token savings data.",
@@ -102,6 +104,10 @@ _QUERY_TOOL_DEFINITION: dict[str, Any] = {
             "query": {
                 "type": "string",
                 "description": "Search query, symbol FQN, or artifact name (action-specific).",
+            },
+            "to_query": {
+                "type": "string",
+                "description": "Target symbol FQN for path queries (used with action='path').",
             },
             "slug": {
                 "type": "string",
@@ -224,6 +230,7 @@ def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict
         )
 
     query = args.get("query", "")
+    to_query = args.get("to_query", "")
     slug = args.get("slug", "")
     phase = args.get("phase", "")
     k = args.get("k", 10)
@@ -267,6 +274,29 @@ def _handle_query_call(request_id: Any, args: dict[str, Any], port: int) -> dict
             kind_qs = f"&kind={_urlencode(kind_param)}" if kind_param else ""
             data = _http_get(port, f"/code/search/entities?query={_urlencode(query)}{kind_qs}")
             text = _format_entity_edges(data)
+
+        elif action == "path":
+            if not query or not to_query:
+                return _err(
+                    request_id,
+                    INVALID_PARAMS,
+                    "'query' (from FQN) and 'to_query' (to FQN) required for path",
+                )
+            data = _http_get(
+                port,
+                f"/code/search/path?from_fqn={_urlencode(query)}&to_fqn={_urlencode(to_query)}",
+            )
+            text = _format_path(data)
+
+        elif action == "communities":
+            if not query:
+                return _err(
+                    request_id,
+                    INVALID_PARAMS,
+                    "'query' (FQN) required for communities",
+                )
+            data = _http_get(port, f"/code/search/communities?fqn={_urlencode(query)}")
+            text = _format_community(data)
 
         elif action == "artifact_body":
             if not phase or not slug or not query:
@@ -408,6 +438,37 @@ def _format_telemetry(data: Any) -> str:
         tokens = t.get("tokens_returned", 0)
         saved = t.get("tokens_flat_equivalent", 0)
         lines.append(f"  [{phase}] {result}: {tokens} tokens (flat equiv: {saved})")
+    return "\n".join(lines)
+
+
+def _format_path(data: Any) -> str:
+    """Format shortest-path results as readable text."""
+    if not isinstance(data, dict):
+        return json.dumps(data, indent=2)
+    from_fqn = data.get("from_fqn", "?")
+    to_fqn = data.get("to_fqn", "?")
+    path = data.get("path", [])
+    if not path:
+        return f"No path found between `{from_fqn}` and `{to_fqn}`."
+    lines = [f"Path from `{from_fqn}` to `{to_fqn}` ({len(path)} hops):"]
+    for i, qn in enumerate(path, 1):
+        lines.append(f"  {i}. `{qn}`")
+    return "\n".join(lines)
+
+
+def _format_community(data: Any) -> str:
+    """Format community detection results as readable text."""
+    if not isinstance(data, dict):
+        return json.dumps(data, indent=2)
+    fqn = data.get("fqn", "?")
+    community = data.get("community", [])
+    if not community:
+        return f"No community found around `{fqn}`."
+    lines = [f"Community around `{fqn}` ({len(community)} symbols):"]
+    for qn in community[:20]:  # Limit to 20 for readability
+        lines.append(f"  - `{qn}`")
+    if len(community) > 20:
+        lines.append(f"  ... and {len(community) - 20} more")
     return "\n".join(lines)
 
 

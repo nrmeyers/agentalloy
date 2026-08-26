@@ -248,3 +248,62 @@ async def search_structural(
 
     results = await with_handles(state, repo, _run, repo_path=indexed.repo_path)
     return {"query": query, "fqn": fqn or None, "results": results}
+
+
+@router.get(
+    "/search/path",
+    summary="Shortest path between two symbols (OrientDB only)",
+    responses={400: {"description": "Missing from_fqn or to_fqn"}},
+)
+async def search_path(
+    repo: str = Query(description="Indexed repo slug"),
+    from_fqn: str = Query(min_length=1, description="Source symbol FQN"),
+    to_fqn: str = Query(min_length=1, description="Target symbol FQN"),
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> dict[str, object]:
+    """Find the shortest path between two symbols via graph edges.
+
+    Only available when using the OrientDB backend. Returns a list of
+    qualified_names along the path (including endpoints).
+    """
+    indexed = require_indexed_repo(state, repo)
+
+    def _run(h: CodeIndexHandles) -> list[str]:
+        if not hasattr(h.graph, "shortest_path"):
+            raise HTTPException(
+                status_code=400,
+                detail="path query requires OrientDB backend (set CODE_INDEX_GRAPH_BACKEND=orientdb)",
+            )
+        return h.graph.shortest_path(from_fqn, to_fqn)
+
+    path = await with_handles(state, repo, _run, repo_path=indexed.repo_path)
+    return {"from_fqn": from_fqn, "to_fqn": to_fqn, "path": path}
+
+
+@router.get(
+    "/search/communities",
+    summary="Community cluster around a symbol (OrientDB only)",
+    responses={400: {"description": "Missing fqn"}},
+)
+async def search_communities(
+    repo: str = Query(description="Indexed repo slug"),
+    fqn: str = Query(min_length=1, description="Symbol FQN to find community around"),
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> dict[str, object]:
+    """Find the community cluster around a symbol.
+
+    Only available when using the OrientDB backend. Returns qualified_names
+    of symbols in the same structural community.
+    """
+    indexed = require_indexed_repo(state, repo)
+
+    def _run(h: CodeIndexHandles) -> list[str]:
+        if not hasattr(h.graph, "community_detection"):
+            raise HTTPException(
+                status_code=400,
+                detail="communities query requires OrientDB backend (set CODE_INDEX_GRAPH_BACKEND=orientdb)",
+            )
+        return h.graph.community_detection(fqn)
+
+    community = await with_handles(state, repo, _run, repo_path=indexed.repo_path)
+    return {"fqn": fqn, "community": community}

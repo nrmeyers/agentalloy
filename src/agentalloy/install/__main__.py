@@ -50,6 +50,7 @@ from agentalloy.install.subcommands import (
     reset,
     reset_step,
     resume,
+    rollback_orient,
     seed_corpus,
     serve,
     server_restart,
@@ -125,6 +126,7 @@ _SUBCOMMANDS = [
     workflow,
     approve,
     cleanup,
+    rollback_orient,  # OrientDB migration rollback
     # Underlying step subcommands (still available for power-users + the
     # runbook LLM that drives them individually).
     auto_wire_worktree,  # internal — invoked by the post-checkout hook only
