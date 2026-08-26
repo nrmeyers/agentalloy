@@ -242,26 +242,37 @@ def _resolve_current_contract(
 
     Resolution reads the cursor value (scoped then shared) and treats it as
     the contract's store key.  The cursor is seeded to the phase's first
-    work-item on entry and advanced by ``agentalloy task next``.
+    work-item on entry and advanced by ``agentalloy task next``.  Seeded
+    cursors carry the marker form ``active/{phase}/{contract_id}.md``
+    (``_write_phase_atomic`` / ``_auto_create_next_contract``); that wrapper
+    is unwrapped here so the returned id is the bare store key that
+    ``get_contract`` resolves — otherwise callers like
+    ``_auto_create_next_contract`` look up a key that doesn't exist.
     """
-    from agentalloy.signals.skill_loader import ensure_migrated
-
-    ensure_migrated(cwd)
-
     # Try scoped cursor first, then shared cursor
     cursor_val = _read_cursor(cwd, session_key)
     if not cursor_val:
         cursor_val = _read_cursor(cwd, None)
 
     if cursor_val:
-        # The cursor value is the contract_id (store key).
+        # The cursor value is the contract_id (store key), possibly wrapped in
+        # the seeded marker form.
         # Containment guard: reject path-traversal values like "../../../etc/passwd".
         # A valid contract_id must not escape the project root.
         if ".." in cursor_val or cursor_val.startswith("/"):
             # Treat as invalid — fall through to the first-active-fallback below.
             pass
         else:
-            return cursor_val, None
+            contract_id = cursor_val
+            if contract_id.startswith("active/"):
+                # Unwrap active/{phase}/{contract_id}.md — split once past the
+                # phase segment so multi-segment ids (``spec/slug``) survive.
+                _parts = contract_id.split("/", 2)
+                if len(_parts) == 3:
+                    contract_id = _parts[2]
+            if contract_id.endswith(".md"):
+                contract_id = contract_id[: -len(".md")]
+            return contract_id, None
 
     # No cursor — fall back to the first active contract for the phase.
     # Strict fail-safe: ≥2 contracts with no cursor → stay silent (don't guess).
@@ -760,6 +771,11 @@ def _auto_create_next_contract(
     for the target phase. This means the next phase's agent starts with a
     contract already in place — no CLI ``contract init`` needed.
 
+    The new contract_id is phase-scoped (``{phase}/{slug}``, the same scheme
+    as CLI ``contract init``): a work-item's slug is continuous across phases,
+    and ``put_contract`` upserts on contract_id alone, so a bare-slug id would
+    overwrite the prior phase's contract instead of adding a sibling.
+
     Soft: never raises. A failure leaves the next phase without an auto-created
     contract (the agent can still create one manually).
     """
@@ -782,8 +798,9 @@ def _auto_create_next_contract(
         if existing:
             return  # already exists, don't duplicate
 
-        # Build the new contract_id (use slug as the ID for simplicity)
-        new_contract_id = slug
+        # Phase-scoped id (see docstring): a bare slug would collide with the
+        # same work-item's contract in other phases and upsert over it.
+        new_contract_id = f"{to_phase}/{slug}"
 
         # Carry forward scope from the current contract
         import json as _json

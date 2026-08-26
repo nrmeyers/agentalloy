@@ -540,7 +540,7 @@ _APPROVAL_STORE_NAME_GLOB: dict[str, str] = {
     # plan produces tasks.artifact + test-plan.artifact, so "*.artifact" covers both.
     "plan": "*.artifact",
     # sdd-fast's one collapsed artifact; matches the pack's artifact_exists leaf.
-    "sdd-fast": "*.artifact",
+    "sdd-fast": "fast.artifact",
 }
 
 

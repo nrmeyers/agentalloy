@@ -45,7 +45,9 @@ class TestAutoCreateNextContract:
 
         store.put_contract.assert_called_once()
         call_kwargs = store.put_contract.call_args
-        assert call_kwargs[0][0] == "auth-refactor"  # contract_id
+        # Phase-scoped id: a bare slug would upsert over the same work-item's
+        # contract in other phases (put_contract keys on contract_id alone).
+        assert call_kwargs[0][0] == "design/auth-refactor"  # contract_id
         assert call_kwargs[1]["phase"] == "design"
         assert call_kwargs[1]["slug"] == "auth-refactor"
         assert call_kwargs[1]["domain_tags"] == ["fastapi"]

@@ -16,7 +16,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -351,6 +351,69 @@ def _path_in_excluded_dir(rel: Path) -> bool:
     return any(part in _TEST_EXCLUDE_DIRS for part in rel.parts)
 
 
+def _test_file_patterns(root: Path) -> list[str]:
+    """Recognized test-file globs — the single source of truth for test recognition.
+
+    Always the pytest layouts (``tests/**/*.py``, ``**/test_*.py``,
+    ``**/*_test.py``); Vitest/Jest globs are added when a root ``package.json``
+    exists. Both ``eval_tests_present`` (existence + phase diff) and
+    ``eval_scope_touched_in_diff`` (scope exclusion) use these, so "is a test
+    file" means the same thing in both gates.
+    """
+    patterns = ["tests/**/*.py", "**/test_*.py", "**/*_test.py"]
+    if (root / "package.json").is_file():
+        for ext in _JS_TEST_EXTS:
+            patterns.append(f"**/*.test.{ext}")
+            patterns.append(f"**/*.spec.{ext}")
+        patterns.append("**/*.mtest.*")
+    return patterns
+
+
+@cache
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a glob to a regex with pathlib semantics: ``**`` crosses
+    directory boundaries (zero or more segments), ``*`` does not.
+
+    Used to match changed *path strings* against the test globs — filesystem
+    globbing can't be reused there because a changed path may not be on disk
+    (deleted or untracked).
+    """
+    i, n = 0, len(pattern)
+    out: list[str] = []
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if pattern.startswith("**/", i):
+                out.append("(?:[^/]+/)*")  # zero or more leading directories
+                i += 3
+            elif pattern.startswith("**", i):
+                out.append(".*")  # bare ``**`` (e.g. trailing) — anything
+                i += 2
+            else:
+                out.append("[^/]*")
+                i += 1
+        elif c == "?":
+            out.append("[^/]")
+            i += 1
+        elif c in r"\.^$+{}()|[]":
+            out.append("\\" + c)
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return re.compile("".join(out))
+
+
+def _is_test_path(rel: str, patterns: list[str]) -> bool:
+    """Whether a repo-relative *rel* matches any test-file glob in *patterns*.
+
+    Pure string matching (see ``_glob_to_regex``), so it works on changed paths
+    that may not be on disk. Keeps test files out of the scope gate: they are
+    the build's own proof, judged by ``tests_present``.
+    """
+    return any(_glob_to_regex(pat).fullmatch(rel) for pat in patterns)
+
+
 def eval_tests_present(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
     """MET iff the build added or modified a recognized test file this phase.
 
@@ -372,11 +435,7 @@ def eval_tests_present(args: dict[str, Any], ctx: PredicateContext) -> Predicate
     NOT_MET on an infra gap (the absent-vs-unavailable convention).
     """
     root = ctx.project_root
-    patterns: list[str] = ["tests/**/*.py", "**/test_*.py", "**/*_test.py"]
-    if (root / "package.json").is_file():
-        for ext in _JS_TEST_EXTS:
-            patterns.append(f"**/*.test.{ext}")
-            patterns.append(f"**/*.spec.{ext}")
+    patterns: list[str] = _test_file_patterns(root)
     extra = args.get("extra_globs")
     if isinstance(extra, list):
         patterns.extend(str(g) for g in cast(list[Any], extra))
@@ -668,8 +727,35 @@ def store_section_completeness(
 
 
 def eval_artifact_size_min(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
-    pattern = args.get("path", "")
+    """MET when the matched artifacts carry at least ``bytes`` of content.
+
+    Two addressing modes, mirroring :func:`eval_artifact_exists`:
+
+    * store-backed (``phase`` + optional ``name`` glob): sums the stripped
+      content length of every matching store row — the SDD path, where the
+      artifact lives in the store, not on disk.
+    * filesystem (``path`` glob): sums the on-disk size of every matching file.
+
+    ``bytes`` defaults to 0 (existence-only). A gate that wants to prove a
+    *real* record (not an empty stub or whitespace-only file) sets a small
+    floor, e.g. ``bytes: 50``.
+    """
     min_bytes = args.get("bytes", 0)
+    phase = args.get("phase")
+    if phase is not None:
+        rows = _list_store_artifacts(ctx, phase=str(phase), name_glob=args.get("name"))
+        if rows is None:
+            return PredicateResult.UNKNOWN
+        if not rows:
+            return PredicateResult.NOT_MET
+        total = 0
+        for row in rows:
+            content = row.get("content")
+            if content is None:
+                return PredicateResult.UNKNOWN
+            total += len(content.strip())
+        return PredicateResult.MET if total >= min_bytes else PredicateResult.NOT_MET
+    pattern = args.get("path", "")
     if not pattern:
         return PredicateResult.UNKNOWN
     files = _glob_files(ctx.project_root, pattern)
@@ -1033,6 +1119,11 @@ def eval_scope_touched_in_diff(args: dict[str, Any], ctx: PredicateContext) -> P
     contract's ``scope.touches``, so the gate proves the build actually touched
     the declared scope — not that the repo merely has source.
 
+    Test files (the same recognition as ``tests_present``) are excluded from
+    the scope check: they are the build's own proof and are judged by the
+    ``tests_present`` gate, so a build that only wrote tests for an out-of-scope
+    plan cannot satisfy this gate.
+
     Fail-open (UNKNOWN) on any infra gap — no phase-start marker, no store, no
     contract, an undeclared scope, or a git failure — never NOT_MET: a degraded
     read must not return the shape of success (the absent-vs-unavailable
@@ -1063,7 +1154,14 @@ def eval_scope_touched_in_diff(args: dict[str, Any], ctx: PredicateContext) -> P
         return PredicateResult.UNKNOWN  # git failed → infra
     if not changed:
         return PredicateResult.NOT_MET  # nothing changed this phase — a no-op build
-    if any(_path_in_scope(c, list(touches)) for c in changed):
+    # Test files are the build's own proof (judged by the tests_present gate),
+    # so they must not satisfy the scope gate: a TDD build that only wrote tests
+    # for an out-of-scope plan would otherwise pass. The scope gate proves the
+    # build touched the declared source scope, not just its own tests.
+    test_patterns = _test_file_patterns(ctx.project_root)
+    if any(
+        _path_in_scope(c, list(touches)) and not _is_test_path(c, test_patterns) for c in changed
+    ):
         return PredicateResult.MET
     return PredicateResult.NOT_MET  # changed things, but nothing in the declared scope
 

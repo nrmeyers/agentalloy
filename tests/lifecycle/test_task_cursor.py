@@ -77,7 +77,9 @@ def test_resolve_current_contract_uses_cursor(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["01-cache", "02-api"])
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "active/build/02-api.md"
+    # The seeded cursor's ``active/{phase}/{id}.md`` marker is unwrapped to the
+    # bare store key so ``get_contract(cid)`` resolves (feeds _auto_create_next_contract).
+    assert cid == "02-api"
     # Path component is deprecated — always None; consumers load from store via cid
     assert path is None
 
@@ -97,10 +99,10 @@ def test_resolve_current_contract_fanout_strict_no_cursor(tmp_path: Path) -> Non
     cid, path = _resolve_current_contract(tmp_path, "build")
     assert cid is None
     assert path is None
-    # ...an explicit cursor resolves the pointed-at work-item.
+    # ...an explicit cursor resolves the pointed-at work-item's store key.
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "active/build/02-api.md"
+    assert cid == "02-api"
     # Path component is deprecated — always None
     assert path is None
 
@@ -151,7 +153,8 @@ def test_phase_transition_seeds_cursor_proxy_path(tmp_path: Path) -> None:
 
     assert _read_cursor(tmp_path) == "active/qa/the-feature.md"  # seeded, not the stale build slug
     cid, path = _resolve_current_contract(tmp_path, "qa")
-    assert cid == "active/qa/the-feature.md"
+    # Resolution unwraps the seeded marker to the store key.
+    assert cid == "the-feature"
     # Path component is deprecated — always None; consumers load from store via cid
     assert path is None
 
