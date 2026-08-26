@@ -124,8 +124,9 @@ class Settings(BaseSettings):
     # between manual runs. Off in code/dev/tests; the container entrypoint opts in
     # (300). Env: CODE_INDEX_REFRESH_SECONDS.
     code_index_refresh_seconds: int = 0
-    # Graph backend for the code index: "duckdb" (default, relational) or
-    # "orientdb" (native graph, multi-hop traversal). Env: CODE_INDEX_GRAPH_BACKEND.
+    # Graph backend for the code index: "duckdb" (default, relational),
+    # "orientdb" (multi-model document+graph), or "nebulagraph" (native graph,
+    # best performance for deep traversals). Env: CODE_INDEX_GRAPH_BACKEND.
     code_index_graph_backend: str = "duckdb"
     # OrientDB connection settings (used when code_index_graph_backend = "orientdb").
     # Env: ORIENTDB_URL, ORIENTDB_DATABASE, ORIENTDB_USERNAME, ORIENTDB_PASSWORD.
@@ -133,6 +134,12 @@ class Settings(BaseSettings):
     orientdb_database: str = "agentalloy"
     orientdb_username: str = "admin"
     orientdb_password: str = "admin"
+    # NebulaGraph connection settings (used when code_index_graph_backend = "nebulagraph").
+    # Env: NEBULAGRAPH_HOST, NEBULAGRAPH_PORT, NEBULAGRAPH_USERNAME, NEBULAGRAPH_PASSWORD.
+    nebulagraph_host: str = "127.0.0.1"
+    nebulagraph_port: int = 9669
+    nebulagraph_username: str = "root"
+    nebulagraph_password: str = "nebula"
     # JIT push phase 2: merge related (thematic) decisions via
     # ``related_decisions(task_title)`` into the decision block.  Measured
     # median overhead ≈ 4 ms (p95 ≈ 5 ms) — well within the 300 ms compose

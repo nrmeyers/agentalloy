@@ -34,6 +34,7 @@ from typing import Literal
 
 from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
 from agentalloy.code_index.store.jobs_store import CodeIndexJobsStore, repo_path_key
+from agentalloy.code_index.store.nebula_graph_store import NebulaGraphCodeGraphStore
 from agentalloy.code_index.store.orient_graph_store import OrientDBCodeGraphStore
 from agentalloy.code_index.store.vector_store import LanceCodeVectorStore
 from agentalloy.config import Settings, get_settings
@@ -124,7 +125,8 @@ def open_code_index(
 
     The graph backend is selected by ``settings.code_index_graph_backend``:
     ``"duckdb"`` (default) uses a local DuckDB file; ``"orientdb"`` connects
-    to an OrientDB server via REST API.
+    to an OrientDB server via REST API; ``"nebulagraph"`` connects to a
+    NebulaGraph server via binary protocol for native graph performance.
     """
     s = settings or get_settings()
     paths = code_index_paths(settings, slug, repo_path=repo_path)
@@ -134,7 +136,20 @@ def open_code_index(
         paths.cache_dir.mkdir(parents=True, exist_ok=True)
 
     backend = s.code_index_graph_backend
-    if backend == "orientdb":
+    if backend == "nebulagraph":
+        # NebulaGraph: per-slug space on the shared server. The space name
+        # is derived from the slug (sanitised for NebulaGraph naming rules).
+        space_name = slug.replace("-", "_").replace(".", "_")
+        graph = NebulaGraphCodeGraphStore(
+            space=space_name,
+            host=s.nebulagraph_host,
+            port=s.nebulagraph_port,
+            username=s.nebulagraph_username,
+            password=s.nebulagraph_password,
+        )
+        if not read_only:
+            graph.migrate()
+    elif backend == "orientdb":
         # OrientDB: per-slug database on the shared server. The database name
         # is derived from the slug (sanitised for OrientDB naming rules).
         db_name = slug.replace("-", "_").replace(".", "_")
