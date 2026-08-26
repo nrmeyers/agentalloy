@@ -1158,6 +1158,75 @@ def test_scope_touched_in_diff_unknown_when_no_phase(tmp_path: Path) -> None:
     assert eval_scope_touched_in_diff({}, ctx) == UNKNOWN
 
 
+def test_is_test_path_pytest_layouts() -> None:
+    from agentalloy.signals.predicates import _is_test_path, _test_file_patterns
+
+    # No package.json → pytest layouts only.
+    patterns = _test_file_patterns(Path("/nonexistent"))
+    assert _is_test_path("tests/test_foo.py", patterns)
+    assert _is_test_path("tests/api/test_foo.py", patterns)
+    assert _is_test_path("tests/foo_test.py", patterns)
+    assert _is_test_path("test_foo.py", patterns)  # root-level
+    assert _is_test_path("src/foo_test.py", patterns)
+    assert _is_test_path("tests/utils.py", patterns)  # any .py under tests/
+    assert not _is_test_path("src/api/handler.py", patterns)
+    assert not _is_test_path("tests/README.md", patterns)
+
+
+def test_is_test_path_js_layouts(tmp_path: Path) -> None:
+    from agentalloy.signals.predicates import _is_test_path, _test_file_patterns
+
+    (tmp_path / "package.json").write_text("{}")
+    patterns = _test_file_patterns(tmp_path)
+    assert _is_test_path("src/api/handler.test.ts", patterns)
+    assert _is_test_path("handler.spec.tsx", patterns)
+    assert _is_test_path("foo.mtest.mts", patterns)
+    assert not _is_test_path("src/api/handler.ts", patterns)
+
+
+def test_scope_touched_in_diff_not_met_when_only_tests_in_scope(tmp_path: Path) -> None:
+    # Scope is broad enough to match test files; the build only wrote tests for
+    # an out-of-scope plan. Test files must not satisfy the scope gate.
+    store = _seed_build_contract(tmp_path, scope_touches=["src/**", "tests/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["tests/test_handler.py"], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == NOT_MET
+
+
+def test_scope_touched_in_diff_met_when_source_and_tests_in_scope(tmp_path: Path) -> None:
+    # A real in-scope source file satisfies the gate even when test files are
+    # also changed (tests are ignored, source is what proves the scope).
+    store = _seed_build_contract(tmp_path, scope_touches=["src/**", "tests/**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["tests/test_handler.py", "src/api/handler.py"], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == MET
+
+
+def test_scope_touched_in_diff_not_met_when_whole_repo_scope_only_tests(
+    tmp_path: Path,
+) -> None:
+    # Even a whole-repo scope must not let a tests-only change pass.
+    store = _seed_build_contract(tmp_path, scope_touches=["**"])
+    _write_phase_start_ref(store, "abc123")
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
+    with patch(
+        "agentalloy.signals.predicates.subprocess.run",
+        side_effect=_git_run_factory(["tests/test_handler.py"], []),
+    ):
+        assert eval_scope_touched_in_diff({}, ctx) == NOT_MET
+
+
 # ---------------------------------------------------------------------------
 # _glob_files / artifact_exists directory regression (#513)
 # ---------------------------------------------------------------------------
