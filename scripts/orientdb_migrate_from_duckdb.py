@@ -53,8 +53,8 @@ def orient_command(sql: str, params: list[Any] | None = None) -> dict:
 
 def orient_query(sql: str, params: list[Any] | None = None) -> list[dict]:
     """Execute a SQL query against OrientDB."""
-    url = f"{ORIENTDB_URL}/query/{DATABASE}/sql"
-    payload = {"query": sql, "parameters": params or []}
+    url = f"{ORIENTDB_URL}/command/{DATABASE}/sql"
+    payload = {"command": sql, "parameters": params or []}
     response = httpx.post(
         url,
         json=payload,
@@ -68,36 +68,61 @@ def orient_query(sql: str, params: list[Any] | None = None) -> list[dict]:
 def migrate_symbols(duck_conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
     """
     Migrate symbols from DuckDB to OrientDB.
-    
+
     Returns a mapping of qualified_name → OrientDB RID.
     """
     print("\n=== Migrating Symbols ===")
-    
-    # Read all symbols from DuckDB
+
+    # Read all symbols from DuckDB (without pagerank - that's in centrality table)
     symbols = duck_conn.execute("""
         SELECT 
             qualified_name, kind, name, file_path, start_line, end_line,
             docstring, is_exported, is_async, is_generator, source_code,
-            content_hash, pagerank
+            content_hash
         FROM symbols
     """).fetchall()
     
     print(f"  Found {len(symbols)} symbols in DuckDB")
     
+    # Read centrality data (pagerank scores)
+    try:
+        centrality = dict(duck_conn.execute("""
+            SELECT qualified_name, pagerank FROM centrality
+        """).fetchall())
+    except Exception:
+        centrality = {}
+        print("  Note: No centrality table found, pagerank will be null")
+
     # Mapping of qualified_name → OrientDB RID
     rid_map = {}
-    
+
     for i, sym in enumerate(symbols, 1):
         (qualified_name, kind, name, file_path, start_line, end_line,
          docstring, is_exported, is_async, is_generator, source_code,
-         content_hash, pagerank) = sym
+         content_hash) = sym
         
-        # Escape single quotes in strings
-        def escape(s):
+        # Get pagerank from centrality table
+        pagerank = centrality.get(qualified_name)
+
+        # Robust escape for OrientDB SQL strings
+        def escape(s, max_length=10000):
             if s is None:
                 return "null"
-            return "'" + str(s).replace("'", "''") + "'"
-        
+            s = str(s)
+            # Truncate very long strings to avoid SQL parser issues
+            if len(s) > max_length:
+                s = s[:max_length] + "... [truncated]"
+            # Escape backslashes first (must be before other escapes)
+            s = s.replace("\\", "\\\\")
+            # Escape single quotes by doubling them
+            s = s.replace("'", "''")
+            # Escape newlines and carriage returns
+            s = s.replace("\n", "\\n")
+            s = s.replace("\r", "\\r")
+            # Escape tabs
+            s = s.replace("\t", "\\t")
+            return "'" + s + "'"
+
         # Build INSERT statement
         sql = f"""
             INSERT INTO Symbol SET
@@ -115,7 +140,7 @@ def migrate_symbols(duck_conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
                 content_hash = {escape(content_hash)},
                 pagerank = {pagerank if pagerank else 'null'}
         """
-        
+
         try:
             result = orient_command(sql)
             rid = result.get("result", [{}])[0].get("@rid")
@@ -124,7 +149,7 @@ def migrate_symbols(duck_conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
         except Exception as e:
             print(f"  ✗ Failed to insert symbol: {qualified_name}")
             print(f"    Error: {e}")
-        
+
         if i % 100 == 0:
             print(f"  Migrated {i}/{len(symbols)} symbols...")
     

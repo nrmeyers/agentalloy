@@ -134,12 +134,12 @@ class _OrientClient:
             return None
 
     def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
-        """Execute a read (POST /query/{db}/sql). Returns list of record dicts."""
-        body: dict[str, Any] = {"query": sql}
+        """Execute a read (POST /command/{db}/sql). Returns list of record dicts."""
+        body: dict[str, Any] = {"command": sql}
         if params:
             body["parameters"] = params
         try:
-            r = self._client.post(f"/query/{self.database}/sql", json=body)
+            r = self._client.post(f"/command/{self.database}/sql", json=body)
             r.raise_for_status()
             data = r.json()
             if isinstance(data, list):
