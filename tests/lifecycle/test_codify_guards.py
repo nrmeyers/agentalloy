@@ -74,7 +74,6 @@ def test_ac6_markdown_ingest_surface_intact():
 def test_ac7_off_mode_composes_nothing_even_at_qa(tmp_path: Path):
     from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
     from agentalloy.api.proxy_signal import evaluate_signal
-
     from tests.support import seed_phase
 
     d = tmp_path / ".agentalloy"

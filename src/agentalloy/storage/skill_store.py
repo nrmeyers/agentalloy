@@ -38,7 +38,6 @@ from agentalloy.storage.protocols import (
     FragmentRow,
     SkillDependencyRow,
     SkillRow,
-    SkillStore,
     SkillVersionRow,
 )
 
@@ -111,15 +110,6 @@ CREATE TABLE IF NOT EXISTS corpus_meta (
 
 class SkillStoreError(Exception):
     """Base for skill-store errors."""
-
-
-class LockHeldError(SkillStoreError):
-    """Raised when the DuckDB file write-lock is held by another process.
-
-    In v5 this is benign and transient (a reembed/ingest holds the writer for a
-    short window); callers retry rather than stop the service. Distinct from the
-    legacy LOCK_HELD_REMEDIATION which told users to stop the service.
-    """
 
 
 def is_lock_held_error(text: str) -> bool:

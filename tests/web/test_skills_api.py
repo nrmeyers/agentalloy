@@ -64,8 +64,9 @@ def test_list_skills_filters_and_provenance(client):
 
 
 def test_versions_endpoint_reads_store(client):
+    from datetime import UTC, datetime
+
     from agentalloy.storage.protocols import SkillRow, SkillVersionRow
-    from datetime import datetime, UTC
 
     rows = [
         SkillVersionRow(

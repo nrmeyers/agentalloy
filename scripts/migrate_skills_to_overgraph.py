@@ -21,15 +21,14 @@ import time
 from pathlib import Path
 
 from agentalloy.config import get_settings
-from agentalloy.storage.fragment_store import LanceFragmentStore
-from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
+from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 from agentalloy.storage.protocols import (
     FragmentRow,
     SkillDependencyRow,
     SkillRow,
     SkillVersionRow,
 )
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.skill_store import open_skill_store
 
 
 def migrate(force: bool = False) -> None:
@@ -39,7 +38,6 @@ def migrate(force: bool = False) -> None:
     # Paths
     duckdb_path = Path(settings.duckdb_path)
     overgraph_path = duckdb_path.with_suffix(".overgraph")
-    lance_path = Path(settings.fragments_lance_path)
 
     if not duckdb_path.exists():
         print(f"error: DuckDB skill store not found at {duckdb_path}", file=sys.stderr)
@@ -56,14 +54,13 @@ def migrate(force: bool = False) -> None:
         print(f"Removing existing OverGraph database at {overgraph_path}...")
         shutil.rmtree(overgraph_path)
 
-    print(f" Migrating skills from DuckDB to OverGraph...")
+    print(" Migrating skills from DuckDB to OverGraph...")
     print(f"  Source: {duckdb_path}")
     print(f"  Target: {overgraph_path}")
     t0 = time.time()
 
     # Open source stores
     source_store = open_skill_store(duckdb_path, read_only=True)
-    lance_store = LanceFragmentStore(str(lance_path)) if lance_path.exists() else None
 
     # Open target store
     target_store = open_overgraph_skill_store(overgraph_path, read_only=False)
@@ -216,7 +213,7 @@ def migrate(force: bool = False) -> None:
         target_store.close()
 
     print("\n✓ Migration complete. To use OverGraph, set:")
-    print(f"  export SKILL_STORE_BACKEND=overgraph")
+    print("  export SKILL_STORE_BACKEND=overgraph")
 
 
 def main() -> int:

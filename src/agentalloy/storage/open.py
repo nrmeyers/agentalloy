@@ -20,9 +20,9 @@ from typing import Literal
 
 from agentalloy.config import Settings, get_settings
 from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.protocols import EMBEDDING_DIM, EmbeddingDimMismatch, Stores
 from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
-from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 
 Role = Literal["service", "writer", "reader"]
