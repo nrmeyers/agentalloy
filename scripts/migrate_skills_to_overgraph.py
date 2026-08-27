@@ -105,11 +105,14 @@ def migrate(force: bool = False) -> None:
         )
         version_count = 0
         for r in version_rows:
+            authored_at = r[3]
+            if hasattr(authored_at, 'isoformat'):
+                authored_at = authored_at.isoformat()
             version = SkillVersionRow(
                 version_id=str(r[0]),
                 skill_id=str(r[1]),
                 version_number=int(r[2]),
-                authored_at=r[3],
+                authored_at=authored_at,
                 author=str(r[4]) if r[4] else "",
                 change_summary=str(r[5]) if r[5] else "",
                 status=str(r[6]) if r[6] else "",
@@ -136,6 +139,25 @@ def migrate(force: bool = False) -> None:
             target_store.insert_fragment(fragment)
             fragment_count += 1
         print(f"  Migrated {fragment_count} fragments")
+
+        # Create DecomposesTo edges (after all nodes exist)
+        print("  Creating DecomposesTo edges...")
+        edge_count = 0
+        for r in fragment_rows:
+            frag_id = str(r[0])
+            ver_id = str(r[1])
+            seq = int(r[3])
+            ver_node = target_store._db.get_node_by_key("SkillVersion", ver_id)
+            frag_node = target_store._db.get_node_by_key("Fragment", frag_id)
+            if ver_node and frag_node:
+                target_store._db.upsert_edge(
+                    from_id=ver_node.id,
+                    to_id=frag_node.id,
+                    label="DecomposesTo",
+                    props={"sequence": seq},
+                )
+                edge_count += 1
+        print(f"  Created {edge_count} DecomposesTo edges")
 
         # Migrate dependencies
         print("\n[4/5] Migrating dependencies...")

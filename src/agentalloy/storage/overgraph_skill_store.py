@@ -288,10 +288,13 @@ class OverGraphSkillStore:
 
     def insert_version(self, version: SkillVersionRow) -> None:
         """Insert a version."""
+        authored_at = version.authored_at
+        if hasattr(authored_at, 'isoformat'):
+            authored_at = authored_at.isoformat()
         props = {
             "skill_id": version.skill_id,
             "version_number": version.version_number,
-            "authored_at": version.authored_at,
+            "authored_at": authored_at,
             "author": version.author,
             "change_summary": version.change_summary,
             "status": version.status,
@@ -303,16 +306,16 @@ class OverGraphSkillStore:
         ver_node = self._db.get_node_by_key("SkillVersion", version.version_id)
         if skill_node and ver_node:
             self._db.upsert_edge(
-                from_node=skill_node.id,
-                to_node=ver_node.id,
+                from_id=skill_node.id,
+                to_id=ver_node.id,
                 label=_EDGE_HAS_VERSION,
             )
         # If status is active, create CURRENT_VERSION edge
         if version.status == "active":
             if skill_node and ver_node:
                 self._db.upsert_edge(
-                    from_node=skill_node.id,
-                    to_node=ver_node.id,
+                    from_id=skill_node.id,
+                    to_id=ver_node.id,
                     label=_EDGE_CURRENT_VERSION,
                 )
 
@@ -346,8 +349,8 @@ class OverGraphSkillStore:
         frag_node = self._db.get_node_by_key("Fragment", fragment.fragment_id)
         if ver_node and frag_node:
             self._db.upsert_edge(
-                from_node=ver_node.id,
-                to_node=frag_node.id,
+                from_id=ver_node.id,
+                to_id=frag_node.id,
                 label=_EDGE_DECOMPOSES_TO,
                 props={"sequence": fragment.sequence},
             )
@@ -377,8 +380,8 @@ class OverGraphSkillStore:
         target = self._db.get_node_by_key("Skill", dep.target_skill_id)
         if source and target:
             self._db.upsert_edge(
-                from_node=source.id,
-                to_node=target.id,
+                from_id=source.id,
+                to_id=target.id,
                 label=_EDGE_REQUIRES,
                 props={"rel_type": dep.rel_type},
             )
@@ -402,28 +405,35 @@ class OverGraphSkillStore:
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
             f"WHERE v.status = 'active' AND {filter_clause} "
-            f"RETURN s.key AS skill_id, s.canonical_name, s.category, s.skill_class, "
+            f"RETURN id(s) AS sid, s.canonical_name, s.category, s.skill_class, "
             f"s.domain_tags, s.deprecated, s.superseded_by, s.always_apply, "
             f"s.phase_scope, s.category_scope, s.tier, s.description, s.current_version_id "
-            f"ORDER BY s.key"
+            f"ORDER BY s.canonical_name"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
+                sid = row.get("sid")
+                if sid is None:
+                    continue
+                node = self._db.get_node(int(sid))
+                if node is None:
+                    continue
+                skill_id = getattr(node, "key", "") or ""
                 results.append(SkillRow(
-                    skill_id=row.get("skill_id", ""),
-                    canonical_name=row.get("canonical_name", ""),
-                    category=row.get("category", ""),
-                    skill_class=row.get("skill_class", ""),
-                    domain_tags=list(row.get("domain_tags", []) or []),
-                    deprecated=bool(row.get("deprecated", False)),
-                    superseded_by=row.get("superseded_by"),
-                    always_apply=bool(row.get("always_apply", False)),
-                    phase_scope=row.get("phase_scope"),
-                    category_scope=row.get("category_scope"),
-                    tier=row.get("tier"),
-                    description=row.get("description"),
-                    current_version_id=row.get("current_version_id", ""),
+                    skill_id=skill_id,
+                    canonical_name=row.get("s.canonical_name", "") or node.props.get("canonical_name", ""),
+                    category=row.get("s.category", "") or node.props.get("category", ""),
+                    skill_class=row.get("s.skill_class", "") or node.props.get("skill_class", ""),
+                    domain_tags=list(row.get("s.domain_tags", []) or node.props.get("domain_tags", []) or []),
+                    deprecated=bool(row.get("s.deprecated", False)),
+                    superseded_by=row.get("s.superseded_by") or node.props.get("superseded_by"),
+                    always_apply=bool(row.get("s.always_apply", False)),
+                    phase_scope=row.get("s.phase_scope") or node.props.get("phase_scope"),
+                    category_scope=row.get("s.category_scope") or node.props.get("category_scope"),
+                    tier=row.get("s.tier") or node.props.get("tier"),
+                    description=row.get("s.description") or node.props.get("description"),
+                    current_version_id=row.get("s.current_version_id", "") or node.props.get("current_version_id", ""),
                 ))
         return results
 
@@ -493,18 +503,31 @@ class OverGraphSkillStore:
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
             f"WHERE {filter_clause} "
-            f"RETURN f.key AS fragment_id, f.version_id, f.fragment_type, f.sequence, f.content "
+            f"RETURN id(f) AS fid, f.version_id, f.fragment_type, f.sequence, f.content "
             f"ORDER BY s.key, f.sequence"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
+                fid = row.get("fid")
+                if fid is None:
+                    continue
+                node = self._db.get_node(int(fid))
+                if node is None:
+                    continue
                 results.append(FragmentRow(
-                    fragment_id=row.get("fragment_id", ""),
-                    version_id=row.get("version_id", ""),
-                    fragment_type=row.get("fragment_type", ""),
-                    sequence=int(row.get("sequence", 0)),
-                    content=row.get("content", ""),
+                    fragment_id=getattr(node, "key", "") or "",
+                    version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
+                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
+                    sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
+                    content=row.get("f.content", "") or node.props.get("content", ""),
+                    skill_id=node.props.get("skill_id", "") if hasattr(node, "props") else "",
+                    category=node.props.get("category", "") if hasattr(node, "props") else "",
+                    skill_class="",
+                    domain_tags=list(node.props.get("domain_tags", []) or []) if hasattr(node, "props") else [],
+                    phase_scope=node.props.get("phase_scope") if hasattr(node, "props") else None,
+                    category_scope=None,
+                    description=node.props.get("description") if hasattr(node, "props") else None,
                 ))
         return results
 
@@ -513,18 +536,24 @@ class OverGraphSkillStore:
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
             f"WHERE s.key = '{_gql_esc(skill_id)}' AND v.status = 'active' AND s.deprecated = false "
-            f"RETURN f.key AS fragment_id, f.version_id, f.fragment_type, f.sequence, f.content "
+            f"RETURN id(f) AS fid, f.version_id, f.fragment_type, f.sequence, f.content "
             f"ORDER BY f.sequence"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
+                fid = row.get("fid")
+                if fid is None:
+                    continue
+                node = self._db.get_node(int(fid))
+                if node is None:
+                    continue
                 results.append(FragmentRow(
-                    fragment_id=row.get("fragment_id", ""),
-                    version_id=row.get("version_id", ""),
-                    fragment_type=row.get("fragment_type", ""),
-                    sequence=int(row.get("sequence", 0)),
-                    content=row.get("content", ""),
+                    fragment_id=getattr(node, "key", "") or "",
+                    version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
+                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
+                    sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
+                    content=row.get("f.content", "") or node.props.get("content", ""),
                 ))
         return results
 
@@ -678,7 +707,16 @@ class OverGraphSkillStore:
         """Upsert fragment embeddings into the HNSW index."""
         count = 0
         for item in items:
-            normalized = l2_normalize(item.embedding)
+            if not item.fragment_id:
+                logger.debug("skipping embedding with None fragment_id")
+                continue
+            # Skip zero vectors (from failed embeddings)
+            import math
+            norm = math.sqrt(sum(x * x for x in item.embedding))
+            if norm < 1e-9:
+                logger.debug("skipping zero vector for %s", item.fragment_id)
+                continue
+            normalized = l2_normalize(list(item.embedding))
             # Get or create the Fragment node
             frag_node = self._db.get_node_by_key("Fragment", item.fragment_id)
             if frag_node is not None:
@@ -719,7 +757,7 @@ class OverGraphSkillStore:
                     dense_vector=normalized,
                 )
             count += 1
-        self._db.flush()
+        # Don't flush here — caller controls flush timing to avoid races
         return count
 
     def search_similar(
@@ -934,21 +972,12 @@ class OverGraphSkillStore:
     def delete_all(self) -> int:
         """Delete all fragment embeddings."""
         try:
-            rows = self._db.execute_gql(
-                "MATCH (f:Fragment) RETURN id(f) AS nid"
-            )
-            count = 0
-            if isinstance(rows, dict):
-                for row in rows.get("rows", []):
-                    nid = row.get("nid")
-                    if nid is not None:
-                        self._db.execute_gql(
-                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
-                        )
-                        count += 1
+            # Use a single GQL query to delete all Fragment nodes
+            self._db.execute_gql("MATCH (f:Fragment) DETACH DELETE f")
             self._db.flush()
-            return count
+            return 1
         except Exception:
+            logger.debug("delete_all failed", exc_info=True)
             return 0
 
     def embedding_dim(self) -> int | None:
