@@ -145,29 +145,6 @@ class ReembedStats:
 # ---------------------------------------------------------------------------
 
 
-# Active fragments + parent-skill metadata, folded out of the old Cypher graph:
-# CURRENT_VERSION -> skills.current_version_id; DECOMPOSES_TO -> fragments.version_id.
-_DISCOVERY_SQL_ALL = """
-SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
-       s.canonical_name, s.domain_tags, s.description
-FROM skills s
-JOIN skill_versions v ON v.version_id = s.current_version_id
-JOIN fragments f ON f.version_id = v.version_id
-WHERE v.status = 'active' AND s.deprecated = false
-ORDER BY s.skill_id, f.sequence
-"""
-
-_DISCOVERY_SQL_SKILL = """
-SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
-       s.canonical_name, s.domain_tags, s.description
-FROM skills s
-JOIN skill_versions v ON v.version_id = s.current_version_id
-JOIN fragments f ON f.version_id = v.version_id
-WHERE v.status = 'active' AND s.deprecated = false AND s.skill_id = $skill_id
-ORDER BY f.sequence
-"""
-
-
 def discover_unembedded_fragments(
     store: DuckDBSkillStore,
     vector_store: LanceFragmentStore,
@@ -181,25 +158,20 @@ def discover_unembedded_fragments(
     "wipe and re-embed" scenarios (Lance ``insert_embeddings`` upserts on
     ``fragment_id``, so a duplicate id replaces rather than conflicts).
     """
-    if skill_id is not None:
-        rows = store.execute(_DISCOVERY_SQL_SKILL, {"skill_id": skill_id})
-    else:
-        rows = store.execute(_DISCOVERY_SQL_ALL)
+    discovery_rows = store.discover_fragments(skill_id=skill_id)
 
     all_fragments = [
         FragmentNeedingEmbedding(
-            fragment_id=str(row[0]),
-            content=str(row[1]),
-            fragment_type=str(row[2]),
-            skill_id=str(row[3]),
-            category=str(row[4]),
-            canonical_name=str(row[5]) if len(row) > 5 and row[5] is not None else "",
-            domain_tags=tuple(row[6]) if len(row) > 6 and row[6] else (),
-            description=(
-                str(row[7]).strip() or None if len(row) > 7 and row[7] is not None else None
-            ),
+            fragment_id=r.fragment_id,
+            content=r.content,
+            fragment_type=r.fragment_type,
+            skill_id=r.skill_id,
+            category=r.category,
+            canonical_name=r.canonical_name or "",
+            domain_tags=r.domain_tags,
+            description=r.description,
         )
-        for row in rows
+        for r in discovery_rows
     ]
 
     if force:

@@ -32,6 +32,7 @@ from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 class _FakeSettings:
     def __init__(self, db_path: str) -> None:
         self.duckdb_path = db_path
+        self.skill_store_backend = "duckdb"
 
 
 def _skill_yaml(skill_id: str, *, requires: str = "") -> str:

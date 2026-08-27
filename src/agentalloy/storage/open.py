@@ -22,6 +22,7 @@ from agentalloy.config import Settings, get_settings
 from agentalloy.storage.fragment_store import LanceFragmentStore
 from agentalloy.storage.protocols import EMBEDDING_DIM, EmbeddingDimMismatch, Stores
 from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 
 Role = Literal["service", "writer", "reader"]
@@ -41,8 +42,19 @@ def open_fragments(settings: Settings | None = None) -> LanceFragmentStore:
     return store
 
 
-def open_skills(settings: Settings | None = None, *, read_only: bool = False) -> DuckDBSkillStore:
+def open_skills(
+    settings: Settings | None = None,
+    *,
+    read_only: bool = False,
+) -> DuckDBSkillStore | OverGraphSkillStore:
+    """Open the skill store. Backend selected by settings.skill_store_backend."""
     s = settings or get_settings()
+    backend = s.skill_store_backend
+    if backend == "overgraph":
+        # OverGraph uses a separate directory alongside the DuckDB file
+        from pathlib import Path
+        overgraph_path = Path(s.duckdb_path).with_suffix(".overgraph")
+        return open_overgraph_skill_store(overgraph_path, read_only=read_only)
     return open_skill_store(s.duckdb_path, read_only=read_only)
 
 

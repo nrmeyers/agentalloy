@@ -415,6 +415,7 @@ def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
 class _FakeSettings:
     def __init__(self, db_path: str) -> None:
         self.duckdb_path = db_path
+        self.skill_store_backend = "duckdb"
 
 
 _DOMAIN_YAML = textwrap.dedent("""\

@@ -25,7 +25,7 @@ from typing import Any, cast
 
 import yaml
 
-from agentalloy.storage.protocols import SkillStore
+from agentalloy.storage.protocols import FragmentRow, SkillRow, SkillStore, SkillVersionRow
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +87,8 @@ def load_fixtures(
 
 
 def _wipe(store: SkillStore) -> None:
-    # Clear the skill graph tables (corpus_meta is left intact). No FK cascade is
-    # declared, so order is cosmetic; we delete children before parents anyway.
-    store.execute("DELETE FROM fragments")
-    store.execute("DELETE FROM skill_dependencies")
-    store.execute("DELETE FROM skill_versions")
-    store.execute("DELETE FROM skills")
+    # Clear the skill graph tables (corpus_meta is left intact).
+    store.clear_all()
 
 
 def _read_fixture_files(root: Path) -> list[dict[str, Any]]:
@@ -109,21 +105,22 @@ def _read_fixture_files(root: Path) -> list[dict[str, Any]]:
 
 
 def _insert_skill(store: SkillStore, skill: dict[str, Any]) -> None:
-    store.execute(
-        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, "
-        "domain_tags, deprecated, always_apply, phase_scope, category_scope) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            skill["skill_id"],
-            skill["canonical_name"],
-            skill["category"],
-            skill["skill_class"],
-            skill.get("domain_tags") or [],
-            bool(skill.get("deprecated", False)),
-            bool(skill.get("always_apply", False)),
-            skill.get("phase_scope") or [],
-            skill.get("category_scope") or [],
-        ],
+    store.insert_skill(
+        SkillRow(
+            skill_id=skill["skill_id"],
+            canonical_name=skill["canonical_name"],
+            category=skill["category"],
+            skill_class=skill["skill_class"],
+            domain_tags=skill.get("domain_tags") or [],
+            deprecated=bool(skill.get("deprecated", False)),
+            superseded_by=None,
+            always_apply=bool(skill.get("always_apply", False)),
+            phase_scope=skill.get("phase_scope") or None,
+            category_scope=skill.get("category_scope") or None,
+            tier=None,
+            description=None,
+            current_version_id="",  # linked after the active version is inserted
+        )
     )
 
 
@@ -136,28 +133,42 @@ def _insert_version(store: SkillStore, skill_id: str, version: dict[str, Any]) -
     else:
         raise ValueError(f"invalid authored_at on version {version.get('version_id')}")
 
-    store.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
-        "author, change_summary, status, raw_prose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            version["version_id"],
-            skill_id,
-            int(version["version_number"]),
-            authored_dt,
-            version.get("author", "fixture-seed"),
-            version.get("change_summary", ""),
-            version["status"],
-            version.get("raw_prose", ""),
-        ],
+    store.insert_version(
+        SkillVersionRow(
+            version_id=version["version_id"],
+            skill_id=skill_id,
+            version_number=int(version["version_number"]),
+            authored_at=authored_dt,
+            author=version.get("author", "fixture-seed"),
+            change_summary=version.get("change_summary", ""),
+            status=version["status"],
+            raw_prose=version.get("raw_prose", ""),
+        )
     )
 
 
 def _link_current_version(store: SkillStore, skill_id: str, version_id: str) -> None:
     # The old CURRENT_VERSION edge is folded into skills.current_version_id.
-    store.execute(
-        "UPDATE skills SET current_version_id = ? WHERE skill_id = ?",
-        [version_id, skill_id],
-    )
+    # Re-insert the skill row with the current_version_id populated.
+    existing = store.get_skill(skill_id)
+    if existing is not None:
+        store.insert_skill(
+            SkillRow(
+                skill_id=existing.skill_id,
+                canonical_name=existing.canonical_name,
+                category=existing.category,
+                skill_class=existing.skill_class,
+                domain_tags=existing.domain_tags,
+                deprecated=existing.deprecated,
+                superseded_by=existing.superseded_by,
+                always_apply=existing.always_apply,
+                phase_scope=existing.phase_scope,
+                category_scope=existing.category_scope,
+                tier=existing.tier,
+                description=existing.description,
+                current_version_id=version_id,
+            )
+        )
 
 
 def _insert_fragment(
@@ -165,15 +176,12 @@ def _insert_fragment(
     version_id: str,
     fragment: dict[str, Any],
 ) -> None:
-    # The old DECOMPOSES_TO edge is folded into fragments.version_id.
-    store.execute(
-        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [
-            fragment["fragment_id"],
-            version_id,
-            fragment["fragment_type"],
-            int(fragment["sequence"]),
-            fragment["content"],
-        ],
+    store.insert_fragment(
+        FragmentRow(
+            fragment_id=fragment["fragment_id"],
+            version_id=version_id,
+            fragment_type=fragment["fragment_type"],
+            sequence=int(fragment["sequence"]),
+            content=fragment["content"],
+        )
     )

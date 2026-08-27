@@ -33,7 +33,24 @@ from typing import Any
 
 import duckdb
 
+from agentalloy.storage.protocols import (
+    FragmentDiscoveryRow,
+    FragmentRow,
+    SkillDependencyRow,
+    SkillRow,
+    SkillStore,
+    SkillVersionRow,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class SkillStoreError(Exception):
+    """Base exception for skill store errors."""
+
+
+class LockHeldError(SkillStoreError):
+    """Raised when the DB file is locked by another writer."""
 
 
 # Single owned schema. Idempotent CREATE IF NOT EXISTS, run once per writer open —
@@ -281,6 +298,468 @@ class DuckDBSkillStore:
         except Exception:  # noqa: BLE001 - table absent on a not-yet-migrated corpus
             return None
         return str(row[0]) if row else None
+
+    # -- higher-level interface (new protocol) --------------------------------
+
+    def get_skill(self, skill_id: str) -> SkillRow | None:
+        """Get a skill by ID."""
+        rows = self.execute(
+            "SELECT skill_id, canonical_name, category, skill_class, domain_tags, "
+            "deprecated, superseded_by, always_apply, phase_scope, category_scope, "
+            "tier, description, current_version_id "
+            "FROM skills WHERE skill_id = ?",
+            [skill_id],
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return SkillRow(
+            skill_id=str(r[0]),
+            canonical_name=str(r[1]),
+            category=str(r[2]),
+            skill_class=str(r[3]),
+            domain_tags=list(r[4] or []),
+            deprecated=bool(r[5]),
+            superseded_by=str(r[6]) if r[6] else None,
+            always_apply=bool(r[7]),
+            phase_scope=list(r[8]) if r[8] else None,
+            category_scope=list(r[9]) if r[9] else None,
+            tier=str(r[10]) if r[10] else None,
+            description=str(r[11]) if r[11] else None,
+            current_version_id=str(r[12]),
+        )
+
+    def get_skill_id_by_name(self, canonical_name: str) -> str | None:
+        """Get skill_id by canonical_name."""
+        return self.scalar(
+            "SELECT skill_id FROM skills WHERE canonical_name = ?",
+            [canonical_name],
+        )
+
+    def insert_skill(self, skill: SkillRow) -> None:
+        """Insert or replace a skill."""
+        self.execute(
+            "INSERT OR REPLACE INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
+            "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
+            "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                skill.skill_id,
+                skill.canonical_name,
+                skill.category,
+                skill.skill_class,
+                skill.domain_tags,
+                skill.deprecated,
+                skill.superseded_by,
+                skill.always_apply,
+                skill.phase_scope,
+                skill.category_scope,
+                skill.tier,
+                skill.description,
+                skill.current_version_id,
+            ],
+        )
+
+    def get_version(self, version_id: str) -> SkillVersionRow | None:
+        """Get a version by ID."""
+        rows = self.execute(
+            "SELECT version_id, skill_id, version_number, authored_at, author, "
+            "change_summary, status, raw_prose FROM skill_versions WHERE version_id = ?",
+            [version_id],
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return SkillVersionRow(
+            version_id=str(r[0]),
+            skill_id=str(r[1]),
+            version_number=int(r[2]),
+            authored_at=r[3],
+            author=str(r[4]),
+            change_summary=str(r[5]),
+            status=str(r[6]),
+            raw_prose=str(r[7]),
+        )
+
+    def get_versions_by_skill(self, skill_id: str) -> list[SkillVersionRow]:
+        """Get all versions for a skill, ordered by version_number DESC."""
+        rows = self.execute(
+            "SELECT version_id, skill_id, version_number, authored_at, author, "
+            "change_summary, status, raw_prose FROM skill_versions "
+            "WHERE skill_id = ? ORDER BY version_number DESC",
+            [skill_id],
+        )
+        return [
+            SkillVersionRow(
+                version_id=str(r[0]),
+                skill_id=str(r[1]),
+                version_number=int(r[2]),
+                authored_at=r[3],
+                author=str(r[4]),
+                change_summary=str(r[5]),
+                status=str(r[6]),
+                raw_prose=str(r[7]),
+            )
+            for r in rows
+        ]
+
+    def insert_version(self, version: SkillVersionRow) -> None:
+        """Insert or replace a version."""
+        self.execute(
+            "INSERT OR REPLACE INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+            "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
+            [
+                version.version_id,
+                version.skill_id,
+                version.version_number,
+                version.authored_at,
+                version.author,
+                version.change_summary,
+                version.status,
+                version.raw_prose,
+            ],
+        )
+
+    def get_fragment(self, fragment_id: str) -> FragmentRow | None:
+        """Get a fragment by ID."""
+        rows = self.execute(
+            "SELECT fragment_id, version_id, fragment_type, sequence, content "
+            "FROM fragments WHERE fragment_id = ?",
+            [fragment_id],
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return FragmentRow(
+            fragment_id=str(r[0]),
+            version_id=str(r[1]),
+            fragment_type=str(r[2]),
+            sequence=int(r[3]),
+            content=str(r[4]),
+        )
+
+    def insert_fragment(self, fragment: FragmentRow) -> None:
+        """Insert or replace a fragment."""
+        self.execute(
+            "INSERT OR REPLACE INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
+            "VALUES (?,?,?,?,?)",
+            [
+                fragment.fragment_id,
+                fragment.version_id,
+                fragment.fragment_type,
+                fragment.sequence,
+                fragment.content,
+            ],
+        )
+
+    def get_dependencies(self, skill_id: str) -> list[SkillDependencyRow]:
+        """Get dependencies for a skill."""
+        rows = self.execute(
+            "SELECT source_skill_id, target_skill_id, rel_type "
+            "FROM skill_dependencies WHERE source_skill_id = ?",
+            [skill_id],
+        )
+        return [
+            SkillDependencyRow(
+                source_skill_id=str(r[0]),
+                target_skill_id=str(r[1]),
+                rel_type=str(r[2]),
+            )
+            for r in rows
+        ]
+
+    def insert_dependency(self, dep: SkillDependencyRow) -> None:
+        """Insert a dependency."""
+        self.execute(
+            "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) "
+            "VALUES (?,?,?)",
+            [dep.source_skill_id, dep.target_skill_id, dep.rel_type],
+        )
+
+    def get_active_skills(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> list[SkillRow]:
+        """Get all active skills, optionally filtered by class."""
+        filters = ["v.status = 'active'", "s.deprecated = false"]
+        params: list = []
+        if skill_class is not None:
+            if isinstance(skill_class, tuple):
+                filters.append("s.skill_class IN ?")
+                params.append(list(skill_class))
+            else:
+                filters.append("s.skill_class = ?")
+                params.append(skill_class)
+        sql = (
+            "SELECT s.skill_id, s.canonical_name, s.category, s.skill_class, s.domain_tags, "
+            "s.deprecated, s.superseded_by, s.always_apply, s.phase_scope, s.category_scope, "
+            "s.tier, s.description, s.current_version_id "
+            "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id "
+            f"WHERE {' AND '.join(filters)} ORDER BY s.skill_id"
+        )
+        rows = self.execute(sql, params)
+        return [
+            SkillRow(
+                skill_id=str(r[0]),
+                canonical_name=str(r[1]),
+                category=str(r[2]),
+                skill_class=str(r[3]),
+                domain_tags=list(r[4] or []),
+                deprecated=bool(r[5]),
+                superseded_by=str(r[6]) if r[6] else None,
+                always_apply=bool(r[7]),
+                phase_scope=list(r[8]) if r[8] else None,
+                category_scope=list(r[9]) if r[9] else None,
+                tier=str(r[10]) if r[10] else None,
+                description=str(r[11]) if r[11] else None,
+                current_version_id=str(r[12]),
+            )
+            for r in rows
+        ]
+
+    def get_active_skill_by_id(self, skill_id: str) -> SkillRow | None:
+        """Get an active skill by ID."""
+        rows = self.execute(
+            "SELECT s.skill_id, s.canonical_name, s.category, s.skill_class, s.domain_tags, "
+            "s.deprecated, s.superseded_by, s.always_apply, s.phase_scope, s.category_scope, "
+            "s.tier, s.description, s.current_version_id "
+            "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id "
+            "WHERE s.skill_id = ? AND v.status = 'active' AND s.deprecated = false",
+            [skill_id],
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        return SkillRow(
+            skill_id=str(r[0]),
+            canonical_name=str(r[1]),
+            category=str(r[2]),
+            skill_class=str(r[3]),
+            domain_tags=list(r[4] or []),
+            deprecated=bool(r[5]),
+            superseded_by=str(r[6]) if r[6] else None,
+            always_apply=bool(r[7]),
+            phase_scope=list(r[8]) if r[8] else None,
+            category_scope=list(r[9]) if r[9] else None,
+            tier=str(r[10]) if r[10] else None,
+            description=str(r[11]) if r[11] else None,
+            current_version_id=str(r[12]),
+        )
+
+    def get_deprecated_skill_ids(self) -> list[str]:
+        """Get IDs of all deprecated skills."""
+        rows = self.execute("SELECT skill_id FROM skills WHERE deprecated = true")
+        return [str(r[0]) for r in rows]
+
+    def get_active_fragments(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+        categories: list[str] | None = None,
+        phases: list[str] | None = None,
+        domain_tags: list[str] | None = None,
+    ) -> list[FragmentRow]:
+        """Get fragments of active skills, with optional filters."""
+        filters = ["v.status = 'active'", "s.deprecated = false"]
+        params: list = []
+        if skill_class is not None:
+            if isinstance(skill_class, tuple):
+                filters.append("s.skill_class IN ?")
+                params.append(list(skill_class))
+            else:
+                filters.append("s.skill_class = ?")
+                params.append(skill_class)
+        if categories is not None and phases:
+            filters.append("(s.category IN ? OR (s.phase_scope IS NOT NULL AND s.phase_scope && ?))")
+            params.extend([categories, phases])
+        elif categories is not None:
+            filters.append("s.category IN ?")
+            params.append(categories)
+        elif phases:
+            filters.append("(s.phase_scope IS NOT NULL AND s.phase_scope && ?)")
+            params.append(phases)
+        if domain_tags is not None:
+            filters.append("(s.domain_tags IS NOT NULL AND s.domain_tags && ?)")
+            params.append(domain_tags)
+        sql = (
+            "SELECT f.fragment_id, f.version_id, f.fragment_type, f.sequence, f.content, "
+            "s.skill_id, s.category, s.skill_class, s.domain_tags, s.phase_scope, s.category_scope, s.description "
+            "FROM fragments f "
+            "JOIN skill_versions v ON f.version_id = v.version_id "
+            "JOIN skills s ON v.version_id = s.current_version_id "
+            f"WHERE {' AND '.join(filters)} ORDER BY s.skill_id, f.sequence"
+        )
+        rows = self.execute(sql, params)
+        return [
+            FragmentRow(
+                fragment_id=str(r[0]),
+                version_id=str(r[1]),
+                fragment_type=str(r[2]),
+                sequence=int(r[3]),
+                content=str(r[4]),
+                skill_id=str(r[5]),
+                category=str(r[6]) if r[6] else "",
+                skill_class=str(r[7]) if r[7] else "",
+                domain_tags=list(r[8] or []),
+                phase_scope=list(r[9]) if r[9] else None,
+                category_scope=list(r[10]) if r[10] else None,
+                description=str(r[11]) if r[11] else None,
+            )
+            for r in rows
+        ]
+
+    def get_active_fragments_for_skill(self, skill_id: str) -> list[FragmentRow]:
+        """Get fragments for a specific active skill."""
+        rows = self.execute(
+            "SELECT f.fragment_id, f.version_id, f.fragment_type, f.sequence, f.content, "
+            "s.skill_id, s.category, s.skill_class, s.domain_tags, s.phase_scope, s.category_scope, s.description "
+            "FROM fragments f "
+            "JOIN skill_versions v ON f.version_id = v.version_id "
+            "JOIN skills s ON v.version_id = s.current_version_id "
+            "WHERE s.skill_id = ? AND v.status = 'active' AND s.deprecated = false "
+            "ORDER BY f.sequence",
+            [skill_id],
+        )
+        return [
+            FragmentRow(
+                fragment_id=str(r[0]),
+                version_id=str(r[1]),
+                fragment_type=str(r[2]),
+                sequence=int(r[3]),
+                content=str(r[4]),
+                skill_id=str(r[5]),
+                category=str(r[6]) if r[6] else "",
+                skill_class=str(r[7]) if r[7] else "",
+                domain_tags=list(r[8] or []),
+                phase_scope=list(r[9]) if r[9] else None,
+                category_scope=list(r[10]) if r[10] else None,
+                description=str(r[11]) if r[11] else None,
+            )
+            for r in rows
+        ]
+
+    def discover_fragments(
+        self,
+        *,
+        skill_id: str | None = None,
+    ) -> list[FragmentDiscoveryRow]:
+        """Discover fragments for the re-embed pipeline."""
+        if skill_id is not None:
+            rows = self.execute(
+                "SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category, "
+                "s.canonical_name, s.domain_tags, s.description "
+                "FROM skills s "
+                "JOIN skill_versions v ON v.version_id = s.current_version_id "
+                "JOIN fragments f ON f.version_id = v.version_id "
+                "WHERE v.status = 'active' AND s.deprecated = false AND s.skill_id = ? "
+                "ORDER BY f.sequence",
+                [skill_id],
+            )
+        else:
+            rows = self.execute(
+                "SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category, "
+                "s.canonical_name, s.domain_tags, s.description "
+                "FROM skills s "
+                "JOIN skill_versions v ON v.version_id = s.current_version_id "
+                "JOIN fragments f ON f.version_id = v.version_id "
+                "WHERE v.status = 'active' AND s.deprecated = false "
+                "ORDER BY s.skill_id, f.sequence"
+            )
+        return [
+            FragmentDiscoveryRow(
+                fragment_id=str(r[0]),
+                content=str(r[1]),
+                fragment_type=str(r[2]),
+                skill_id=str(r[3]),
+                category=str(r[4]),
+                canonical_name=str(r[5]) if r[5] else "",
+                domain_tags=tuple(r[6]) if r[6] else (),
+                description=str(r[7]).strip() or None if r[7] else None,
+            )
+            for r in rows
+        ]
+
+    def check_consistency(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> None:
+        """Check CURRENT_VERSION / active-version consistency. Raises on mismatch."""
+        from agentalloy.reads.active import InconsistentActiveVersionError
+
+        class_filter = ""
+        params: list = []
+        if skill_class is not None:
+            if isinstance(skill_class, tuple):
+                class_filter = " AND s.skill_class IN ?"
+                params.extend([list(skill_class)])
+            else:
+                class_filter = " AND s.skill_class = ?"
+                params.append(skill_class)
+
+        # (a) CURRENT_VERSION points at a non-active version
+        rows = self.execute(
+            "SELECT s.skill_id, v.status FROM skills s "
+            "JOIN skill_versions v ON v.version_id = s.current_version_id "
+            f"WHERE v.status <> 'active'{class_filter} LIMIT 1",
+            params,
+        )
+        if rows:
+            raise InconsistentActiveVersionError(
+                str(rows[0][0]),
+                f"CURRENT_VERSION points at status={rows[0][1]!r} version",
+            )
+
+        # (b) Active version exists but no CURRENT_VERSION
+        rows = self.execute(
+            "SELECT s.skill_id FROM skills s "
+            "JOIN skill_versions av ON av.skill_id = s.skill_id AND av.status = 'active' "
+            "LEFT JOIN skill_versions cur ON cur.version_id = s.current_version_id "
+            f"WHERE cur.version_id IS NULL{class_filter} LIMIT 1",
+            params,
+        )
+        if rows:
+            raise InconsistentActiveVersionError(
+                str(rows[0][0]),
+                "active SkillVersion exists but no CURRENT_VERSION edge",
+            )
+
+    def check_consistency_for(self, skill_id: str) -> None:
+        """Check consistency for a specific skill."""
+        from agentalloy.reads.active import InconsistentActiveVersionError
+
+        rows = self.execute(
+            "SELECT v.status FROM skills s "
+            "JOIN skill_versions v ON v.version_id = s.current_version_id "
+            "WHERE s.skill_id = ? AND v.status <> 'active' LIMIT 1",
+            [skill_id],
+        )
+        if rows:
+            raise InconsistentActiveVersionError(
+                skill_id,
+                f"CURRENT_VERSION points at status={rows[0][0]!r} version",
+            )
+
+        rows = self.execute(
+            "SELECT s.skill_id FROM skills s "
+            "JOIN skill_versions av ON av.skill_id = s.skill_id AND av.status = 'active' "
+            "LEFT JOIN skill_versions cur ON cur.version_id = s.current_version_id "
+            "WHERE s.skill_id = ? AND cur.version_id IS NULL LIMIT 1",
+            [skill_id],
+        )
+        if rows:
+            raise InconsistentActiveVersionError(
+                skill_id,
+                "active SkillVersion exists but no CURRENT_VERSION edge",
+            )
+
+    def clear_all(self) -> None:
+        """Clear all data (for fixtures/tests)."""
+        self.execute("DELETE FROM fragments")
+        self.execute("DELETE FROM skill_dependencies")
+        self.execute("DELETE FROM skill_versions")
+        self.execute("DELETE FROM skills")
+        self.execute("DELETE FROM corpus_meta")
 
 
 def open_skill_store(db_path: str | Path, *, read_only: bool = False) -> DuckDBSkillStore:

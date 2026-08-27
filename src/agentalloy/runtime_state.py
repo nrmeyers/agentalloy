@@ -202,39 +202,32 @@ def load_runtime_cache(store: SkillStore) -> RuntimeCache:
 
     version_details: dict[str, VersionDetail] = {}
     if version_ids:
-        # One batched query (was an N+1 per-version loop under Cypher).
-        rows = store.execute(
-            "SELECT version_id, version_number, authored_at, author, "
-            "change_summary, raw_prose FROM skill_versions "
-            "WHERE list_contains($vids, version_id)",
-            {"vids": list(version_ids)},
-        )
-        for row in rows:
-            version_details[str(row[0])] = VersionDetail(
-                version_id=str(row[0]),
-                version_number=int(row[1]),
-                authored_at=row[2],
-                author=str(row[3]),
-                change_summary=str(row[4]),
-                raw_prose=str(row[5]),
+        # Fetch each version individually via the higher-level store method.
+        for vid in version_ids:
+            version = store.get_version(vid)
+            if version is None:
+                raise RuntimeError(f"version {vid!r} not found during cache load")
+            version_details[vid] = VersionDetail(
+                version_id=version.version_id,
+                version_number=version.version_number,
+                authored_at=version.authored_at,
+                author=version.author,
+                change_summary=version.change_summary,
+                raw_prose=version.raw_prose,
             )
-    missing = version_ids - set(version_details)
-    if missing:
-        raise RuntimeError(f"version {next(iter(missing))!r} not found during cache load")
 
     from agentalloy.reads import get_deprecated_skill_ids as _get_deprecated_ids
 
     deprecated_ids = _get_deprecated_ids(store)
 
     # REQUIRES_COMPOSITIONAL edges for graph-expansion retrieval. Empty on a
-    # corpus that declares none. One query; grouped into {source: [target,...]}.
+    # corpus that declares none. One query per skill via the higher-level method.
     requires_edges: dict[str, list[str]] = {}
-    edge_rows = store.execute(
-        "SELECT source_skill_id, target_skill_id FROM skill_dependencies "
-        "WHERE rel_type = 'requires'",
-    )
-    for row in edge_rows:
-        requires_edges.setdefault(str(row[0]), []).append(str(row[1]))
+    for skill in skills_list:
+        deps = store.get_dependencies(skill.skill_id)
+        requires_targets = [d.target_skill_id for d in deps if d.rel_type == "requires"]
+        if requires_targets:
+            requires_edges[skill.skill_id] = requires_targets
 
     cache = RuntimeCache(
         skills=skills_by_id,

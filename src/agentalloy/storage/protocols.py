@@ -304,30 +304,168 @@ class FragmentStore(Protocol):
     def close(self) -> None: ...
 
 
+# ---------------------------------------------------------------------------
+# SkillStore DTOs
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SkillRow:
+    """A skill metadata row."""
+
+    skill_id: str
+    canonical_name: str
+    category: str
+    skill_class: str  # "domain" | "system" | "workflow"
+    domain_tags: list[str]
+    deprecated: bool
+    superseded_by: str | None
+    always_apply: bool
+    phase_scope: list[str] | None
+    category_scope: list[str] | None
+    tier: str | None
+    description: str | None
+    current_version_id: str
+
+
+@dataclass(frozen=True)
+class SkillVersionRow:
+    """A skill version row."""
+
+    version_id: str
+    skill_id: str
+    version_number: int
+    authored_at: datetime
+    author: str
+    change_summary: str
+    status: str  # "active" | "draft" | "archived"
+    raw_prose: str
+
+
+@dataclass(frozen=True)
+class FragmentRow:
+    """A fragment row (content slice of a skill version)."""
+
+    fragment_id: str
+    version_id: str
+    fragment_type: str  # "setup" | "execution" | "verification" | "example" | "guardrail" | "rationale" | "card"
+    sequence: int
+    content: str
+    # Denormalized from parent skill for retrieval convenience
+    skill_id: str = ""
+    category: str = ""
+    skill_class: str = ""
+    domain_tags: list[str] = field(default_factory=list)
+    phase_scope: list[str] | None = None
+    category_scope: list[str] | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillDependencyRow:
+    """A skill dependency edge."""
+
+    source_skill_id: str
+    target_skill_id: str
+    rel_type: str  # "requires"
+
+
+@dataclass(frozen=True)
+class FragmentDiscoveryRow:
+    """Fragment + parent skill metadata for the re-embed pipeline."""
+
+    fragment_id: str
+    content: str
+    fragment_type: str
+    skill_id: str
+    category: str
+    canonical_name: str
+    domain_tags: tuple[str, ...]
+    description: str | None
+
+
+# ---------------------------------------------------------------------------
+# SkillStore Protocol (higher-level, no raw SQL)
+# ---------------------------------------------------------------------------
+
+
 @runtime_checkable
 class SkillStore(Protocol):
-    """Skill metadata + corpus_meta (DuckDB ``agentalloy.duck``)."""
+    """Skill metadata + fragments + corpus_meta.
 
+    Higher-level interface — no raw SQL. Implementations may use DuckDB,
+    OverGraph, or any other backend.
+    """
+
+    # --- Lifecycle ---
     def migrate(self) -> None: ...
-    def execute(
-        self,
-        sql: str,
-        params: Sequence[object] | Mapping[str, object] | None = None,
-    ) -> list[tuple[Any, ...]]: ...
-    def scalar(
-        self,
-        sql: str,
-        params: Sequence[object] | Mapping[str, object] | None = None,
-    ) -> Any: ...
+    def close(self) -> None: ...
+
+    # --- Transactions ---
     def begin(self) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
+
+    # --- Skill CRUD ---
+    def get_skill(self, skill_id: str) -> SkillRow | None: ...
+    def get_skill_id_by_name(self, canonical_name: str) -> str | None: ...
+    def insert_skill(self, skill: SkillRow) -> None: ...
     def delete_skill(self, skill_id: str) -> int: ...
     def rollback_skill(self, skill_id: str) -> None: ...
     def rollback_batch(self, skill_ids: Sequence[str]) -> None: ...
+
+    # --- Version CRUD ---
+    def get_version(self, version_id: str) -> SkillVersionRow | None: ...
+    def get_versions_by_skill(self, skill_id: str) -> list[SkillVersionRow]: ...
+    def insert_version(self, version: SkillVersionRow) -> None: ...
+
+    # --- Fragment CRUD ---
+    def get_fragment(self, fragment_id: str) -> FragmentRow | None: ...
+    def insert_fragment(self, fragment: FragmentRow) -> None: ...
+
+    # --- Dependency CRUD ---
+    def get_dependencies(self, skill_id: str) -> list[SkillDependencyRow]: ...
+    def insert_dependency(self, dep: SkillDependencyRow) -> None: ...
+
+    # --- Active-version reads (for compose/retrieval) ---
+    def get_active_skills(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> list[SkillRow]: ...
+    def get_active_skill_by_id(self, skill_id: str) -> SkillRow | None: ...
+    def get_deprecated_skill_ids(self) -> list[str]: ...
+    def get_active_fragments(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+        categories: list[str] | None = None,
+        phases: list[str] | None = None,
+        domain_tags: list[str] | None = None,
+    ) -> list[FragmentRow]: ...
+    def get_active_fragments_for_skill(self, skill_id: str) -> list[FragmentRow]: ...
+
+    # --- Re-embed pipeline ---
+    def discover_fragments(
+        self,
+        *,
+        skill_id: str | None = None,
+    ) -> list[FragmentDiscoveryRow]: ...
+
+    # --- Consistency guards ---
+    def check_consistency(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> None: ...
+    def check_consistency_for(self, skill_id: str) -> None: ...
+
+    # --- Corpus metadata KV ---
     def set_meta(self, key: str, value: str) -> None: ...
     def get_meta(self, key: str) -> str | None: ...
-    def close(self) -> None: ...
+
+    # --- Bulk operations (for fixtures/tests) ---
+    def clear_all(self) -> None: ...
 
 
 @runtime_checkable

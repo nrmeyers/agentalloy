@@ -86,6 +86,9 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # JIT push phase 2: merge related (thematic) decisions into the
         # decision block (default on — measured ~4 ms median overhead).
         "KNOWLEDGE_RELATED_ENABLED",
+        # Graph backend selection — behavioral toggle for code index and skill store.
+        "CODE_INDEX_GRAPH_BACKEND",
+        "SKILL_STORE_BACKEND",
     },
 )
 

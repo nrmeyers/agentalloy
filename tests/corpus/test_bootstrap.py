@@ -56,6 +56,7 @@ def seeded_db(tmp_path: Path) -> DuckDBSkillStore:
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
         duckdb_path = db_path
+        skill_store_backend = "duckdb"
 
     return FakeSettings()
 

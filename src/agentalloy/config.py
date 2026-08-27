@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # "overgraph" (unified graph + vector in single embedded database).
     # Env: CODE_INDEX_GRAPH_BACKEND.
     code_index_graph_backend: str = "duckdb"
+    # Backend for skill store: "duckdb" (default, DuckDB + LanceDB for vectors)
+    # or "overgraph" (unified graph + vector in single embedded database).
+    # Env: SKILL_STORE_BACKEND.
+    skill_store_backend: str = "duckdb"
     # JIT push phase 2: merge related (thematic) decisions via
     # ``related_decisions(task_title)`` into the decision block.  Measured
     # median overhead ≈ 4 ms (p95 ≈ 5 ms) — well within the 300 ms compose
