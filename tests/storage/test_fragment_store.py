@@ -101,7 +101,7 @@ def test_presence_counts_deletes(store):
     store.insert_embeddings([_frag(i) for i in range(6)])
     assert store.fragment_ids_present(["f0", "f1", "nope"]) == {"f0", "f1"}
     assert store.count_cards() >= 1
-    n = store.delete_skill("s0")
+    n = store.delete_skill_fragments("s0")
     assert n >= 1
     assert store.count_embeddings() == 6 - n
 

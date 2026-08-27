@@ -360,7 +360,7 @@ def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]]) -> int:
         for entry in skills_entries:
             sid = str(entry.get("skill_id", ""))
             if sid:
-                deleted += vs.delete_skill(sid)
+                deleted += vs.delete_skill_fragments(sid)
     except Exception as exc:  # noqa: BLE001 — invalidation is best-effort; reembed is the backstop
         logger.warning(
             "could not invalidate pack vectors (run `agentalloy reembed --force` "

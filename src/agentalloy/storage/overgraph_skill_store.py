@@ -21,21 +21,18 @@ import contextlib
 import logging
 import time
 from collections.abc import Iterable, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     BM25Hit,
-    EmbeddingDimMismatch,
     FragmentDiscoveryRow,
     FragmentEmbedding,
     FragmentRow,
     SimilarityHit,
     SkillDependencyRow,
     SkillRow,
-    SkillStore,
     SkillVersionRow,
     l2_normalize,
 )
@@ -317,13 +314,12 @@ class OverGraphSkillStore:
                 label=_EDGE_HAS_VERSION,
             )
         # If status is active, create CURRENT_VERSION edge
-        if version.status == "active":
-            if skill_node and ver_node:
-                self._db.upsert_edge(
-                    from_id=skill_node.id,
-                    to_id=ver_node.id,
-                    label=_EDGE_CURRENT_VERSION,
-                )
+        if version.status == "active" and skill_node and ver_node:
+            self._db.upsert_edge(
+                from_id=skill_node.id,
+                to_id=ver_node.id,
+                label=_EDGE_CURRENT_VERSION,
+            )
 
     # -- fragment CRUD -------------------------------------------------------
 
@@ -932,8 +928,13 @@ class OverGraphSkillStore:
         except Exception:
             return 0
 
-    def delete_skill(self, skill_id: str) -> int:
-        """Delete all fragment embeddings for a skill."""
+    def delete_skill_fragments(self, skill_id: str) -> int:
+        """Delete only fragment embeddings for a skill (keeps skill node).
+
+        Used by the re-embed pipeline to clear stale embeddings before
+        re-inserting.  Distinct from the SkillStore ``delete_skill`` which
+        removes the skill node, versions, and dependencies too.
+        """
         try:
             rows = self._db.execute_gql(
                 f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' RETURN id(f) AS nid"

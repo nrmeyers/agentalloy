@@ -238,7 +238,7 @@ class LanceFragmentStore:
         self._table.delete(pred)
         return before
 
-    def delete_skill(self, skill_id: str) -> int:
+    def delete_skill_fragments(self, skill_id: str) -> int:
         """Remove all fragments for a skill. Returns rows deleted."""
         pred = f"skill_id = {_q(skill_id)}"
         before = self._table.count_rows(pred)

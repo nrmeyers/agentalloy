@@ -6,10 +6,10 @@ OverGraph's HNSW dense vector search for hybrid retrieval.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import shutil
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import tantivy
 
@@ -187,7 +187,5 @@ class TantivyBM25Index:
 
     def close(self) -> None:
         """Close the index."""
-        try:
+        with contextlib.suppress(Exception):
             self._writer.commit()
-        except Exception:
-            pass

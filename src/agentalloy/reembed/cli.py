@@ -621,7 +621,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         # change makes existing vectors incompatible with the new index).
         if args.force:
             if args.skill_id:
-                n = vs.delete_skill(args.skill_id)
+                n = vs.delete_skill_fragments(args.skill_id)
                 logger.info("--force: deleted %d existing embeddings for %s", n, args.skill_id)
             else:
                 n = vs.count_embeddings()
