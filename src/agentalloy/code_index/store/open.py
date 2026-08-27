@@ -26,6 +26,7 @@ single-writer cross-process, so:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 from dataclasses import dataclass
@@ -36,9 +37,12 @@ from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
 from agentalloy.code_index.store.jobs_store import CodeIndexJobsStore, repo_path_key
 from agentalloy.code_index.store.nebula_graph_store import NebulaGraphCodeGraphStore
 from agentalloy.code_index.store.orient_graph_store import OrientDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.code_index.store.vector_store import LanceCodeVectorStore
 from agentalloy.config import Settings, get_settings
 from agentalloy.storage.protocols import CodeIndexHandles
+
+logger = logging.getLogger(__name__)
 
 Role = Literal["service", "writer", "reader"]
 
@@ -126,7 +130,8 @@ def open_code_index(
     The graph backend is selected by ``settings.code_index_graph_backend``:
     ``"duckdb"`` (default) uses a local DuckDB file; ``"orientdb"`` connects
     to an OrientDB server via REST API; ``"nebulagraph"`` connects to a
-    NebulaGraph server via binary protocol for native graph performance.
+    NebulaGraph server via binary protocol for native graph performance;
+    ``"overgraph"`` uses an embedded OverGraph database (unified graph + vector).
     """
     s = settings or get_settings()
     paths = code_index_paths(settings, slug, repo_path=repo_path)
@@ -136,7 +141,18 @@ def open_code_index(
         paths.cache_dir.mkdir(parents=True, exist_ok=True)
 
     backend = s.code_index_graph_backend
-    if backend == "nebulagraph":
+    print(f"[DEBUG] Using graph backend: {backend}")
+    logger.info(f"Using graph backend: {backend}")
+    if backend == "overgraph":
+        # OverGraph: embedded database (unified graph + vector).
+        # Uses a local file path like DuckDB, but stores both graph and vectors.
+        overgraph_path = paths.repo_dir / "graph.overgraph"
+        graph = OverGraphCodeGraphStore(overgraph_path)
+        vectors = graph  # OverGraph handles both graph and vector storage
+        if not read_only:
+            graph.migrate()
+        return CodeIndexHandles(slug=slug, graph=graph, vectors=vectors)
+    elif backend == "nebulagraph":
         # NebulaGraph: per-slug space on the shared server. The space name
         # is derived from the slug (sanitised for NebulaGraph naming rules).
         space_name = slug.replace("-", "_").replace(".", "_")

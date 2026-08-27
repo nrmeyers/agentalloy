@@ -56,7 +56,12 @@ _KIND_TO_EDGE_TYPE: dict[str, str] = {
     "IMPLEMENTS": "Implements",
     "OVERRIDES": "Overrides",
     "DEFINES": "Defines",
+    "DEFINES_METHOD": "Defines_method",
     "CONTAINS": "HasMember",
+    "CONTAINS_PACKAGE": "HasMember",
+    "CONTAINS_FOLDER": "HasMember",
+    "CONTAINS_FILE": "HasMember",
+    "CONTAINS_MODULE": "HasMember",
     "HASMEMBER": "HasMember",
     "GOVERNS": "Governs",
     "REQUIRES": "Requires",
@@ -64,6 +69,12 @@ _KIND_TO_EDGE_TYPE: dict[str, str] = {
     "CONSTRAINTS": "Constraints",
     "COMMAND": "Command",
     "STAKEHOLDER": "Stakeholder",
+    "RE_EXPORTS": "Re_exports",
+    "EXPORTS": "Re_exports",
+    "EXPORTS_MODULE": "Re_exports",
+    "IMPLEMENTS_MODULE": "Implements",
+    "DEPENDS_ON_EXTERNAL": "Depends_on_external",
+    "REBINDS": "Rebinds",
 }
 
 _EDGE_TYPE_TO_KIND: dict[str, str] = {v: k for k, v in _KIND_TO_EDGE_TYPE.items()}

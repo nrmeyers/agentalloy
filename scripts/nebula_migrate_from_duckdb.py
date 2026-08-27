@@ -7,6 +7,7 @@ vertices and edges in NebulaGraph.
 """
 
 import duckdb
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,8 @@ NEBULA_USER = "root"
 NEBULA_PASSWORD = "nebula"
 SPACE_NAME = "agentalloy"
 
-# DuckDB config
-DUCKDB_PATH = ".agentalloy/test-repo/graph.duck"
+# DuckDB config - read from environment or use default
+DUCKDB_PATH = os.environ.get("MIGRATE_DUCKDB_PATH", ".agentalloy/test-repo/graph.duck")
 
 
 def escape_nGQL(s: Any) -> str:
@@ -150,6 +151,8 @@ def migrate_edges(duck_conn: duckdb.DuckDBPyConnection, session, rid_map: dict[s
         "IMPLEMENTS": "Implements",
         "OVERRIDES": "Overrides",
         "DEFINES": "Defines",
+        "DEFINES_METHOD": "Defines_method",
+        "RE_EXPORTS": "Re_exports",
         "CONTAINS": "HasMember",
         "GOVERNS": "Governs",
         "REQUIRES": "Requires",
@@ -157,6 +160,7 @@ def migrate_edges(duck_conn: duckdb.DuckDBPyConnection, session, rid_map: dict[s
         "CONSTRAINTS": "Constraints",
         "COMMAND": "Command",
         "STAKEHOLDER": "Stakeholder",
+        "DEPENDS_ON_EXTERNAL": "Depends_on_external",
     }
     
     # Migrate edges by kind
@@ -183,9 +187,9 @@ def migrate_edges(duck_conn: duckdb.DuckDBPyConnection, session, rid_map: dict[s
                 # Build edge value tuple based on edge type
                 if edge_type in ["Calls"]:
                     value = f"({confidence}, {escape_nGQL(resolved_via)}, {escape_nGQL(file_path)}, {line_start if line_start else 'NULL'})"
-                elif edge_type in ["Imports"]:
+                elif edge_type in ["Imports", "Re_exports"]:
                     value = f"({confidence}, {escape_nGQL(resolved_via)})"
-                elif edge_type in ["Inherits", "Implements", "Overrides", "Defines", "HasMember"]:
+                elif edge_type in ["Inherits", "Implements", "Overrides", "Defines", "Defines_method", "HasMember"]:
                     value = f"({confidence})"
                 elif edge_type == "Governs":
                     value = f"({escape_nGQL('')})"
@@ -200,9 +204,9 @@ def migrate_edges(duck_conn: duckdb.DuckDBPyConnection, session, rid_map: dict[s
             # Build property list based on edge type
             if edge_type == "Calls":
                 props = "(confidence, resolved_via, file_path, line_start)"
-            elif edge_type == "Imports":
+            elif edge_type in ["Imports", "Re_exports"]:
                 props = "(confidence, resolved_via)"
-            elif edge_type in ["Inherits", "Implements", "Overrides", "Defines", "HasMember"]:
+            elif edge_type in ["Inherits", "Implements", "Overrides", "Defines", "Defines_method", "HasMember"]:
                 props = "(confidence)"
             elif edge_type == "Governs":
                 props = "(resolution_tier)"
