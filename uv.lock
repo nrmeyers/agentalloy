@@ -14,6 +14,7 @@ dependencies = [
     { name = "httpx" },
     { name = "lancedb" },
     { name = "langgraph" },
+    { name = "overgraph" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -73,6 +74,7 @@ requires-dist = [
     { name = "lancedb", specifier = ">=0.13" },
     { name = "langgraph", specifier = ">=1.2" },
     { name = "onnxruntime", marker = "extra == 'rerank'", specifier = ">=1.18" },
+    { name = "overgraph", specifier = ">=0.17.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pyarrow", specifier = ">=15.0" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -917,6 +919,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/9a/900a6b9b413e0f8a471cf07830f9cf65939af039a362204b36bd5b581d8b/ormsgpack-1.12.2-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4ee766d2e78251b7a63daf1cddfac36a73562d3ddef68cacfb41b2af64698033", size = 203170, upload-time = "2026-01-18T20:55:44.469Z" },
     { url = "https://files.pythonhosted.org/packages/87/4c/27a95466354606b256f24fad464d7c97ab62bce6cc529dd4673e1179b8fb/ormsgpack-1.12.2-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:292410a7d23de9b40444636b9b8f1e4e4b814af7f1ef476e44887e52a123f09d", size = 212816, upload-time = "2026-01-18T20:55:23.501Z" },
     { url = "https://files.pythonhosted.org/packages/73/cd/29cee6007bddf7a834e6cd6f536754c0535fcb939d384f0f37a38b1cddb8/ormsgpack-1.12.2-cp314-cp314t-win_amd64.whl", hash = "sha256:837dd316584485b72ef451d08dd3e96c4a11d12e4963aedb40e08f89685d8ec2", size = 117232, upload-time = "2026-01-18T20:55:45.448Z" },
+]
+
+[[package]]
+name = "overgraph"
+version = "0.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/a3/e6f6f0f79157bdb19544170b10b53759354217365941c04a436d4fc66021/overgraph-0.17.0.tar.gz", hash = "sha256:0cd50b0dcf50549430a5dc6067ef31aa34356ef1ac4d7ac966d104955c6243b8", size = 2078324, upload-time = "2026-07-22T01:28:48.2Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/71/23bc26eedfcf66b86d81889466a6cd5c26318400fb609b2081132b22d72e/overgraph-0.17.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:80914cfaae7c358bf48a4d3eca2da52f28631e34a719349f717e15c70964f589", size = 5870463, upload-time = "2026-07-22T01:28:38.092Z" },
+    { url = "https://files.pythonhosted.org/packages/af/b2/a3d2c255e0e5cf3c52782cd8a31ad1a958f43f431dd5cdfe09886d7f025f/overgraph-0.17.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:398a6b5f05429ba223b74076c3fd582bc86a6783db3bb94aaef3639c17c4de29", size = 5378478, upload-time = "2026-07-22T01:28:41.093Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/30/1b26032da71f163cbdd089eaf0e9afc22cd8fa094966b6caab4f57b5c6d1/overgraph-0.17.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:de977b81245d1d8cb51f5c58ae8baf3ccd00bcd7e6bde0604510ef6c7aee5e01", size = 5990392, upload-time = "2026-07-22T01:28:43.491Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/6a/c3ef800f8dc7d95e27106ee30f697ccfe05cb996c763892027c81f6bf2e6/overgraph-0.17.0-cp310-abi3-win_amd64.whl", hash = "sha256:a695342b84c9e77f621a0815c15d444325c972172282acb9de5338b1d28c741b", size = 6257383, upload-time = "2026-07-22T01:28:45.87Z" },
 ]
 
 [[package]]

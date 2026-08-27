@@ -35,6 +35,7 @@ Metadata is stored on ``Meta`` nodes (one per key/value pair).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -42,13 +43,13 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.storage.protocols import (
+    EMBEDDING_DIM,
     CallSite,
     CodeEdge,
     CodeSearchHit,
     CodeSymbol,
     CodeVectorRow,
     DecisionRow,
-    EMBEDDING_DIM,
     EmbeddingDimMismatch,
     l2_normalize,
 )
@@ -205,7 +206,33 @@ class OverGraphCodeGraphStore:
             dense_vector_dimension=vector_dimension,
         )
         self._qn_to_id: dict[str, int] = {}
+        self._verify_dimension_alignment(vector_dimension)
         logger.debug("OverGraph store opened at %s (vector_dim=%d)", db_path, vector_dimension)
+
+    def _verify_dimension_alignment(self, expected_dim: int) -> None:
+        """Verify that the database's vector dimension matches expectations.
+
+        OverGraph persists dense_vector_dimension in its schema. If the
+        embedding model changed (e.g. 768 → 1536), the existing HNSW index
+        is incompatible and data must be re-indexed into a fresh directory.
+        """
+        try:
+            schema = self._db.get_node_schema("Symbol")
+            if schema and "dense_vector_dimension" in schema:
+                actual = int(schema["dense_vector_dimension"])
+                if actual != expected_dim:
+                    raise EmbeddingDimMismatch(
+                        f"OverGraph database at {self._db_path} was created with "
+                        f"dense_vector_dimension={actual}, but the current embedding "
+                        f"model requires {expected_dim}. Delete the OverGraph directory "
+                        f"and re-index from scratch."
+                    )
+                logger.debug("vector dimension alignment verified: %d", actual)
+        except EmbeddingDimMismatch:
+            raise
+        except Exception:
+            # Schema may not expose this field yet (first open); that's fine.
+            logger.debug("could not verify vector dimension from schema (first open?)")
 
     # -- low-level GQL execution --------------------------------------------
 
@@ -224,35 +251,29 @@ class OverGraphCodeGraphStore:
         if result is None:
             return []
         try:
-            # OverGraph returns result.rows as list of tuples
+            # OverGraph returns a dict with 'rows' (list of dicts) and 'columns'
+            if isinstance(result, dict):
+                rows = result.get("rows", [])
+                if rows and isinstance(rows[0], dict):
+                    return rows
+                # Fallback: rows as tuples + columns list
+                col_names = result.get("columns", [])
+                if col_names and rows:
+                    return [dict(zip(col_names, row, strict=False)) for row in rows]
+                return []
+            # Legacy object-style result
             if hasattr(result, "rows"):
-                rows = result.rows
+                raw_rows = result.rows
                 if hasattr(result, "columns"):
                     col_names = result.columns
-                    return [dict(zip(col_names, row)) for row in rows]
-                return [{"value": row[0]} if len(row) == 1 else {"row": row} for row in rows]
+                    return [dict(zip(col_names, row, strict=False)) for row in raw_rows]
+                return [{"value": row[0]} if len(row) == 1 else {"row": row} for row in raw_rows]
             return []
         except Exception:
             logger.debug("failed to decode result rows", exc_info=True)
             return []
 
     # -- ID mapping ----------------------------------------------------------
-
-    def _rebuild_id_mapping(self) -> None:
-        """Rebuild the qualified_name → node_id mapping from the database."""
-        self._qn_to_id.clear()
-        try:
-            # Query all Symbol nodes
-            result = self._db.execute_gql("MATCH (n:Symbol) RETURN n.key, id(n)")
-            if hasattr(result, "rows"):
-                for row in result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        node_id = int(row[1])
-                        if key:
-                            self._qn_to_id[key] = node_id
-        except Exception:
-            logger.warning("failed to rebuild ID mapping", exc_info=True)
 
     def _get_node_id(self, qualified_name: str) -> int | None:
         """Get the node ID for a qualified name, checking cache first."""
@@ -316,10 +337,10 @@ class OverGraphCodeGraphStore:
         short_name = fqn.rsplit(".", 1)[-1] if "." in fqn else fqn
         try:
             result = self._db.execute_gql(
-                f"MATCH (n:Symbol) WHERE n.name = '{_esc(short_name)}' RETURN n.key LIMIT 1"
+                f"MATCH (n:Symbol) WHERE n.name = '{_esc(short_name)}' RETURN n.qualified_name LIMIT 1"
             )
-            if hasattr(result, "rows") and result.rows:
-                key = _decode(result.rows[0][0])
+            if isinstance(result, dict) and result.get("rows"):
+                key = _decode(result["rows"][0].get("n.qualified_name"))
                 if key:
                     return key
         except Exception:
@@ -363,6 +384,7 @@ class OverGraphCodeGraphStore:
         """Convert a CodeSymbol to a properties dict for OverGraph."""
         decos_str = ",".join(s.decorators) if s.decorators else ""
         return {
+            "qualified_name": s.qualified_name,
             "kind": s.kind,
             "name": s.name,
             "file_path": s.file_path or "",
@@ -409,25 +431,46 @@ class OverGraphCodeGraphStore:
             # Use batch_upsert_nodes if available
             if hasattr(self._db, "batch_upsert_nodes"):
                 self._db.batch_upsert_nodes(batch_data)
+                # Rebuild ID mapping from database
+                self._rebuild_id_mapping()
             else:
                 # Fall back to individual upserts
                 for s in symbols:
                     self._upsert_symbol_node(s)
                 return len(symbols)
-
-            # Update ID mapping
-            for s in symbols:
-                node = self._db.get_node_by_key("Symbol", s.qualified_name)
-                if node:
-                    node_id = getattr(node, "id", None)
-                    if node_id is not None:
-                        self._qn_to_id[s.qualified_name] = node_id
         except Exception:
             logger.warning("batch_upsert_nodes failed, falling back to individual upserts", exc_info=True)
             for s in symbols:
                 self._upsert_symbol_node(s)
 
         return len(symbols)
+
+    def _rebuild_id_mapping(self) -> None:
+        """Rebuild the qualified_name -> node_id mapping from the database.
+
+        Uses the native API (``nodes_by_labels`` + ``get_nodes``) because
+        ``n.key`` is not accessible via GQL (OverGraph stores the key
+        separately from node properties).
+        """
+        try:
+            self._qn_to_id.clear()
+            node_ids = list(self._db.nodes_by_labels(["Symbol"]))
+            if not node_ids:
+                logger.debug("rebuilt ID mapping: 0 symbols (empty)")
+                return
+            # Fetch in chunks to avoid oversized requests
+            chunk_size = 1000
+            for i in range(0, len(node_ids), chunk_size):
+                chunk = node_ids[i : i + chunk_size]
+                nodes = self._db.get_nodes(chunk)
+                for node in nodes:
+                    key = getattr(node, "key", None)
+                    nid = getattr(node, "id", None)
+                    if key and nid is not None:
+                        self._qn_to_id[key] = nid
+            logger.debug("rebuilt ID mapping: %d symbols", len(self._qn_to_id))
+        except Exception:
+            logger.warning("failed to rebuild ID mapping", exc_info=True)
 
     def _upsert_edge(self, e: CodeEdge) -> int | None:
         """Upsert a single edge and return its ID."""
@@ -522,8 +565,8 @@ class OverGraphCodeGraphStore:
             for label in _ALL_EDGE_LABELS:
                 self._db.execute_gql(f"MATCH ()-[r:{label}]->() DELETE r")
             # Delete all nodes
-            self._db.execute_gql("MATCH (n:Symbol) DELETE n")
-            self._db.execute_gql("MATCH (n:Decision) DELETE n")
+            self._db.execute_gql("MATCH (n:Symbol) DETACH DELETE n")
+            self._db.execute_gql("MATCH (n:Decision) DETACH DELETE n")
         except Exception:
             logger.warning("failed to clear graph", exc_info=True)
 
@@ -563,26 +606,26 @@ class OverGraphCodeGraphStore:
         for path in paths:
             try:
                 result = self._db.execute_gql(
-                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' RETURN n.key, id(n)"
+                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' RETURN n.qualified_name, id(n)"
                 )
-                if hasattr(result, "rows"):
-                    for row in result.rows:
-                        if len(row) >= 2:
-                            key = _decode(row[0])
-                            node_id = int(row[1])
-                            if key:
-                                # Delete edges touching this node
-                                for label in _ALL_EDGE_LABELS:
-                                    if label == "Governs":
-                                        continue
-                                    self._db.execute_gql(
-                                        f"MATCH ()-[r:{label}]->() WHERE id(r) IN "
-                                        f"(MATCH (n) WHERE id(n) = {node_id} RETURN id(n)) DELETE r"
-                                    )
-                                # Delete the node
-                                self._db.execute_gql(f"MATCH (n) WHERE id(n) = {node_id} DELETE n")
-                                self._qn_to_id.pop(key, None)
-                                deleted_count += 1
+                if isinstance(result, dict):
+                    for row in result.get("rows", []):
+                        key = _decode(row.get("n.qualified_name"))
+                        node_id = row.get("id(n)")
+                        if key and node_id is not None:
+                            node_id = int(node_id)
+                            # Delete edges touching this node
+                            for label in _ALL_EDGE_LABELS:
+                                if label == "Governs":
+                                    continue
+                                self._db.execute_gql(
+                                    f"MATCH ()-[r:{label}]->() WHERE id(r) IN "
+                                    f"(MATCH (n) WHERE id(n) = {node_id} RETURN id(n)) DELETE r"
+                                )
+                            # Delete the node
+                            self._db.execute_gql(f"MATCH (n) WHERE id(n) = {node_id} DETACH DELETE n")
+                            self._qn_to_id.pop(key, None)
+                            deleted_count += 1
             except Exception:
                 logger.warning("failed to delete symbols for file %s", path, exc_info=True)
 
@@ -745,16 +788,15 @@ class OverGraphCodeGraphStore:
         """Find symbols by short name."""
         results: list[tuple[str, str]] = []
         try:
-            gql_result = self._db.execute_gql(
-                f"MATCH (n:Symbol) WHERE n.name = '{_esc(name)}' RETURN n.key, n.kind"
+            rows = self._fetch_rows(
+                f"MATCH (n:Symbol) WHERE n.name = '{_esc(name)}' "
+                f"RETURN n.qualified_name, n.kind"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        kind = _decode(row[1])
-                        if key and kind and kind != "MarkdownDoc":
-                            results.append((key, kind))
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                kind = _decode(row.get("n.kind"))
+                if key and kind and kind != "MarkdownDoc":
+                    results.append((key, kind))
         except Exception:
             logger.debug("failed to fetch symbols by name %s", name, exc_info=True)
         return results
@@ -763,16 +805,15 @@ class OverGraphCodeGraphStore:
         """Find symbols by file path."""
         results: list[tuple[str, str]] = []
         try:
-            gql_result = self._db.execute_gql(
-                f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(file_path)}' RETURN n.key, n.kind"
+            rows = self._fetch_rows(
+                f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(file_path)}' "
+                f"RETURN n.qualified_name, n.kind"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        kind = _decode(row[1])
-                        if key and kind and kind != "MarkdownDoc":
-                            results.append((key, kind))
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                kind = _decode(row.get("n.kind"))
+                if key and kind and kind != "MarkdownDoc":
+                    results.append((key, kind))
         except Exception:
             logger.debug("failed to fetch symbols by file %s", file_path, exc_info=True)
         return results
@@ -781,13 +822,11 @@ class OverGraphCodeGraphStore:
         """List all decision qualified names."""
         results: list[str] = []
         try:
-            gql_result = self._db.execute_gql("MATCH (n:Decision) RETURN n.key")
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if row:
-                        key = _decode(row[0])
-                        if key:
-                            results.append(key)
+            rows = self._fetch_rows("MATCH (n:Decision) RETURN n.qualified_name")
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                if key:
+                    results.append(key)
         except Exception:
             logger.debug("failed to fetch decision QNs", exc_info=True)
         return results
@@ -839,15 +878,14 @@ class OverGraphCodeGraphStore:
         sym_qns: list[str] = []
         for path in paths:
             try:
-                gql_result = self._db.execute_gql(
-                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' RETURN n.key"
+                rows = self._fetch_rows(
+                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' "
+                    f"RETURN n.qualified_name"
                 )
-                if hasattr(gql_result, "rows"):
-                    for row in gql_result.rows:
-                        if row:
-                            key = _decode(row[0])
-                            if key:
-                                sym_qns.append(key)
+                for row in rows:
+                    key = _decode(row.get("n.qualified_name"))
+                    if key:
+                        sym_qns.append(key)
             except Exception:
                 continue
 
@@ -931,25 +969,25 @@ class OverGraphCodeGraphStore:
         count = 0
         try:
             # Find decisions with this source_path
-            gql_result = self._db.execute_gql(
-                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n)"
+            rows = self._fetch_rows(
+                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n) AS nid"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if row:
-                        decision_id = int(row[0])
-                        # Delete outgoing Governs edges
-                        try:
-                            neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
-                            for neighbor in neighbors:
-                                if getattr(neighbor, "edge_label", None) == "Governs":
-                                    # Delete the edge
-                                    self._db.execute_gql(
-                                        f"MATCH ()-[r:Governs]->() WHERE id(r) = {neighbor.edge_id} DELETE r"
-                                    )
-                                    count += 1
-                        except Exception:
-                            continue
+            for row in rows:
+                decision_id = row.get("nid")
+                if decision_id is not None:
+                    decision_id = int(decision_id)
+                    # Delete outgoing Governs edges
+                    try:
+                        neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
+                        for neighbor in neighbors:
+                            if getattr(neighbor, "edge_label", None) == "Governs":
+                                # Delete the edge
+                                self._db.execute_gql(
+                                    f"MATCH ()-[r:Governs]->() WHERE id(r) = {neighbor.edge_id} DELETE r"
+                                )
+                                count += 1
+                    except Exception:
+                        continue
         except Exception:
             logger.debug("failed to delete govern edges for doc %s", doc_path, exc_info=True)
         return count
@@ -968,20 +1006,20 @@ class OverGraphCodeGraphStore:
         """Count Governs edges from decisions with the given source path."""
         count = 0
         try:
-            gql_result = self._db.execute_gql(
-                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n)"
+            rows = self._fetch_rows(
+                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n) AS nid"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if row:
-                        decision_id = int(row[0])
-                        try:
-                            neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
-                            for neighbor in neighbors:
-                                if getattr(neighbor, "edge_label", None) == "Governs":
-                                    count += 1
-                        except Exception:
-                            continue
+            for row in rows:
+                decision_id = row.get("nid")
+                if decision_id is not None:
+                    decision_id = int(decision_id)
+                    try:
+                        neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
+                        for neighbor in neighbors:
+                            if getattr(neighbor, "edge_label", None) == "Governs":
+                                count += 1
+                    except Exception:
+                        continue
         except Exception:
             logger.debug("failed to count govern edges for doc %s", doc_path, exc_info=True)
         return count
@@ -1079,13 +1117,11 @@ class OverGraphCodeGraphStore:
         """Count symbols by kind."""
         counts: dict[str, int] = {}
         try:
-            gql_result = self._db.execute_gql("MATCH (n:Symbol) RETURN n.kind")
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if row:
-                        k = _decode(row[0])
-                        if k:
-                            counts[k] = counts.get(k, 0) + 1
+            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.kind")
+            for row in rows:
+                k = _decode(row.get("n.kind"))
+                if k:
+                    counts[k] = counts.get(k, 0) + 1
         except Exception:
             logger.debug("failed to fetch counts by kind", exc_info=True)
         return counts
@@ -1101,18 +1137,17 @@ class OverGraphCodeGraphStore:
         files: set[str] = set()
         try:
             if prefix:
-                gql_result = self._db.execute_gql(
-                    f"MATCH (n:Symbol) WHERE n.file_path STARTS WITH '{_esc(prefix)}' RETURN n.file_path"
+                rows = self._fetch_rows(
+                    f"MATCH (n:Symbol) WHERE n.file_path STARTS WITH '{_esc(prefix)}' "
+                    f"RETURN n.file_path"
                 )
             else:
-                gql_result = self._db.execute_gql("MATCH (n:Symbol) RETURN n.file_path")
+                rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.file_path")
 
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if row:
-                        fp = _decode_or_none(row[0])
-                        if fp:
-                            files.add(fp)
+            for row in rows:
+                fp = _decode_or_none(row.get("n.file_path"))
+                if fp:
+                    files.add(fp)
         except Exception:
             logger.debug("failed to list files", exc_info=True)
 
@@ -1123,16 +1158,15 @@ class OverGraphCodeGraphStore:
         """All Calls edges as (src, dst) pairs."""
         results: list[tuple[str, str]] = []
         try:
-            gql_result = self._db.execute_gql(
-                "MATCH (a:Symbol)-[r:Calls]->(b:Symbol) RETURN a.key, b.key"
+            rows = self._fetch_rows(
+                "MATCH (a:Symbol)-[r:Calls]->(b:Symbol) "
+                "RETURN a.qualified_name AS src, b.qualified_name AS dst"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        src = _decode(row[0])
-                        dst = _decode(row[1])
-                        if src and dst:
-                            results.append((src, dst))
+            for row in rows:
+                src = _decode(row.get("src"))
+                dst = _decode(row.get("dst"))
+                if src and dst:
+                    results.append((src, dst))
         except Exception:
             logger.debug("failed to fetch calls edges", exc_info=True)
         return results
@@ -1184,16 +1218,12 @@ class OverGraphCodeGraphStore:
         """Return the top symbols by pagerank."""
         scored: list[tuple[str, float]] = []
         try:
-            gql_result = self._db.execute_gql(
-                "MATCH (n:Symbol) RETURN n.key, n.pagerank"
-            )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        pr = row[1]
-                        if key and pr is not None:
-                            scored.append((key, float(pr)))
+            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.qualified_name, n.pagerank")
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                pr = row.get("n.pagerank")
+                if key and pr is not None:
+                    scored.append((key, float(pr)))
         except Exception:
             logger.debug("failed to fetch top centrality", exc_info=True)
 
@@ -1206,14 +1236,12 @@ class OverGraphCodeGraphStore:
         """Return content hashes for all symbols."""
         result: dict[str, str] = {}
         try:
-            gql_result = self._db.execute_gql("MATCH (n:Symbol) RETURN n.key, n.content_hash")
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        ch = _decode(row[1])
-                        if key and ch:
-                            result[key] = ch
+            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.qualified_name, n.content_hash")
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                ch = _decode(row.get("n.content_hash"))
+                if key and ch:
+                    result[key] = ch
         except Exception:
             logger.debug("failed to fetch content hashes", exc_info=True)
         return result
@@ -1251,7 +1279,16 @@ class OverGraphCodeGraphStore:
     # =========================================================================
 
     def upsert(self, rows: Iterable[CodeVectorRow]) -> int:
-        """Upsert vector rows (keyed on qualified_name)."""
+        """Upsert vector rows (keyed on qualified_name).
+
+        Uses ``upsert_node(dense_vector=...)`` for every write — this is the
+        only path that updates OverGraph's HNSW index. GQL ``SET n.dense_vector``
+        updates the node property but leaves the HNSW index stale, causing
+        vector_search to return 0 hits or corrupt-record errors.
+
+        After the batch completes, ``db.flush()`` ensures the HNSW segments
+        are materialised to the mmap'd files before any similarity query.
+        """
         batch = list(rows)
         if not batch:
             return 0
@@ -1264,44 +1301,67 @@ class OverGraphCodeGraphStore:
                     f"dimensions, expected {self._vector_dimension}",
                 )
 
-        # Upsert nodes with vectors
-        for r in batch:
+        # Use a write transaction for atomic batch ingestion with retry
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                # Normalize the embedding
-                normalized_embedding = l2_normalize(r.embedding)
-
-                # Check if node exists
-                node_id = self._get_node_id(r.qualified_name)
-                if node_id is not None:
-                    # Delete and re-insert with vector (OverGraph doesn't support updating vectors on existing nodes)
-                    try:
-                        self._db.delete_node(node_id)
-                    except Exception:
-                        pass
-                
-                # Insert/re-insert node with vector
-                props = {
-                    "symbol_type": r.symbol_type,
-                    "file_path": r.file_path,
-                    "start_line": r.start_line,
-                    "end_line": r.end_line,
-                    "text": r.text or "",
-                    "indexed_at": r.indexed_at,
-                }
-                node_id = self._db.upsert_node(
-                    labels=["Symbol"],
-                    key=r.qualified_name,
-                    props=props,
-                    dense_vector=normalized_embedding,
-                )
-                self._qn_to_id[r.qualified_name] = node_id
+                txn = self._db.begin_write_txn()
+                for r in batch:
+                    normalized_embedding = l2_normalize(r.embedding)
+                    # Merge with existing node props so graph data (kind,
+                    # name, docstring, etc.) is preserved when the vector
+                    # leg writes its properties.
+                    existing_props: dict[str, Any] = {}
+                    node_id = self._get_node_id(r.qualified_name)
+                    if node_id is not None:
+                        try:
+                            existing_node = self._db.get_node(node_id)
+                            existing_props = dict(getattr(existing_node, "props", {}) or {})
+                        except Exception:
+                            pass
+                    vector_props = {
+                        "symbol_type": r.symbol_type,
+                        "file_path": r.file_path,
+                        "start_line": r.start_line,
+                        "end_line": r.end_line,
+                        "text": r.text or "",
+                        "indexed_at": r.indexed_at,
+                    }
+                    merged = {**existing_props, **vector_props}
+                    merged["qualified_name"] = r.qualified_name
+                    txn.upsert_node(
+                        labels=["Symbol"],
+                        key=r.qualified_name,
+                        props=merged,
+                        dense_vector=normalized_embedding,
+                    )
+                txn.commit()
+                break
             except Exception:
-                logger.warning("failed to upsert vector for %s", r.qualified_name, exc_info=True)
+                with contextlib.suppress(Exception):
+                    txn.rollback()
+                if attempt == max_retries - 1:
+                    logger.warning(
+                        "failed to upsert vectors after %d attempts", max_retries, exc_info=True
+                    )
+                    return 0
+                logger.debug("vector upsert txn attempt %d failed, retrying", attempt + 1)
+
+        # Flush to materialise HNSW segments for search
+        self._db.flush()
+
+        # Rebuild ID mapping for any new nodes
+        self._rebuild_id_mapping()
 
         return len(batch)
 
     def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int:
-        """Atomically replace the entire vector dataset."""
+        """Atomically replace the entire vector dataset.
+
+        Delegates to ``upsert()`` which uses ``upsert_node(dense_vector=...)``
+        — this overwrites both the node properties and the HNSW index entries
+        in a single transactional batch, followed by ``db.flush()``.
+        """
         batch = list(rows)
 
         # Check dimensions
@@ -1312,16 +1372,8 @@ class OverGraphCodeGraphStore:
                     f"dimensions, expected {self._vector_dimension}",
                 )
 
-        # Clear existing vectors
-        try:
-            self._db.execute_gql("MATCH (n:Symbol) WHERE n.indexed_at IS NOT NULL DELETE n")
-        except Exception:
-            logger.warning("failed to clear vectors", exc_info=True)
-
-        # Clear ID mapping for vector nodes
-        self._qn_to_id.clear()
-
-        # Insert new vectors
+        # upsert() handles txn + flush; it overwrites vectors for existing
+        # nodes and creates new ones as needed.
         return self.upsert(batch)
 
     def search_similar(
@@ -1351,7 +1403,7 @@ class OverGraphCodeGraphStore:
             results: list[CodeSearchHit] = []
             for hit in hits:
                 node_id = hit.node_id
-                score = 1.0 - float(hit.score)  # Convert distance to similarity
+                score = float(hit.score)  # OverGraph returns cosine similarity directly
 
                 try:
                     node = self._db.get_node(node_id)
@@ -1391,19 +1443,16 @@ class OverGraphCodeGraphStore:
         results: list[tuple[str, float]] = []
         try:
             # Simple substring match (not true BM25)
-            gql_result = self._db.execute_gql(
+            rows = self._fetch_rows(
                 f"MATCH (n:Symbol) WHERE n.text CONTAINS '{_esc(query)}' "
-                f"RETURN n.key, n.text LIMIT {k}"
+                f"RETURN n.qualified_name, n.text LIMIT {k}"
             )
-            if hasattr(gql_result, "rows"):
-                for row in gql_result.rows:
-                    if len(row) >= 2:
-                        key = _decode(row[0])
-                        text = _decode(row[1])
-                        if key:
-                            # Simple score based on occurrence count
-                            score = float(text.lower().count(query.lower())) if text else 0.0
-                            results.append((key, score))
+            for row in rows:
+                key = _decode(row.get("n.qualified_name"))
+                text = _decode(row.get("n.text"))
+                if key:
+                    score = float(text.lower().count(query.lower())) if text else 0.0
+                    results.append((key, score))
         except Exception:
             logger.debug("failed to perform BM25 search", exc_info=True)
 
@@ -1422,7 +1471,7 @@ class OverGraphCodeGraphStore:
                 continue
             try:
                 # Delete the node (which includes its vector)
-                self._db.execute_gql(f"MATCH (n) WHERE id(n) = {node_id} DELETE n")
+                self._db.execute_gql(f"MATCH (n) WHERE id(n) = {node_id} DETACH DELETE n")
                 self._qn_to_id.pop(qn, None)
                 count += 1
             except Exception:
@@ -1431,13 +1480,13 @@ class OverGraphCodeGraphStore:
         return count
 
     def count(self) -> int:
-        """Count the number of vectors."""
+        """Count the number of vectors (Symbol nodes with indexed_at set)."""
         try:
-            gql_result = self._db.execute_gql(
-                "MATCH (n:Symbol) WHERE n.indexed_at IS NOT NULL RETURN count(n)"
+            rows = self._fetch_rows(
+                "MATCH (n:Symbol) WHERE n.indexed_at IS NOT NULL RETURN count(n) AS cnt"
             )
-            if hasattr(gql_result, "rows") and gql_result.rows:
-                return int(gql_result.rows[0][0])
+            if rows:
+                return int(rows[0].get("cnt", 0))
         except Exception:
             logger.debug("failed to count vectors", exc_info=True)
         return 0
