@@ -108,10 +108,6 @@ CREATE TABLE IF NOT EXISTS corpus_meta (
 """
 
 
-class SkillStoreError(Exception):
-    """Base for skill-store errors."""
-
-
 def is_lock_held_error(text: str) -> bool:
     """True if ``text`` looks like a DuckDB file write-lock conflict."""
     t = text.lower()
@@ -490,7 +486,7 @@ class DuckDBSkillStore:
     ) -> list[SkillRow]:
         """Get all active skills, optionally filtered by class."""
         filters = ["v.status = 'active'", "s.deprecated = false"]
-        params: list = []
+        params: list[object] = []
         if skill_class is not None:
             if isinstance(skill_class, tuple):
                 filters.append("s.skill_class IN ?")
@@ -573,7 +569,7 @@ class DuckDBSkillStore:
     ) -> list[FragmentRow]:
         """Get fragments of active skills, with optional filters."""
         filters = ["v.status = 'active'", "s.deprecated = false"]
-        params: list = []
+        params: list[object] = []
         if skill_class is not None:
             if isinstance(skill_class, tuple):
                 filters.append("s.skill_class IN ?")
@@ -702,7 +698,7 @@ class DuckDBSkillStore:
         from agentalloy.reads.active import InconsistentActiveVersionError
 
         class_filter = ""
-        params: list = []
+        params: list[object] = []
         if skill_class is not None:
             if isinstance(skill_class, tuple):
                 class_filter = " AND s.skill_class IN ?"
