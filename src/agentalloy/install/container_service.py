@@ -292,13 +292,14 @@ def test_corpus_lock_released() -> bool:
 
     assert skills_path is not None, "skills_path must resolve to a non-None Path"  # P10-R5
 
-    from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+    from agentalloy.storage.protocols import SkillStore
+    from agentalloy.storage.skill_store import open_skill_store
 
     max_retries = 10  # P10-R2: 10 iterations × 0.5s = 5s max wait
     retry_interval = 0.5
 
     for attempt in range(max_retries):  # P10-R2: bounded = max_retries = 10
-        store: DuckDBSkillStore | None = None
+        store: SkillStore | None = None
         try:
             # A read-only open succeeds only when no writer holds the lock.
             store = open_skill_store(str(skills_path), read_only=True)

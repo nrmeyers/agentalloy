@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 def test_corpus_counts_returned(app: FastAPI) -> None:
     store = MagicMock()
-    store.execute.return_value = [[30]]
+    store.count_skills.return_value = 30
     vector_store = MagicMock()
     vector_store.count_embeddings.return_value = 412
     app.state.store = store
@@ -29,7 +29,7 @@ def test_corpus_counts_returned(app: FastAPI) -> None:
 def test_corpus_partial_when_one_store_fails(app: FastAPI) -> None:
     # Skill store raises; vector store still answers — endpoint must not 500.
     store = MagicMock()
-    store.execute.side_effect = Exception("Could not set lock on file")
+    store.count_skills.side_effect = Exception("Could not set lock on file")
     vector_store = MagicMock()
     vector_store.count_embeddings.return_value = 7
     app.state.store = store

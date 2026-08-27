@@ -81,10 +81,8 @@ def _check_skill_store(settings: Settings) -> dict[str, Any]:
     store = open_skills(settings, read_only=True)
     try:
         try:
-            skill_count = int(
-                store.scalar("SELECT count(*) FROM skills WHERE deprecated = false") or 0,
-            )
-            frag_count = int(store.scalar("SELECT count(*) FROM fragments") or 0)
+            skill_count = store.count_skills() - len(store.get_deprecated_skill_ids())
+            frag_count = store.count_fragments()
         except Exception:
             skill_count = 0
             frag_count = 0

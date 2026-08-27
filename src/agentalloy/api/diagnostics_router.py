@@ -260,9 +260,7 @@ async def corpus_diagnostics(request: Request) -> CorpusDiagnosticsResponse:
     store: SkillStore | None = getattr(state, "store", None)
     if store is not None:
         try:
-            rows = store.execute("SELECT count(*) FROM skills")
-            if rows and rows[0]:
-                skill_count = int(rows[0][0])
+            skill_count = int(store.count_skills())
         except Exception:
             skill_count = 0
 

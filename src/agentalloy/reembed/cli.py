@@ -63,8 +63,7 @@ from agentalloy.storage.protocols import FragmentEmbedding
 from agentalloy.storage.skill_store import LockHeldError, is_lock_held_error
 
 if TYPE_CHECKING:
-    from agentalloy.storage.fragment_store import LanceFragmentStore
-    from agentalloy.storage.skill_store import DuckDBSkillStore
+    from agentalloy.storage.protocols import FragmentStore, SkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +145,8 @@ class ReembedStats:
 
 
 def discover_unembedded_fragments(
-    store: DuckDBSkillStore,
-    vector_store: LanceFragmentStore,
+    store: SkillStore,
+    vector_store: FragmentStore,
     *,
     skill_id: str | None = None,
     force: bool = False,
@@ -273,7 +272,7 @@ def reembed_fragments(
     fragments: list[FragmentNeedingEmbedding],
     *,
     embed_fn: Callable[[str], list[float]],
-    vector_store: LanceFragmentStore,
+    vector_store: FragmentStore,
     embedding_model: str,
     progress_tty: bool = False,
     on_embedded: Callable[[FragmentNeedingEmbedding, list[float]], None] | None = None,
@@ -393,7 +392,7 @@ def insert_cards(
     fragments: list[FragmentNeedingEmbedding],
     *,
     embed_fn: Callable[[str], list[float]],
-    vector_store: LanceFragmentStore,
+    vector_store: FragmentStore,
     embedding_model: str,
 ) -> int:
     """Embed and insert one synthetic card document per distinct skill.
@@ -599,8 +598,8 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
     # restart also reloads its in-memory cache, so it serves this pass's
     # corpus). ``--no-restart`` opts out for callers that manage the service
     # themselves (`upgrade`) or run in-process (the web UI).
-    store: DuckDBSkillStore | None = None
-    vs: LanceFragmentStore | None = None
+    store: SkillStore | None = None
+    vs: FragmentStore | None = None
     service_mode: str | None = None
     try:
         try:
@@ -948,7 +947,7 @@ def _start_main_service(mode: str) -> None:
         )
 
 
-def _reopen_after_stop(settings: Any) -> DuckDBSkillStore:
+def _reopen_after_stop(settings: Any) -> SkillStore:
     """Retry the writer open after stopping the service; the OS may take a
     moment to release the old process's file handle.
     """

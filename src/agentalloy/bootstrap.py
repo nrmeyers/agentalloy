@@ -27,7 +27,7 @@ from agentalloy.storage.open import open_skills
 from agentalloy.storage.protocols import FragmentRow, SkillRow, SkillVersionRow
 
 if TYPE_CHECKING:
-    from agentalloy.storage.skill_store import DuckDBSkillStore
+    from agentalloy.storage.protocols import SkillStore
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -239,7 +239,7 @@ def _print_summary(skill: ParsedSystemSkill, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: DuckDBSkillStore, skill: ParsedSystemSkill, *, force: bool) -> None:
+def _insert(store: SkillStore, skill: ParsedSystemSkill, *, force: bool) -> None:
     """Insert a system skill (skill, active version, single guardrail fragment).
 
     Mirrors ``install.importer.import_skill``'s system-class path: the version is

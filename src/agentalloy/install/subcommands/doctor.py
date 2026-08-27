@@ -177,8 +177,7 @@ def _check_skill_schema(skills_path: str) -> dict[str, Any]:
 
     try:
         with open_skill_store(skills_path, read_only=True) as store:
-            rows = store.execute("SELECT count(*) FROM skills")
-            _ = rows  # just confirming the table exists
+            _ = store.count_skills()  # just confirming the table exists
         return {
             "name": "skill_schema",
             "passed": True,
@@ -234,8 +233,7 @@ def _check_corpus_count(skills_path: str, fragments_path: str) -> dict[str, Any]
 
     try:
         with open_skill_store(skills_path, read_only=True) as store:
-            rows = store.execute("SELECT count(*) FROM skills")
-            skill_count = int(rows[0][0]) if rows and rows[0] else 0
+            skill_count = store.count_skills()
     except Exception as exc:  # noqa: BLE001
         skill_err = str(exc)
         if is_lock_held_error(skill_err):

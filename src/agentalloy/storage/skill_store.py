@@ -441,6 +441,10 @@ class DuckDBSkillStore:
             ],
         )
 
+    def count_fragments(self) -> int:
+        """Count all fragment rows (any version/skill status)."""
+        return int(self.scalar("SELECT count(*) FROM fragments") or 0)
+
     def get_dependencies(self, skill_id: str) -> list[SkillDependencyRow]:
         """Get dependencies for a skill."""
         rows = self.execute(
@@ -458,12 +462,26 @@ class DuckDBSkillStore:
         ]
 
     def insert_dependency(self, dep: SkillDependencyRow) -> None:
-        """Insert a dependency."""
+        """Insert a dependency (idempotent — an existing edge is kept)."""
         self.execute(
             "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) "
-            "VALUES (?,?,?)",
+            "VALUES (?,?,?) ON CONFLICT DO NOTHING",
             [dep.source_skill_id, dep.target_skill_id, dep.rel_type],
         )
+
+    def delete_dependencies(self, skill_id: str, rel_type: str | None = None) -> int:
+        """Delete outgoing dependency edges for a skill. Returns rows removed.
+
+        With ``rel_type`` given, only edges of that type are removed; otherwise
+        all outgoing edges go (the re-ingest idempotency path).
+        """
+        if rel_type is None:
+            where, params = "source_skill_id = ?", [skill_id]
+        else:
+            where, params = "source_skill_id = ? AND rel_type = ?", [skill_id, rel_type]
+        n = self.scalar(f"SELECT count(*) FROM skill_dependencies WHERE {where}", params)
+        self.execute(f"DELETE FROM skill_dependencies WHERE {where}", params)
+        return int(n or 0)
 
     def get_active_skills(
         self,
@@ -541,6 +559,10 @@ class DuckDBSkillStore:
         rows = self.execute("SELECT skill_id FROM skills WHERE deprecated = true")
         return [str(r[0]) for r in rows]
 
+    def count_skills(self) -> int:
+        """Count all skill rows (any deprecation/version status)."""
+        return int(self.scalar("SELECT count(*) FROM skills") or 0)
+
     def get_active_fragments(
         self,
         *,
@@ -560,7 +582,9 @@ class DuckDBSkillStore:
                 filters.append("s.skill_class = ?")
                 params.append(skill_class)
         if categories is not None and phases:
-            filters.append("(s.category IN ? OR (s.phase_scope IS NOT NULL AND s.phase_scope && ?))")
+            filters.append(
+                "(s.category IN ? OR (s.phase_scope IS NOT NULL AND s.phase_scope && ?))"
+            )
             params.extend([categories, phases])
         elif categories is not None:
             filters.append("s.category IN ?")

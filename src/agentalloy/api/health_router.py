@@ -189,7 +189,9 @@ class HealthChecker:
 
     def _probe_runtime_store(self) -> str | None:
         try:
-            self._store.scalar("SELECT 1")
+            # Protocol-level probe: a nonexistent id returns None on a healthy
+            # store and raises on an unreachable/corrupt one.
+            self._store.get_skill("__agentalloy_health_probe__")
             return None
         except Exception as exc:
             return str(exc)
@@ -199,15 +201,10 @@ class HealthChecker:
         when the store is unreachable. The probe must never break /health.
         """
         try:
-            rows = self._store.execute(
-                "SELECT s.skill_id, s.current_version_id FROM skills s "
-                "JOIN skill_versions v ON v.version_id = s.current_version_id "
-                "WHERE v.status = 'active' AND s.deprecated = false "
-                "ORDER BY s.skill_id",
-            )
+            skills = sorted(self._store.get_active_skills(), key=lambda s: s.skill_id)
             digest = hashlib.sha256()
-            for skill_id, version_id in rows:
-                digest.update(f"{skill_id}:{version_id}\n".encode())
+            for s in skills:
+                digest.update(f"{s.skill_id}:{s.current_version_id}\n".encode())
             return digest.hexdigest()
         except Exception:
             return None

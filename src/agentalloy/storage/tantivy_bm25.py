@@ -109,9 +109,7 @@ class TantivyBM25Index:
         if categories:
             cat_queries = []
             for cat in categories:
-                cat_queries.append(
-                    tantivy.Query.term_query(self._index.schema, "category", cat)
-                )
+                cat_queries.append(tantivy.Query.term_query(self._index.schema, "category", cat))
             if len(cat_queries) == 1:
                 must_clauses.append((tantivy.Occur.Must, cat_queries[0]))
             else:
@@ -123,9 +121,7 @@ class TantivyBM25Index:
         if domain_tags:
             tag_queries = []
             for tag in domain_tags:
-                tag_queries.append(
-                    tantivy.Query.term_query(self._index.schema, "domain_tags", tag)
-                )
+                tag_queries.append(tantivy.Query.term_query(self._index.schema, "domain_tags", tag))
             if len(tag_queries) == 1:
                 must_clauses.append((tantivy.Occur.Must, tag_queries[0]))
             else:

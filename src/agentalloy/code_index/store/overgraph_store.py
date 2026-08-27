@@ -421,11 +421,13 @@ class OverGraphCodeGraphStore:
         batch_data = []
         for s in symbols:
             props = self._symbol_props(s)
-            batch_data.append({
-                "labels": ["Symbol"],
-                "key": s.qualified_name,
-                "props": props,
-            })
+            batch_data.append(
+                {
+                    "labels": ["Symbol"],
+                    "key": s.qualified_name,
+                    "props": props,
+                }
+            )
 
         try:
             # Use batch_upsert_nodes if available
@@ -439,7 +441,9 @@ class OverGraphCodeGraphStore:
                     self._upsert_symbol_node(s)
                 return len(symbols)
         except Exception:
-            logger.warning("batch_upsert_nodes failed, falling back to individual upserts", exc_info=True)
+            logger.warning(
+                "batch_upsert_nodes failed, falling back to individual upserts", exc_info=True
+            )
             for s in symbols:
                 self._upsert_symbol_node(s)
 
@@ -526,12 +530,14 @@ class OverGraphCodeGraphStore:
             if label == "Governs":
                 props = {"resolution_tier": e.resolution_tier or 0}
 
-            batch_data.append({
-                "from_id": src_id,
-                "to_id": dst_id,
-                "label": label,
-                "props": props,
-            })
+            batch_data.append(
+                {
+                    "from_id": src_id,
+                    "to_id": dst_id,
+                    "label": label,
+                    "props": props,
+                }
+            )
 
         try:
             if hasattr(self._db, "batch_upsert_edges"):
@@ -542,7 +548,9 @@ class OverGraphCodeGraphStore:
                     self._upsert_edge(e)
                 return len(batch_data)
         except Exception:
-            logger.warning("batch_upsert_edges failed, falling back to individual upserts", exc_info=True)
+            logger.warning(
+                "batch_upsert_edges failed, falling back to individual upserts", exc_info=True
+            )
             for e in edges:
                 self._upsert_edge(e)
 
@@ -623,7 +631,9 @@ class OverGraphCodeGraphStore:
                                     f"(MATCH (n) WHERE id(n) = {node_id} RETURN id(n)) DELETE r"
                                 )
                             # Delete the node
-                            self._db.execute_gql(f"MATCH (n) WHERE id(n) = {node_id} DETACH DELETE n")
+                            self._db.execute_gql(
+                                f"MATCH (n) WHERE id(n) = {node_id} DETACH DELETE n"
+                            )
                             self._qn_to_id.pop(key, None)
                             deleted_count += 1
             except Exception:
@@ -676,9 +686,7 @@ class OverGraphCodeGraphStore:
                     fp = _decode_or_none(props.get("file_path"))
                     line = _opt_int(props.get("start_line"))
 
-                    results.append(
-                        CallSite(qualified_name=caller_key, file_path=fp, line=line)
-                    )
+                    results.append(CallSite(qualified_name=caller_key, file_path=fp, line=line))
                 except Exception:
                     continue
         except Exception:
@@ -716,9 +724,7 @@ class OverGraphCodeGraphStore:
                     fp = _decode_or_none(props.get("file_path"))
                     line = _opt_int(props.get("start_line"))
 
-                    results.append(
-                        CallSite(qualified_name=callee_key, file_path=fp, line=line)
-                    )
+                    results.append(CallSite(qualified_name=callee_key, file_path=fp, line=line))
                 except Exception:
                     continue
         except Exception:
@@ -773,9 +779,7 @@ class OverGraphCodeGraphStore:
                 props = getattr(caller_node, "props", {}) or {}
                 fp = _decode_or_none(props.get("file_path"))
                 line = _opt_int(props.get("start_line"))
-                results.append(
-                    CallSite(qualified_name=caller_key, file_path=fp, line=line)
-                )
+                results.append(CallSite(qualified_name=caller_key, file_path=fp, line=line))
             except Exception:
                 continue
 
@@ -789,8 +793,7 @@ class OverGraphCodeGraphStore:
         results: list[tuple[str, str]] = []
         try:
             rows = self._fetch_rows(
-                f"MATCH (n:Symbol) WHERE n.name = '{_esc(name)}' "
-                f"RETURN n.qualified_name, n.kind"
+                f"MATCH (n:Symbol) WHERE n.name = '{_esc(name)}' RETURN n.qualified_name, n.kind"
             )
             for row in rows:
                 key = _decode(row.get("n.qualified_name"))
@@ -879,8 +882,7 @@ class OverGraphCodeGraphStore:
         for path in paths:
             try:
                 rows = self._fetch_rows(
-                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' "
-                    f"RETURN n.qualified_name"
+                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' RETURN n.qualified_name"
                 )
                 for row in rows:
                     key = _decode(row.get("n.qualified_name"))
@@ -1394,11 +1396,13 @@ class OverGraphCodeGraphStore:
 
         try:
             # Use OverGraph's vector search
-            hits = list(self._db.vector_search(
-                mode="dense",
-                k=k,
-                dense_query=normalized_query,
-            ))
+            hits = list(
+                self._db.vector_search(
+                    mode="dense",
+                    k=k,
+                    dense_query=normalized_query,
+                )
+            )
 
             results: list[CodeSearchHit] = []
             for hit in hits:

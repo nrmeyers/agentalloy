@@ -204,22 +204,18 @@ def _propagate_deprecation(skill_id: str, superseded_by: str) -> str:
     """
     if not skill_id:
         return "deprecated"
+    from dataclasses import replace
+
     from agentalloy.config import get_settings
 
     store = None
     try:
         settings = get_settings()
         store = open_skills(settings, read_only=False)
-        exists = store.scalar(
-            "SELECT count(*) FROM skills WHERE skill_id = ?",
-            [skill_id],
-        )
-        if not exists:
+        skill = store.get_skill(skill_id)
+        if skill is None:
             return "deprecated"
-        store.execute(
-            "UPDATE skills SET deprecated = true, superseded_by = ? WHERE skill_id = ?",
-            [superseded_by, skill_id],
-        )
+        store.insert_skill(replace(skill, deprecated=True, superseded_by=superseded_by))
         logger.info(
             "deprecation propagated: skill %s marked deprecated (superseded_by=%r)",
             skill_id,
@@ -574,19 +570,28 @@ def _corpus_missing_active(skill_ids: list[str]) -> list[str]:
         return []
     try:
         from agentalloy.config import get_settings
-        from agentalloy.storage.skill_store import open_skill_store
 
         settings = get_settings()
-        if not Path(settings.duckdb_path).exists():
+        if settings.skill_store_backend == "overgraph":
+            store_path = Path(settings.duckdb_path).with_suffix(".overgraph")
+        else:
+            store_path = Path(settings.duckdb_path)
+        if not store_path.exists():
             return list(skill_ids)
-        with open_skill_store(settings.duckdb_path, read_only=True) as store:
-            rows = store.execute(
-                "SELECT s.skill_id FROM skills s "
-                "JOIN skill_versions v ON v.version_id = s.current_version_id "
-                "WHERE v.status = 'active' AND list_contains($ids, s.skill_id)",
-                {"ids": list(skill_ids)},
-            )
-        present = {str(r[0]) for r in rows}
+        store = open_skills(settings, read_only=True)
+        try:
+            present: set[str] = set()
+            for sid in skill_ids:
+                skill = store.get_skill(sid)
+                if skill is None:
+                    continue
+                # Replicates the old JOIN: the skill only counts as present when
+                # its current_version_id points at a version with status='active'.
+                version = store.get_version(skill.current_version_id)
+                if version is not None and version.status == "active":
+                    present.add(sid)
+        finally:
+            store.close()
         return [sid for sid in skill_ids if sid not in present]
     except Exception:  # noqa: BLE001 — unreadable store → re-ingest, never skip
         return list(skill_ids)

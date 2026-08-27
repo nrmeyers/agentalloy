@@ -375,8 +375,7 @@ def _check_skill_store_present(
         # Use the context manager so the read-only connection is always
         # closed and never contends with a writer's single-writer lock.
         with open_skill_store(str(p), read_only=True) as store:
-            rows = store.execute("SELECT count(*) FROM skills")
-        count = int(rows[0][0]) if rows and rows[0] else 0
+            count = store.count_skills()
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "skill_store_present",
@@ -495,12 +494,7 @@ def _check_skill_count(
             # Context manager closes the read-only connection so the fallback
             # never contends with a writer's single-writer lock.
             with open_skill_store(str(skills_path), read_only=True) as store:
-                rows = store.execute(
-                    "SELECT s.skill_id FROM skills s "
-                    "JOIN skill_versions v ON v.version_id = s.current_version_id "
-                    "WHERE v.status = 'active' AND s.deprecated = false",
-                )
-            active_ids = {str(r[0]) for r in rows}
+                active_ids = {s.skill_id for s in store.get_active_skills()}
             source = "direct store read"
         except Exception as exc:
             duration = int((time.monotonic() - t0) * 1000)

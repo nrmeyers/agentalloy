@@ -121,9 +121,7 @@ def get_active_fragments(
     # returns bare FragmentRow objects; we re-attach the parent skill metadata
     # that ActiveFragment carries.
     all_skills = store.get_active_skills()
-    version_to_skill: dict[str, SkillRow] = {
-        s.current_version_id: s for s in all_skills
-    }
+    version_to_skill: dict[str, SkillRow] = {s.current_version_id: s for s in all_skills}
 
     fragments = store.get_active_fragments(
         skill_class=skill_class,

@@ -103,7 +103,7 @@ def migrate(force: bool = False) -> None:
         version_count = 0
         for r in version_rows:
             authored_at = r[3]
-            if hasattr(authored_at, 'isoformat'):
+            if hasattr(authored_at, "isoformat"):
                 authored_at = authored_at.isoformat()
             version = SkillVersionRow(
                 version_id=str(r[0]),

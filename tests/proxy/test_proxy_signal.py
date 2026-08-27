@@ -645,9 +645,7 @@ def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
     store = process_store()
     if store is None:
         return
-    scoped = store.for_repo(
-        _repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path))
-    )
+    scoped = store.for_repo(_repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path)))
     scoped.put_contract(
         name,
         phase=phase,

@@ -96,7 +96,7 @@ def test_corpus_stamp_changes_when_active_set_changes(corpus_dir: Path) -> None:
 
 def test_corpus_stamp_none_when_store_unreachable() -> None:
     broken = MagicMock()
-    broken.execute.side_effect = RuntimeError("db locked")
+    broken.get_active_skills.side_effect = RuntimeError("db locked")
     checker = HealthChecker(broken, MagicMock(), MagicMock(), "stub-embed")
     assert checker._corpus_stamp() is None  # pyright: ignore[reportPrivateUsage]
 

@@ -109,11 +109,15 @@ def _stamp_corpus_schema_version(duck_path: Path, version: int) -> bool:
     """
     try:
         from agentalloy.storage.card_index import META_KEY_SCHEMA_VERSION
-        from agentalloy.storage.skill_store import DuckDBSkillStore
+        from agentalloy.storage.protocols import SkillStore
+        from agentalloy.storage.skill_store import open_skill_store
 
-        with DuckDBSkillStore(str(duck_path)) as store:
+        store: SkillStore = open_skill_store(duck_path, read_only=False)
+        try:
             store.migrate()  # legacy corpora may predate the corpus_meta table
             store.set_meta(META_KEY_SCHEMA_VERSION, str(version))
+        finally:
+            store.close()
         return True
     except Exception:
         return False

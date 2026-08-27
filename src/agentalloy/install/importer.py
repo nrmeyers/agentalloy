@@ -32,8 +32,14 @@ import yaml
 
 from agentalloy.reads.active import get_active_fragments
 from agentalloy.storage.fragment_store import LanceFragmentStore
-from agentalloy.storage.protocols import FragmentEmbedding
-from agentalloy.storage.skill_store import DuckDBSkillStore
+from agentalloy.storage.protocols import (
+    FragmentEmbedding,
+    FragmentRow,
+    SkillDependencyRow,
+    SkillRow,
+    SkillStore,
+    SkillVersionRow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +55,7 @@ def _opt_list(v: Any) -> list[str] | None:
     return lst or None
 
 
-def import_skill(ss: DuckDBSkillStore, data: dict[str, Any], *, tier: str | None) -> list[str]:
+def import_skill(ss: SkillStore, data: dict[str, Any], *, tier: str | None) -> list[str]:
     """Insert one parsed skill YAML. Returns its ``requires`` targets (edges).
 
     Idempotent: deletes any existing skill of the same id first.
@@ -61,67 +67,66 @@ def import_skill(ss: DuckDBSkillStore, data: dict[str, Any], *, tier: str | None
 
     ss.delete_skill(skill_id)  # idempotent re-import
 
-    ss.execute(
-        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
-        "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
-        "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            skill_id,
-            str(data.get("canonical_name", skill_id)),
-            str(data.get("category", "")),
-            skill_class,
-            _opt_list(data.get("domain_tags")) or [],
-            bool(data.get("deprecated", False)),
-            data.get("superseded_by") or None,
-            bool(data.get("always_apply", False)),
-            _opt_list(data.get("phase_scope")),
-            _opt_list(data.get("category_scope")),
-            tier,
-            (str(data["description"]).strip() or None) if data.get("description") else None,
-            version_id,
-        ],
+    ss.insert_skill(
+        SkillRow(
+            skill_id=skill_id,
+            canonical_name=str(data.get("canonical_name", skill_id)),
+            category=str(data.get("category", "")),
+            skill_class=skill_class,
+            domain_tags=_opt_list(data.get("domain_tags")) or [],
+            deprecated=bool(data.get("deprecated", False)),
+            superseded_by=data.get("superseded_by") or None,
+            always_apply=bool(data.get("always_apply", False)),
+            phase_scope=_opt_list(data.get("phase_scope")),
+            category_scope=_opt_list(data.get("category_scope")),
+            tier=tier,
+            description=(str(data["description"]).strip() or None)
+            if data.get("description")
+            else None,
+            current_version_id=version_id,
+        )
     )
-    ss.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
-        "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
-        [
-            version_id,
-            skill_id,
-            1,
-            now,
-            str(data.get("author", "")),
-            str(data.get("change_summary", "")),
-            "active",
-            str(data.get("raw_prose", "")),
-        ],
+    ss.insert_version(
+        SkillVersionRow(
+            version_id=version_id,
+            skill_id=skill_id,
+            version_number=1,
+            authored_at=now,
+            author=str(data.get("author", "")),
+            change_summary=str(data.get("change_summary", "")),
+            status="active",
+            raw_prose=str(data.get("raw_prose", "")),
+        )
     )
 
     if skill_class == "system":
-        ss.execute(
-            "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-            "VALUES (?,?,?,?,?)",
-            [f"{skill_id}-v1-f1", version_id, "guardrail", 1, str(data.get("raw_prose", ""))],
+        ss.insert_fragment(
+            FragmentRow(
+                fragment_id=f"{skill_id}-v1-f1",
+                version_id=version_id,
+                fragment_type="guardrail",
+                sequence=1,
+                content=str(data.get("raw_prose", "")),
+            )
         )
     elif skill_class == "domain":
         for frag in data.get("fragments", []) or []:
             seq = int(frag["sequence"])
-            ss.execute(
-                "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-                "VALUES (?,?,?,?,?)",
-                [
-                    f"{skill_id}-v1-f{seq}",
-                    version_id,
-                    str(frag.get("fragment_type", "execution")),
-                    seq,
-                    str(frag.get("content", "")),
-                ],
+            ss.insert_fragment(
+                FragmentRow(
+                    fragment_id=f"{skill_id}-v1-f{seq}",
+                    version_id=version_id,
+                    fragment_type=str(frag.get("fragment_type", "execution")),
+                    sequence=seq,
+                    content=str(frag.get("content", "")),
+                )
             )
     # workflow: no fragments (raw_prose injected by the SDD phase hook)
 
     return [str(t) for t in dict.fromkeys(data.get("requires", []) or [])]
 
 
-def import_pack(ss: DuckDBSkillStore, pack_dir: Path) -> dict[str, Any]:
+def import_pack(ss: SkillStore, pack_dir: Path) -> dict[str, Any]:
     """Import every skill declared in ``pack_dir/pack.yaml``.
 
     Returns stats including the (source, target) requires edges to resolve.
@@ -139,24 +144,25 @@ def import_pack(ss: DuckDBSkillStore, pack_dir: Path) -> dict[str, Any]:
     return {"pack": pack.get("name"), "skills": n, "edges": edges}
 
 
-def resolve_edges(ss: DuckDBSkillStore, edges: Sequence[tuple[str, str]]) -> int:
+def resolve_edges(ss: SkillStore, edges: Sequence[tuple[str, str]]) -> int:
     """Insert requires edges whose target skill exists. Returns edges written."""
-    existing = {str(r[0]) for r in ss.execute("SELECT skill_id FROM skills")}
     written = 0
     for source, target in edges:
-        if target not in existing:
+        if ss.get_skill(target) is None:
             logger.warning("requires edge %s -> %s: target missing, skipped", source, target)
             continue
-        ss.execute(
-            "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) "
-            "VALUES (?,?, 'requires') ON CONFLICT DO NOTHING",
-            [source, target],
+        ss.insert_dependency(
+            SkillDependencyRow(
+                source_skill_id=source,
+                target_skill_id=target,
+                rel_type="requires",
+            )
         )
         written += 1
     return written
 
 
-def import_packs(ss: DuckDBSkillStore, pack_dirs: Sequence[Path]) -> dict[str, Any]:
+def import_packs(ss: SkillStore, pack_dirs: Sequence[Path]) -> dict[str, Any]:
     """Import multiple packs, then resolve all requires edges (cross-pack safe)."""
     all_edges: list[tuple[str, str]] = []
     total = 0
@@ -170,7 +176,7 @@ def import_packs(ss: DuckDBSkillStore, pack_dirs: Sequence[Path]) -> dict[str, A
 
 def reembed_corpus(
     fs: LanceFragmentStore,
-    ss: DuckDBSkillStore,
+    ss: SkillStore,
     *,
     embed: Callable[[list[str]], list[list[float]]],
     model: str,

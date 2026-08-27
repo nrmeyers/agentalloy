@@ -131,7 +131,7 @@ class TestCheckSkillSchema:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.execute.side_effect = Exception("Table skills does not exist")
+            mock_store.count_skills.side_effect = Exception("Table skills does not exist")
             mock_open.return_value = mock_store
             result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
         assert result["passed"] is False
@@ -144,7 +144,7 @@ class TestCheckSkillSchema:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.execute.side_effect = Exception(
+            mock_store.count_skills.side_effect = Exception(
                 "Could not set lock on file /corpus/agentalloy.duck"
             )
             mock_open.return_value = mock_store
@@ -159,7 +159,7 @@ class TestCheckSkillSchema:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.execute.return_value = [[1]]
+            mock_store.count_skills.return_value = 1
             mock_open.return_value = mock_store
             result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
         assert result["passed"] is True
@@ -181,7 +181,7 @@ class TestCheckCorpusCount:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.execute.return_value = [[0]]
+            mock_store.count_skills.return_value = 0
             mock_open.return_value = mock_store
             mock_vs = MagicMock()
             mock_vs.count_embeddings.return_value = 0
@@ -201,7 +201,7 @@ class TestCheckCorpusCount:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.execute.return_value = [[30]]
+            mock_store.count_skills.return_value = 30
             mock_open.return_value = mock_store
             mock_vs = MagicMock()
             mock_vs.count_embeddings.return_value = 100

@@ -92,7 +92,7 @@ class OverGraphSkillStore:
 
     def close(self) -> None:
         """Close the database connection."""
-        if hasattr(self, '_bm25') and self._bm25 is not None:
+        if hasattr(self, "_bm25") and self._bm25 is not None:
             self._bm25.close()
         if self._db is not None:
             self._db.close()
@@ -212,27 +212,24 @@ class OverGraphSkillStore:
             for frag in fragments:
                 frag_node = self._db.get_node_by_key("Fragment", frag.fragment_id)
                 if frag_node:
-                    self._db.execute_gql(
-                        f"MATCH (n) WHERE id(n) = {frag_node.id} DETACH DELETE n"
-                    )
+                    self._db.execute_gql(f"MATCH (n) WHERE id(n) = {frag_node.id} DETACH DELETE n")
             # Delete the version node
             ver_node = self._db.get_node_by_key("SkillVersion", version.version_id)
             if ver_node:
-                self._db.execute_gql(
-                    f"MATCH (n) WHERE id(n) = {ver_node.id} DETACH DELETE n"
-                )
+                self._db.execute_gql(f"MATCH (n) WHERE id(n) = {ver_node.id} DETACH DELETE n")
 
-        # Delete dependencies
+        # Delete dependencies touching this skill (outgoing or incoming).
+        # Anchor on node ids: STARTNODE()/ENDNODE() and node-property
+        # projection are unsupported inside edge-pattern WHERE clauses.
         self._db.execute_gql(
-            f"MATCH ()-[r:{_EDGE_REQUIRES}]->() WHERE "
-            f"(STARTNODE(r).key = '{_gql_esc(skill_id)}' OR ENDNODE(r).key = '{_gql_esc(skill_id)}') "
-            f"DELETE r"
+            f"MATCH (s:Skill)-[r:{_EDGE_REQUIRES}]->() WHERE id(s) = {node.id} DELETE r"
+        )
+        self._db.execute_gql(
+            f"MATCH ()-[r:{_EDGE_REQUIRES}]->(t:Skill) WHERE id(t) = {node.id} DELETE r"
         )
 
         # Delete the skill node
-        self._db.execute_gql(
-            f"MATCH (n:Skill) WHERE id(n) = {node.id} DETACH DELETE n"
-        )
+        self._db.execute_gql(f"MATCH (n:Skill) WHERE id(n) = {node.id} DETACH DELETE n")
         return 1
 
     def rollback_skill(self, skill_id: str) -> None:
@@ -268,31 +265,41 @@ class OverGraphSkillStore:
 
     def get_versions_by_skill(self, skill_id: str) -> list[SkillVersionRow]:
         """Get all versions for a skill, ordered by version_number DESC."""
+        # ``v.key`` projection is broken in GQL — return the node id and read
+        # the key off the node itself.
         rows = self._db.execute_gql(
             f"MATCH (v:SkillVersion) WHERE v.skill_id = '{_gql_esc(skill_id)}' "
-            f"RETURN v.key AS version_id, v.skill_id, v.version_number, v.authored_at, "
-            f"v.author, v.change_summary, v.status, v.raw_prose "
+            f"RETURN id(v) AS vid, v.version_number "
             f"ORDER BY v.version_number DESC"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(SkillVersionRow(
-                    version_id=row.get("version_id", ""),
-                    skill_id=row.get("skill_id", ""),
-                    version_number=int(row.get("version_number", 0)),
-                    authored_at=row.get("authored_at"),
-                    author=row.get("author", ""),
-                    change_summary=row.get("change_summary", ""),
-                    status=row.get("status", ""),
-                    raw_prose=row.get("raw_prose", ""),
-                ))
+                vid = row.get("vid")
+                if vid is None:
+                    continue
+                node = self._db.get_node(int(vid))
+                if node is None:
+                    continue
+                props = dict(node.props)
+                results.append(
+                    SkillVersionRow(
+                        version_id=getattr(node, "key", "") or "",
+                        skill_id=props.get("skill_id", ""),
+                        version_number=int(props.get("version_number", 0)),
+                        authored_at=props.get("authored_at"),
+                        author=props.get("author", ""),
+                        change_summary=props.get("change_summary", ""),
+                        status=props.get("status", ""),
+                        raw_prose=props.get("raw_prose", ""),
+                    )
+                )
         return results
 
     def insert_version(self, version: SkillVersionRow) -> None:
         """Insert a version."""
         authored_at = version.authored_at
-        if hasattr(authored_at, 'isoformat'):
+        if hasattr(authored_at, "isoformat"):
             authored_at = authored_at.isoformat()
         props = {
             "skill_id": version.skill_id,
@@ -357,23 +364,48 @@ class OverGraphSkillStore:
                 props={"sequence": fragment.sequence},
             )
 
+    def count_fragments(self) -> int:
+        """Count all fragment nodes (any version/skill status)."""
+        try:
+            rows = self._db.execute_gql("MATCH (f:Fragment) RETURN count(f) AS cnt")
+            if isinstance(rows, dict) and rows.get("rows"):
+                return int(rows["rows"][0].get("cnt", 0))
+        except Exception:
+            pass
+        return 0
+
     # -- dependency CRUD -----------------------------------------------------
 
     def get_dependencies(self, skill_id: str) -> list[SkillDependencyRow]:
         """Get dependencies for a skill."""
+        # Anchor on the source node's id: the GQL engine cannot project node
+        # properties (``s.key``) inside edge-pattern matches — WHERE/RETURN on
+        # them silently yield None — so the working pattern is id(s)/id(t)
+        # plus a node lookup for the key.
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return []
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[r:{_EDGE_REQUIRES}]->(t:Skill) "
-            f"WHERE s.key = '{_gql_esc(skill_id)}' "
-            f"RETURN t.key AS target, r.rel_type AS rel_type"
+            f"WHERE id(s) = {source.id} "
+            f"RETURN id(t) AS tid, r.rel_type AS rel_type"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(SkillDependencyRow(
-                    source_skill_id=skill_id,
-                    target_skill_id=row.get("target", ""),
-                    rel_type=row.get("rel_type", "requires"),
-                ))
+                tid = row.get("tid")
+                if tid is None:
+                    continue
+                target_node = self._db.get_node(int(tid))
+                if target_node is None:
+                    continue
+                results.append(
+                    SkillDependencyRow(
+                        source_skill_id=skill_id,
+                        target_skill_id=getattr(target_node, "key", "") or "",
+                        rel_type=row.get("rel_type") or "requires",
+                    )
+                )
         return results
 
     def insert_dependency(self, dep: SkillDependencyRow) -> None:
@@ -387,6 +419,33 @@ class OverGraphSkillStore:
                 label=_EDGE_REQUIRES,
                 props={"rel_type": dep.rel_type},
             )
+
+    def delete_dependencies(self, skill_id: str, rel_type: str | None = None) -> int:
+        """Delete outgoing dependency edges for a skill. Returns edges removed.
+
+        With ``rel_type`` given, only edges of that type are removed; otherwise
+        all outgoing edges go (the re-ingest idempotency path). The graph
+        stores requires-edges under a single ``Requires`` label, so the count
+        is taken from ``get_dependencies`` (which carries each edge's rel_type
+        property) and the delete is one label-scoped GQL pass.
+        """
+        existing = self.get_dependencies(skill_id)
+        removed = [d for d in existing if rel_type is None or d.rel_type == rel_type]
+        if not removed:
+            return 0
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return 0
+        # Anchor on id(s) — see get_dependencies: node-property projection is
+        # broken inside edge-pattern matches.
+        rel_filter = "" if rel_type is None else f" AND r.rel_type = '{_gql_esc(rel_type)}'"
+        self._db.execute_gql(
+            f"MATCH (s:Skill)-[r:{_EDGE_REQUIRES}]->() "
+            f"WHERE id(s) = {source.id}{rel_filter} "
+            f"DELETE r"
+        )
+        self._db.flush()
+        return len(removed)
 
     # -- active-version reads ------------------------------------------------
 
@@ -422,37 +481,52 @@ class OverGraphSkillStore:
                 if node is None:
                     continue
                 skill_id = getattr(node, "key", "") or ""
-                results.append(SkillRow(
-                    skill_id=skill_id,
-                    canonical_name=row.get("s.canonical_name", "") or node.props.get("canonical_name", ""),
-                    category=row.get("s.category", "") or node.props.get("category", ""),
-                    skill_class=row.get("s.skill_class", "") or node.props.get("skill_class", ""),
-                    domain_tags=list(row.get("s.domain_tags", []) or node.props.get("domain_tags", []) or []),
-                    deprecated=bool(row.get("s.deprecated", False)),
-                    superseded_by=row.get("s.superseded_by") or node.props.get("superseded_by"),
-                    always_apply=bool(row.get("s.always_apply", False)),
-                    phase_scope=row.get("s.phase_scope") or node.props.get("phase_scope"),
-                    category_scope=row.get("s.category_scope") or node.props.get("category_scope"),
-                    tier=row.get("s.tier") or node.props.get("tier"),
-                    description=row.get("s.description") or node.props.get("description"),
-                    current_version_id=row.get("s.current_version_id", "") or node.props.get("current_version_id", ""),
-                ))
+                results.append(
+                    SkillRow(
+                        skill_id=skill_id,
+                        canonical_name=row.get("s.canonical_name", "")
+                        or node.props.get("canonical_name", ""),
+                        category=row.get("s.category", "") or node.props.get("category", ""),
+                        skill_class=row.get("s.skill_class", "")
+                        or node.props.get("skill_class", ""),
+                        domain_tags=list(
+                            row.get("s.domain_tags", []) or node.props.get("domain_tags", []) or []
+                        ),
+                        deprecated=bool(row.get("s.deprecated", False)),
+                        superseded_by=row.get("s.superseded_by") or node.props.get("superseded_by"),
+                        always_apply=bool(row.get("s.always_apply", False)),
+                        phase_scope=row.get("s.phase_scope") or node.props.get("phase_scope"),
+                        category_scope=row.get("s.category_scope")
+                        or node.props.get("category_scope"),
+                        tier=row.get("s.tier") or node.props.get("tier"),
+                        description=row.get("s.description") or node.props.get("description"),
+                        current_version_id=row.get("s.current_version_id", "")
+                        or node.props.get("current_version_id", ""),
+                    )
+                )
         return results
 
     def get_active_skill_by_id(self, skill_id: str) -> SkillRow | None:
         """Get an active skill by ID."""
+        # Anchor on id(s): ``s.key`` WHERE is broken in edge-pattern matches.
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return None
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
-            f"WHERE s.key = '{_gql_esc(skill_id)}' AND v.status = 'active' AND s.deprecated = false "
-            f"RETURN s.key AS skill_id, s.canonical_name, s.category, s.skill_class, "
-            f"s.domain_tags, s.deprecated, s.superseded_by, s.always_apply, "
-            f"s.phase_scope, s.category_scope, s.tier, s.description, s.current_version_id "
+            f"WHERE id(s) = {source.id} AND v.status = 'active' AND s.deprecated = false "
+            f"RETURN s.canonical_name AS canonical_name, s.category AS category, "
+            f"s.skill_class AS skill_class, s.domain_tags AS domain_tags, "
+            f"s.deprecated AS deprecated, s.superseded_by AS superseded_by, "
+            f"s.always_apply AS always_apply, s.phase_scope AS phase_scope, "
+            f"s.category_scope AS category_scope, s.tier AS tier, "
+            f"s.description AS description, s.current_version_id AS current_version_id "
             f"LIMIT 1"
         )
         if isinstance(rows, dict) and rows.get("rows"):
             row = rows["rows"][0]
             return SkillRow(
-                skill_id=row.get("skill_id", ""),
+                skill_id=skill_id,
                 canonical_name=row.get("canonical_name", ""),
                 category=row.get("category", ""),
                 skill_class=row.get("skill_class", ""),
@@ -470,14 +544,29 @@ class OverGraphSkillStore:
 
     def get_deprecated_skill_ids(self) -> list[str]:
         """Get IDs of all deprecated skills."""
-        rows = self._db.execute_gql(
-            "MATCH (s:Skill) WHERE s.deprecated = true RETURN s.key AS skill_id"
-        )
+        # ``s.key`` projection is broken in GQL — return node ids and resolve
+        # the keys off the nodes.
+        rows = self._db.execute_gql("MATCH (s:Skill) WHERE s.deprecated = true RETURN id(s) AS sid")
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(row.get("skill_id", ""))
+                sid = row.get("sid")
+                if sid is None:
+                    continue
+                node = self._db.get_node(int(sid))
+                if node is not None:
+                    results.append(getattr(node, "key", "") or "")
         return results
+
+    def count_skills(self) -> int:
+        """Count all skill nodes (any deprecation/version status)."""
+        try:
+            rows = self._db.execute_gql("MATCH (s:Skill) RETURN count(s) AS cnt")
+            if isinstance(rows, dict) and rows.get("rows"):
+                return int(rows["rows"][0].get("cnt", 0))
+        except Exception:
+            pass
+        return 0
 
     def get_active_fragments(
         self,
@@ -517,27 +606,40 @@ class OverGraphSkillStore:
                 node = self._db.get_node(int(fid))
                 if node is None:
                     continue
-                results.append(FragmentRow(
-                    fragment_id=getattr(node, "key", "") or "",
-                    version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
-                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
-                    sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
-                    content=row.get("f.content", "") or node.props.get("content", ""),
-                    skill_id=node.props.get("skill_id", "") if hasattr(node, "props") else "",
-                    category=node.props.get("category", "") if hasattr(node, "props") else "",
-                    skill_class="",
-                    domain_tags=list(node.props.get("domain_tags", []) or []) if hasattr(node, "props") else [],
-                    phase_scope=node.props.get("phase_scope") if hasattr(node, "props") else None,
-                    category_scope=None,
-                    description=node.props.get("description") if hasattr(node, "props") else None,
-                ))
+                results.append(
+                    FragmentRow(
+                        fragment_id=getattr(node, "key", "") or "",
+                        version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
+                        fragment_type=row.get("f.fragment_type", "")
+                        or node.props.get("fragment_type", ""),
+                        sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
+                        content=row.get("f.content", "") or node.props.get("content", ""),
+                        skill_id=node.props.get("skill_id", "") if hasattr(node, "props") else "",
+                        category=node.props.get("category", "") if hasattr(node, "props") else "",
+                        skill_class="",
+                        domain_tags=list(node.props.get("domain_tags", []) or [])
+                        if hasattr(node, "props")
+                        else [],
+                        phase_scope=node.props.get("phase_scope")
+                        if hasattr(node, "props")
+                        else None,
+                        category_scope=None,
+                        description=node.props.get("description")
+                        if hasattr(node, "props")
+                        else None,
+                    )
+                )
         return results
 
     def get_active_fragments_for_skill(self, skill_id: str) -> list[FragmentRow]:
         """Get fragments for a specific active skill."""
+        # Anchor on id(s): ``s.key`` WHERE is broken in edge-pattern matches.
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return []
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
-            f"WHERE s.key = '{_gql_esc(skill_id)}' AND v.status = 'active' AND s.deprecated = false "
+            f"WHERE id(s) = {source.id} AND v.status = 'active' AND s.deprecated = false "
             f"RETURN id(f) AS fid, f.version_id, f.fragment_type, f.sequence, f.content "
             f"ORDER BY f.sequence"
         )
@@ -550,13 +652,16 @@ class OverGraphSkillStore:
                 node = self._db.get_node(int(fid))
                 if node is None:
                     continue
-                results.append(FragmentRow(
-                    fragment_id=getattr(node, "key", "") or "",
-                    version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
-                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
-                    sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
-                    content=row.get("f.content", "") or node.props.get("content", ""),
-                ))
+                results.append(
+                    FragmentRow(
+                        fragment_id=getattr(node, "key", "") or "",
+                        version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
+                        fragment_type=row.get("f.fragment_type", "")
+                        or node.props.get("fragment_type", ""),
+                        sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
+                        content=row.get("f.content", "") or node.props.get("content", ""),
+                    )
+                )
         return results
 
     # -- re-embed pipeline ---------------------------------------------------
@@ -567,36 +672,70 @@ class OverGraphSkillStore:
         skill_id: str | None = None,
     ) -> list[FragmentDiscoveryRow]:
         """Discover fragments for the re-embed pipeline."""
+        # ``.key`` projection/WHERE is broken in edge-pattern matches — anchor
+        # on id(s) for the per-skill filter and resolve fragment/skill keys via
+        # node lookups. Sorting happens in Python (ORDER BY s.key is unusable).
+        anchor_clause = ""
+        source_id: int | None = None
         if skill_id is not None:
-            rows = self._db.execute_gql(
-                f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
-                f"WHERE v.status = 'active' AND s.deprecated = false AND s.key = '{_gql_esc(skill_id)}' "
-                f"RETURN f.key AS fragment_id, f.content, f.fragment_type, s.key AS skill_id, "
-                f"s.category, s.canonical_name, s.domain_tags, s.description "
-                f"ORDER BY f.sequence"
-            )
-        else:
-            rows = self._db.execute_gql(
-                f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
-                f"WHERE v.status = 'active' AND s.deprecated = false "
-                f"RETURN f.key AS fragment_id, f.content, f.fragment_type, s.key AS skill_id, "
-                f"s.category, s.canonical_name, s.domain_tags, s.description "
-                f"ORDER BY s.key, f.sequence"
-            )
-        results = []
+            source = self._db.get_node_by_key("Skill", skill_id)
+            if source is None:
+                return []
+            source_id = source.id
+            anchor_clause = f" AND id(s) = {source_id}"
+        rows = self._db.execute_gql(
+            f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
+            f"WHERE v.status = 'active' AND s.deprecated = false{anchor_clause} "
+            f"RETURN id(f) AS fid, id(s) AS sid, f.content AS content, "
+            f"f.fragment_type AS fragment_type, f.sequence AS sequence, "
+            f"s.category AS category, s.canonical_name AS canonical_name, "
+            f"s.domain_tags AS domain_tags, s.description AS description"
+        )
+        raw: list[tuple[int, int, int, dict[str, Any]]] = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(FragmentDiscoveryRow(
-                    fragment_id=row.get("fragment_id", ""),
-                    content=row.get("content", ""),
-                    fragment_type=row.get("fragment_type", ""),
-                    skill_id=row.get("skill_id", ""),
-                    category=row.get("category", ""),
-                    canonical_name=row.get("canonical_name", "") or "",
-                    domain_tags=tuple(row.get("domain_tags", []) or []),
-                    description=(row.get("description") or "").strip() or None,
-                ))
-        return results
+                fid = row.get("fid")
+                sid = row.get("sid")
+                if fid is None or sid is None:
+                    continue
+                raw.append((int(fid), int(sid), int(row.get("sequence") or 0), row))
+        results: list[tuple[str, int, FragmentDiscoveryRow]] = []
+        for fid, sid, seq, row in raw:
+            frag_node = self._db.get_node(fid)
+            skill_node = self._db.get_node(sid)
+            if frag_node is None or skill_node is None:
+                continue
+            frag_key = getattr(frag_node, "key", "") or ""
+            skill_key = getattr(skill_node, "key", "") or ""
+            results.append(
+                (
+                    skill_key,
+                    seq,
+                    FragmentDiscoveryRow(
+                        fragment_id=frag_key,
+                        content=row.get("content") or frag_node.props.get("content", ""),
+                        fragment_type=row.get("fragment_type")
+                        or frag_node.props.get("fragment_type", ""),
+                        skill_id=skill_key,
+                        category=row.get("category") or skill_node.props.get("category", ""),
+                        canonical_name=row.get("canonical_name")
+                        or skill_node.props.get("canonical_name", "")
+                        or "",
+                        domain_tags=tuple(
+                            row.get("domain_tags") or skill_node.props.get("domain_tags") or ()
+                        ),
+                        description=(
+                            (
+                                row.get("description") or skill_node.props.get("description") or ""
+                            ).strip()
+                            or None
+                        ),
+                    ),
+                )
+            )
+        # DuckDB parity: order by (skill_id, fragment sequence).
+        results.sort(key=lambda item: (item[0], item[1]))
+        return [dto for _skill_key, _seq, dto in results]
 
     # -- consistency guards --------------------------------------------------
 
@@ -608,16 +747,21 @@ class OverGraphSkillStore:
         """Check CURRENT_VERSION / active-version consistency."""
         from agentalloy.reads.active import InconsistentActiveVersionError
 
-        # Check for CURRENT_VERSION pointing to non-active version
+        # Check for CURRENT_VERSION pointing to non-active version.
+        # ``s.key`` projection is broken in edge-pattern matches — return the
+        # node id and resolve the key off the node.
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
             f"WHERE v.status <> 'active' "
-            f"RETURN s.key AS skill_id, v.status LIMIT 1"
+            f"RETURN id(s) AS sid, v.status LIMIT 1"
         )
         if isinstance(rows, dict) and rows.get("rows"):
             row = rows["rows"][0]
+            sid = row.get("sid")
+            node = self._db.get_node(int(sid)) if sid is not None else None
+            skill_key = (getattr(node, "key", "") or "") if node is not None else ""
             raise InconsistentActiveVersionError(
-                row.get("skill_id", ""),
+                skill_key,
                 f"CURRENT_VERSION points at status={row.get('status')!r} version",
             )
 
@@ -625,9 +769,13 @@ class OverGraphSkillStore:
         """Check consistency for a specific skill."""
         from agentalloy.reads.active import InconsistentActiveVersionError
 
+        # Anchor on id(s): ``s.key`` WHERE is broken in edge-pattern matches.
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
-            f"WHERE s.key = '{_gql_esc(skill_id)}' AND v.status <> 'active' "
+            f"WHERE id(s) = {source.id} AND v.status <> 'active' "
             f"RETURN v.status LIMIT 1"
         )
         if isinstance(rows, dict) and rows.get("rows"):
@@ -663,44 +811,71 @@ class OverGraphSkillStore:
 
     def _get_versions_for_skill(self, skill_id: str) -> list[SkillVersionRow]:
         """Get all versions for a skill."""
+        # Anchor on node ids — ``.key`` projection/WHERE is broken inside
+        # edge-pattern matches (see get_dependencies).
+        source = self._db.get_node_by_key("Skill", skill_id)
+        if source is None:
+            return []
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_HAS_VERSION}]->(v:SkillVersion) "
-            f"WHERE s.key = '{_gql_esc(skill_id)}' "
-            f"RETURN v.key AS version_id, v.skill_id, v.version_number, v.authored_at, "
-            f"v.author, v.change_summary, v.status, v.raw_prose"
+            f"WHERE id(s) = {source.id} "
+            f"RETURN id(v) AS vid"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(SkillVersionRow(
-                    version_id=row.get("version_id", ""),
-                    skill_id=row.get("skill_id", ""),
-                    version_number=int(row.get("version_number", 0)),
-                    authored_at=row.get("authored_at"),
-                    author=row.get("author", ""),
-                    change_summary=row.get("change_summary", ""),
-                    status=row.get("status", ""),
-                    raw_prose=row.get("raw_prose", ""),
-                ))
+                vid = row.get("vid")
+                if vid is None:
+                    continue
+                node = self._db.get_node(int(vid))
+                if node is None:
+                    continue
+                props = dict(node.props)
+                results.append(
+                    SkillVersionRow(
+                        version_id=getattr(node, "key", "") or "",
+                        skill_id=props.get("skill_id", ""),
+                        version_number=int(props.get("version_number", 0)),
+                        authored_at=props.get("authored_at"),
+                        author=props.get("author", ""),
+                        change_summary=props.get("change_summary", ""),
+                        status=props.get("status", ""),
+                        raw_prose=props.get("raw_prose", ""),
+                    )
+                )
         return results
 
     def _get_fragments_for_version(self, version_id: str) -> list[FragmentRow]:
         """Get all fragments for a version."""
+        # Anchor on node ids — ``.key`` projection/WHERE is broken inside
+        # edge-pattern matches (see get_dependencies).
+        ver_node = self._db.get_node_by_key("SkillVersion", version_id)
+        if ver_node is None:
+            return []
         rows = self._db.execute_gql(
             f"MATCH (v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
-            f"WHERE v.key = '{_gql_esc(version_id)}' "
-            f"RETURN f.key AS fragment_id, f.version_id, f.fragment_type, f.sequence, f.content"
+            f"WHERE id(v) = {ver_node.id} "
+            f"RETURN id(f) AS fid"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
-                results.append(FragmentRow(
-                    fragment_id=row.get("fragment_id", ""),
-                    version_id=row.get("version_id", ""),
-                    fragment_type=row.get("fragment_type", ""),
-                    sequence=int(row.get("sequence", 0)),
-                    content=row.get("content", ""),
-                ))
+                fid = row.get("fid")
+                if fid is None:
+                    continue
+                node = self._db.get_node(int(fid))
+                if node is None:
+                    continue
+                props = dict(node.props)
+                results.append(
+                    FragmentRow(
+                        fragment_id=getattr(node, "key", "") or "",
+                        version_id=props.get("version_id", ""),
+                        fragment_type=props.get("fragment_type", ""),
+                        sequence=int(props.get("sequence", 0)),
+                        content=props.get("content", ""),
+                    )
+                )
         return results
 
     # -- FragmentStore protocol (vector + BM25 search over fragments) --------
@@ -714,6 +889,7 @@ class OverGraphSkillStore:
                 continue
             # Skip zero vectors (from failed embeddings)
             import math
+
             norm = math.sqrt(sum(x * x for x in item.embedding))
             if norm < 1e-9:
                 logger.debug("skipping zero vector for %s", item.fragment_id)
@@ -724,16 +900,18 @@ class OverGraphSkillStore:
             if frag_node is not None:
                 # Update existing node with vector
                 props = dict(frag_node.props)
-                props.update({
-                    "skill_id": item.skill_id,
-                    "category": item.category,
-                    "fragment_type": item.fragment_type,
-                    "embedded_at": item.embedded_at,
-                    "embedding_model": item.embedding_model,
-                    "prose": item.prose,
-                    "phase_scope": list(item.phase_scope) if item.phase_scope else None,
-                    "domain_tags": list(item.domain_tags) if item.domain_tags else None,
-                })
+                props.update(
+                    {
+                        "skill_id": item.skill_id,
+                        "category": item.category,
+                        "fragment_type": item.fragment_type,
+                        "embedded_at": item.embedded_at,
+                        "embedding_model": item.embedding_model,
+                        "prose": item.prose,
+                        "phase_scope": list(item.phase_scope) if item.phase_scope else None,
+                        "domain_tags": list(item.domain_tags) if item.domain_tags else None,
+                    }
+                )
                 self._db.upsert_node(
                     labels=["Fragment"],
                     key=item.fragment_id,
@@ -827,11 +1005,13 @@ class OverGraphSkillStore:
                 frag_tags = set(props.get("domain_tags") or [])
                 if not frag_tags & set(domain_tags):
                     continue
-            results.append(SimilarityHit(
-                fragment_id=getattr(node, "key", ""),
-                skill_id=skill_id,
-                distance=1.0 - float(hit.score),  # Convert similarity to distance
-            ))
+            results.append(
+                SimilarityHit(
+                    fragment_id=getattr(node, "key", ""),
+                    skill_id=skill_id,
+                    distance=1.0 - float(hit.score),  # Convert similarity to distance
+                )
+            )
             if len(results) >= k:
                 break
         return results
@@ -860,8 +1040,7 @@ class OverGraphSkillStore:
         count = 0
         for skill_id, scope in scope_by_skill.items():
             rows = self._db.execute_gql(
-                f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' "
-                f"RETURN id(f) AS nid"
+                f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' RETURN id(f) AS nid"
             )
             if isinstance(rows, dict):
                 for row in rows.get("rows", []):
@@ -919,9 +1098,7 @@ class OverGraphSkillStore:
                 for row in rows.get("rows", []):
                     nid = row.get("nid")
                     if nid is not None:
-                        self._db.execute_gql(
-                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
-                        )
+                        self._db.execute_gql(f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n")
                         count += 1
             self._db.flush()
             return count
@@ -944,9 +1121,7 @@ class OverGraphSkillStore:
                 for row in rows.get("rows", []):
                     nid = row.get("nid")
                     if nid is not None:
-                        self._db.execute_gql(
-                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
-                        )
+                        self._db.execute_gql(f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n")
                         count += 1
             self._db.flush()
             return count
@@ -975,24 +1150,13 @@ class OverGraphSkillStore:
         """Check which fragment_ids already have embeddings."""
         if not fragment_ids:
             return set()
+        # ``f.key`` projection/WHERE is broken in GQL — resolve each id via a
+        # direct node lookup instead.
         present: set[str] = set()
-        # Check in chunks
-        chunk_size = 100
-        for i in range(0, len(fragment_ids), chunk_size):
-            chunk = fragment_ids[i:i + chunk_size]
-            keys = ", ".join(f"'{_gql_esc(fid)}'" for fid in chunk)
-            try:
-                rows = self._db.execute_gql(
-                    f"MATCH (f:Fragment) WHERE f.key IN [{keys}] AND f.embedded_at IS NOT NULL "
-                    f"RETURN f.key AS fid"
-                )
-                if isinstance(rows, dict):
-                    for row in rows.get("rows", []):
-                        fid = row.get("fid")
-                        if fid:
-                            present.add(fid)
-            except Exception:
-                pass
+        for fid in fragment_ids:
+            node = self._db.get_node_by_key("Fragment", fid)
+            if node is not None and dict(node.props).get("embedded_at") is not None:
+                present.add(fid)
         return present
 
     def rebuild_fts_index(self) -> None:
@@ -1015,7 +1179,8 @@ class OverGraphSkillStore:
                     fragment_id=getattr(node, "key", "") or "",
                     skill_id=row.get("f.skill_id", "") or node.props.get("skill_id", ""),
                     category=row.get("f.category", "") or node.props.get("category", ""),
-                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
+                    fragment_type=row.get("f.fragment_type", "")
+                    or node.props.get("fragment_type", ""),
                     prose=row.get("f.prose", "") or node.props.get("prose", ""),
                     phase_scope=row.get("f.phase_scope") or node.props.get("phase_scope"),
                     domain_tags=row.get("f.domain_tags") or node.props.get("domain_tags"),
