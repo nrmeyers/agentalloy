@@ -1203,6 +1203,39 @@ async def evaluate_signal(
             # the linear intake → spec.
             route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
             lane = route_hint if route_hint else "sdd-full"
+            
+            # Intent-based contract creation: if we're in intake and the trigger fired,
+            # auto-create the first contract before gate evaluation. This eliminates
+            # the fragile dependency on the agent outputting HTML comment markers.
+            if phase == INTAKE_PHASE and ctx.store is not None:
+                # Generate a slug from the task (first 50 chars, sanitized)
+                import re as _re
+                task_text = task or "intake"
+                slug = _re.sub(r'[^a-z0-9]+', '-', task_text.lower())[:50].strip('-')
+                if not slug:
+                    slug = "intake"
+                
+                # Check if a contract already exists for spec phase
+                existing = ctx.store.list_contracts(phase="spec", status="active")
+                if not existing:
+                    # Auto-create the first contract for spec phase
+                    contract_id = f"spec/{slug}"
+                    try:
+                        ctx.store.put_contract(
+                            contract_id,
+                            phase="spec",
+                            slug=slug,
+                            domain_tags=[],
+                            scope_touches=[],
+                            scope_avoids=[],
+                            body=task or "",  # Use the task as the initial contract body
+                        )
+                        logger.info(
+                            "Intent-based: auto-created first contract for phase=spec slug=%s",
+                            slug,
+                        )
+                    except Exception:
+                        logger.debug("intent-based contract creation failed", exc_info=True)
             # Execute the LangGraph to route the transition (task 07).
             # The graph's nodes load workflow prose; conditional edges decide routing.
             from agentalloy.signals.graph import (  # noqa: PLC0415
