@@ -81,7 +81,7 @@ class OverGraphSkillStore:
         self._verify_dimension_alignment(vector_dimension)
         # Tantivy BM25 sidecar for full-text keyword search
         bm25_path = Path(self._db_path).parent / (Path(self._db_path).stem + ".bm25")
-        self._bm25 = TantivyBM25Index(bm25_path)
+        self._bm25 = TantivyBM25Index(bm25_path, read_only=read_only)
         logger.debug("OverGraph skill store opened at %s", db_path)
 
     def _verify_dimension_alignment(self, expected_dim: int) -> None:

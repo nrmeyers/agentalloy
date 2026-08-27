@@ -26,15 +26,16 @@ class TantivyBM25Index:
     filtered search.
     """
 
-    def __init__(self, index_path: str | Path) -> None:
+    def __init__(self, index_path: str | Path, *, read_only: bool = False) -> None:
         self._path = str(index_path)
         self._schema = self._build_schema()
+        self._read_only = read_only
         Path(self._path).mkdir(parents=True, exist_ok=True)
-        if (Path(self._path) / "meta.json").exists():
-            self._index = tantivy.Index(self._schema, path=self._path)
+        self._index = tantivy.Index(self._schema, path=self._path)
+        if read_only:
+            self._writer = None  # type: ignore[assignment]
         else:
-            self._index = tantivy.Index(self._schema, path=self._path)
-        self._writer = self._index.writer()
+            self._writer = self._index.writer()
         self._index.reload()
 
     @staticmethod
@@ -182,6 +183,12 @@ class TantivyBM25Index:
         return searcher.search(q, limit=1).count
 
     def close(self) -> None:
-        """Close the index."""
+        """Close the index, releasing the Tantivy writer lock."""
+        import gc
+
         with contextlib.suppress(Exception):
             self._writer.commit()
+        with contextlib.suppress(Exception):
+            del self._writer
+        self._writer = None  # type: ignore[assignment]
+        gc.collect()
