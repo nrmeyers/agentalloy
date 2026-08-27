@@ -218,7 +218,8 @@ def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
             return override()
     except Exception:  # noqa: BLE001
         pass
-    return None
+    # Fallback: lifespan stores the orchestrator on app.state
+    return getattr(request.app.state, "compose_orchestrator", None)
 
 
 def get_settings_for_proxy(request: Request) -> AppSettings:
