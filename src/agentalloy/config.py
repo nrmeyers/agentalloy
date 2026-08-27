@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     # between manual runs. Off in code/dev/tests; the container entrypoint opts in
     # (300). Env: CODE_INDEX_REFRESH_SECONDS.
     code_index_refresh_seconds: int = 0
+    # Graph backend for code index: "duckdb" (default, DuckDB + LanceDB) or
+    # "overgraph" (unified graph + vector in single embedded database).
+    # Env: CODE_INDEX_GRAPH_BACKEND.
+    code_index_graph_backend: str = "duckdb"
     # JIT push phase 2: merge related (thematic) decisions via
     # ``related_decisions(task_title)`` into the decision block.  Measured
     # median overhead ≈ 4 ms (p95 ≈ 5 ms) — well within the 300 ms compose

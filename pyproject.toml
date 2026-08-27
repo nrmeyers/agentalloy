@@ -17,6 +17,7 @@ dependencies = [
     "rich>=13.0",
     "duckdb>=1.5.4",
     "lancedb>=0.13",
+    "overgraph>=0.17.0",
     "pyarrow>=15.0",
     "watchdog>=6.0.0",
     # codex provider writes .codex/config.toml (reads use stdlib tomllib).
