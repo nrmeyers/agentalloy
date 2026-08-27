@@ -27,9 +27,12 @@ from typing import Any
 
 from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
+    BM25Hit,
     EmbeddingDimMismatch,
     FragmentDiscoveryRow,
+    FragmentEmbedding,
     FragmentRow,
+    SimilarityHit,
     SkillDependencyRow,
     SkillRow,
     SkillStore,
@@ -668,6 +671,325 @@ class OverGraphSkillStore:
                     content=row.get("content", ""),
                 ))
         return results
+
+    # -- FragmentStore protocol (vector + BM25 search over fragments) --------
+
+    def insert_embeddings(self, items: Iterable[FragmentEmbedding]) -> int:
+        """Upsert fragment embeddings into the HNSW index."""
+        count = 0
+        for item in items:
+            normalized = l2_normalize(item.embedding)
+            # Get or create the Fragment node
+            frag_node = self._db.get_node_by_key("Fragment", item.fragment_id)
+            if frag_node is not None:
+                # Update existing node with vector
+                props = dict(frag_node.props)
+                props.update({
+                    "skill_id": item.skill_id,
+                    "category": item.category,
+                    "fragment_type": item.fragment_type,
+                    "embedded_at": item.embedded_at,
+                    "embedding_model": item.embedding_model,
+                    "prose": item.prose,
+                    "phase_scope": list(item.phase_scope) if item.phase_scope else None,
+                    "domain_tags": list(item.domain_tags) if item.domain_tags else None,
+                })
+                self._db.upsert_node(
+                    labels=["Fragment"],
+                    key=item.fragment_id,
+                    props=props,
+                    dense_vector=normalized,
+                )
+            else:
+                # Create new Fragment node with vector
+                props = {
+                    "skill_id": item.skill_id,
+                    "category": item.category,
+                    "fragment_type": item.fragment_type,
+                    "embedded_at": item.embedded_at,
+                    "embedding_model": item.embedding_model,
+                    "prose": item.prose,
+                    "phase_scope": list(item.phase_scope) if item.phase_scope else None,
+                    "domain_tags": list(item.domain_tags) if item.domain_tags else None,
+                }
+                self._db.upsert_node(
+                    labels=["Fragment"],
+                    key=item.fragment_id,
+                    props=props,
+                    dense_vector=normalized,
+                )
+            count += 1
+        self._db.flush()
+        return count
+
+    def search_similar(
+        self,
+        query_vec: Sequence[float],
+        *,
+        categories: list[str] | None = None,
+        phases: list[str] | None = None,
+        fragment_types: list[str] | None = None,
+        deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
+        k: int = 10,
+    ) -> list[SimilarityHit]:
+        """Dense vector similarity search over fragment embeddings.
+
+        OverGraph's vector_search doesn't support property-level filtering,
+        so we fetch more candidates than needed and post-filter in Python.
+        """
+        normalized_query = l2_normalize(list(query_vec))
+        # Fetch more candidates to account for post-filtering
+        fetch_k = max(k * 5, 100)
+        try:
+            raw_hits = self._db.vector_search(
+                mode="dense",
+                k=fetch_k,
+                dense_query=normalized_query,
+                label_filter={"labels": ["Fragment"]},
+            )
+        except Exception:
+            logger.debug("vector_search failed", exc_info=True)
+            return []
+
+        deprecated_set = set(deprecated_skill_ids or [])
+        results: list[SimilarityHit] = []
+        for hit in raw_hits:
+            node = self._db.get_node(hit.node_id)
+            if node is None:
+                continue
+            props = dict(node.props)
+            skill_id = props.get("skill_id", "")
+            # Post-filter
+            if skill_id in deprecated_set:
+                continue
+            if categories and props.get("category") not in categories:
+                continue
+            if fragment_types and props.get("fragment_type") not in fragment_types:
+                continue
+            if phases:
+                frag_phases = props.get("phase_scope") or []
+                if not set(frag_phases) & set(phases):
+                    continue
+            if domain_tags:
+                frag_tags = set(props.get("domain_tags") or [])
+                if not frag_tags & set(domain_tags):
+                    continue
+            results.append(SimilarityHit(
+                fragment_id=getattr(node, "key", ""),
+                skill_id=skill_id,
+                distance=1.0 - float(hit.score),  # Convert similarity to distance
+            ))
+            if len(results) >= k:
+                break
+        return results
+
+    def search_bm25(
+        self,
+        query: str,
+        *,
+        categories: list[str] | None = None,
+        phases: list[str] | None = None,
+        deprecated_skill_ids: list[str] | None = None,
+        domain_tags: list[str] | None = None,
+        k: int = 10,
+    ) -> list[BM25Hit]:
+        """BM25 keyword search over fragment prose.
+
+        OverGraph doesn't have native FTS, so we use GQL CONTAINS as a
+        poor-man's full-text search and score by occurrence count.
+        """
+        deprecated_set = set(deprecated_skill_ids or [])
+        query_lower = query.lower()
+        # Build GQL filter
+        filters = ["f.prose IS NOT NULL"]
+        if categories:
+            cats = ", ".join(f"'{_gql_esc(c)}'" for c in categories)
+            filters.append(f"f.category IN [{cats}]")
+        if phases:
+            phs = ", ".join(f"'{_gql_esc(p)}'" for p in phases)
+            filters.append(f"(f.phase_scope IS NOT NULL AND ANY(p IN f.phase_scope WHERE p IN [{phs}]))")
+        if domain_tags:
+            tags = ", ".join(f"'{_gql_esc(t)}'" for t in domain_tags)
+            filters.append(f"(f.domain_tags IS NOT NULL AND ANY(t IN f.domain_tags WHERE t IN [{tags}]))")
+        filter_clause = " AND ".join(filters)
+        try:
+            rows = self._db.execute_gql(
+                f"MATCH (f:Fragment) WHERE {filter_clause} "
+                f"RETURN f.key AS fragment_id, f.skill_id, f.prose LIMIT 500"
+            )
+        except Exception:
+            logger.debug("BM25 GQL query failed", exc_info=True)
+            return []
+
+        results: list[BM25Hit] = []
+        if isinstance(rows, dict):
+            for row in rows.get("rows", []):
+                skill_id = row.get("skill_id", "")
+                if skill_id in deprecated_set:
+                    continue
+                prose = (row.get("prose") or "").lower()
+                score = float(prose.count(query_lower))
+                if score > 0:
+                    results.append(BM25Hit(
+                        fragment_id=row.get("fragment_id", ""),
+                        score=score,
+                    ))
+        results.sort(key=lambda h: h.score, reverse=True)
+        return results[:k]
+
+    def backfill_phase_scope(self, scope_by_skill: dict[str, list[str] | None]) -> int:
+        """Update phase_scope on fragment nodes by skill_id."""
+        count = 0
+        for skill_id, scope in scope_by_skill.items():
+            rows = self._db.execute_gql(
+                f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' "
+                f"RETURN id(f) AS nid"
+            )
+            if isinstance(rows, dict):
+                for row in rows.get("rows", []):
+                    nid = row.get("nid")
+                    if nid is not None:
+                        node = self._db.get_node(int(nid))
+                        if node:
+                            props = dict(node.props)
+                            props["phase_scope"] = list(scope) if scope else None
+                            self._db.upsert_node(
+                                labels=["Fragment"],
+                                key=getattr(node, "key", ""),
+                                props=props,
+                            )
+                            count += 1
+        self._db.flush()
+        return count
+
+    def count_embeddings(self) -> int:
+        """Count fragment nodes with dense_vector set."""
+        try:
+            rows = self._db.execute_gql(
+                "MATCH (f:Fragment) WHERE f.embedded_at IS NOT NULL RETURN count(f) AS cnt"
+            )
+            if isinstance(rows, dict) and rows.get("rows"):
+                return int(rows["rows"][0].get("cnt", 0))
+        except Exception:
+            pass
+        return 0
+
+    def count_cards(self) -> int:
+        """Count synthetic card documents."""
+        try:
+            rows = self._db.execute_gql(
+                "MATCH (f:Fragment) WHERE f.fragment_type = 'card' RETURN count(f) AS cnt"
+            )
+            if isinstance(rows, dict) and rows.get("rows"):
+                return int(rows["rows"][0].get("cnt", 0))
+        except Exception:
+            pass
+        return 0
+
+    def delete_cards(self, skill_id: str | None = None) -> int:
+        """Delete synthetic card documents."""
+        if skill_id:
+            filter_clause = f"f.fragment_type = 'card' AND f.skill_id = '{_gql_esc(skill_id)}'"
+        else:
+            filter_clause = "f.fragment_type = 'card'"
+        try:
+            rows = self._db.execute_gql(
+                f"MATCH (f:Fragment) WHERE {filter_clause} RETURN id(f) AS nid"
+            )
+            count = 0
+            if isinstance(rows, dict):
+                for row in rows.get("rows", []):
+                    nid = row.get("nid")
+                    if nid is not None:
+                        self._db.execute_gql(
+                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
+                        )
+                        count += 1
+            self._db.flush()
+            return count
+        except Exception:
+            return 0
+
+    def delete_skill(self, skill_id: str) -> int:
+        """Delete all fragment embeddings for a skill."""
+        try:
+            rows = self._db.execute_gql(
+                f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' RETURN id(f) AS nid"
+            )
+            count = 0
+            if isinstance(rows, dict):
+                for row in rows.get("rows", []):
+                    nid = row.get("nid")
+                    if nid is not None:
+                        self._db.execute_gql(
+                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
+                        )
+                        count += 1
+            self._db.flush()
+            return count
+        except Exception:
+            return 0
+
+    def delete_all(self) -> int:
+        """Delete all fragment embeddings."""
+        try:
+            rows = self._db.execute_gql(
+                "MATCH (f:Fragment) RETURN id(f) AS nid"
+            )
+            count = 0
+            if isinstance(rows, dict):
+                for row in rows.get("rows", []):
+                    nid = row.get("nid")
+                    if nid is not None:
+                        self._db.execute_gql(
+                            f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n"
+                        )
+                        count += 1
+            self._db.flush()
+            return count
+        except Exception:
+            return 0
+
+    def embedding_dim(self) -> int | None:
+        """Return the embedding dimension, or None if no embeddings exist."""
+        count = self.count_embeddings()
+        if count == 0:
+            return None
+        return self._vector_dimension
+
+    def fragment_ids_present(self, fragment_ids: Sequence[str]) -> set[str]:
+        """Check which fragment_ids already have embeddings."""
+        if not fragment_ids:
+            return set()
+        present: set[str] = set()
+        # Check in chunks
+        chunk_size = 100
+        for i in range(0, len(fragment_ids), chunk_size):
+            chunk = fragment_ids[i:i + chunk_size]
+            keys = ", ".join(f"'{_gql_esc(fid)}'" for fid in chunk)
+            try:
+                rows = self._db.execute_gql(
+                    f"MATCH (f:Fragment) WHERE f.key IN [{keys}] AND f.embedded_at IS NOT NULL "
+                    f"RETURN f.key AS fid"
+                )
+                if isinstance(rows, dict):
+                    for row in rows.get("rows", []):
+                        fid = row.get("fid")
+                        if fid:
+                            present.add(fid)
+            except Exception:
+                pass
+        return present
+
+    def rebuild_fts_index(self) -> None:
+        """No-op — OverGraph doesn't have a separate FTS index."""
+        pass
+
+    def bulk_replace(self, items: Iterable[FragmentEmbedding]) -> int:
+        """Atomically replace all fragment embeddings."""
+        self.delete_all()
+        return self.insert_embeddings(items)
 
 
 def _gql_esc(s: str) -> str:

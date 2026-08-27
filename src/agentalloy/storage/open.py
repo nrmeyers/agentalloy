@@ -28,13 +28,23 @@ from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_teleme
 Role = Literal["service", "writer", "reader"]
 
 
-def open_fragments(settings: Settings | None = None) -> LanceFragmentStore:
+def open_fragments(settings: Settings | None = None) -> LanceFragmentStore | OverGraphSkillStore:
+    """Open the fragment vector store. Backend selected by settings.skill_store_backend."""
     s = settings or get_settings()
+    if s.skill_store_backend == "overgraph":
+        from pathlib import Path
+        overgraph_path = Path(s.duckdb_path).with_suffix(".overgraph")
+        store = open_overgraph_skill_store(overgraph_path, read_only=False)
+        dim = store.embedding_dim()
+        if dim is not None and dim != EMBEDDING_DIM:
+            raise EmbeddingDimMismatch(
+                f"OverGraph store has {dim}-dim embeddings but runtime expects "
+                f"{EMBEDDING_DIM}-dim (nomic-embed-text-v1.5)",
+            )
+        return store
     store = LanceFragmentStore(s.fragments_lance_path)
     dim = store.embedding_dim()
     if dim is not None and dim != EMBEDDING_DIM:
-        # Largely unreachable (Lance FixedSizeList is dim-fixed) but kept for the
-        # multi-surface dim contract; message carries an upgrade.py marker substring.
         raise EmbeddingDimMismatch(
             f"fragments dataset has {dim}-dim embeddings but runtime expects "
             f"{EMBEDDING_DIM}-dim (nomic-embed-text-v1.5)",
