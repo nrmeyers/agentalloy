@@ -39,6 +39,7 @@ from agentalloy.storage.protocols import (
     SkillVersionRow,
     l2_normalize,
 )
+from agentalloy.storage.tantivy_bm25 import TantivyBM25Index
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,9 @@ class OverGraphSkillStore:
             dense_vector_dimension=vector_dimension,
         )
         self._verify_dimension_alignment(vector_dimension)
+        # Tantivy BM25 sidecar for full-text keyword search
+        bm25_path = Path(self._db_path).parent / (Path(self._db_path).stem + ".bm25")
+        self._bm25 = TantivyBM25Index(bm25_path)
         logger.debug("OverGraph skill store opened at %s", db_path)
 
     def _verify_dimension_alignment(self, expected_dim: int) -> None:
@@ -91,6 +95,8 @@ class OverGraphSkillStore:
 
     def close(self) -> None:
         """Close the database connection."""
+        if hasattr(self, '_bm25') and self._bm25 is not None:
+            self._bm25.close()
         if self._db is not None:
             self._db.close()
             self._db = None
@@ -756,8 +762,20 @@ class OverGraphSkillStore:
                     props=props,
                     dense_vector=normalized,
                 )
+            # Index in Tantivy BM25 sidecar
+            self._bm25.upsert(
+                fragment_id=item.fragment_id,
+                skill_id=item.skill_id,
+                category=item.category,
+                fragment_type=item.fragment_type,
+                prose=item.prose or "",
+                phase_scope=list(item.phase_scope) if item.phase_scope else None,
+                domain_tags=list(item.domain_tags) if item.domain_tags else None,
+            )
             count += 1
-        # Don't flush here — caller controls flush timing to avoid races
+        # Commit BM25 writes
+        self._bm25.commit()
+        # Don't flush OverGraph here — caller controls flush timing to avoid races
         return count
 
     def search_similar(
@@ -832,49 +850,14 @@ class OverGraphSkillStore:
         domain_tags: list[str] | None = None,
         k: int = 10,
     ) -> list[BM25Hit]:
-        """BM25 keyword search over fragment prose.
-
-        OverGraph doesn't have native FTS, so we use GQL CONTAINS as a
-        poor-man's full-text search and score by occurrence count.
-        """
-        deprecated_set = set(deprecated_skill_ids or [])
-        query_lower = query.lower()
-        # Build GQL filter
-        filters = ["f.prose IS NOT NULL"]
-        if categories:
-            cats = ", ".join(f"'{_gql_esc(c)}'" for c in categories)
-            filters.append(f"f.category IN [{cats}]")
-        if phases:
-            phs = ", ".join(f"'{_gql_esc(p)}'" for p in phases)
-            filters.append(f"(f.phase_scope IS NOT NULL AND ANY(p IN f.phase_scope WHERE p IN [{phs}]))")
-        if domain_tags:
-            tags = ", ".join(f"'{_gql_esc(t)}'" for t in domain_tags)
-            filters.append(f"(f.domain_tags IS NOT NULL AND ANY(t IN f.domain_tags WHERE t IN [{tags}]))")
-        filter_clause = " AND ".join(filters)
-        try:
-            rows = self._db.execute_gql(
-                f"MATCH (f:Fragment) WHERE {filter_clause} "
-                f"RETURN f.key AS fragment_id, f.skill_id, f.prose LIMIT 500"
-            )
-        except Exception:
-            logger.debug("BM25 GQL query failed", exc_info=True)
-            return []
-
-        results: list[BM25Hit] = []
-        if isinstance(rows, dict):
-            for row in rows.get("rows", []):
-                skill_id = row.get("skill_id", "")
-                if skill_id in deprecated_set:
-                    continue
-                prose = (row.get("prose") or "").lower()
-                score = float(prose.count(query_lower))
-                if score > 0:
-                    results.append(BM25Hit(
-                        fragment_id=row.get("fragment_id", ""),
-                        score=score,
-                    ))
-        results.sort(key=lambda h: h.score, reverse=True)
-        return results[:k]
+        """BM25 keyword search via Tantivy FTS sidecar."""
+        return self._bm25.search(
+            query,
+            categories=categories,
+            deprecated_skill_ids=deprecated_skill_ids,
+            domain_tags=domain_tags,
+            k=k,
+        )
 
     def backfill_phase_scope(self, scope_by_skill: dict[str, list[str] | None]) -> int:
         """Update phase_scope on fragment nodes by skill_id."""
@@ -972,9 +955,9 @@ class OverGraphSkillStore:
     def delete_all(self) -> int:
         """Delete all fragment embeddings."""
         try:
-            # Use a single GQL query to delete all Fragment nodes
             self._db.execute_gql("MATCH (f:Fragment) DETACH DELETE f")
             self._db.flush()
+            self._bm25.delete_all()
             return 1
         except Exception:
             logger.debug("delete_all failed", exc_info=True)
@@ -1012,8 +995,31 @@ class OverGraphSkillStore:
         return present
 
     def rebuild_fts_index(self) -> None:
-        """No-op — OverGraph doesn't have a separate FTS index."""
-        pass
+        """Rebuild the Tantivy BM25 index from OverGraph fragment nodes."""
+        self._bm25.delete_all()
+        rows = self._db.execute_gql(
+            "MATCH (f:Fragment) WHERE f.prose IS NOT NULL "
+            "RETURN id(f) AS nid, f.skill_id, f.category, f.fragment_type, f.prose, "
+            "f.phase_scope, f.domain_tags"
+        )
+        if isinstance(rows, dict):
+            for row in rows.get("rows", []):
+                nid = row.get("nid")
+                if nid is None:
+                    continue
+                node = self._db.get_node(int(nid))
+                if node is None:
+                    continue
+                self._bm25.upsert(
+                    fragment_id=getattr(node, "key", "") or "",
+                    skill_id=row.get("f.skill_id", "") or node.props.get("skill_id", ""),
+                    category=row.get("f.category", "") or node.props.get("category", ""),
+                    fragment_type=row.get("f.fragment_type", "") or node.props.get("fragment_type", ""),
+                    prose=row.get("f.prose", "") or node.props.get("prose", ""),
+                    phase_scope=row.get("f.phase_scope") or node.props.get("phase_scope"),
+                    domain_tags=row.get("f.domain_tags") or node.props.get("domain_tags"),
+                )
+        self._bm25.commit()
 
     def bulk_replace(self, items: Iterable[FragmentEmbedding]) -> int:
         """Atomically replace all fragment embeddings."""
