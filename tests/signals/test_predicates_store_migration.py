@@ -145,6 +145,87 @@ class TestTB1StoreOnlyEvaluators:
         # 2 build contracts match, 2 tasks → covered
         assert result == PredicateResult.MET
 
+    @staticmethod
+    def _cursor(tmp_path: Path, slug: str) -> None:
+        cursor = tmp_path / ".agentalloy" / "cursor"
+        cursor.parent.mkdir(parents=True, exist_ok=True)
+        cursor.write_text(slug)
+
+    def test_store_path_reads_tasks_artifact_name(
+        self, tmp_path: Path, store_with_contracts: DuckDBStateStore
+    ) -> None:
+        """tasks_from_store reads the gate's canonical tasks.artifact name."""
+        self._cursor(tmp_path, "01-widget-design")
+        store_with_contracts.set_artifact(
+            "spec", "01-widget-design", "tasks.artifact", "## Tasks\n- Task 1\n- Task 2\n"
+        )
+        ctx = PredicateContext(
+            project_root=tmp_path, current_phase="build", store=store_with_contracts
+        )
+        result = eval_build_contracts_cover_tasks(
+            {"phase": "spec", "tasks_from_store": True}, ctx
+        )
+        assert result == PredicateResult.MET
+
+    def test_store_path_legacy_tasks_md_name_is_canonicalized(
+        self, tmp_path: Path, store_with_contracts: DuckDBStateStore
+    ) -> None:
+        """Store-backed phases canonicalize .md → .artifact on write, so a
+        'mirror' recorded under tasks.md lands in the same tasks.artifact row —
+        one canonical artifact, never a shadow copy."""
+        self._cursor(tmp_path, "01-widget-design")
+        store_with_contracts.set_artifact(
+            "spec", "01-widget-design", "tasks.md", "## Tasks\n- Task 1\n- Task 2\n"
+        )
+        row = store_with_contracts.get_artifact("spec", "01-widget-design", "tasks.artifact")
+        assert row is not None  # the .md write landed under the canonical name
+        ctx = PredicateContext(
+            project_root=tmp_path, current_phase="build", store=store_with_contracts
+        )
+        result = eval_build_contracts_cover_tasks(
+            {"phase": "spec", "tasks_from_store": True}, ctx
+        )
+        assert result == PredicateResult.MET
+
+    def test_store_path_blocks_when_contracts_fewer_than_tasks(
+        self, tmp_path: Path, store_with_contracts: DuckDBStateStore
+    ) -> None:
+        """Three counted tasks vs two build contracts → NOT_MET."""
+        self._cursor(tmp_path, "01-widget-design")
+        store_with_contracts.set_artifact(
+            "spec",
+            "01-widget-design",
+            "tasks.artifact",
+            "## Tasks\n- Task 1\n- Task 2\n- Task 3\n",
+        )
+        ctx = PredicateContext(
+            project_root=tmp_path, current_phase="build", store=store_with_contracts
+        )
+        result = eval_build_contracts_cover_tasks(
+            {"phase": "spec", "tasks_from_store": True}, ctx
+        )
+        assert result == PredicateResult.NOT_MET
+
+    def test_store_path_counts_only_top_level_bullets(
+        self, tmp_path: Path, store_with_contracts: DuckDBStateStore
+    ) -> None:
+        """'### T-N' headings count as zero — floor-clamped to 1 task."""
+        self._cursor(tmp_path, "01-widget-design")
+        store_with_contracts.set_artifact(
+            "spec",
+            "01-widget-design",
+            "tasks.artifact",
+            "## Tasks\n### T-01 do a thing\n### T-02 do another\n",
+        )
+        ctx = PredicateContext(
+            project_root=tmp_path, current_phase="build", store=store_with_contracts
+        )
+        # 0 counted tasks → floor 1 → 2 contracts cover it
+        assert (
+            eval_build_contracts_cover_tasks({"phase": "spec", "tasks_from_store": True}, ctx)
+            == PredicateResult.MET
+        )
+
     def test_eval_build_contract_tag_focus_via_store(
         self, tmp_path: Path, store_with_contracts: DuckDBStateStore
     ) -> None:

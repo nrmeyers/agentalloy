@@ -1361,8 +1361,9 @@ def eval_build_contracts_cover_tasks(
     UNKNOWN (fail-open) when no single work-item resolves, no tasks.md exists, or
     one is unreadable — a preceding artifact node owns the missing-file case.
 
-    ``tasks_from_store: true`` (set by the design pack post-migration) reads
-    ``tasks.md`` from the artifact store instead of disk. This is a distinct
+    ``tasks_from_store: true`` reads the work-item's tasks artifact from the
+    store instead of disk — default name ``tasks.artifact`` (the gate's
+    canonical name), override with ``tasks_artifact_name``. This is a distinct
     switch from ``ctx.store`` being set: ``ctx.store`` is also bound to resolve
     the build-contract count below, independent of where ``tasks.md`` lives, so
     branching on its mere presence would silently stop reading a
@@ -1377,8 +1378,9 @@ def eval_build_contracts_cover_tasks(
     contracts_glob: str | None = args.get("contracts")
 
     if args.get("tasks_from_store") and ctx.store is not None:
+        tasks_name = str(args.get("tasks_artifact_name") or "tasks.artifact")
         try:
-            artifact = ctx.store.get_artifact(phase, slug, "tasks.md")
+            artifact = ctx.store.get_artifact(phase, slug, tasks_name)
         except Exception:
             return PredicateResult.UNKNOWN  # store error → fail closed, never MET
         if artifact is None or artifact.get("content") is None:

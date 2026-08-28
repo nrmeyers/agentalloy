@@ -177,9 +177,10 @@ def _build_artifact_size_advisory(args: dict[str, Any], ctx: PredicateContext) -
 def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
     """Advisory for ``build_contracts_cover_tasks`` NOT_MET (the §6 density floor).
 
-    Cursor-scoped (#378) to match the predicate: counts against the active design
-    work-item's tasks.md and its own build contracts, so the numbers reported are
-    the same ones the gate judged (never the repo aggregate).
+    Cursor-scoped (#378) to match the predicate: counts against the active
+    work-item's tasks (store artifact when ``tasks_from_store``, else the disk
+    glob) and its own build contracts, so the numbers reported are the same
+    ones the gate judged (never the repo aggregate).
     """
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         _count_task_items,
@@ -187,18 +188,27 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
         _resolve_workitem_slug,
     )
 
-    slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
+    phase = str(args.get("phase") or "design")
+    slug = _resolve_workitem_slug(ctx, phase)
     if slug is None:
         return None
-    tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
 
     # Legacy glob tolerance: pass through if present (traces deprecation)
     contracts_glob: str | None = args.get("contracts")
 
     try:
         tasks = 0
-        for f in _glob_files(ctx.project_root, tasks_glob):
-            tasks += _count_task_items(_read_file(f) or "")
+        if args.get("tasks_from_store") and ctx.store is not None:
+            tasks_name = str(args.get("tasks_artifact_name") or "tasks.artifact")
+            artifact = ctx.store.get_artifact(phase, slug, tasks_name)
+            if artifact is not None and artifact.get("content") is not None:
+                tasks = _count_task_items(artifact["content"])
+        else:
+            tasks_glob: str = args.get(
+                "tasks", "docs/design/{slug}/tasks.md"
+            ).replace("{slug}", slug)
+            for f in _glob_files(ctx.project_root, tasks_glob):
+                tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)
         contracts_list = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
         if contracts_list is None:
@@ -207,9 +217,12 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     except Exception:
         return None
     return (
-        f"Design emitted {contracts} build contract(s) for {tasks} task(s) in tasks.md. "
-        f"Emit ONE build contract per task before advancing to build — "
-        f"each centered on a single tech surface. Contracts are auto-created on phase transition."
+        f"{contracts} build contract(s) recorded for {tasks} counted task(s) — "
+        f"one build contract per task is required before advancing (POST "
+        f"/contracts with work_item '{slug}'; each centered on ONE dominant "
+        f"tech surface, <=2 domain_tags). Tasks are counted as top-level "
+        f"bullets under the tasks artifact's '## Tasks' heading — '### T-N' "
+        f"headings count as zero."
     )
 
 

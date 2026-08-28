@@ -173,6 +173,10 @@ raw_prose: |
   ## 5. Emit one build contract per task
 
   **MUST: emit ONE build contract per task — never one whole-feature contract.**
+  The density gate counts the tasks artifact's top-level bullets under its
+  `## Tasks` heading (`- T-1 …` — `### T-N` headings count as zero) and blocks
+  the advance until at least that many build contracts are recorded, so format
+  the artifact accordingly and match the count exactly.
   Build retrieval is budgeted to a small ~4-skill cap per contract. A single
   contract that carries every task's tags spreads that budget across all of
   them, so most surfaces get zero skills. One contract per task, centered on

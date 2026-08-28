@@ -665,7 +665,36 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
     assert result == NOT_MET
     assert evals[0].advisory is not None
     assert "1 build contract" in evals[0].advisory
-    assert "3 task" in evals[0].advisory
+    assert "3 counted task" in evals[0].advisory
+
+
+def test_coverage_advisory_counts_from_store_tasks_artifact(tmp_path: Path):
+    """tasks_from_store branch: counts top-level bullets in the tasks.artifact
+    and explains the counting rule — the block that used to force agents to
+    read engine source now carries the answer."""
+    _seed_design_contract(tmp_path, "feat")
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    store.set_artifact("design", "feat", "tasks.artifact", "# feat\n\n## Tasks\n\n- a\n- b\n- c\n")
+    store.close()
+    _write_build_contract(tmp_path, name="01-a.md", tags=["react"])
+    spec = {
+        "build_contracts_cover_tasks": {
+            "phase": "design",
+            "tasks_from_store": True,
+        }
+    }
+    qwen_calls: list[int] = [0]
+    result, evals = evaluate_node(
+        spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
+    )
+    assert result == NOT_MET
+    assert evals[0].advisory is not None
+    assert "1 build contract(s) recorded for 3 counted task(s)" in evals[0].advisory
+    assert "'## Tasks'" in evals[0].advisory
+    assert "count as zero" in evals[0].advisory
+    assert "tasks.md" not in evals[0].advisory
 
 
 def test_tag_focus_advisory_names_offender(tmp_path: Path):
