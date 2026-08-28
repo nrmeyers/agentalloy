@@ -989,6 +989,23 @@ async def evaluate_signal(
     repo = str(cwd)
     session_key, session_source = resolve_session_key(request, session_id)
 
+    # Register session in the registry if it's new. This makes session tracking
+    # explicit and reliable, not dependent on fragile fingerprint detection.
+    is_new_session = False
+    if session_key and ctx.store is not None:
+        try:
+            existing = ctx.store.get_session(session_key)
+            if existing is None:
+                # New session - create it in the registry
+                ctx.store.create_session(session_key, task_slug=None, phase=phase)
+                logger.info("Registered new session: %s", session_key)
+                is_new_session = True
+            else:
+                # Existing session - update activity
+                ctx.store.update_session_activity(session_key, phase=phase)
+        except Exception:
+            logger.debug("Session registry update failed", exc_info=True)
+
     # Carrier-request gate: only identifiable sessions are carriers.
     #
     # Every supported harness (Claude Code, Qwen Code, aider, hermes …) is either
@@ -1103,11 +1120,6 @@ async def evaluate_signal(
         except Exception:  # noqa: BLE001 — soft-fail by design
             logger.debug("phase_start telemetry write failed", exc_info=True)
 
-    # System-prompt leg of the workflow prose. Threaded onto EVERY carrier return below
-    # (quiet passthrough included) — unlike `workflow_prose`, which is announce-gated.
-    # See the field docstring on `SignalResult` for why the cadence differs.
-    workflow_system_prose = (skill.get("raw_prose") or None) if is_carrier else None
-
     # Per-turn banner (recency anchor). Built on a carrier turn that lands on the cadence
     # tick (`emit_banner`) under the active lifecycle mode + a valid phase; independent of
     # should_compose / announce / cursor, so it threads onto every return below — quiet
@@ -1150,11 +1162,9 @@ async def evaluate_signal(
     phase_changed = last_phase != phase
     # With a session key: announce on a new phase OR a session not yet oriented for
     # this phase. Without one (no user text): phase-only cadence (announce on entry).
-    # Gated on `is_carrier` so a background micro-request never burns the marker — the
-    # orientation waits for the next real agent turn instead of being lost to a ping.
-    announce = is_carrier and (
-        (phase_changed or session_key not in last_sessions) if session_key else phase_changed
-    )
+    # Removed is_carrier gate: workflow instructions should inject on phase entry
+    # regardless of session detection.
+    announce = (phase_changed or session_key not in last_sessions) if session_key else phase_changed
 
     # 4b. Orientation cadence: the orientation marker fires once per (phase, session),
     #    BEFORE the workflow block. Uses its own cadence file (`_read_orientation_announced`
@@ -1167,11 +1177,17 @@ async def evaluate_signal(
     last_orientation_phase, last_orientation_sessions = _read_orientation_announced(cwd)
     orientation_phase_changed = last_orientation_phase != phase
     # Only fire orientation when there's an explicit session_id (not fingerprinted).
-    announce_orientation = (
-        is_carrier
-        and bool(session_id)
-        and (orientation_phase_changed or session_key not in last_orientation_sessions)
+    # Removed is_carrier gate: orientation should fire on phase entry regardless of
+    # session detection.
+    announce_orientation = bool(session_id) and (
+        orientation_phase_changed or session_key not in last_orientation_sessions
     )
+
+    # System-prompt leg of the workflow prose. Inject on phase entry, new session,
+    # or orientation. The agent needs workflow instructions when entering a phase
+    # or starting a new session, not based on fragile session headers.
+    should_inject_prose = phase_changed or is_new_session or announce_orientation or announce
+    workflow_system_prose = (skill.get("raw_prose") or None) if should_inject_prose else None
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
@@ -1236,22 +1252,9 @@ async def evaluate_signal(
                         )
                     except Exception:
                         logger.debug("intent-based contract creation failed", exc_info=True)
-            # Execute the LangGraph to route the transition (task 07).
-            # The graph's nodes load workflow prose; conditional edges decide routing.
-            from agentalloy.signals.graph import (  # noqa: PLC0415
-                initial_phase_graph_state,
-                make_thread_key,
-                phase_graph,
-            )
-
-            thread_key = make_thread_key(cwd)
-            input_state = initial_phase_graph_state(phase=phase, lane=lane)
-            graph = phase_graph()
-            config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-            to_phase = result.get("phase") if result else None
-
-            # Gate evaluation still runs via _route_step for advisories/gates_met
+            # Evaluate gates and decide the transition. _route_step is the single
+            # decision point for proxy/HTTP/CLI (slice 09). The LangGraph topology
+            # exists for future enhancement but currently doesn't evaluate gates.
             from agentalloy.signals.graph import (  # noqa: PLC0415
                 _route_step,
             )
@@ -1260,10 +1263,8 @@ async def evaluate_signal(
             # predicates and the approval gate against the real repo, not the
             # proxy's process cwd (the uv tool dir).
             out = _route_step(phase, lane, project_root=cwd, store=ctx.store)
-            # Defensive: only write to_phase when the gate allows the transition.
-            # Never use the graph's ungated terminal result (always 'ship' for the
-            # full lane) as a fallback write target — the graph is "reactive, not
-            # driving" per its docstring. When the gate blocks, stay put.
+            # Only write to_phase when the gate allows the transition.
+            # When the gate blocks, stay put.
             to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
