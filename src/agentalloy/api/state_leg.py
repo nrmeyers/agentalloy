@@ -337,15 +337,18 @@ def _add_actions(
     # Query tool is always available. When the scope is known, make the hint
     # self-sufficient: the tool is not in every harness's reachable tool set,
     # so the fallback (raw HTTP against the local service) must carry the
-    # base URL and the scoping params inline — one worked example, no more.
+    # base URL and the scoping params inline — worked examples, no more.
     if scope is not None:
         service = scope["service"]
         actions["query"] = (
             "Deep-dive lookups beyond this summary (artifact bodies, contract "
             "detail, code search, symbol lookup, governing decisions): use the "
             "agentalloy_query tool when it is in your tool set; if it is not, "
-            f"GET the service directly, e.g. "
-            f"{service}/state/artifact/{phase}/<slug>/<name>?repo_root={scope['repo_root']}. "
+            f"GET the service directly. Key endpoints (all scoped by ?repo_root={scope['repo_root']}):\n"
+            f"  - List contracts: {service}/contracts?repo_root={scope['repo_root']}\n"
+            f"  - Get artifact: {service}/state/artifact/{phase}/<slug>/<name>?repo_root={scope['repo_root']}\n"
+            f"  - Get phase: {service}/state/phase?repo_root={scope['repo_root']}\n"
+            f"  - Code search: {service}/code/search?repo={scope['repo']}&q=<query>\n"
             f"/state/* and /contracts/* are scoped by ?repo_root=; /code/search/* "
             f"by ?repo={scope['repo']}."
         )
