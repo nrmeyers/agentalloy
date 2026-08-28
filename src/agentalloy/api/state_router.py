@@ -40,6 +40,8 @@ from agentalloy.api.state_models import (
     ContractSupersedeRequest,
     PhaseAdvanceRequest,
     PhaseAdvanceResponse,
+    PhaseApproveRequest,
+    PhaseApproveResponse,
     PhaseReadResponse,
     ResumeContractInfo,
     ResumeResponse,
@@ -1037,6 +1039,48 @@ async def write_phase(
 # ---------------------------------------------------------------------------
 
 
+def _record_phase_approval(
+    store: DuckDBStateStore,
+    project_root: Path | None,
+    phase: str,
+    approver: str,
+) -> dict[str, Any]:
+    """Record approval for *phase* with a server-computed artifact digest.
+
+    Mirrors the store-backed path of ``run_approve`` exactly — same slug
+    resolver, same name_glob — so the recorded digest covers the identical
+    row set the approval gate re-digests (#501/#518).  The digest is never
+    computed client-side: a caller-supplied value could never be trusted to
+    match the gate's recomputation.
+
+    Raises ``ValueError`` when the phase is not store-approval-gated or has
+    no exit artifact yet (nothing to approve).
+    """
+    from agentalloy.signals.gates import _APPROVAL_STORE_NAME_GLOB
+    from agentalloy.signals.predicates import (
+        _artifact_digest,
+        _resolve_workitem_slug_for,
+        approval_required,
+    )
+
+    if not approval_required(phase):
+        raise ValueError(f"phase {phase!r} is not approval-gated")
+    name_glob = _APPROVAL_STORE_NAME_GLOB.get(phase)
+    if name_glob is None:
+        raise ValueError(f"phase {phase!r} has no store-backed approval gate")
+    slug = _resolve_workitem_slug_for(store, project_root or Path.cwd(), phase)
+    rows = store.list_artifacts(phase, slug=slug, name_glob=name_glob)
+    if not rows:
+        raise ValueError(
+            f"no exit artifact recorded for phase {phase!r} to approve — "
+            f"record it with PUT /state/artifact first (the gate reads the "
+            f"store, so a file on disk satisfies nothing)"
+        )
+    digest = _artifact_digest(rows)
+    store.set_approval(phase, digest, approver=approver)
+    return {"phase": phase, "slug": slug, "artifact_digest": digest}
+
+
 @router.post(
     "/advance",
     response_model=AdvanceResponse,
@@ -1076,6 +1120,27 @@ async def advance_phase(
 
     to_phase = req.to_phase or _PHASE_GRAPH.get(current_phase, current_phase)
     route = req.route or "full"
+
+    # Record human approval for the current phase when the agent reports the
+    # user approved the presented work.  The service computes the digest over
+    # the phase's exit artifact; refusal (no artifact yet) fails the whole
+    # call before the next-phase contract is written.
+    if req.approved:
+        try:
+            await asyncio.to_thread(
+                _record_phase_approval,
+                store,
+                Path(repo_root) if repo_root else None,
+                current_phase,
+                "agent-on-user-approval",
+            )
+        except ValueError as exc:
+            return AdvanceResponse(
+                success=False,
+                phase=current_phase,
+                to_phase=to_phase,
+                message=str(exc),
+            )
 
     # Generate contract_id
     contract_id = f"{to_phase}/{req.slug}"
@@ -1259,6 +1324,55 @@ async def delete_scoped_cursor(
 ) -> StateReadResponse:
     await asyncio.to_thread(store._delete_scoped_cursor, session_key)
     return StateReadResponse(kind="cursor", value=None)
+
+
+# ---------------------------------------------------------------------------
+# POST /state/approve-phase — record approval with server-computed digest
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/approve-phase",
+    response_model=PhaseApproveResponse,
+    summary="Record human approval for a phase (digest computed server-side)",
+)
+async def approve_phase(
+    req: PhaseApproveRequest,
+    repo_root: str | None = Query(
+        default=None,
+        description="Absolute path to the repository root.",
+    ),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> PhaseApproveResponse:
+    """Record approval for a phase so its exit gate can pass.
+
+    The service resolves the active work item the same way the approval gate
+    does, digests the phase's exit artifact, and stores the approval.  The
+    approval binds to exact content: editing the artifact after approval
+    voids it (digest mismatch) and the work must be presented again.
+
+    Use ``POST /state/advance`` with ``approved: true`` to approve and
+    advance in a single call.
+    """
+    phase = req.phase
+    if not phase:
+        current_phase_row = await asyncio.to_thread(store.read_phase)
+        phase = current_phase_row.phase if current_phase_row else "intake"
+    try:
+        result = await asyncio.to_thread(
+            _record_phase_approval,
+            store,
+            Path(repo_root) if repo_root else None,
+            phase,
+            req.approver or "agent-on-user-approval",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PhaseApproveResponse(
+        phase=result["phase"],
+        slug=result["slug"],
+        artifact_digest=result["artifact_digest"],
+    )
 
 
 # ---------------------------------------------------------------------------

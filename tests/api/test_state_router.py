@@ -1464,3 +1464,156 @@ class TestSessionEndpoints:
         resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
         assert resp.json() == {"resumed": False}
         assert state_store.get_session("sess-1")["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Approval flow — POST /state/advance approved + POST /state/approve-phase
+# ---------------------------------------------------------------------------
+
+
+class TestAdvanceApproval:
+    """Approval-gated advance: the digest is computed server-side and binds
+    the approval to the exact artifact content at sign-off.
+
+    ``repo_root`` must name the fixture's own bucket root
+    (``default_repo_root()``) — the store is seeded under that (repo, stream)
+    pair, and any other path re-scopes the request to an empty bucket.
+    """
+
+    def _setup_spec(self, state_store: DuckDBStateStore) -> None:
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a", body="spec contract")
+        # The packaged spec exit gate requires these sections in the artifact
+        state_store.set_artifact(
+            "spec",
+            "feat-a",
+            "spec.artifact",
+            "# Spec\nContent v1\n\n## Acceptance Criteria\n- AC-1\n\n## Out of Scope\n- none",
+        )
+
+    def _advance_url(self) -> str:
+        return f"/state/advance?repo_root={default_repo_root()}"
+
+    def _approve_url(self) -> str:
+        return f"/state/approve-phase?repo_root={default_repo_root()}"
+
+    def test_advance_without_approval_is_blocked(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        self._setup_spec(state_store)
+        resp = state_client.post(
+            self._advance_url(),
+            json={"slug": "feat-a", "contract_body": "design brief", "to_phase": "design"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["gate_verdict"]["reason"] == "approval"
+
+    def test_advance_approved_flows_to_design(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        from unittest.mock import patch
+
+        self._setup_spec(state_store)
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]):
+            resp = state_client.post(
+                self._advance_url(),
+                json={
+                    "slug": "feat-a",
+                    "contract_body": "design brief",
+                    "to_phase": "design",
+                    "approved": True,
+                },
+            )
+        body = resp.json()
+        assert body["success"] is True, body
+        assert body["phase"] == "design"
+        # Approval recorded server-side
+        approval = state_store.get_approval("spec")
+        assert approval is not None
+        assert approval["approver"] == "agent-on-user-approval"
+        assert approval["artifact_digest"]
+        # The next-phase contract was written
+        assert state_store.get_contract("design/feat-a") is not None
+
+    def test_advance_approved_refused_without_artifact(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Nothing to approve → refuse before writing the next contract."""
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+        resp = state_client.post(
+            self._advance_url(),
+            json={
+                "slug": "feat-a",
+                "contract_body": "design brief",
+                "to_phase": "design",
+                "approved": True,
+            },
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert "no exit artifact" in body["message"]
+        assert state_store.get_approval("spec") is None
+        assert state_store.get_contract("design/feat-a") is None
+
+    def test_approval_goes_stale_when_artifact_changes(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Editing the artifact after approval voids it (digest mismatch)."""
+        from unittest.mock import patch
+
+        self._setup_spec(state_store)
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]):
+            first = state_client.post(
+                self._advance_url(),
+                json={
+                    "slug": "feat-a",
+                    "contract_body": "design brief",
+                    "to_phase": "design",
+                    "approved": True,
+                },
+            )
+        assert first.json()["success"] is True
+
+        # Findings routed back: return to spec and revise the artifact
+        state_store.write_phase("spec")
+        state_store.set_artifact(
+            "spec",
+            "feat-a",
+            "spec.artifact",
+            "# Spec\nContent v2 — edited after approval\n\n"
+            "## Acceptance Criteria\n- AC-1\n\n## Out of Scope\n- none",
+        )
+
+        # Advance without re-approval must re-block
+        resp = state_client.post(
+            self._advance_url(),
+            json={"slug": "feat-a", "contract_body": "design brief v2", "to_phase": "design"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["gate_verdict"]["reason"] == "approval"
+
+    def test_approve_phase_endpoint_records_digest(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        self._setup_spec(state_store)
+        resp = state_client.post(self._approve_url(), json={"phase": "spec"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["phase"] == "spec"
+        assert body["slug"] == "feat-a"
+        assert body["artifact_digest"]
+        assert state_store.get_approval("spec")["artifact_digest"] == body["artifact_digest"]
+
+    def test_approve_phase_refuses_without_artifact(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+        resp = state_client.post(self._approve_url(), json={"phase": "spec"})
+        assert resp.status_code == 422
+        assert "no exit artifact" in resp.json()["detail"]

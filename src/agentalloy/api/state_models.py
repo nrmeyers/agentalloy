@@ -377,6 +377,15 @@ class AdvanceRequest(BaseModel):
         default=None,
         description="Route type: full | fast | add-skill | flow (defaults to full)",
     )
+    approved: bool = Field(
+        default=False,
+        description=(
+            "Record human approval for the CURRENT phase before evaluating the "
+            "gate.  The service computes the approval digest server-side over the "
+            "phase's exit artifact — pass this when the user has approved the "
+            "presented work.  Refused when the phase has no exit artifact yet."
+        ),
+    )
     domain_tags: list[str] | None = Field(default=None, description="Domain tag list")
     scope_touches: list[str] | None = Field(default=None, description="Files the contract touches")
     scope_avoids: list[str] | None = Field(default=None, description="Files the contract avoids")
@@ -393,3 +402,36 @@ class AdvanceResponse(BaseModel):
     gate_verdict: dict[str, Any] | None = None
     advisories: list[str] | None = None
     message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Approval endpoint (server-computed digest)
+# ---------------------------------------------------------------------------
+
+
+class PhaseApproveRequest(BaseModel):
+    """Input to POST /state/approve-phase.
+
+    ``phase`` defaults to the live phase.  The service resolves the active
+    work item the same way the approval gate does, digests the phase's exit
+    artifact, and records the approval — the digest is never computed
+    client-side.
+    """
+
+    phase: str | None = Field(
+        default=None,
+        description="Phase to approve (defaults to the current live phase)",
+    )
+    approver: str | None = Field(
+        default=None,
+        description="Who approved (defaults to 'agent-on-user-approval')",
+    )
+
+
+class PhaseApproveResponse(BaseModel):
+    """Response for POST /state/approve-phase."""
+
+    ok: bool = True
+    phase: str
+    slug: str | None = None
+    artifact_digest: str | None = None

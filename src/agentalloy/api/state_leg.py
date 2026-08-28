@@ -388,9 +388,11 @@ def _add_actions(
         actions["advance"] = (
             f"To advance to the next phase, call POST {service}/state/advance?repo_root={scope['repo_root']} "
             f"with JSON body: {{\"slug\": \"<task-slug>\", \"contract_body\": \"<what the next phase needs to know>\", "
-            f"\"to_phase\": \"<target-phase>\", \"route\": \"full\"}}. "
-            f"This writes the contract and advances the phase in one call. "
-            f"Use this when you have completed the current phase's work and are ready to move on."
+            f"\"to_phase\": \"<target-phase>\", \"route\": \"full\", \"approved\": true}}. "
+            f"Set \"approved\": true when the user has approved the presented work — it records the "
+            f"approval and advances in one call (standalone: POST {service}/state/approve-phase). "
+            f"Approval-gated phases (spec, design) block until approved; approval is refused until the "
+            f"phase's exit artifact is recorded, and editing an approved artifact voids the approval."
         )
         # Contract retrieval: pull a specific contract by ID or list all
         actions["contracts"] = (
