@@ -122,23 +122,19 @@ raw_prose: |
   ## 2. Hand off the next phase's work-item
 
   Intake doesn't keep a contract of its own — it writes the **work-item the next
-  phase picks up**. Create that downstream contract with a contract marker on
-  the chosen route's phase (`spec`, `sdd-fast`, `add-skill`, or `sdd-flow`):
-
-  `<!-- agentalloy:contract phase=<phase> slug=<task-slug> route=<route> -->...<!-- /agentalloy:contract -->`
-
-  Later phases auto-propagate an existing contract on transition, but the FIRST
-  one has nothing to propagate from — intake authors it. State that the phase is
-  complete. The phase advances automatically once exit gates pass.
+  phase picks up**. The advance call authors that downstream contract in the same
+  request: your state panel's advance action (POST /state/advance) with
+  `slug` (a short task identifier), `contract_body` (a concrete restatement of
+  what the user wants), `to_phase` (`spec`, `sdd-fast`, `add-skill`, or
+  `sdd-flow`), and `route` (`full`, `fast`, `add-skill`, `flow`). Set
+  `scope_touches` when known. Writing the contract completes intake.
 
   Write the body as a concrete restatement of what the user wants. That body
-  becomes the next phase's retrieval prompt. Set `scope.touches`. Writing the
-  contract completes intake.
+  becomes the next phase's retrieval prompt.
 
   Then **PRESENT the contract in full and STOP** — do not advance yourself. The
-  forward jump is a human checkpoint: only once the user explicitly approves do
-  you advance. Present the work for human approval. The phase advances after
-  approval is recorded.
+  forward jump is a human checkpoint: only once the user explicitly approves
+  the route do you advance.
 
   Phase advance ends intake for this session. The next phase begins in a fresh
   one; the state panel provides context automatically. Stop here only if the

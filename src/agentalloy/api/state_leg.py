@@ -302,19 +302,21 @@ def _add_actions(
     """
     actions: dict[str, str] = {}
 
-    # Artifact recording is always available
+    # Artifact recording is always available — the store endpoint is the one
+    # authoritative mechanism (marker extraction is off by default).
     actions["record_artifact"] = (
-        "Include an artifact marker in your response to record it, "
-        "or describe the artifact naturally and the system will capture it."
+        "Record artifacts via the state service artifact endpoint "
+        "(PUT /state/artifact). A file on disk is not an artifact — the "
+        "artifact exists only once the PUT succeeds."
     )
 
     # Contract recording is always available; it is how intake authors the first
     # downstream contract (there is no current contract to auto-propagate yet).
     actions["record_contract"] = (
-        "To create the next phase's contract, include a contract marker in your "
-        "response: <!-- agentalloy:contract phase=<phase> slug=<slug> route=<route> "
-        ">...<!-- /agentalloy:contract -->. The body becomes the next phase's "
-        "retrieval prompt; the system records it scoped to this repo."
+        "To create the next phase's contract, use the advance action (POST "
+        "/state/advance writes the contract in the same request). For per-task "
+        "build contracts during plan, use POST /contracts (scoped by "
+        "?repo_root=). The contract body becomes the next phase's retrieval prompt."
     )
 
     # Phase advance depends on gate status

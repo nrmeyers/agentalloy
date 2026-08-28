@@ -149,8 +149,8 @@ def test_tc2_session_boundary_on_phase_advance() -> None:
     for name in advancing_skills:
         prose = _prose(name)
         prose_lower = prose.lower()
-        # Must reference automatic advancement and context handoff
-        assert "advances" in prose_lower, f"{name} missing phase advancement language"
+        # Must reference explicit advancement and context handoff
+        assert "advance" in prose_lower, f"{name} missing phase advancement language"
         assert "state panel" in prose or "context" in prose_lower, (
             f"{name} missing context handoff reference"
         )

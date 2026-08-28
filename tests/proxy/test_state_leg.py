@@ -195,11 +195,11 @@ class TestBuildStateLeg:
         # Transport guidance: never inline multi-line JSON in shell quotes
         assert "--data @<file>" in hint
 
-    def test_record_artifact_marker_fallback_without_scope(self) -> None:
+    def test_record_artifact_endpoint_fallback_without_scope(self) -> None:
         result = build_state_leg("spec")
         assert result is not None
         state = json.loads(result)
-        assert "artifact marker" in state["actions"]["record_artifact"]
+        assert "PUT /state/artifact" in state["actions"]["record_artifact"]
 
     def test_scope_actions_include_reset_to_intake(self) -> None:
         result = build_state_leg("ship", repo_root="/home/u/dev/agentalloy")

@@ -94,8 +94,9 @@ raw_prose: |
      matter — they shape what comes next.
   4. **Return to intake.** When the exploration has run its course — when you've
      learned enough to have a clearer sense of direction, or when you simply want
-     to pause — state that the phase is complete. The phase advances automatically
-     once exit gates pass. Check your state panel for the current phase at any time.
+     to pause — return to intake via your state panel's reset action
+     (POST /state/phase with JSON body `{"value": "intake"}`).
+     Check your state panel for the current phase at any time.
      Intake will help you decide whether the exploration points toward the full
      SDD lane, the fast lane, or a fresh round of flow.
 
@@ -105,7 +106,7 @@ raw_prose: |
   acceptance criteria, writing a design document, or planning tasks, you've left
   the flow lane — go back.
 
-  This lane is not a code-writing lane. No `src/`, no `tests/`, no artifact markers.
+  This lane is not a code-writing lane. No `src/`, no `tests/`, no artifact recording.
   The output of flow is clarity, not code.
 
   This lane is not a decision lane. You may surface options, compare approaches,

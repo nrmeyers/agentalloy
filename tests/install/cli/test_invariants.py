@@ -62,7 +62,7 @@ class TestDeriveInvariants:
         assert "tasks.artifact" in inv
         assert "test-plan.artifact" in inv
         assert "state panel" in inv
-        assert "agentalloy:artifact" in inv
+        assert "/state/artifact" in inv
 
     def test_shipped_prose_satisfies_its_own_invariants(self) -> None:
         # A shipped skill must never violate its own linter, or every

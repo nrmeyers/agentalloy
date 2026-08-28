@@ -18,7 +18,7 @@ applies_to_phases:
 # verbatim.
 prose_invariants:
   - "state panel"
-  - "agentalloy:artifact"
+  - "/state/artifact"
 exit_gates:
   all_of:
     # The ship gate is a "real record" check: the ship artifact must exist with
@@ -94,12 +94,11 @@ raw_prose: |
   - **how it was verified** — link the spec acceptance, the design, and the QA
     report so a reviewer can trace the chain instead of reconstructing it.
 
-  Record the PR narrative using an artifact marker:
+  Record the PR narrative via your state panel's record_artifact action
+  (PUT /state/artifact), name `pr-narrative`:
 
   ```
-  <!-- agentalloy:artifact name=pr-narrative -->
   ...narrative content...
-  <!-- /agentalloy:artifact -->
   ```
 
   A reviewer should be able to approve from the narrative plus the diff, without
@@ -110,18 +109,17 @@ raw_prose: |
   Write the ship artifact with `## Summary` (what shipped, the PR
   link, the release-notes or changelog entry) and `## Rollback` (how to reverse this
   exact change — the revert commit, the flag to flip, any data migration to undo)
-  using an artifact marker:
+  via your state panel's record_artifact action (PUT /state/artifact),
+  name `delivery.artifact`:
 
   ```
-  <!-- agentalloy:artifact name=delivery -->
   ## Summary
   ...what shipped...
   ## Rollback
   ...how to reverse...
-  <!-- /agentalloy:artifact -->
   ```
 
-  The ship artifact is extracted by the proxy from your response — no ``docs/ship/*.md``
+  The ship artifact lives in the store — no ``docs/ship/*.md``
   file. Update the changelog or release notes to the repo's own convention.
 
   ## 4. Reversibility scales with risk
@@ -139,7 +137,7 @@ raw_prose: |
   The watcher opens the PR, monitors CI, and detects merge — all automatically.
   After writing the PR narrative, the proxy starts the watcher for you. It:
 
-  - Opens the PR with the narrative from the artifact marker
+  - Opens the PR with the narrative from the pr-narrative artifact
   - Polls CI every 60 seconds
   - Captures all CI results to telemetry (queryable via `agentalloy_query` with action=`telemetry`)
   - After 5 CI failures, pauses and notifies you
@@ -156,8 +154,8 @@ raw_prose: |
   Do not then go quiet and wait to be prompted — explicitly ask the user whether
   they're ready to reset to intake for the next work item. The one transition out
   is back to the top, and it's the user's call, not yours: when they say go,
-  state that the phase is complete. The phase advances automatically once exit
-  gates pass, and the next session opens fresh. Check your state panel for the
+  reset to intake via your state panel's reset action (POST /state/phase with
+  JSON body `{"value": "intake"}`), and the next session opens fresh. Check your state panel for the
   current phase at any time. **Never reset on your own initiative** —
   a green CI run or a successful merge is not permission; only the user's explicit
   yes is. Ask, then wait for the answer.
