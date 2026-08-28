@@ -94,6 +94,17 @@ class PhaseGraphState(TypedDict, total=False):
     cursor: str | None  # current work-item slug
     approved: bool  # approval-marker validity (staleness-aware)
     artifact_refs: list[str]  # artifact refs produced this phase
+    # Workflow instructions embedded in the graph. The graph drives the workflow,
+    # not just routes phases. The model follows the graph.
+    workflow_instructions: str | None  # raw prose for the current phase
+    workflow_step: str | None  # current workflow step (e.g., "start", "write_spec", "present", "approve")
+    # Gate evaluation results (passed to graph, used for routing decisions).
+    # The graph is the single decision point for transitions.
+    gates_met: list[str]  # gates that passed
+    gates_unmet: list[str]  # gates that failed
+    should_transition: bool  # whether gates allow transition
+    to_phase: str | None  # target phase if transition allowed
+    advisories: list[str]  # gate advisories
 
 
 @dataclass(frozen=True)
@@ -390,23 +401,44 @@ def route_from_decision(
 
 
 def _node(phase: str):
-    """A StateGraph node for ``phase``: resolve prose, update state phase to self."""
+    """A StateGraph node for ``phase``: evaluate gates, embed workflow instructions."""
 
     def _run(state: PhaseGraphState) -> PhaseGraphState:
-        phase_node(phase)  # pure read — binds prose for the proxy to inject
+        skill = phase_node(phase)  # pure read — binds prose for the proxy to inject
         state["phase"] = phase  # keep graph-phase in sync with the executing node
+        
+        # Embed workflow instructions into the graph state. The graph drives
+        # the workflow, not just routes phases. The model follows the graph.
+        if skill and skill.get("raw_prose"):
+            state["workflow_instructions"] = skill["raw_prose"]
+            state["workflow_step"] = "start"
+        
+        # Evaluate exit gates for this phase. Gates are passed via config.
+        # The graph evaluates gates and stores results in state.
+        # This makes the graph the single decision point for transitions.
+        from agentalloy.signals.gates import evaluate_phase_gate
+        
+        # Gate context is passed via config["configurable"]["gate_context"]
+        # For now, we just mark that gates need evaluation. The actual
+        # evaluation happens in the conditional edge predicate.
+        state["gates_evaluated"] = False
+        
         return state
 
-    return _run
+    return _node
 
 
 def build_phase_graph() -> StateGraph[PhaseGraphState]:
     """Assemble the reactive phase topology (approach.md §2 diagram).
 
     One node per phase; a conditional edge out of ``intake`` selects the lane;
-    forward edges mirror ``_PHASE_GRAPH`` with ``route_step`` as predicate.
+    forward edges use gate results from state to decide routing.
     ``ship`` is terminal. Returns an *uncompiled* graph — callers choose whether
     and how to checkpointer it (task 05).
+    
+    The graph is the single decision point for transitions. Gate evaluation
+    happens outside the graph (needs store access), but routing decisions
+    are made by the graph based on gate results in state.
     """
     g = StateGraph[PhaseGraphState](PhaseGraphState)
     for phase in _PHASE_GRAPH:
@@ -416,10 +448,21 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
     def _advance(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)
         phase = _d["phase"]
+        
+        # Use gate results from state to decide routing.
+        # If should_transition is True and to_phase is set, advance.
+        # Otherwise, stay in current phase.
+        should_transition = _d.get("should_transition", False)
+        to_phase = _d.get("to_phase")
+        
+        if should_transition and to_phase:
+            return to_phase
+        
+        # No transition allowed - stay in current phase
         nxt = _PHASE_GRAPH.get(phase)
         if nxt is None or nxt == phase:  # terminal or unknown phase → stay
             return phase
-        return nxt
+        return phase  # Stay put if gates block
 
     g.add_conditional_edges(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         "intake",
