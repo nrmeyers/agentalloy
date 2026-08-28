@@ -330,8 +330,9 @@ def _add_actions(
             )
         else:
             actions["advance_phase"] = (
-                "State that the phase is complete. "
-                "The phase advances automatically once exit gates pass."
+                "When the phase's work is complete, advance via the advance "
+                "action below (POST /state/advance) — approval-gated phases "
+                "need approved: true once the user approves."
             )
     else:
         actions["blocked"] = f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."

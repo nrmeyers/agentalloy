@@ -150,8 +150,9 @@ raw_prose: |
   Present the final skill content — the actual prose and fragments, not a summary —
   plus one line on what install will do (strict lint already passed; the dedup gate
   runs at install and flags near-duplicates against the existing corpus). Then
-  **stop and wait**. When, and only when, the human says to proceed, present the
-  work for human approval. The phase advances after approval is recorded, then:
+  **stop and wait**. When, and only when, the human says to proceed, advance via
+  your state panel's advance action (POST /state/advance) with `approved: true`,
+  then:
 
       agentalloy install-pack .agentalloy/custom-skills/<pack-name>
 
@@ -160,7 +161,7 @@ raw_prose: |
   `--allow-unreviewed` is the loud, recorded bypass — use it only if the operator
   explicitly waives the review.
 
-  Approval auto-advances the phase back to `intake` — check your state panel to
+  The advance returns the phase to `intake` — check your state panel to
   confirm. If install's dedup gate reports a hard match, bring it back to the
   human: the corpus may already cover this, and superseding beats duplicating.
 
