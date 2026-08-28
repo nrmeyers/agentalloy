@@ -404,7 +404,38 @@ def _node(phase: str):
     """A StateGraph node for ``phase``: evaluate gates, embed workflow instructions."""
 
     def _run(state: PhaseGraphState) -> PhaseGraphState:
-        skill = phase_node(phase)  # pure read — binds prose for the proxy to inject
+        # Load the workflow skill based on phase and lane.
+        # For intake, the workflow skill depends on the lane:
+        # - sdd-full/sdd-fast → sdd-intake
+        # - add-skill → sdd-add-skill
+        # - flow → sdd-flow
+        lane = state.get("lane", "sdd-full")
+        
+        if phase == "intake":
+            if lane == "add-skill":
+                skill_file = "sdd-add-skill"
+            elif lane == "flow":
+                skill_file = "sdd-flow"
+            else:
+                skill_file = "sdd-intake"
+        elif phase == "qa" and lane == "sdd-fast":
+            # sdd-fast lane uses sdd-fast skill for qa
+            skill_file = "sdd-fast"
+        else:
+            # Map phase to skill file name
+            phase_to_skill = {
+                "spec": "sdd-spec-and-scoping",
+                "design": "sdd-design-and-architecture",
+                "plan": "sdd-plan-and-contracts",
+                "build": "sdd-build",
+                "qa": "sdd-verify-and-review",
+                "ship": "sdd-deliver-and-ship",
+            }
+            skill_file = phase_to_skill.get(phase, f"sdd-{phase}")
+        
+        # Load the workflow skill from the packaged YAML
+        skill = _load_workflow_skill_by_file(skill_file)
+        
         state["phase"] = phase  # keep graph-phase in sync with the executing node
 
         # Embed workflow instructions into the graph state. The graph drives
@@ -428,9 +459,28 @@ def _node(phase: str):
     return _run
 
 
+def _load_workflow_skill_by_file(skill_file: str) -> dict[str, Any] | None:
+    """Load a workflow skill from the shipped ``_packs/sdd`` directory by file name."""
+    try:
+        import yaml
+
+        import agentalloy
+
+        packs_root = Path(agentalloy.__file__).resolve().parent / "_packs" / "sdd"
+        skill_path = packs_root / f"{skill_file}.yaml"
+        if skill_path.exists():
+            data: dict[str, Any] = yaml.safe_load(skill_path.read_text(encoding="utf-8")) or {}
+            return data
+    except Exception:
+        pass
+    return None
+
+
 def build_phase_graph() -> StateGraph[PhaseGraphState]:
     """Assemble the reactive phase topology (approach.md §2 diagram).
 
+    Starts at orientation, which routes to the current phase (from state).
+    This allows the graph to start at any phase, not just intake.
     One node per phase; a conditional edge out of ``intake`` selects the lane;
     forward edges use gate results from state to decide routing.
     ``ship`` is terminal. Returns an *uncompiled* graph — callers choose whether
@@ -441,9 +491,36 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
     are made by the graph based on gate results in state.
     """
     g = StateGraph[PhaseGraphState](PhaseGraphState)
+    
+    # Orientation node: routes to the current phase (from state).
+    # This allows the graph to start at any phase, not just intake.
+    def _orientation(state: PhaseGraphState) -> PhaseGraphState:
+        # Orientation is a pass-through node that just marks the entry point.
+        # The actual routing happens in the conditional edge below.
+        return state
+    
+    g.add_node("orientation", _orientation)
+    
     for phase in _PHASE_GRAPH:
         g.add_node(phase, _node(phase))  # pyright: ignore[reportUnknownMemberType]
-    g.add_edge(START, "intake")  # entrypoint — intake is the front door
+    
+    # Start at orientation
+    g.add_edge(START, "orientation")
+    
+    # Orientation routes to the current phase (from state)
+    def _route_to_phase(state: PhaseGraphState) -> str:
+        _d: dict[str, Any] = dict(state)
+        phase = _d.get("phase", "intake")
+        # Route to the current phase, or intake if not set
+        if phase in _PHASE_GRAPH:
+            return phase
+        return "intake"
+    
+    g.add_conditional_edges(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        "orientation",
+        _route_to_phase,
+        {phase: phase for phase in _PHASE_GRAPH},
+    )
 
     def _advance(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)

@@ -1182,13 +1182,39 @@ async def evaluate_signal(
         orientation_phase_changed or session_key not in last_orientation_sessions
     )
 
-    # System-prompt leg of the workflow prose. The workflow instructions come from
-    # the skill's raw_prose. The LangGraph is used for routing transitions, not
-    # for getting workflow instructions on every request.
+    # System-prompt leg of the workflow prose. Get workflow instructions from
+    # the LangGraph. The graph starts at orientation and routes to the current
+    # phase, embedding workflow instructions in its state.
+    from agentalloy.signals.graph import (  # noqa: PLC0415
+        initial_phase_graph_state,
+        make_thread_key,
+        phase_graph,
+    )
+    
+    thread_key = make_thread_key(cwd)
+    input_state = initial_phase_graph_state(phase=phase, lane="sdd-full")
+    # Set should_transition=False to terminate after the current phase node.
+    # We just want the workflow instructions for the current phase, not routing.
+    input_state["should_transition"] = False
+    input_state["to_phase"] = None
+    
+    graph = phase_graph()
+    config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
+    
+    try:
+        graph_result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+        graph_workflow_instructions = graph_result.get("workflow_instructions") if graph_result else None
+    except Exception:
+        logger.debug("Graph invocation failed, falling back to skill.raw_prose", exc_info=True)
+        graph_workflow_instructions = None
+    
+    # Use graph's workflow_instructions, fall back to skill.raw_prose
+    workflow_instructions = graph_workflow_instructions or (skill.get("raw_prose") or None)
+    
     # Inject on phase entry, new session, or orientation. The agent needs workflow
     # instructions when entering a phase or starting a new session.
     should_inject_prose = phase_changed or is_new_session or announce_orientation or announce
-    workflow_system_prose = (skill.get("raw_prose") or None) if should_inject_prose else None
+    workflow_system_prose = workflow_instructions if should_inject_prose else None
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
