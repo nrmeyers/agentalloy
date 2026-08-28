@@ -406,26 +406,26 @@ def _node(phase: str):
     def _run(state: PhaseGraphState) -> PhaseGraphState:
         skill = phase_node(phase)  # pure read — binds prose for the proxy to inject
         state["phase"] = phase  # keep graph-phase in sync with the executing node
-        
+
         # Embed workflow instructions into the graph state. The graph drives
         # the workflow, not just routes phases. The model follows the graph.
         if skill and skill.get("raw_prose"):
             state["workflow_instructions"] = skill["raw_prose"]
             state["workflow_step"] = "start"
-        
+
         # Evaluate exit gates for this phase. Gates are passed via config.
         # The graph evaluates gates and stores results in state.
         # This makes the graph the single decision point for transitions.
         from agentalloy.signals.gates import evaluate_phase_gate
-        
+
         # Gate context is passed via config["configurable"]["gate_context"]
         # For now, we just mark that gates need evaluation. The actual
         # evaluation happens in the conditional edge predicate.
         state["gates_evaluated"] = False
-        
+
         return state
 
-    return _node
+    return _run
 
 
 def build_phase_graph() -> StateGraph[PhaseGraphState]:
@@ -451,18 +451,15 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
         
         # Use gate results from state to decide routing.
         # If should_transition is True and to_phase is set, advance.
-        # Otherwise, stay in current phase.
+        # Otherwise, terminate (END) to avoid infinite loops.
         should_transition = _d.get("should_transition", False)
         to_phase = _d.get("to_phase")
         
         if should_transition and to_phase:
             return to_phase
         
-        # No transition allowed - stay in current phase
-        nxt = _PHASE_GRAPH.get(phase)
-        if nxt is None or nxt == phase:  # terminal or unknown phase → stay
-            return phase
-        return phase  # Stay put if gates block
+        # No transition allowed - terminate to avoid infinite loop
+        return END
 
     g.add_conditional_edges(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         "intake",
@@ -472,7 +469,7 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
     for phase, nxt in _PHASE_GRAPH.items():
         if phase == "intake" or phase == nxt:
             continue  # intake handled above; self-loops terminate at END below
-        g.add_conditional_edges(phase, _advance, {phase: phase, nxt: nxt})
+        g.add_conditional_edges(phase, _advance, {nxt: nxt, END: END})
     g.add_edge("ship", END)
     return g
 

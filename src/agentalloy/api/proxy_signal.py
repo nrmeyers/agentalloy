@@ -1183,28 +1183,13 @@ async def evaluate_signal(
         orientation_phase_changed or session_key not in last_orientation_sessions
     )
 
-    # System-prompt leg of the workflow prose. Get workflow instructions from
-    # the LangGraph. The graph embeds workflow instructions and drives the workflow.
-    # Invoke the graph to get workflow instructions for the current phase.
-    from agentalloy.signals.graph import (  # noqa: PLC0415
-        initial_phase_graph_state,
-        make_thread_key,
-        phase_graph,
-    )
-    
-    thread_key = make_thread_key(cwd)
-    input_state = initial_phase_graph_state(phase=phase, lane="sdd-full")
-    graph = phase_graph()
-    config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-    graph_result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-    
-    # Get workflow instructions from graph state
-    graph_workflow_instructions = graph_result.get("workflow_instructions") if graph_result else None
-    
+    # System-prompt leg of the workflow prose. The workflow instructions come from
+    # the skill's raw_prose. The LangGraph is used for routing transitions, not
+    # for getting workflow instructions on every request.
     # Inject on phase entry, new session, or orientation. The agent needs workflow
     # instructions when entering a phase or starting a new session.
     should_inject_prose = phase_changed or is_new_session or announce_orientation or announce
-    workflow_system_prose = graph_workflow_instructions if should_inject_prose else None
+    workflow_system_prose = (skill.get("raw_prose") or None) if should_inject_prose else None
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
@@ -1269,8 +1254,8 @@ async def evaluate_signal(
                         )
                     except Exception:
                         logger.debug("intent-based contract creation failed", exc_info=True)
-            # Evaluate gates first (needs store access), then pass results to graph.
-            # The graph is the single decision point for transitions.
+            # Evaluate gates and decide the transition. _route_step is the single
+            # decision point for proxy/HTTP/CLI (slice 09).
             from agentalloy.signals.graph import (  # noqa: PLC0415
                 _route_step,
             )
@@ -1279,34 +1264,9 @@ async def evaluate_signal(
             # predicates and the approval gate against the real repo, not the
             # proxy's process cwd (the uv tool dir).
             out = _route_step(phase, lane, project_root=cwd, store=ctx.store)
-            
-            # Execute the LangGraph with gate results. The graph routes based on
-            # gate evaluation and embeds workflow instructions.
-            from agentalloy.signals.graph import (  # noqa: PLC0415
-                initial_phase_graph_state,
-                make_thread_key,
-                phase_graph,
-            )
-
-            thread_key = make_thread_key(cwd)
-            # Pass gate results to graph state
-            input_state = initial_phase_graph_state(phase=phase, lane=lane)
-            input_state["gates_met"] = list(out.gates_met)
-            input_state["gates_unmet"] = list(out.gates_unmet)
-            input_state["should_transition"] = out.should_transition
-            input_state["to_phase"] = out.to_phase if out.should_transition else None
-            input_state["advisories"] = list(out.advisories)
-            
-            graph = phase_graph()
-            config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-            
-            # Extract workflow instructions from graph state. The graph drives
-            # the workflow, not just routes phases.
-            graph_workflow_instructions = result.get("workflow_instructions") if result else None
-            
-            # Use graph's routing decision (based on gate results)
-            to_phase = result.get("to_phase") if result else None
+            # Only write to_phase when the gate allows the transition.
+            # When the gate blocks, stay put.
+            to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
                 # test-plan.md into plan so the plan gate is satisfied on first
