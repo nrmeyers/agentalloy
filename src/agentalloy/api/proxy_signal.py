@@ -989,23 +989,6 @@ async def evaluate_signal(
     repo = str(cwd)
     session_key, session_source = resolve_session_key(request, session_id)
 
-    # Register session in the registry if it's new. This makes session tracking
-    # explicit and reliable, not dependent on fragile fingerprint detection.
-    is_new_session = False
-    if session_key and ctx.store is not None:
-        try:
-            existing = ctx.store.get_session(session_key)
-            if existing is None:
-                # New session - create it in the registry
-                ctx.store.create_session(session_key, task_slug=None, phase=phase)
-                logger.info("Registered new session: %s", session_key)
-                is_new_session = True
-            else:
-                # Existing session - update activity
-                ctx.store.update_session_activity(session_key, phase=phase)
-        except Exception:
-            logger.debug("Session registry update failed", exc_info=True)
-
     # Carrier-request gate: only identifiable sessions are carriers.
     #
     # Every supported harness (Claude Code, Qwen Code, aider, hermes …) is either
@@ -1149,6 +1132,23 @@ async def evaluate_signal(
         store=gate_store,
         # Proxy has no file/tool events — only prompt text
     )
+
+    # Register session in the registry if it's new. This makes session tracking
+    # explicit and reliable, not dependent on fragile fingerprint detection.
+    is_new_session = False
+    if session_key and ctx.store is not None:
+        try:
+            existing = ctx.store.get_session(session_key)
+            if existing is None:
+                # New session - create it in the registry
+                ctx.store.create_session(session_key, task_slug=None, phase=phase)
+                logger.info("Registered new session: %s", session_key)
+                is_new_session = True
+            else:
+                # Existing session - update activity
+                ctx.store.update_session_activity(session_key, phase=phase)
+        except Exception:
+            logger.debug("Session registry update failed", exc_info=True)
 
     # 4. Announce cadence: a phase's orientation block is emitted once per
     #    (phase, session). `.agentalloy/announced` records the last phase AND the
