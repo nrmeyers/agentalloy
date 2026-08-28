@@ -117,9 +117,11 @@ def _build_artifact_missing_advisory(args: dict[str, Any], ctx: PredicateContext
     name = str(args.get("name") or args.get("name_glob") or "<name>.artifact")
     return (
         f"Phase '{phase}' isn't complete yet: its exit artifact '{name}' is not "
-        f"recorded. Record it via your state panel's record_artifact action "
-        f"(PUT /state/artifact) with name '{name}' — a file on disk is not an "
-        f"artifact. Then present the work for approval."
+        f"recorded. Record it by piping the body straight to the store: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {name} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback). A file on disk is not an artifact — the store is the "
+        f"artifact's only home. Then present the work for approval."
     )
 
 
@@ -150,9 +152,11 @@ def _build_artifact_sections_advisory(args: dict[str, Any], ctx: PredicateContex
     names = ", ".join(f"'## {s}'" for s in missing)
     return (
         f"The '{name}' artifact is recorded but missing required section heading(s): "
-        f"{names}. Update the body to include those headings and re-record it via "
-        f"PUT /state/artifact with the same name — note this voids any existing "
-        f"approval for '{phase}', so present the updated artifact for re-approval."
+        f"{names}. Update the body to include those headings and re-record it: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {name} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback). Re-recording voids any existing approval for '{phase}', so "
+        f"present the updated artifact for re-approval."
     )
 
 
@@ -163,8 +167,10 @@ def _build_artifact_size_advisory(args: dict[str, Any], ctx: PredicateContext) -
     minimum = args.get("minimum_size", 0)
     return (
         f"Phase '{phase}' exit artifact matching '{glob}' is below the minimum "
-        f"size ({minimum} chars). Flesh out the artifact body and re-record it "
-        f"via PUT /state/artifact."
+        f"size ({minimum} chars). Flesh out the artifact body and re-record it: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {glob} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback)."
     )
 
 

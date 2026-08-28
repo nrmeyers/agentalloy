@@ -347,16 +347,21 @@ def _add_actions(
         # marker extraction is off by default, and the exit gates match on the
         # artifact NAME, so the hint must pin the exact names per phase.
         actions["record_artifact"] = (
-            f"To record this phase's deliverable artifact, call "
-            f"PUT {service}/state/artifact?repo_root={scope['repo_root']} "
-            f"with JSON body: {{\"phase\": \"<phase>\", \"slug\": \"<task-slug>\", "
-            f"\"name\": \"<artifact-name>\", \"content\": \"<markdown body>\"}}. "
+            f"To record this phase's deliverable artifact, pipe its body "
+            f"straight into the state store — the store is the artifact's only "
+            f"home, so never write deliverables to files on disk:\n"
+            f"  agentalloy artifact put --phase <phase> --slug <task-slug> "
+            f"--name <artifact-name> <<'EOF'\n"
+            f"  <markdown body>\n"
+            f"  EOF\n"
             f"Exit gates match on the artifact name — use exactly: "
             f"spec → 'spec.artifact', design → 'approach.artifact', "
             f"plan → 'tasks.artifact' and 'test-plan.artifact', "
             f"sdd-fast → 'fast.artifact'. "
-            f"For long bodies, write the JSON to a temp file and pass it with "
-            f"curl --data @<file> — never inline multi-line JSON in shell quotes. "
+            f"If the CLI is unavailable, PUT {service}/state/artifact?"
+            f"repo_root={scope['repo_root']} with JSON body "
+            f"{{\"phase\": \"<phase>\", \"slug\": \"<task-slug>\", "
+            f"\"name\": \"<artifact-name>\", \"content\": \"<markdown body>\"}}. "
             f"In a spec artifact, '## AC-N: <text>' headings are merged into the "
             f"contract's success criteria automatically."
         )

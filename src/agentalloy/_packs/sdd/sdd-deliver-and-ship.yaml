@@ -19,6 +19,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     # The ship gate is a "real record" check: the ship artifact must exist with
@@ -94,8 +95,9 @@ raw_prose: |
   - **how it was verified** — link the spec acceptance, the design, and the QA
     report so a reviewer can trace the chain instead of reconstructing it.
 
-  Record the PR narrative via your state panel's record_artifact action
-  (PUT /state/artifact), name `pr-narrative`:
+  Record the PR narrative by piping its body to the store:
+  `agentalloy artifact put --phase deliver --slug <task-slug> --name pr-narrative`
+  (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   ```
   ...narrative content...
@@ -109,8 +111,9 @@ raw_prose: |
   Write the ship artifact with `## Summary` (what shipped, the PR
   link, the release-notes or changelog entry) and `## Rollback` (how to reverse this
   exact change — the revert commit, the flag to flip, any data migration to undo)
-  via your state panel's record_artifact action (PUT /state/artifact),
-  name `delivery.artifact`:
+  and record it: `agentalloy artifact put --phase deliver --slug <task-slug>
+  --name delivery.artifact` (content on stdin; PUT /state/artifact is the HTTP
+  fallback):
 
   ```
   ## Summary

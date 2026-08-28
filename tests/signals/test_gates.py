@@ -823,6 +823,7 @@ def test_artifact_contains_advisory_names_missing_sections(tmp_path: Path):
         advisory = evals[0].advisory
         assert advisory is not None
         assert "'## Approach'" in advisory
+        assert "agentalloy artifact put" in advisory
         assert "PUT /state/artifact" in advisory
         assert "re-approval" in advisory
         assert "<!-- agentalloy:artifact" not in advisory
@@ -841,6 +842,7 @@ def test_artifact_exists_advisory_points_at_store_endpoint(tmp_path: Path):
         assert result == NOT_MET
         advisory = evals[0].advisory
         assert advisory is not None
+        assert "agentalloy artifact put" in advisory
         assert "PUT /state/artifact" in advisory
         assert "spec.artifact" in advisory
         assert "<!-- agentalloy:artifact" not in advisory

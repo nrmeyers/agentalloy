@@ -18,6 +18,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -68,7 +69,7 @@ contract_template: |
   ## Spec
 
   Acceptance criteria and out-of-scope live in the spec artifact
-  (recorded via PUT /state/artifact, name `spec.artifact`).
+  (recorded via `agentalloy artifact put` or PUT /state/artifact, name `spec.artifact`).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -85,11 +86,13 @@ raw_prose: |
   with action=`contract_detail` to read the full contract. If it does not exist, you
   skipped intake; STOP and go back.
 
-  You MUST record the spec via your state panel's record_artifact action
-  (PUT /state/artifact) with name `spec.artifact`, carrying its **Acceptance Criteria**
-  and **Out of Scope** sections. There is no file to write — this is a store write, not
-  a filesystem document; a file on disk is not an artifact, and the artifact exists only
-  once the PUT succeeds. You MUST NOT design solutions or touch `src/` here — spec settles
+  You MUST record the spec by piping its body straight to the store:
+  `agentalloy artifact put --phase spec --slug <task-slug> --name spec.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback), carrying its
+  **Acceptance Criteria** and **Out of Scope** sections. There is no file to write —
+  this is a store write, not a filesystem document; a file on disk is not an artifact,
+  and the artifact exists only once the recording succeeds. You MUST NOT design
+  solutions or touch `src/` here — spec settles
   *what* and *done*, never *how*.
 
   You have one job: turn the intake contract's fuzzy ask into a spec precise enough that
@@ -173,8 +176,9 @@ raw_prose: |
   ## 6. Record it + prepare the hand-off
 
   The **spec artifact** is the deliverable and the single source of truth for acceptance —
-  record it via your state panel's record_artifact action (PUT /state/artifact),
-  name `spec.artifact`.
+  record it by piping the body to the store: `agentalloy artifact put --phase spec
+  --slug <task-slug> --name spec.artifact` (content on stdin; PUT /state/artifact is
+  the HTTP fallback).
 
   The body MUST include `## Acceptance Criteria` and `## Out of Scope` sections. That
   completes spec.

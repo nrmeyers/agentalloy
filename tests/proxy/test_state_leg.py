@@ -192,8 +192,10 @@ class TestBuildStateLeg:
         assert "spec.artifact" in hint
         assert "approach.artifact" in hint
         assert "tasks.artifact" in hint
-        # Transport guidance: never inline multi-line JSON in shell quotes
-        assert "--data @<file>" in hint
+        # Recording goes straight to the store via the CLI — never via a
+        # temp file on disk
+        assert "agentalloy artifact put" in hint
+        assert "temp file" not in hint
 
     def test_record_artifact_endpoint_fallback_without_scope(self) -> None:
         result = build_state_leg("spec")

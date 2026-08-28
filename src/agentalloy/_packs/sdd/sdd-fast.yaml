@@ -24,6 +24,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -92,8 +93,9 @@ raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
   **Checkpoint first.** The fast lane compresses spec + design + build into one pass, but you MUST
-  still record the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) via
-  your state panel's record_artifact action (PUT /state/artifact) before coding, and you MUST
+  still record the sdd-fast artifact (**Acceptance Criteria**, **Approach**, **Test Cases**) by
+  piping its body to the store (`agentalloy artifact put`, content on stdin;
+  PUT /state/artifact is the HTTP fallback) before coding, and you MUST
   prove the work with tests under `tests/` before
   ship. You MUST NOT skip the acceptance and test cases just because the lane is fast — fast is
   not unspecified.
@@ -105,8 +107,9 @@ raw_prose: |
 
   ## Where the artifact goes
 
-  **The sdd-fast artifact is not a file.** It is recorded via your state panel's
-  record_artifact action — PUT /state/artifact, name `fast.artifact`:
+  **The sdd-fast artifact is not a file.** Record it with `agentalloy artifact
+  put --phase <phase> --slug <task-slug> --name fast.artifact` (content on stdin;
+  PUT /state/artifact is the HTTP fallback):
 
   ```
   ## Acceptance Criteria

@@ -128,6 +128,32 @@ def test_no_artifact_markers_in_any_prose() -> None:
         )
 
 
+def test_no_temp_file_transport_in_any_prose() -> None:
+    """Deliverables go straight to the store — prose must not teach writing
+    them to disk (temp files included)."""
+    for path in _PACKS.glob("sdd-*.yaml"):
+        prose = _prose(path.name)
+        assert "temp file" not in prose, path.name
+        assert "write the json to" not in prose.lower(), path.name
+
+
+def test_artifact_recording_teaches_the_cli() -> None:
+    """Every phase that records deliverables teaches `agentalloy artifact put`
+    as the recording mechanism (PUT /state/artifact remains the fallback)."""
+    for name in (
+        "sdd-spec-and-scoping.yaml",
+        "sdd-design-and-architecture.yaml",
+        "sdd-plan-and-contracts.yaml",
+        "sdd-build.yaml",
+        "sdd-verify-and-review.yaml",
+        "sdd-deliver-and-ship.yaml",
+        "sdd-fast.yaml",
+    ):
+        prose = _prose(name)
+        assert "agentalloy artifact put" in prose, name
+        assert _ARTIFACT_ENDPOINT in prose, name
+
+
 def test_no_cli_phase_set_in_any_prose() -> None:
     """No workflow skill prose contains `agentalloy phase set` commands."""
     for path in _PACKS.glob("sdd-*.yaml"):

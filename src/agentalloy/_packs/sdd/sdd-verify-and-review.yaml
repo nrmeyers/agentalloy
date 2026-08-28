@@ -24,6 +24,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
   - "the solutions artifact"
 exit_gates:
   all_of:
@@ -146,9 +147,10 @@ raw_prose: |
 
   ## 4. Record the verdict to the qa artifact
 
-  The qa exit gate is store-backed. You MUST record the verdict via your state
-  panel's record_artifact action (PUT /state/artifact), naming it `qa.artifact`,
-  body shaped:
+  The qa exit gate is store-backed. You MUST record the verdict by piping its
+  body to the store: `agentalloy artifact put --phase qa --slug <task-slug>
+  --name qa.artifact` (content on stdin; PUT /state/artifact is the HTTP
+  fallback), body shaped:
 
   ```
   # <slug>
@@ -178,8 +180,9 @@ raw_prose: |
   A report with routed findings does not advance to ship — the findings are
   the worklist for the phase that owns the fix.
 
-  On a clean report, seed **ship's work-item** before you go — record it via
-  PUT /state/artifact, name `work-item`:
+  On a clean report, seed **ship's work-item** before you go — record it with
+  `agentalloy artifact put --phase qa --slug <task-slug> --name work-item`
+  (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   ```
   <delivery surface: release, changelog, migration, rollout — whatever shipping this touches.
@@ -197,8 +200,8 @@ raw_prose: |
   decision worth keeping. Keep it concrete and short — a real lesson, not a
   restatement of the diff — so the next task starts smarter instead of from zero.
 
-  Record it via your state panel's record_artifact action (PUT /state/artifact),
-  name `solution`:
+  Record it with `agentalloy artifact put --phase qa --slug <task-slug>
+  --name solution` (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   ```
   <the problem, the approach that worked, what didn't, and the decision worth keeping>

@@ -30,6 +30,7 @@ prose_invariants:
   - "state panel"
   - "present the work for human approval"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -91,7 +92,7 @@ contract_template: |
   ## Plan
 
   Tasks and test cases are recorded as plan artifacts
-  (tasks.artifact, test-plan.artifact) via PUT /state/artifact.
+  (tasks.artifact, test-plan.artifact) via `agentalloy artifact put` or PUT /state/artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -105,10 +106,11 @@ raw_prose: |
   **Checkpoint first.** Check your state panel and confirm the design artifact
   exists and carries an **Approach**. If it does not, you skipped design;
   STOP and record it. You MUST NOT write any `src/` code in this phase: plan
-  produces artifacts and contracts only — artifacts via your state panel's
-  record_artifact action (PUT /state/artifact), contracts via POST /contracts.
+  produces artifacts and contracts only — artifacts piped straight to the store
+  (`agentalloy artifact put`, content on stdin; PUT /state/artifact is the HTTP
+  fallback), contracts via POST /contracts.
   There is no file to write — a file on disk is not an artifact, and it exists
-  only once the PUT succeeds. If you are editing source,
+  only once the recording succeeds. If you are editing source,
   you are in the wrong phase.
 
   Design settled the approach and decisions. Plan turns that into an ordered
@@ -158,8 +160,9 @@ raw_prose: |
   ## 4. Record it
 
   Plan fans out into named artifacts build reads from — two load-bearing ones,
-  with the exact section headers the gates check. Record each via your state
-  panel's record_artifact action (PUT /state/artifact):
+  with the exact section headers the gates check. Record each by piping its body
+  to the store: `agentalloy artifact put --phase plan --slug <task-slug>
+  --name <name>` (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   - name `tasks.artifact`, body starting `## Tasks`
   - name `test-plan.artifact`, body starting `## Test Cases`

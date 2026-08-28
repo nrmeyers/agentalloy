@@ -1,5 +1,5 @@
 name: sdd
-version: 2.15.1
+version: 2.16.0
 tier: workflow
 description: 'Spec-Driven Development pipeline phase patterns — sdd-spec (scoping
   a fuzzy ask into a precise spec), sdd-design (technical approach and decisions),

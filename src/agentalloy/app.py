@@ -28,6 +28,7 @@ from agentalloy.api.diagnostics_router import DiagnosticsChecker
 from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker, ReadinessChecker
 from agentalloy.api.health_router import router as health_router
+from agentalloy.api.json_body import install_json_body_tolerances
 from agentalloy.api.proxy_passthrough_router import router as passthrough_router
 from agentalloy.api.proxy_responses_router import router as responses_router
 from agentalloy.api.proxy_router import router as proxy_router
@@ -459,6 +460,10 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
         description="Just-in-time context engine: instruction composition + code index.",
         lifespan=lifespan if use_default_lifespan else None,
     )
+
+    # Agents hand-roll these calls (curl --data, urllib) and routinely mistag
+    # a JSON body as form-urlencoded; accept the valid JSON anyway.
+    install_json_body_tolerances(app)
 
     @app.exception_handler(RetrievalStageError)
     async def _retrieval_handler(_req: Request, err: RetrievalStageError) -> JSONResponse:

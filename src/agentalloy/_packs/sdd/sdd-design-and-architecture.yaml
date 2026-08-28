@@ -18,6 +18,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -60,7 +61,7 @@ contract_template: |
   ## Design
 
   The approach is recorded as a design artifact
-  (approach.artifact) via PUT /state/artifact.
+  (approach.artifact) via `agentalloy artifact put` or PUT /state/artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -74,10 +75,11 @@ raw_prose: |
   **Checkpoint first.** Check your state panel and confirm the spec artifact
   exists and carries **Acceptance Criteria**. If it does not, you skipped spec;
   STOP and record it. You MUST NOT write any `src/` code in this phase: design
-  produces artifacts only, recorded via your state panel's record_artifact
-  action (PUT /state/artifact) with name `approach.artifact`.
+  produces artifacts only, recorded by piping the body straight to the store:
+  `agentalloy artifact put --phase design --slug <task-slug> --name approach.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback).
   There is no file to write — a file on disk is not an artifact, and the
-  artifact exists only once the PUT succeeds. If you are editing source, you
+  artifact exists only once the recording succeeds. If you are editing source, you
   are in the wrong phase.
 
   Spec settled *what* and *done*. Design settles *how* — the approach, the
@@ -112,8 +114,9 @@ raw_prose: |
   ## 3. Record it
 
   The **design artifact** is the deliverable and the single source of truth
-  for approach — record it via your state panel's record_artifact action
-  (PUT /state/artifact), name `approach.artifact`, body starting:
+  for approach — record it by piping the body to the store:
+  `agentalloy artifact put --phase design --slug <task-slug> --name approach.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback), body starting:
 
       ## Approach
       ...

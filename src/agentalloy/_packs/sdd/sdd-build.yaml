@@ -18,6 +18,7 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     # Prove the build touched the declared scope (``scope.touches`` of the
@@ -155,8 +156,9 @@ raw_prose: |
   app's real entry point and confirm data flows end to end — green unit tests
   prove the unit works, not that the running app uses it.
 
-  Then seed **qa's work-item** — record the artifact via your state panel's
-  record_artifact action (PUT /state/artifact) with name `work-item`.
+  Then seed **qa's work-item** — record the artifact: `agentalloy artifact put
+  --phase build --slug <task-slug> --name work-item` (content on stdin;
+  PUT /state/artifact is the HTTP fallback).
 
   Fill `domain_tags` with the *verification surface* (the tech qa will probe —
   the risk areas you touched, the test types that matter here) and write the body
