@@ -1170,16 +1170,15 @@ async def evaluate_signal(
     #    BEFORE the workflow block. Uses its own cadence file (`_read_orientation_announced`
     #    / `_write_orientation_announced_atomic`) so the workflow announce and orientation
     #    cadence are independent — a degraded workflow announce never burns the orientation
-    #    marker, and vice versa. Same carrier gate: a background tool-less request must not
-    #    burn the orientation marker. Unlike Tier 1 announce, orientation REQUIRES an
-    #    explicit session_id (not a fingerprinted key) — anonymous requests never get
-    #    orientation.
+    #    marker, and vice versa. Removed session_id requirement: orientation should fire
+    #    for any identifiable session (header or fingerprint), enabling resume after
+    #    interruption even when harnesses don't send session headers.
     last_orientation_phase, last_orientation_sessions = _read_orientation_announced(cwd)
     orientation_phase_changed = last_orientation_phase != phase
-    # Only fire orientation when there's an explicit session_id (not fingerprinted).
-    # Removed is_carrier gate: orientation should fire on phase entry regardless of
-    # session detection.
-    announce_orientation = bool(session_id) and (
+    # Fire orientation for any identifiable session (session_key from header or fingerprint).
+    # This enables resume after interruption (power loss, etc.) even when harnesses
+    # don't send explicit session_id headers.
+    announce_orientation = bool(session_key) and (
         orientation_phase_changed or session_key not in last_orientation_sessions
     )
 
