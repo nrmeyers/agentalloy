@@ -360,6 +360,25 @@ def _add_actions(
             f"This writes the contract and advances the phase in one call. "
             f"Use this when you have completed the current phase's work and are ready to move on."
         )
+        # Contract retrieval: pull a specific contract by ID or list all
+        actions["contracts"] = (
+            f"To retrieve contracts:\n"
+            f"  - List all: GET {service}/contracts?repo_root={scope['repo_root']}\n"
+            f"  - Get by ID: GET {service}/contracts/<contract_id>?repo_root={scope['repo_root']} "
+            f"(contract_id format: '<phase>/<slug>', e.g., 'spec/test-feature')\n"
+            f"  - Filter by phase: GET {service}/contracts?repo_root={scope['repo_root']}&phase=<phase>\n"
+            f"Use this to pull the current contract before starting phase work."
+        )
+        # Session management: list, archive, resume
+        actions["sessions"] = (
+            f"To manage workflow sessions:\n"
+            f"  - List active: GET {service}/state/sessions/active?repo_root={scope['repo_root']}\n"
+            f"  - Archive: POST {service}/state/sessions/archive?repo_root={scope['repo_root']} "
+            f"with JSON body: {{\"session_key\": \"<session-id>\"}}\n"
+            f"  - Resume: POST {service}/state/sessions/resume?repo_root={scope['repo_root']} "
+            f"with JSON body: {{\"session_key\": \"<session-id>\"}}\n"
+            f"Use archive to stash work-in-progress, resume to pick it back up."
+        )
     else:
         actions["query"] = (
             "Use the agentalloy_query tool for code search, symbol lookup, "
