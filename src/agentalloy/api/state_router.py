@@ -28,6 +28,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from agentalloy.api.state_models import (
     ALL_KINDS,
+    AdvanceRequest,
+    AdvanceResponse,
     ArtifactListResponse,
     ArtifactResponse,
     ArtifactSetRequest,
@@ -973,6 +975,154 @@ async def write_phase(
         contract_id=contract_id,
         end_session_instruction=end_session_instruction(phase_value),
         gate_verdict=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /state/advance — contract writing + phase advancement in one call
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/advance",
+    response_model=AdvanceResponse,
+    summary="Write contract and advance phase in one call (agent tool)",
+)
+async def advance_phase(
+    req: AdvanceRequest,
+    request: Request,
+    repo_root: str | None = Query(
+        default=None,
+        description="Absolute path to the repository root.",
+    ),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> AdvanceResponse:
+    """Write the contract for the next phase and advance the phase if gates pass.
+
+    This is the single tool call the agent uses to advance the workflow.
+    It replaces fragile marker extraction and unreliable trigger detection
+    with one explicit, reliable action.
+
+    Flow:
+    1. Determine the target phase (from req.to_phase or next in workflow)
+    2. Write the contract for the target phase
+    3. Evaluate exit gates
+    4. Advance the phase if gates pass
+    5. Return the result
+
+    The contract is written to the store with the slug and body provided.
+    The contract_id is auto-generated as ``{to_phase}/{slug}``.
+    """
+    # Read current phase
+    current_phase_row = store.read_phase()
+    current_phase = current_phase_row.phase if current_phase_row else "intake"
+
+    # Determine target phase
+    from agentalloy.signals.graph import _PHASE_GRAPH
+
+    to_phase = req.to_phase or _PHASE_GRAPH.get(current_phase, current_phase)
+    route = req.route or "full"
+
+    # Generate contract_id
+    contract_id = f"{to_phase}/{req.slug}"
+
+    # Write the contract
+    try:
+        store.put_contract(
+            contract_id,
+            phase=to_phase,
+            slug=req.slug,
+            route=route,
+            domain_tags=req.domain_tags,
+            scope_touches=req.scope_touches,
+            scope_avoids=req.scope_avoids,
+            body=req.contract_body,
+        )
+    except Exception as exc:
+        logger.error("advance: contract write failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            message=f"Contract write failed: {exc}",
+        )
+
+    # Evaluate exit gates and advance the phase
+    # Reuse the write_phase logic with the contract already written
+    try:
+        verdict = await asyncio.to_thread(
+            _route_phase,
+            store,
+            current_phase,
+            lane=f"sdd-{route}" if route != "full" else "sdd-full",
+            target_phase=to_phase,
+            override=False,
+            project_root=Path(repo_root) if repo_root else None,
+        )
+    except Exception as exc:
+        logger.error("advance: gate evaluation failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            message=f"Gate evaluation failed: {exc}",
+        )
+
+    # Check if gates passed
+    if verdict is not None and not verdict.get("should_transition", False):
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            to_phase=to_phase,
+            gate_verdict=verdict,
+            message=f"Gate blocked transition: {verdict.get('reason', 'unknown')}",
+        )
+
+    # Advance the phase
+    try:
+        result = store.write_phase(to_phase, actor="agent-tool")
+        if result.conflict is not None and result.conflict.owner is not None:
+            return AdvanceResponse(
+                success=False,
+                phase=current_phase,
+                contract_id=contract_id,
+                contract_slug=req.slug,
+                to_phase=to_phase,
+                message=f"Phase write conflict: {result.conflict.owner}",
+            )
+    except Exception as exc:
+        logger.error("advance: phase write failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            to_phase=to_phase,
+            message=f"Phase write failed: {exc}",
+        )
+
+    # Posture rewrite after successful phase advance
+    if repo_root is not None:
+        await asyncio.to_thread(
+            _rewrite_posture,
+            Path(repo_root),
+            to_phase,
+            None,
+        )
+
+    # Stamp the phase-start HEAD ref
+    _stamp_phase_start_ref(store, Path(repo_root) if repo_root else None)
+
+    return AdvanceResponse(
+        success=True,
+        phase=to_phase,
+        contract_id=contract_id,
+        contract_slug=req.slug,
+        to_phase=to_phase,
+        gate_verdict=verdict,
+        message=f"Advanced from {current_phase} to {to_phase}",
     )
 
 

@@ -352,6 +352,14 @@ def _add_actions(
             f"/state/* and /contracts/* are scoped by ?repo_root=; /code/search/* "
             f"by ?repo={scope['repo']}."
         )
+        # Phase advancement tool: single call to write contract + advance phase
+        actions["advance"] = (
+            f"To advance to the next phase, call POST {service}/state/advance?repo_root={scope['repo_root']} "
+            f"with JSON body: {{\"slug\": \"<task-slug>\", \"contract_body\": \"<what the next phase needs to know>\", "
+            f"\"to_phase\": \"<target-phase>\", \"route\": \"full\"}}. "
+            f"This writes the contract and advances the phase in one call. "
+            f"Use this when you have completed the current phase's work and are ready to move on."
+        )
     else:
         actions["query"] = (
             "Use the agentalloy_query tool for code search, symbol lookup, "
