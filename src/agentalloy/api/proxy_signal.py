@@ -934,6 +934,7 @@ async def evaluate_signal(
     # the phase as of the start of this turn", never this turn's own write.
     # One store read, projected three ways (phase, actor, flow mode).
     # hand this request a mixed view of the same row.
+    seeded_this_turn = False
     phase_state = _phase_state(cwd)
     phase = phase_state.phase if phase_state else None
     transitioned_by = phase_state.transitioned_by if phase_state else None
@@ -966,6 +967,7 @@ async def evaluate_signal(
             _write_phase_atomic(cwd, phase)
             phase_state = _phase_state(cwd)
             transitioned_by = phase_state.transitioned_by if phase_state else None
+            seeded_this_turn = True
 
     # 1b. Pause guard (single guard point). ``mode: paused`` in the phase row
     # flips the whole request into compose-only handling: no orientation, no
@@ -1222,13 +1224,20 @@ async def evaluate_signal(
     #    so an in-progress phase stays silent unless it is also an entry turn.
     #    Runs in a worker thread (like the gate eval below) so the reranker /
     #    embed network I/O never blocks the single uvicorn event loop.
-    match: PreFilterMatch | None = await asyncio.to_thread(
-        check_transition_trigger,
-        signal_keywords,
-        exit_gates,
-        ctx,
-        embed_client,
-    )
+    if seeded_this_turn:
+        # The seeding turn orients — the repo just entered lifecycle
+        # management and the agent needs its intake turn before any gate
+        # runs. Evaluating here would let a trigger auto-advance the same
+        # request that created the phase row.
+        match = None
+    else:
+        match = await asyncio.to_thread(
+            check_transition_trigger,
+            signal_keywords,
+            exit_gates,
+            ctx,
+            embed_client,
+        )
 
     # 6. Eval (only when the trigger fired): evaluate exit gates, transition the
     #    phase if met, and collect gate advisories. Runs in a thread so the
@@ -1314,10 +1323,18 @@ async def evaluate_signal(
                     # Auto-create next-phase contract if the transition warrants it.
                     # This runs AFTER _write_phase_atomic (which clears cursors), so
                     # we re-seed the cursor to the new contract if creation succeeds.
+                    # Carry slug/scope forward from the current phase's work-item
+                    # contract (cursor/sole-active fallback). Every transition must
+                    # resolve it here: the intake intent branch only binds its local
+                    # when it created the first spec contract, and that local must
+                    # not shadow this path for spec→design and beyond.
+                    source_contract_id, _ = _resolve_current_contract(
+                        cwd, phase, session_key
+                    )
                     _auto_create_next_contract(
                         cwd,
                         to_phase,
-                        contract_id,
+                        source_contract_id,
                         ctx.store,
                     )
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).
