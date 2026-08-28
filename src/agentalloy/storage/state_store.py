@@ -604,6 +604,15 @@ class DuckDBStateStore:
             )
         logger.debug("sdd_artifact lifecycle column and index ensured")
 
+        # Contract status consolidation (four-state model): the retired
+        # ``superseded`` status folds into ``cancelled`` — a forked revision
+        # never reached product, and the lineage lives in the new revision's
+        # ``supersedes`` pointer.  Idempotent once no superseded rows remain.
+        with suppress(duckdb.Error):
+            self.conn.execute(
+                "UPDATE sdd_contract SET status='cancelled' WHERE status='superseded'",
+            )
+
         # Store-only artifact naming migration (#552 06a): lifecycle artifact
         # names in store-backed phases must end with ARTIFACT_EXT, not the
         # legacy ".md". Rename legacy rows in place (strip ".md", append
@@ -1222,9 +1231,16 @@ class DuckDBStateStore:
     # Three entry points are intentional (not redundant):
     #   put_contract      — upsert: create or replace a contract by id
     #   update_contract   — partial in-place correction (no revision fork)
-    #   supersede_contract — revision fork: new row + mark old as superseded
+    #   supersede_contract — revision fork: new row + retire the old one
     # Merging any two would conflate distinct semantics (replace vs correct
     # vs fork) and force callers to guess the intended operation.
+    #
+    # Contract lifecycle statuses (four states, one in-flight + three outcomes):
+    #   active    — in flight; the only status workflow reads match
+    #   stashed   — parked, waiting to resume (session stash)
+    #   archived  — reached product (terminal)
+    #   cancelled — never reached product: abandoned, or retired by a
+    #               revision fork (lineage lives in the new row's supersedes)
 
     def put_contract(
         self,
@@ -1403,9 +1419,11 @@ class DuckDBStateStore:
         success_criteria: list[str | dict[str, Any]] | None = None,
         body: str | None = None,
     ) -> str:
-        """Supersede a contract: write a new row and flip the prior to 'superseded'.
+        """Supersede a contract: write a new row and retire the prior one.
 
-        Returns the new contract_id.
+        The retired revision is flipped to ``cancelled`` — it never reached
+        product; the fork lineage survives in the new row's ``supersedes``
+        pointer.  Returns the new contract_id.
         """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
@@ -1414,19 +1432,21 @@ class DuckDBStateStore:
         now = datetime.now()
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Verify the old contract exists and is active
+        # Verify the old contract exists and can be retired by a fork.
+        # ``cancelled`` is accepted so a revision chain can keep forking
+        # (each retired revision is itself cancelled-by-fork).
         old_row = self.conn.execute(
             "SELECT status FROM sdd_contract WHERE repo=? AND stream_id=? AND contract_id=?",
             (repo, self._stream_id, old_contract_id),
         ).fetchone()
         if old_row is None:
             raise StateStoreError(f"Contract {old_contract_id!r} not found")
-        if old_row[0] not in ("active", "superseded"):
+        if old_row[0] not in ("active", "cancelled"):
             raise StateStoreError(f"Cannot supersede contract with status {old_row[0]!r}")
 
-        # Flip the old contract to superseded
+        # Retire the old revision
         self.conn.execute(
-            "UPDATE sdd_contract SET status='superseded', updated_at=? "
+            "UPDATE sdd_contract SET status='cancelled', updated_at=? "
             "WHERE repo=? AND stream_id=? AND contract_id=?",
             (ts, repo, self._stream_id, old_contract_id),
         )
@@ -1683,11 +1703,20 @@ class DuckDBStateStore:
         count = result.fetchall()
         return bool(count) and count[0][0] > 0
 
-    def archive_all(self) -> dict[str, int]:
-        """Archive all active contracts and artifacts in one transaction.
+    def archive_all(self, outcome: str = "archived") -> dict[str, Any]:
+        """End the current work cycle: retire all in-flight contracts and artifacts.
 
-        Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
+        ``outcome`` is the terminal status the in-flight contracts receive —
+        ``archived`` when the cycle reached product (reset from ship),
+        ``cancelled`` when it was abandoned mid-flight.  ``stashed`` contracts
+        are deliberately untouched: parked work waits to resume and is not
+        part of the cycle being closed.  Artifacts always go to ``archived``
+        regardless — they are historical record, not lifecycle participants.
+
+        Returns ``{"contracts": int, "artifacts": int, "outcome": str}``.
         """
+        if outcome not in ("archived", "cancelled"):
+            raise StateStoreError(f"Invalid archive_all outcome: {outcome!r}")
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1699,24 +1728,31 @@ class DuckDBStateStore:
         # across both UPDATEs and _txn.active stays consistent.
         with self.transaction():
             contracts_result = conn.execute(
-                "UPDATE sdd_contract SET status='archived', updated_at=? "
-                "WHERE repo=? AND stream_id=? AND status != 'archived'",
-                (ts, repo, stream_id),
+                "UPDATE sdd_contract SET status=?, updated_at=? "
+                "WHERE repo=? AND stream_id=? AND status='active'",
+                (outcome, ts, repo, stream_id),
             )
             contracts_count = contracts_result.fetchall()
             contracts_count = contracts_count[0][0] if contracts_count else 0
 
+            # Stashed work keeps its artifacts active: the resume path reads
+            # them back, and the default artifact reads filter to active.
             artifacts_result = conn.execute(
                 "UPDATE sdd_artifact SET status='archived', updated_at=? "
-                "WHERE repo=? AND status != 'archived'",
-                (ts, repo),
+                "WHERE repo=? AND status != 'archived' "
+                "AND slug NOT IN ("
+                "  SELECT slug FROM sdd_contract "
+                "  WHERE repo=? AND stream_id=? AND status='stashed'"
+                ")",
+                (ts, repo, repo, stream_id),
             )
             artifacts_count = artifacts_result.fetchall()
             artifacts_count = artifacts_count[0][0] if artifacts_count else 0
 
         return {
-            "contracts_archived": contracts_count,
-            "artifacts_archived": artifacts_count,
+            "contracts": contracts_count,
+            "artifacts": artifacts_count,
+            "outcome": outcome,
         }
 
     # -- session management ----------------------------------------------------
@@ -1785,19 +1821,74 @@ class DuckDBStateStore:
             for r in rows
         ]
 
-    def archive_session(self, session_key: str) -> bool:
-        """Archive a session by setting status='archived'. Returns True if updated."""
+    def _flip_contract_status_for_slug(
+        self,
+        slug: str | None,
+        from_status: str,
+        to_status: str,
+    ) -> int:
+        """Flip every contract of *slug* from one status to another.
+
+        Contracts are per-work-item (slug), not per-session — when a session
+        parks or closes its work item, the work item's contracts move with it.
+        Returns how many rows moved.
+        """
+        if not slug:
+            return 0
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result = self.conn.execute(
+            "UPDATE sdd_contract SET status=?, updated_at=? "
+            "WHERE repo=? AND stream_id=? AND slug=? AND status=?",
+            (to_status, ts, self._repo(), self._sid(), slug, from_status),
+        )
+        count = result.fetchall()
+        return count[0][0] if count else 0
+
+    def _park_or_close_session(
+        self,
+        session_key: str,
+        session_to: str,
+        contract_to: str,
+    ) -> bool:
+        """Move an active session to a parked/terminal state, propagating to
+        its work item's contracts.  Returns True when a session actually moved.
+        """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
         repo = self._repo()
         stream_id = self._sid()
-        result = self.conn.execute(
-            "UPDATE sdd_session SET status='archived' "
-            "WHERE repo=? AND stream_id=? AND session_key=? AND status='active'",
+        row = self.conn.execute(
+            "SELECT task_slug, status FROM sdd_session "
+            "WHERE repo=? AND stream_id=? AND session_key=?",
             (repo, stream_id, session_key),
+        ).fetchone()
+        if row is None or row[1] != "active":
+            return False
+        task_slug = row[0]
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            "UPDATE sdd_session SET status=?, last_active_at=? "
+            "WHERE repo=? AND stream_id=? AND session_key=?",
+            (session_to, ts, repo, stream_id, session_key),
         )
-        count = result.fetchall()
-        return bool(count) and count[0][0] > 0
+        self._flip_contract_status_for_slug(task_slug, "active", contract_to)
+        return True
+
+    def stash_session(self, session_key: str) -> bool:
+        """Stash a session (active → stashed): parked, waiting to resume.
+
+        The session's work-item contracts go to ``stashed`` with it, so they
+        stop matching workflow reads but stay restorable via resume.
+        """
+        return self._park_or_close_session(session_key, "stashed", "stashed")
+
+    def cancel_session(self, session_key: str) -> bool:
+        """Cancel a session (active → cancelled): abandoned, never reached product."""
+        return self._park_or_close_session(session_key, "cancelled", "cancelled")
+
+    def archive_session(self, session_key: str) -> bool:
+        """Archive a session (active → archived): the work item reached product."""
+        return self._park_or_close_session(session_key, "archived", "archived")
 
     def update_session_activity(
         self,
@@ -1825,28 +1916,35 @@ class DuckDBStateStore:
             )
 
     def resume_session(self, session_key: str) -> bool:
-        """Re-activate a session (archived → active) and refresh last_active_at.
+        """Re-activate a stashed session (and its contracts), refreshing activity.
 
         Idempotent for an already-active session (just refreshes activity).
-        Returns True when the session is known for this repo+stream (active or
-        archived); False when no such session exists.
+        Returns True when the session is known for this repo+stream; False
+        when no such session exists.
+
+        Legacy note: rows parked as ``archived`` before the four-state model
+        are also resumed — pre-v10 the archive verb *was* the stash, so those
+        rows are parked work, not completed work.  ``cancelled`` stays
+        terminal.
         """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
         repo = self._repo()
         stream_id = self._sid()
-        exists = self.conn.execute(
-            "SELECT 1 FROM sdd_session WHERE repo=? AND stream_id=? AND session_key=?",
+        row = self.conn.execute(
+            "SELECT task_slug, status FROM sdd_session "
+            "WHERE repo=? AND stream_id=? AND session_key=?",
             (repo, stream_id, session_key),
         ).fetchone()
-        if not exists:
+        if not row or row[1] == "cancelled":
             return False
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.conn.execute(
             "UPDATE sdd_session SET status='active', last_active_at=? "
-            "WHERE repo=? AND stream_id=? AND session_key=?",
+            "WHERE repo=? AND stream_id=? AND session_key=? AND status != 'cancelled'",
             (ts, repo, stream_id, session_key),
         )
+        self._flip_contract_status_for_slug(row[0], "stashed", "active")
         return True
 
     # -- approval marker -------------------------------------------------------

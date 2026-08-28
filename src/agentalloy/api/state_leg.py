@@ -324,7 +324,7 @@ def _add_actions(
             actions["advance_phase"] = (
                 "Ship is terminal — it does not self-advance. "
                 "When the user confirms they're ready for the next work item, "
-                "run `agentalloy phase set intake` to reset."
+                "use the reset action below to return to intake."
             )
         else:
             actions["advance_phase"] = (
@@ -340,6 +340,23 @@ def _add_actions(
     # base URL and the scoping params inline — worked examples, no more.
     if scope is not None:
         service = scope["service"]
+        # Artifact recording: the explicit PUT endpoint is the reliable path —
+        # marker extraction is off by default, and the exit gates match on the
+        # artifact NAME, so the hint must pin the exact names per phase.
+        actions["record_artifact"] = (
+            f"To record this phase's deliverable artifact, call "
+            f"PUT {service}/state/artifact?repo_root={scope['repo_root']} "
+            f"with JSON body: {{\"phase\": \"<phase>\", \"slug\": \"<task-slug>\", "
+            f"\"name\": \"<artifact-name>\", \"content\": \"<markdown body>\"}}. "
+            f"Exit gates match on the artifact name — use exactly: "
+            f"spec → 'spec.artifact', design → 'approach.artifact', "
+            f"plan → 'tasks.artifact' and 'test-plan.artifact', "
+            f"sdd-fast → 'fast.artifact'. "
+            f"For long bodies, write the JSON to a temp file and pass it with "
+            f"curl --data @<file> — never inline multi-line JSON in shell quotes. "
+            f"In a spec artifact, '## AC-N: <text>' headings are merged into the "
+            f"contract's success criteria automatically."
+        )
         actions["query"] = (
             "Deep-dive lookups beyond this summary (artifact bodies, contract "
             "detail, code search, symbol lookup, governing decisions): use the "
@@ -348,9 +365,24 @@ def _add_actions(
             f"  - List contracts: {service}/contracts?repo_root={scope['repo_root']}\n"
             f"  - Get artifact: {service}/state/artifact/{phase}/<slug>/<name>?repo_root={scope['repo_root']}\n"
             f"  - Get phase: {service}/state/phase?repo_root={scope['repo_root']}\n"
-            f"  - Code search: {service}/code/search?repo={scope['repo']}&q=<query>\n"
-            f"/state/* and /contracts/* are scoped by ?repo_root=; /code/search/* "
-            f"by ?repo={scope['repo']}."
+            f"/state/* and /contracts/* are scoped by ?repo_root=; /code/* "
+            f"by ?repo={scope['repo']} (see the code_index action)."
+        )
+        # Code index / knowledge graph: semantic + lexical search, symbol lookup,
+        # structural graph queries, and decision-doc (knowledge) retrieval.
+        actions["code_index"] = (
+            f"Code index / knowledge graph (all scoped by ?repo={scope['repo']}):\n"
+            f"  - Semantic search: GET {service}/code/search/semantic?repo={scope['repo']}&q=<query>&k=10\n"
+            f"  - Lexical (BM25) search: GET {service}/code/search/lexical?repo={scope['repo']}&q=<query>\n"
+            f"  - Symbol lookup by FQN: GET {service}/code/search/symbol?repo={scope['repo']}&fqn=<fully.qualified.Name>\n"
+            f"  - Graph queries: GET {service}/code/search/structural?repo={scope['repo']}"
+            f"&query=<callers|callees|transitive_callers|governing_decisions|counts_by_kind>&fqn=<fqn>\n"
+            f"  - Decision docs (why code exists): GET {service}/code/search/related-decisions?repo={scope['repo']}&q=<query>\n"
+            f"  - Entity edges for a symbol: GET {service}/code/search/entities?repo={scope['repo']}&query=<symbol>\n"
+            f"  - Budgeted task context: POST {service}/code/context-bundle "
+            f"with JSON body: {{\"repo\": \"{scope['repo']}\", \"task\": \"<task description>\", \"budget_chars\": 24000}}\n"
+            f"Use semantic search to find code, structural callers/callees to trace "
+            f"impact, governing_decisions to find the rationale behind code."
         )
         # Phase advancement tool: single call to write contract + advance phase
         actions["advance"] = (
@@ -369,15 +401,29 @@ def _add_actions(
             f"  - Filter by phase: GET {service}/contracts?repo_root={scope['repo_root']}&phase=<phase>\n"
             f"Use this to pull the current contract before starting phase work."
         )
-        # Session management: list, archive, resume
+        # Session management: list, stash, resume, archive, cancel
         actions["sessions"] = (
-            f"To manage workflow sessions:\n"
+            f"To manage workflow sessions (all POSTs take JSON body: "
+            f"{{\"session_key\": \"<session-id>\"}}):\n"
             f"  - List active: GET {service}/state/sessions/active?repo_root={scope['repo_root']}\n"
-            f"  - Archive: POST {service}/state/sessions/archive?repo_root={scope['repo_root']} "
-            f"with JSON body: {{\"session_key\": \"<session-id>\"}}\n"
-            f"  - Resume: POST {service}/state/sessions/resume?repo_root={scope['repo_root']} "
-            f"with JSON body: {{\"session_key\": \"<session-id>\"}}\n"
-            f"Use archive to stash work-in-progress, resume to pick it back up."
+            f"  - Stash (park work-in-progress to resume later): "
+            f"POST {service}/state/sessions/stash?repo_root={scope['repo_root']}\n"
+            f"  - Resume (bring a stashed session and its contracts back): "
+            f"POST {service}/state/sessions/resume?repo_root={scope['repo_root']}\n"
+            f"  - Archive (work item done, reached product — terminal): "
+            f"POST {service}/state/sessions/archive?repo_root={scope['repo_root']}\n"
+            f"  - Cancel (work item abandoned, never reached product — terminal): "
+            f"POST {service}/state/sessions/cancel?repo_root={scope['repo_root']}\n"
+            f"Use stash/resume to park and restore work-in-progress; "
+            f"archive/cancel only when the work item is finished or abandoned."
+        )
+        # Reset to intake: start a new work item or abandon a stuck one.
+        # Resets are backward moves — the exit gate does not guard them.
+        actions["reset"] = (
+            f"To reset the workflow back to intake (start a new work item, or "
+            f"abandon a stuck/finished one): POST {service}/state/phase?repo_root={scope['repo_root']} "
+            f"with JSON body: {{\"value\": \"intake\"}}. Resets are not gated. "
+            f"Only reset when the user confirms the current work item is done or abandoned."
         )
     else:
         actions["query"] = (

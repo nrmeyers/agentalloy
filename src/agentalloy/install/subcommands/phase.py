@@ -384,15 +384,18 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     # (filename order) so "which task is current" is reliably set — the single source of
     # truth both the proxy and the codify gate read. A phase with no contracts clears it.
     # Mirrors the proxy auto-advance path in skill_loader._write_phase_atomic (B2).
-    # Auto-archive on intake: any non-intake → intake transition ends a work
-    # cycle, so sweep the just-completed cycle's live contracts into
-    # archive/<phase>/ before the next cycle starts writing into active/.
+    # Auto-close on intake: any non-intake → intake transition ends a work
+    # cycle, so sweep the just-ended cycle's live contracts before the next
+    # cycle starts writing.  Outcome depends on where the cycle ended:
+    # leaving ship means it reached product (archived); leaving any earlier
+    # phase means it was abandoned mid-flight (cancelled).  Stashed contracts
+    # are untouched — parked work survives the reset.
     if current is not None and current != "intake" and phase == "intake":
         from agentalloy.api.state_client import StateClient
 
         try:
             client = StateClient()
-            client.archive_all()
+            client.archive_all(outcome="archived" if current == "ship" else "cancelled")
         except Exception:
             logger.warning("archive_all failed — store archiving skipped")
 

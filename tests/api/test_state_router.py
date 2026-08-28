@@ -728,7 +728,7 @@ class TestContractSupersede:
         assert resp.json()["supersedes"] == "ctr-sup-1"
 
         old = state_store.get_contract("ctr-sup-1")
-        assert old["status"] == "superseded"
+        assert old["status"] == "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -1115,8 +1115,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 2
-        assert body["artifacts_archived"] == 2
+        assert body["contracts"] == 2
+        assert body["artifacts"] == 2
 
         # Verify they are now archived
         all_contracts = state_store.list_contracts(status="active")
@@ -1132,7 +1132,7 @@ class TestArchiveAll:
 
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
-        assert resp.json()["contracts_archived"] == 1
+        assert resp.json()["contracts"] == 1
 
         assert sibling.get_contract("ctr-sibling")["status"] == "active"
         assert state_store.get_contract("ctr-mine")["status"] == "archived"
@@ -1144,8 +1144,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 0
 
     def test_archive_all_only_contracts(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1156,8 +1156,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 1
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 1
+        assert body["artifacts"] == 0
 
     def test_archive_all_only_artifacts(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1168,8 +1168,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 1
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 1
 
     def test_archive_all_is_idempotent(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1185,8 +1185,42 @@ class TestArchiveAll:
         resp2 = state_client.post("/state/archive-all")
         assert resp2.status_code == 200
         body = resp2.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 0
+
+    def test_archive_all_outcome_cancelled(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """outcome=cancelled retires in-flight contracts as abandoned."""
+        state_store.put_contract("ctr-abandoned", phase="build", slug="ab")
+
+        resp = state_client.post("/state/archive-all", json={"outcome": "cancelled"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "cancelled"
+        assert body["contracts"] == 1
+        assert state_store.get_contract("ctr-abandoned")["status"] == "cancelled"
+
+    def test_archive_all_spares_stashed_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Stashed (parked) contracts survive the cycle sweep."""
+        state_store.create_session("sess-parked", task_slug="feat-parked")
+        state_store.put_contract("build/feat-parked", phase="build", slug="feat-parked")
+        state_store.put_contract("build/feat-live", phase="build", slug="feat-live")
+        state_store.stash_session("sess-parked")
+
+        resp = state_client.post("/state/archive-all", json={"outcome": "cancelled"})
+        assert resp.status_code == 200
+        assert resp.json()["contracts"] == 1
+        assert state_store.get_contract("build/feat-parked")["status"] == "stashed"
+        assert state_store.get_contract("build/feat-live")["status"] == "cancelled"
+
+    def test_archive_all_rejects_invalid_outcome(
+        self, state_client: TestClient
+    ) -> None:
+        resp = state_client.post("/state/archive-all", json={"outcome": "superseded"})
+        assert resp.status_code == 422
 
     # ------------------------------------------------------------------
     # GET /state/artifact/{phase}/{slug}/{name} — single artifact route
@@ -1383,3 +1417,50 @@ class TestSessionEndpoints:
     def test_resume_missing_session_key_is_400(self, state_client: TestClient) -> None:
         resp = state_client.post("/state/sessions/resume", json={})
         assert resp.status_code == 400
+
+    def test_stash_session_parks_session_and_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a", phase="build")
+        state_store.put_contract("build/feat-a", phase="build", slug="feat-a")
+
+        resp = state_client.post("/state/sessions/stash", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"stashed": True}
+        assert state_store.get_session("sess-1")["status"] == "stashed"
+        assert state_store.get_contract("build/feat-a")["status"] == "stashed"
+        assert state_client.get("/state/sessions/active").json() == []
+
+    def test_stash_session_not_found(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/stash", json={"session_key": "ghost"})
+        assert resp.status_code == 200
+        assert resp.json() == {"stashed": False}
+
+    def test_resume_stashed_session_restores_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a")
+        state_store.put_contract("build/feat-a", phase="build", slug="feat-a")
+        state_store.stash_session("sess-1")
+
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
+        assert resp.json() == {"resumed": True}
+        assert state_store.get_session("sess-1")["status"] == "active"
+        assert state_store.get_contract("build/feat-a")["status"] == "active"
+
+    def test_cancel_session_is_terminal(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+
+        resp = state_client.post("/state/sessions/cancel", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"cancelled": True}
+        assert state_store.get_session("sess-1")["status"] == "cancelled"
+        assert state_store.get_contract("spec/feat-a")["status"] == "cancelled"
+
+        # Cancelled is terminal — resume refuses
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
+        assert resp.json() == {"resumed": False}
+        assert state_store.get_session("sess-1")["status"] == "cancelled"

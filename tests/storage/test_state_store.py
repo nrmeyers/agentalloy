@@ -610,8 +610,9 @@ class TestArtifactStatus:
             store.set_artifact("build", "feat-b", "approach.artifact", "a5")
             # Archive everything
             result = store.archive_all()
-            assert result["contracts_archived"] == 3
-            assert result["artifacts_archived"] == 5
+            assert result["contracts"] == 3
+            assert result["artifacts"] == 5
+            assert result["outcome"] == "archived"
             # Nothing active anymore
             assert store.list_contracts(status="active") == []
             assert store.list_artifacts("design") == []
@@ -635,8 +636,8 @@ class TestArtifactStatus:
 
         # Archive repo-a's active items
         result = store_a.archive_all()
-        assert result["contracts_archived"] == 1
-        assert result["artifacts_archived"] == 1
+        assert result["contracts"] == 1
+        assert result["artifacts"] == 1
 
         # Repo-a is now empty of active items
         assert store_a.list_contracts(status="active") == []
@@ -1271,8 +1272,8 @@ class TestContractSupersede:
             assert v2["status"] == "active"
             assert v2["body"] == "version 2"
 
-    def test_ta8_prior_flipped_to_superseded(self, tmp_path: Path) -> None:
-        """TA8 — the prior contract is flipped to 'superseded'."""
+    def test_ta8_prior_flipped_to_cancelled(self, tmp_path: Path) -> None:
+        """TA8 — the prior revision is retired as 'cancelled' (four-state model)."""
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
@@ -1281,7 +1282,7 @@ class TestContractSupersede:
 
             v1 = store.get_contract("ctr-v1")
             assert v1 is not None
-            assert v1["status"] == "superseded"
+            assert v1["status"] == "cancelled"
 
     def test_ta8_both_rows_readable(self, tmp_path: Path) -> None:
         """TA8 — both the old and new contract remain readable."""
@@ -1297,7 +1298,7 @@ class TestContractSupersede:
             v2 = store.get_contract("ctr-v2")
             assert v1 is not None
             assert v2 is not None
-            assert v1["status"] == "superseded"
+            assert v1["status"] == "cancelled"
             assert v2["status"] == "active"
             assert v1["body"] == "original"
             assert v2["body"] == "replacement"
@@ -1624,6 +1625,102 @@ class TestSessionRegistry:
             store.migrate()
             s = store.for_repo("test", stream_id="main")
             assert s.resume_session("ghost") is False
+
+    def test_stash_session_parks_session_and_contracts(self, tmp_path: Path) -> None:
+        """Four-state model: stash parks the session and its work-item contracts."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", task_slug="feat-a", phase="build")
+            s.put_contract("build/feat-a", phase="build", slug="feat-a")
+
+            assert s.stash_session("sess-1") is True
+            assert s.get_session("sess-1")["status"] == "stashed"
+            # Contracts follow the work item into stashed
+            assert s.list_contracts(status="active") == []
+            assert s.get_contract("build/feat-a")["status"] == "stashed"
+            # Stashing an already-parked session is a no-op
+            assert s.stash_session("sess-1") is False
+
+    def test_resume_session_restores_stashed_contracts(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", task_slug="feat-a")
+            s.put_contract("build/feat-a", phase="build", slug="feat-a")
+            s.stash_session("sess-1")
+
+            assert s.resume_session("sess-1") is True
+            assert s.get_session("sess-1")["status"] == "active"
+            assert s.get_contract("build/feat-a")["status"] == "active"
+
+    def test_cancel_session_is_terminal(self, tmp_path: Path) -> None:
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-1", task_slug="feat-a")
+            s.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+
+            assert s.cancel_session("sess-1") is True
+            assert s.get_session("sess-1")["status"] == "cancelled"
+            assert s.get_contract("spec/feat-a")["status"] == "cancelled"
+            # Cancelled is terminal — resume refuses
+            assert s.resume_session("sess-1") is False
+            assert s.get_session("sess-1")["status"] == "cancelled"
+
+    def test_archive_all_outcome_cancelled(self, tmp_path: Path) -> None:
+        """Cycle sweep with outcome=cancelled retires in-flight contracts as cancelled."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.put_contract("build/feat-a", phase="build", slug="feat-a")
+
+            result = s.archive_all(outcome="cancelled")
+            assert result["outcome"] == "cancelled"
+            assert s.get_contract("build/feat-a")["status"] == "cancelled"
+
+    def test_archive_all_spares_stashed_work(self, tmp_path: Path) -> None:
+        """Stashed contracts — and their artifacts — survive the cycle sweep."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.create_session("sess-parked", task_slug="feat-parked")
+            s.put_contract("build/feat-parked", phase="build", slug="feat-parked")
+            s.put_contract("build/feat-live", phase="build", slug="feat-live")
+            s.set_artifact("build", "feat-parked", "notes.artifact", "parked body")
+            s.set_artifact("build", "feat-live", "notes.artifact", "live body")
+            s.stash_session("sess-parked")
+
+            result = s.archive_all(outcome="cancelled")
+            assert result["contracts"] == 1  # only the in-flight one
+            assert s.get_contract("build/feat-parked")["status"] == "stashed"
+            assert s.get_contract("build/feat-live")["status"] == "cancelled"
+            # Parked artifacts stay readable for the resume path; live ones don't
+            assert [a["name"] for a in s.list_artifacts("build", slug="feat-parked")] == [
+                "notes.artifact"
+            ]
+            assert s.list_artifacts("build", slug="feat-live") == []
+
+    def test_superseded_rows_migrate_to_cancelled(self, tmp_path: Path) -> None:
+        """Legacy 'superseded' rows fold into 'cancelled' when the store migrates."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            s.put_contract("ctr-v0", phase="build", slug="s")
+            s.conn.execute(
+                "UPDATE sdd_contract SET status='superseded' "
+                "WHERE contract_id='ctr-v0'",
+            )
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            s = store.for_repo("test", stream_id="main")
+            assert s.get_contract("ctr-v0")["status"] == "cancelled"
 
     def test_repo_scoping_isolates_sessions(self, tmp_path: Path) -> None:
         """Two repos share one DB; a session in one is invisible to the other."""

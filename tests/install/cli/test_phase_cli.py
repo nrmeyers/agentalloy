@@ -563,7 +563,9 @@ class TestShipResetAutoArchive:
         from agentalloy.api.state_client import StateClient
 
         with patch.object(
-            StateClient, "archive_all", side_effect=lambda: self._mock_archive_all(root)
+            StateClient,
+            "archive_all",
+            side_effect=lambda outcome="archived": self._mock_archive_all(root),
         ):
             run_phase_set("intake", root=root)
 

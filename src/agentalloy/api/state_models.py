@@ -29,8 +29,11 @@ ALL_KINDS: frozenset[str] = frozenset(
 # Kinds that participate in lease-based concurrency control.
 LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
-# Valid contract statuses stored in sdd_contract.
-ContractStatus = Literal["active", "archived", "superseded"]
+# Valid contract statuses stored in sdd_contract. Four states: one in-flight
+# (active), one parked (stashed — waiting to resume), two terminal outcomes
+# (archived — reached product; cancelled — never reached product, whether
+# abandoned or retired by a revision fork).
+ContractStatus = Literal["active", "stashed", "archived", "cancelled"]
 
 # Valid contract route values.
 ContractRoute = Literal["full", "sdd-fast", "add-skill"]

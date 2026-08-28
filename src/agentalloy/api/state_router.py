@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from agentalloy.api.state_models import (
     ALL_KINDS,
@@ -640,14 +640,58 @@ async def list_active_sessions(
 
 
 @router.post(
+    "/sessions/stash",
+    summary="Stash a session (park it, waiting to resume)",
+)
+async def stash_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Stash a session by session_key (active → stashed).
+
+    The session's work-item contracts are stashed with it.  Returns
+    ``{"stashed": bool}``.
+    """
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    stashed = await asyncio.to_thread(store.stash_session, session_key)
+    return {"stashed": stashed}
+
+
+@router.post(
+    "/sessions/cancel",
+    summary="Cancel a session (abandoned, never reached product)",
+)
+async def cancel_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Cancel a session by session_key (active → cancelled).
+
+    The session's work-item contracts are cancelled with it.  Returns
+    ``{"cancelled": bool}``.
+    """
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    cancelled = await asyncio.to_thread(store.cancel_session, session_key)
+    return {"cancelled": cancelled}
+
+
+@router.post(
     "/sessions/archive",
-    summary="Archive a session by session_key",
+    summary="Archive a session (work item reached product)",
 )
 async def archive_session(
     body: dict[str, Any],
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> dict[str, bool]:
-    """Archive a session by session_key. Returns {"archived": bool}."""
+    """Archive a session by session_key (active → archived).
+
+    The session's work-item contracts are archived with it.  Returns
+    ``{"archived": bool}``.
+    """
     session_key = body.get("session_key")
     if not session_key:
         raise HTTPException(status_code=400, detail="session_key is required")
@@ -657,16 +701,17 @@ async def archive_session(
 
 @router.post(
     "/sessions/resume",
-    summary="Re-activate a session by session_key",
+    summary="Re-activate a stashed session by session_key",
 )
 async def resume_session(
     body: dict[str, Any],
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> dict[str, bool]:
-    """Re-activate a session (archived → active) and refresh last_active_at.
+    """Re-activate a stashed session (stashed → active) and refresh activity.
 
-    Returns ``{"resumed": bool}`` — True when the session is known (active or
-    archived), False when no such session exists for this repo+stream.
+    The session's stashed contracts come back to active with it.  Returns
+    ``{"resumed": bool}`` — True when the session is known, False when no
+    such session exists for this repo+stream.
     """
     session_key = body.get("session_key")
     if not session_key:
@@ -677,17 +722,26 @@ async def resume_session(
 
 @router.post(
     "/archive-all",
-    summary="Archive all active contracts and artifacts",
+    summary="End the work cycle: retire all in-flight contracts and artifacts",
 )
 async def archive_all(
+    body: dict[str, Any] | None = Body(default=None),
     store: DuckDBStateStore = Depends(get_repo_store),
-) -> dict[str, int]:
-    """Archive every active contract and artifact in one transaction.
+) -> dict[str, Any]:
+    """Retire every active contract and artifact in one transaction.
 
-    Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
-    Zero counts is a valid no-op (everything already archived) — not an error.
+    Optional JSON body ``{"outcome": "archived" | "cancelled"}`` sets the
+    terminal status the in-flight contracts receive: ``archived`` when the
+    cycle reached product (reset from ship), ``cancelled`` when abandoned
+    mid-flight.  Defaults to ``archived``.  Stashed contracts are untouched.
+
+    Returns ``{"contracts": int, "artifacts": int, "outcome": str}``.
+    Zero counts is a valid no-op — not an error.
     """
-    return await asyncio.to_thread(store.archive_all)
+    outcome = (body or {}).get("outcome", "archived")
+    if outcome not in ("archived", "cancelled"):
+        raise HTTPException(status_code=422, detail=f"invalid outcome: {outcome!r}")
+    return await asyncio.to_thread(store.archive_all, outcome)
 
 
 @router.get(
