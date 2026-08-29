@@ -1,10 +1,10 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
-"""Fresh-build importer: pack YAML -> agentalloy.duck (+ fragments.lance reembed).
+"""Fresh-build importer: pack YAML -> the unified corpus store (+ reembed).
 
 The v5 deterministic corpus builder. Reads ``_packs/<pack>/pack.yaml`` and the
 referenced skill YAMLs and writes the relational skill graph (skills /
-skill_versions / fragments / skill_dependencies) into ``agentalloy.duck``,
-mirroring the graph structure the old Cypher ``ingest._insert`` produced:
+skill_versions / fragments / skill_dependencies) into the OverGraph corpus
+store, mirroring the graph structure the old Cypher ``ingest._insert`` produced:
 
 - ``version_id = "{skill_id}-v1"``; the version is ``status='active'`` and the
   skill's ``current_version_id`` points at it (folds HAS_VERSION/CURRENT_VERSION).
@@ -14,8 +14,8 @@ mirroring the graph structure the old Cypher ``ingest._insert`` produced:
 - ``requires`` -> ``skill_dependencies`` (rel_type='requires'); cross-pack
   forward references are resolved after all skills are inserted.
 
-``reembed_corpus`` then reads the active fragments back and builds the Lance
-``fragments`` dataset (the SQL-canonical -> derived-index step, decision D7),
+``reembed_corpus`` then reads the active fragments back and builds the
+fragment embedding index (the canonical -> derived-index step, decision D7),
 embedding each fragment's content via the configured embed client.
 """
 
@@ -31,10 +31,10 @@ from typing import Any
 import yaml
 
 from agentalloy.reads.active import get_active_fragments
-from agentalloy.storage.fragment_store import LanceFragmentStore
 from agentalloy.storage.protocols import (
     FragmentEmbedding,
     FragmentRow,
+    FragmentStore,
     SkillDependencyRow,
     SkillRow,
     SkillStore,
@@ -175,18 +175,19 @@ def import_packs(ss: SkillStore, pack_dirs: Sequence[Path]) -> dict[str, Any]:
 
 
 def reembed_corpus(
-    fs: LanceFragmentStore,
+    fs: FragmentStore,
     ss: SkillStore,
     *,
     embed: Callable[[list[str]], list[list[float]]],
     model: str,
     batch_size: int = 32,
 ) -> int:
-    """Build the Lance fragments dataset from the active fragments in DuckDB.
+    """Build fragment embeddings from the active fragments in the corpus store.
 
-    ``embed`` is a callable ``(texts: list[str]) -> list[list[float]]`` (e.g. an
-    embed client bound to its model). Writes are atomic (one ``bulk_replace``),
-    then indices are built. Returns the number of fragments embedded.
+    ``fs`` and ``ss`` may be the same unified store. ``embed`` is a callable
+    ``(texts: list[str]) -> list[list[float]]`` (e.g. an embed client bound to
+    its model). Writes are atomic (one ``bulk_replace``), then the BM25 index
+    is rebuilt. Returns the number of fragments embedded.
     """
     frags = get_active_fragments(ss)
     if not frags:
@@ -213,8 +214,7 @@ def reembed_corpus(
                 ),
             )
     fs.bulk_replace(items)
-    fs.optimize()
     ss.set_meta("schema_version", "1")
     ss.set_meta("card_index", "off")
-    logger.info("reembed_corpus: %d fragments -> fragments.lance", len(items))
+    logger.info("reembed_corpus: %d fragments embedded", len(items))
     return len(items)

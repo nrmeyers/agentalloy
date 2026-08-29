@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol, DecisionRow
 
 
@@ -39,8 +39,8 @@ def governs(src: str, dst: str, *, doc: str) -> CodeEdge:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
@@ -49,7 +49,7 @@ def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
 # -- AC 1: a decision + its governed symbol round-trips with no DDL -----------
 
 
-def test_governing_decisions_reads_back_decision_and_link(store: DuckDBCodeGraphStore) -> None:
+def test_governing_decisions_reads_back_decision_and_link(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols(
         [
             sym("pkg.foo", file_path="pkg/foo.py"),
@@ -80,7 +80,7 @@ def test_governing_decisions_reads_back_decision_and_link(store: DuckDBCodeGraph
     ]
 
 
-def test_governing_decisions_empty_for_ungoverned(store: DuckDBCodeGraphStore) -> None:
+def test_governing_decisions_empty_for_ungoverned(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo", file_path="pkg/foo.py")])
     assert store.governing_decisions("pkg.foo") == []
     assert store.governing_decisions("does.not.exist") == []
@@ -89,7 +89,7 @@ def test_governing_decisions_empty_for_ungoverned(store: DuckDBCodeGraphStore) -
 # -- symbols_by_name: DK2 tier-2 lookup, MarkdownDoc excluded -----------------
 
 
-def test_symbols_by_name_returns_code_symbols_only(store: DuckDBCodeGraphStore) -> None:
+def test_symbols_by_name_returns_code_symbols_only(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols(
         [
             sym("pkg.a.run", name="run", file_path="pkg/a.py"),
@@ -110,7 +110,7 @@ def test_symbols_by_name_returns_code_symbols_only(store: DuckDBCodeGraphStore) 
 # -- DK6: doc-granular prune ---------------------------------------------------
 
 
-def test_count_govern_edges_for_doc_is_non_destructive(store: DuckDBCodeGraphStore) -> None:
+def test_count_govern_edges_for_doc_is_non_destructive(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo", file_path="pkg/foo.py")])
     store.upsert_edges(
         [
@@ -127,7 +127,7 @@ def test_count_govern_edges_for_doc_is_non_destructive(store: DuckDBCodeGraphSto
 # -- #526: delete_for_files must not touch GOVERNS edges -----------------------
 
 
-def test_delete_for_files_preserves_govern_edges(store: DuckDBCodeGraphStore) -> None:
+def test_delete_for_files_preserves_govern_edges(store: OverGraphCodeGraphStore) -> None:
     """The real deletion path (#526/#527 mechanism correction): GOVERNS edges
     carry ``file_path`` = the decision doc path, so a file-granular
     ``delete_for_files`` call that includes a decision doc must not delete
@@ -165,7 +165,7 @@ def test_delete_for_files_preserves_govern_edges(store: DuckDBCodeGraphStore) ->
     assert ("pkg.a", "pkg.b") not in store.calls_edges()
 
 
-def test_delete_govern_edges_for_doc_is_scoped(store: DuckDBCodeGraphStore) -> None:
+def test_delete_govern_edges_for_doc_is_scoped(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo", file_path="pkg/foo.py")])
     store.upsert_edges(
         [

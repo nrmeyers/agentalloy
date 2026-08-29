@@ -62,8 +62,8 @@ def _probe_diagnostics(port: int) -> dict[str, Any] | None:
     """Probe the running service's diagnostics endpoint.
 
     Returns the parsed JSON body when the service is up and responding,
-    None on any failure. Used by the DB checks to avoid racing the
-    service for the corpus DB lock.
+    None on any failure. Used by the corpus checks so they also work for
+    container deployments where the host has no direct file access.
     """
     url = f"http://localhost:{port}/diagnostics/runtime"
     try:
@@ -224,15 +224,19 @@ def _check_embedding_expected_dim(embed_url: str, model: str) -> dict[str, Any]:
 
 
 def _check_duckdb_present(
-    fragments_path: str,
+    store_path: str,
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
-    """Check 3: fragments store exists with fragment rows.
+    """Check 3: corpus store exists with fragment embeddings.
+
+    (Name is a stable output-contract key from the DuckDB era; the check
+    now reads the unified OverGraph corpus store.)
 
     When the service is running (``diag`` is non-None), defer to its
-    telemetry-store readiness probe instead of opening the store directly —
-    a concurrent open races the service for the file lock.
+    telemetry-store readiness probe instead of opening the store directly,
+    so this check composes with container deployments where the host has
+    no file access at all.
 
     In container mode, direct file access is not available on the host;
     the diagnostics endpoint is the only reliable source.
@@ -247,7 +251,7 @@ def _check_duckdb_present(
                 "name": "duckdb_present",
                 "passed": True,
                 "duration_ms": duration,
-                "detail": "verified via /diagnostics/runtime (service holds DB lock)",
+                "detail": "verified via /diagnostics/runtime (service serves the store)",
             }
         return {
             "name": "duckdb_present",
@@ -265,36 +269,33 @@ def _check_duckdb_present(
             "duration_ms": duration,
             "error": (
                 "Service not reachable on the runtime port; "
-                "cannot verify the fragments store without the diagnostics endpoint"
+                "cannot verify the corpus store without the diagnostics endpoint"
             ),
             "remediation": (
                 "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
-    p = Path(fragments_path)
+    p = Path(store_path)
     if not p.exists():
         return {
             "name": "duckdb_present",
             "passed": False,
             "duration_ms": 0,
-            "error": f"{fragments_path} not found",
+            "error": f"{store_path} not found",
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        from agentalloy.storage.fragment_store import LanceFragmentStore
+        from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-        vs = LanceFragmentStore(str(p))
-        try:
-            count = vs.count_embeddings()
-        finally:
-            vs.close()
+        with open_overgraph_skill_store(str(p), read_only=True) as store:
+            count = store.count_embeddings()
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "duckdb_present",
             "passed": True,
             "duration_ms": duration,
-            "detail": f"{fragments_path} has {count} fragments",
+            "detail": f"{store_path} has {count} fragment embeddings",
         }
     except Exception as exc:
         duration = int((time.monotonic() - t0) * 1000)
@@ -312,11 +313,12 @@ def _check_skill_store_present(
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
-    """Check 4: skill store (agentalloy.duck) exists with skill rows.
+    """Check 4: corpus store exists with skill rows.
 
+    Same unified OverGraph store as check 3, counted from the skill side.
     When the service is running (``diag`` is non-None), defer to its
-    runtime-store readiness probe — the skill store holds a single-writer
-    lock that blocks a second writer open from this process.
+    runtime-store readiness probe so this check also works for container
+    deployments where the host has no file access.
 
     In container mode, direct file access is not available on the host;
     the diagnostics endpoint is the only reliable source.
@@ -333,7 +335,7 @@ def _check_skill_store_present(
                 "passed": True,
                 "duration_ms": duration,
                 "detail": (
-                    f"verified via /diagnostics/runtime (service holds DB lock); "
+                    f"verified via /diagnostics/runtime (service serves the store); "
                     f"{skill_count} active skills"
                 ),
             }
@@ -370,11 +372,9 @@ def _check_skill_store_present(
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        from agentalloy.storage.skill_store import open_skill_store
+        from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-        # Use the context manager so the read-only connection is always
-        # closed and never contends with a writer's single-writer lock.
-        with open_skill_store(str(p), read_only=True) as store:
+        with open_overgraph_skill_store(str(p), read_only=True) as store:
             count = store.count_skills()
         duration = int((time.monotonic() - t0) * 1000)
         return {
@@ -489,11 +489,9 @@ def _check_skill_count(
         }
     else:
         try:
-            from agentalloy.storage.skill_store import open_skill_store
+            from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-            # Context manager closes the read-only connection so the fallback
-            # never contends with a writer's single-writer lock.
-            with open_skill_store(str(skills_path), read_only=True) as store:
+            with open_overgraph_skill_store(str(skills_path), read_only=True) as store:
                 active_ids = {s.skill_id for s in store.get_active_skills()}
             source = "direct store read"
         except Exception as exc:
@@ -864,20 +862,17 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
     embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "nomic-embed-text-v1.5.Q8_0.gguf")
     user_corpus = install_state.corpus_dir()
-    fragments_path = env.get("FRAGMENTS_LANCE_PATH", str(user_corpus / "fragments.lance"))
-    skills_path = env.get("DUCKDB_PATH", str(user_corpus / "agentalloy.duck"))
+    store_path = env.get("CORPUS_STORE_PATH", str(user_corpus / "agentalloy.overgraph"))
     port = install_state.validate_port(st.get("port", 47950))
 
-    # Resolve relative paths against the user corpus dir (not the cwd) —
+    # Resolve a relative path against the user corpus dir (not the cwd) —
     # the service no longer assumes a project-relative working directory.
-    if not Path(fragments_path).is_absolute():
-        fragments_path = str(user_corpus / fragments_path)
-    if not Path(skills_path).is_absolute():
-        skills_path = str(user_corpus / skills_path)
+    if not Path(store_path).is_absolute():
+        store_path = str(user_corpus / store_path)
 
-    # Probe the running service once. When it's up, the three DB checks
-    # below skip the direct file open (which races the service for the
-    # corpus DB lock) and use the diagnostics response instead.
+    # Probe the running service once. When it's up, the corpus checks
+    # below use the diagnostics response instead of a direct store open
+    # (and container deployments have no host file access at all).
     diag = _probe_diagnostics(port)
 
     # Container deployments: the host can't reach the embedder directly
@@ -899,9 +894,9 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
 
     checks = [
         *embed_checks,
-        _check_duckdb_present(fragments_path, diag=diag, is_container=is_container),
-        _check_skill_store_present(skills_path, diag=diag, is_container=is_container),
-        _check_skill_count(skills_path, st, diag=diag, is_container=is_container),
+        _check_duckdb_present(store_path, diag=diag, is_container=is_container),
+        _check_skill_store_present(store_path, diag=diag, is_container=is_container),
+        _check_skill_count(store_path, st, diag=diag, is_container=is_container),
         _check_harness_config_present(st),
         _check_harness_config_url(st),
         _check_port_available(port),

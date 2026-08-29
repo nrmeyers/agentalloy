@@ -162,9 +162,7 @@ class TestTB1StoreOnlyEvaluators:
         ctx = PredicateContext(
             project_root=tmp_path, current_phase="build", store=store_with_contracts
         )
-        result = eval_build_contracts_cover_tasks(
-            {"phase": "spec", "tasks_from_store": True}, ctx
-        )
+        result = eval_build_contracts_cover_tasks({"phase": "spec", "tasks_from_store": True}, ctx)
         assert result == PredicateResult.MET
 
     def test_store_path_legacy_tasks_md_name_is_canonicalized(
@@ -182,9 +180,7 @@ class TestTB1StoreOnlyEvaluators:
         ctx = PredicateContext(
             project_root=tmp_path, current_phase="build", store=store_with_contracts
         )
-        result = eval_build_contracts_cover_tasks(
-            {"phase": "spec", "tasks_from_store": True}, ctx
-        )
+        result = eval_build_contracts_cover_tasks({"phase": "spec", "tasks_from_store": True}, ctx)
         assert result == PredicateResult.MET
 
     def test_store_path_blocks_when_contracts_fewer_than_tasks(
@@ -201,9 +197,7 @@ class TestTB1StoreOnlyEvaluators:
         ctx = PredicateContext(
             project_root=tmp_path, current_phase="build", store=store_with_contracts
         )
-        result = eval_build_contracts_cover_tasks(
-            {"phase": "spec", "tasks_from_store": True}, ctx
-        )
+        result = eval_build_contracts_cover_tasks({"phase": "spec", "tasks_from_store": True}, ctx)
         assert result == PredicateResult.NOT_MET
 
     def test_store_path_counts_only_top_level_bullets(

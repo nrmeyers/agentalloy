@@ -16,7 +16,7 @@ import agentalloy
 from agentalloy.install.importer import import_packs
 from agentalloy.retrieval.system import retrieve_system_fragments
 from agentalloy.skill_md.parser import parse_file
-from agentalloy.storage.skill_store import open_skill_store
+from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
 _PACKS = Path(agentalloy.__file__).parent / "_packs"
 _SDD_DIR = _PACKS / "sdd"
@@ -36,7 +36,7 @@ _TARGET_IDS = set(_SOURCE_DIRS)
 
 
 def _fresh_store(tmp_path: Path):
-    ss = open_skill_store(str(tmp_path / "corpus.duck"))
+    ss = open_overgraph_skill_store(str(tmp_path / "corpus.duck"))
     ss.migrate()
     import_packs(ss, [_SDD_DIR])
     return ss
@@ -79,11 +79,8 @@ def test_raw_prose_carried_over_verbatim(tmp_path: Path) -> None:
 def test_requires_edges_resolved(tmp_path: Path) -> None:
     ss = _fresh_store(tmp_path)
     try:
-        rows = ss.execute(
-            "SELECT target_skill_id FROM skill_dependencies "
-            "WHERE source_skill_id = 'sdd-add-skill' AND rel_type = 'requires'"
-        )
-        targets = {str(r[0]) for r in rows}
+        deps = ss.get_dependencies("sdd-add-skill")
+        targets = {d.target_skill_id for d in deps if d.rel_type == "requires"}
         assert targets >= _TARGET_IDS
     finally:
         ss.close()

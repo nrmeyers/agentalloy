@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.code_index.store.pagerank import compute_pagerank, refresh_centrality
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
@@ -45,7 +45,7 @@ def test_dangling_nodes_get_scores() -> None:
 
 
 def test_refresh_centrality_writes_to_graph(tmp_path: Path) -> None:
-    graph = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+    graph = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     graph.migrate()
     try:
         graph.upsert_symbols(
@@ -85,7 +85,7 @@ def test_refresh_centrality_writes_to_graph(tmp_path: Path) -> None:
 
 
 def test_refresh_centrality_empty_graph_clears(tmp_path: Path) -> None:
-    graph = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+    graph = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     graph.migrate()
     try:
         graph.write_centrality({"stale": 0.9})

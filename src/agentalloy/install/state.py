@@ -186,11 +186,11 @@ def rerank_reachable(url: str, timeout_s: float = 2.0) -> bool:
 def _is_real_corpus(p: Path) -> bool:
     """Sentinel check — returns True only if ``p`` looks like a complete corpus.
 
-    A directory that exists but lacks ``agentalloy.duck`` is either a partial
-    install (interrupted copy) or a same-named dir from a different
+    A directory that exists but lacks ``agentalloy.overgraph`` is either a
+    partial install (interrupted copy) or a same-named dir from a different
     package. Either way we should refuse to use it.
     """
-    return p.exists() and (p / "agentalloy.duck").exists()
+    return p.exists() and (p / "agentalloy.overgraph").exists()
 
 
 def bundled_corpus_dir() -> Path | None:
@@ -200,9 +200,9 @@ def bundled_corpus_dir() -> Path | None:
     back to the repo's source tree for development checkouts. Returns
     ``None`` if no usable corpus is bundled (operator must seed manually).
 
-    The sentinel check (``agentalloy.duck`` must exist inside the dir) blocks
-    silently returning a same-named-but-empty directory from a different
-    package on the Python path.
+    The sentinel check (``agentalloy.overgraph`` must exist inside the dir)
+    blocks silently returning a same-named-but-empty directory from a
+    different package on the Python path.
     """
     try:
         from importlib import resources
@@ -238,21 +238,21 @@ def ensure_corpus_seeded() -> tuple[Path, bool]:
     call created the user copy, False if it was already there. Idempotent.
     """
     user_corpus = corpus_dir()
-    if (user_corpus / "agentalloy.duck").exists() and (user_corpus / "fragments.lance").exists():
+    if (user_corpus / "agentalloy.overgraph").exists():
         return user_corpus, False
     bundled = bundled_corpus_dir()
     if bundled is None:
         # No bundled corpus — caller must surface a clear error.
         return user_corpus, False
     user_corpus.mkdir(parents=True, exist_ok=True)
-    src_duck = bundled / "agentalloy.duck"
-    src_fragments = bundled / "fragments.lance"
+    src_store = bundled / "agentalloy.overgraph"
 
     def _atomic_copy(src: Path, dst: Path) -> None:
         """Copy src → dst via a temp sibling so a partial / interrupted
-        copy never leaves a half-written file at the final path. Without
-        this, an aborted copytree leaves a directory at `fragments.lance/`
-        whose `.exists()` is True forever, and the next run skips it.
+        copy never leaves a half-written store at the final path. Without
+        this, an aborted copytree leaves a directory at
+        ``agentalloy.overgraph/`` whose `.exists()` is True forever, and
+        the next run skips it.
         """
         if dst.exists():
             return
@@ -277,10 +277,8 @@ def ensure_corpus_seeded() -> tuple[Path, bool]:
                     tmp.unlink()
             raise
 
-    if src_duck.exists():
-        _atomic_copy(src_duck, user_corpus / "agentalloy.duck")
-    if src_fragments.exists():
-        _atomic_copy(src_fragments, user_corpus / "fragments.lance")
+    if src_store.exists():
+        _atomic_copy(src_store, user_corpus / "agentalloy.overgraph")
     return user_corpus, True
 
 

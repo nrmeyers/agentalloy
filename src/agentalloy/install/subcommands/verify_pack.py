@@ -7,10 +7,10 @@ For each skill in a pack, runs:
   * **topic probe**: first sentences of raw_prose with all name/id tokens
     removed (realistic — catches ranking weakness).
 
-Both probes are run in-process against the local skill store + fragments
-store. No HTTP service needs to be running, but the reembed pass must have
-been run first (the fragments store must have embeddings for the pack's
-skills).
+Both probes are run in-process against the local unified corpus store
+(skills + fragment embeddings). No HTTP service needs to be running, but
+the reembed pass must have been run first (the store must have embeddings
+for the pack's skills).
 
 Exit codes:
   0  all skills found (hit@k for every probe)
@@ -149,7 +149,7 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
     from agentalloy.config import get_settings  # noqa: PLC0415
     from agentalloy.lm_client import LMUnavailable  # noqa: PLC0415
     from agentalloy.retrieval.domain import retrieve_domain_candidates  # noqa: PLC0415
-    from agentalloy.storage.open import open_fragments, open_skills  # noqa: PLC0415
+    from agentalloy.storage.open import open_skills  # noqa: PLC0415
 
     manifest_path = pack_dir / "pack.yaml"
     if not manifest_path.is_file():
@@ -162,100 +162,89 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
     settings = get_settings()
     report = VerifyPackReport(pack_id=pack_dir.name, k=k)
 
-    # --- Check embeddings presence ---
-    vs = open_fragments(settings)
-    try:
-        total = vs.count_embeddings()
-    finally:
-        vs.close()
-    if total == 0:
-        report.missing_embeddings = True
-        report.error = (
-            "Fragments store has 0 embeddings. "
-            "Run `agentalloy reembed` first, then re-run verify-pack."
-        )
-        return report
-
-    # --- Set up stores for in-process retrieval ---
+    # --- Open the unified corpus store (skills + fragment embeddings) ---
     try:
         store = open_skills(settings, read_only=True)
     except Exception as exc:
-        report.error = f"Cannot open skill store: {exc}"
+        report.error = f"Cannot open corpus store: {exc}"
         return report
 
     try:
+        # --- Check embeddings presence ---
+        if store.count_embeddings() == 0:
+            report.missing_embeddings = True
+            report.error = (
+                "Corpus store has 0 fragment embeddings. "
+                "Run `agentalloy reembed` first, then re-run verify-pack."
+            )
+            return report
+
         # Build a minimal EmbedClient from the configured embed server.
         from agentalloy.embed_provider import get_embed_client  # noqa: PLC0415
 
         lm = get_embed_client(settings)
 
-        vs = open_fragments(settings)
-        try:
-            for skill in skills:
-                if skill["deprecated"]:
-                    continue
-                sid = skill["skill_id"]
-                if not sid:
-                    continue
-                name = skill["canonical_name"] or sid
-                prose = skill["raw_prose"]
-                phase_list: list[str] = skill["phase_scope"] or ["build"]
-                # Use the first non-system phase as our probe phase.
-                _VALID_PROBE_PHASES = frozenset(
-                    {
-                        "intake",
-                        "spec",
-                        "design",
-                        "plan",
-                        "build",
-                        "qa",
-                        "ship",
-                        "sdd-fast",
-                        "add-skill",
-                    },
-                )
-                probe_phase = next((p for p in phase_list if p in _VALID_PROBE_PHASES), "build")
+        for skill in skills:
+            if skill["deprecated"]:
+                continue
+            sid = skill["skill_id"]
+            if not sid:
+                continue
+            name = skill["canonical_name"] or sid
+            prose = skill["raw_prose"]
+            phase_list: list[str] = skill["phase_scope"] or ["build"]
+            # Use the first non-system phase as our probe phase.
+            _VALID_PROBE_PHASES = frozenset(
+                {
+                    "intake",
+                    "spec",
+                    "design",
+                    "plan",
+                    "build",
+                    "qa",
+                    "ship",
+                    "sdd-fast",
+                    "add-skill",
+                },
+            )
+            probe_phase = next((p for p in phase_list if p in _VALID_PROBE_PHASES), "build")
 
-                pr = ProbeResult(skill_id=sid)
-                probes: dict[str, str] = {"name": _name_probe(name)}
-                topic = _topic_probe(sid, name, prose)
-                if topic:
-                    probes["topic"] = topic
+            pr = ProbeResult(skill_id=sid)
+            probes: dict[str, str] = {"name": _name_probe(name)}
+            topic = _topic_probe(sid, name, prose)
+            if topic:
+                probes["topic"] = topic
 
-                for probe_type, query in probes.items():
-                    try:
-                        result = retrieve_domain_candidates(
-                            store,
-                            lm,
-                            vs,
-                            task=query,
-                            phase=probe_phase,  # type: ignore[arg-type]
-                            domain_tags=None,
-                            k=k,
-                            embedding_model=settings.runtime_embedding_model,
-                        )
-                        from agentalloy.retrieval.embedding_errors import (  # noqa: PLC0415
-                            EmbeddingErrorResult,
-                        )
+            for probe_type, query in probes.items():
+                try:
+                    result = retrieve_domain_candidates(
+                        store,
+                        lm,
+                        store,
+                        task=query,
+                        phase=probe_phase,  # type: ignore[arg-type]
+                        domain_tags=None,
+                        k=k,
+                        embedding_model=settings.runtime_embedding_model,
+                    )
+                    from agentalloy.retrieval.embedding_errors import (  # noqa: PLC0415
+                        EmbeddingErrorResult,
+                    )
 
-                        if isinstance(result, EmbeddingErrorResult):
-                            pr.error = f"Embedding error: {result}"
-                            break
-                        retrieved_ids = [c.skill_id for c in result.candidates]
-                        hit = sid in retrieved_ids
-                        if probe_type == "name":
-                            pr.name_hit = hit
-                        else:
-                            pr.topic_hit = hit
-                    except LMUnavailable as exc:
-                        pr.error = (
-                            f"Embed server unavailable: {exc}. Start the embed server and retry."
-                        )
+                    if isinstance(result, EmbeddingErrorResult):
+                        pr.error = f"Embedding error: {result}"
                         break
+                    retrieved_ids = [c.skill_id for c in result.candidates]
+                    hit = sid in retrieved_ids
+                    if probe_type == "name":
+                        pr.name_hit = hit
+                    else:
+                        pr.topic_hit = hit
+                except LMUnavailable as exc:
+                    pr.error = f"Embed server unavailable: {exc}. Start the embed server and retry."
+                    break
 
-                report.probes.append(pr)
-        finally:
-            vs.close()
+            report.probes.append(pr)
     finally:
         store.close()
 

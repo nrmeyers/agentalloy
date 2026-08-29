@@ -1,4 +1,4 @@
-"""DuckDBCodeGraphStore — DDL, writes, relations, centrality, meta."""
+"""OverGraphCodeGraphStore — DDL, writes, relations, centrality, meta."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.storage.protocols import CodeEdge, CodeGraphStore, CodeSymbol
 
 
@@ -34,8 +34,8 @@ def call(src: str, dst: str, *, file_path: str = "", line_start: int = 0) -> Cod
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
@@ -72,24 +72,24 @@ FIXTURE_EDGES = [
 
 
 @pytest.fixture
-def populated(store: DuckDBCodeGraphStore) -> DuckDBCodeGraphStore:
+def populated(store: OverGraphCodeGraphStore) -> OverGraphCodeGraphStore:
     store.replace_all(FIXTURE_SYMBOLS, FIXTURE_EDGES)
     return store
 
 
-def test_satisfies_protocol(store: DuckDBCodeGraphStore) -> None:
+def test_satisfies_protocol(store: OverGraphCodeGraphStore) -> None:
     assert isinstance(store, CodeGraphStore)
 
 
 def test_migrate_idempotent(tmp_path: Path) -> None:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     s.migrate()  # second run must be a no-op, not an error
     assert s.counts_by_kind() == {}
     s.close()
 
 
-def test_replace_all_counts_and_lookup(populated: DuckDBCodeGraphStore) -> None:
+def test_replace_all_counts_and_lookup(populated: OverGraphCodeGraphStore) -> None:
     got = populated.symbol("mod.a")
     assert got is not None
     assert got.kind == "Function"
@@ -105,7 +105,7 @@ def test_replace_all_counts_and_lookup(populated: DuckDBCodeGraphStore) -> None:
     assert populated.symbol("mod.nope") is None
 
 
-def test_replace_all_replaces_prior_contents(populated: DuckDBCodeGraphStore) -> None:
+def test_replace_all_replaces_prior_contents(populated: OverGraphCodeGraphStore) -> None:
     n_sym, n_edge = populated.replace_all([sym("other.x", file_path="x.py")], [])
     assert (n_sym, n_edge) == (1, 0)
     assert populated.symbol("mod.a") is None
@@ -113,7 +113,7 @@ def test_replace_all_replaces_prior_contents(populated: DuckDBCodeGraphStore) ->
     assert populated.calls_edges() == []
 
 
-def test_upsert_symbols_replaces_on_key(populated: DuckDBCodeGraphStore) -> None:
+def test_upsert_symbols_replaces_on_key(populated: OverGraphCodeGraphStore) -> None:
     updated = sym("mod.b", file_path="mod/b.py", docstring="now documented")
     assert populated.upsert_symbols([updated]) == 1
     got = populated.symbol("mod.b")
@@ -121,13 +121,13 @@ def test_upsert_symbols_replaces_on_key(populated: DuckDBCodeGraphStore) -> None
     assert populated.counts_by_kind()["Function"] == 3  # no duplicate row
 
 
-def test_upsert_edges_appends(populated: DuckDBCodeGraphStore) -> None:
+def test_upsert_edges_appends(populated: OverGraphCodeGraphStore) -> None:
     assert populated.upsert_edges([call("mod.b", "mod.d")]) == 1
     assert ("mod.b", "mod.d") in populated.calls_edges()
     assert populated.upsert_edges([]) == 0
 
 
-def test_delete_for_files(populated: DuckDBCodeGraphStore) -> None:
+def test_delete_for_files(populated: OverGraphCodeGraphStore) -> None:
     # mod/a.py holds symbols a, c, M and edges a->c, c->d.
     removed = populated.delete_for_files(["mod/a.py"])
     assert removed == 5
@@ -139,7 +139,7 @@ def test_delete_for_files(populated: DuckDBCodeGraphStore) -> None:
     assert populated.delete_for_files([]) == 0
 
 
-def test_callers_single_join(populated: DuckDBCodeGraphStore) -> None:
+def test_callers_single_join(populated: OverGraphCodeGraphStore) -> None:
     hits = populated.callers("mod.c")
     assert [h.qualified_name for h in hits] == ["mod.a", "mod.b"]
     by_qn = {h.qualified_name: h for h in hits}
@@ -152,13 +152,13 @@ def test_callers_single_join(populated: DuckDBCodeGraphStore) -> None:
     assert "mod.M" not in by_qn
 
 
-def test_callers_dangling_endpoint_uses_edge_file(populated: DuckDBCodeGraphStore) -> None:
+def test_callers_dangling_endpoint_uses_edge_file(populated: OverGraphCodeGraphStore) -> None:
     populated.upsert_edges([call("ext.pkg.fn", "mod.c", file_path="vendor/x.py", line_start=4)])
     hits = {h.qualified_name: h for h in populated.callers("mod.c")}
     assert hits["ext.pkg.fn"].file_path == "vendor/x.py"
 
 
-def test_callees_single_join(populated: DuckDBCodeGraphStore) -> None:
+def test_callees_single_join(populated: OverGraphCodeGraphStore) -> None:
     hits = populated.callees("mod.c")
     assert [h.qualified_name for h in hits] == ["mod.d"]
     assert hits[0].file_path == "mod/d.py"
@@ -168,7 +168,7 @@ def test_callees_single_join(populated: DuckDBCodeGraphStore) -> None:
     ]
 
 
-def test_transitive_callers_depth_cap(populated: DuckDBCodeGraphStore) -> None:
+def test_transitive_callers_depth_cap(populated: OverGraphCodeGraphStore) -> None:
     # callers of d: depth1 = {c}; depth2 adds {a, b}.
     depth1 = {h.qualified_name for h in populated.transitive_callers("mod.d", max_depth=1)}
     assert depth1 == {"mod.c"}
@@ -178,7 +178,7 @@ def test_transitive_callers_depth_cap(populated: DuckDBCodeGraphStore) -> None:
 
 
 def test_transitive_callers_cycle_terminates_and_excludes_seed(
-    populated: DuckDBCodeGraphStore,
+    populated: OverGraphCodeGraphStore,
 ) -> None:
     # a -> c -> d -> a is a cycle; deep traversal must terminate and never
     # report the seed itself.
@@ -188,24 +188,24 @@ def test_transitive_callers_cycle_terminates_and_excludes_seed(
     assert "mod.a" not in qns
 
 
-def test_counts_by_kind(populated: DuckDBCodeGraphStore) -> None:
+def test_counts_by_kind(populated: OverGraphCodeGraphStore) -> None:
     assert populated.counts_by_kind() == {"Function": 3, "Method": 1, "Class": 1}
 
 
-def test_list_files(populated: DuckDBCodeGraphStore) -> None:
+def test_list_files(populated: OverGraphCodeGraphStore) -> None:
     assert populated.list_files() == ["mod/a.py", "mod/b.py", "mod/d.py"]
     assert populated.list_files(prefix="mod/a") == ["mod/a.py"]
     assert populated.list_files(limit=1, offset=1) == ["mod/b.py"]
     assert populated.list_files(prefix="nope/") == []
 
 
-def test_calls_edges_filters_kind(populated: DuckDBCodeGraphStore) -> None:
+def test_calls_edges_filters_kind(populated: OverGraphCodeGraphStore) -> None:
     edges = populated.calls_edges()
     assert ("mod.M", "mod.c") not in edges  # CONTAINS excluded
     assert len(edges) == 4
 
 
-def test_centrality_roundtrip(populated: DuckDBCodeGraphStore) -> None:
+def test_centrality_roundtrip(populated: OverGraphCodeGraphStore) -> None:
     assert populated.write_centrality({"mod.a": 0.5, "mod.c": 0.9, "mod.b": 0.1}) == 3
     assert populated.read_centrality(["mod.a", "mod.c", "missing"]) == {
         "mod.a": pytest.approx(0.5),
@@ -220,14 +220,14 @@ def test_centrality_roundtrip(populated: DuckDBCodeGraphStore) -> None:
     assert populated.top_centrality() == [("mod.b", pytest.approx(1.0))]
 
 
-def test_content_hashes(populated: DuckDBCodeGraphStore) -> None:
+def test_content_hashes(populated: OverGraphCodeGraphStore) -> None:
     hashes = populated.content_hashes()
     assert hashes == {"mod.a": "hash-a", "mod.b": "hash-b", "mod.c": "hash-c"}
     # mod.d has no hash — must be absent, not None-valued.
     assert "mod.d" not in hashes
 
 
-def test_meta_kv(store: DuckDBCodeGraphStore) -> None:
+def test_meta_kv(store: OverGraphCodeGraphStore) -> None:
     assert store.get_meta("head_sha") is None
     store.set_meta("head_sha", "abc123")
     assert store.get_meta("head_sha") == "abc123"
@@ -244,23 +244,23 @@ class TestResolveQn:
     """`_resolve_qn` — exact match wins; else a UNIQUE dot-boundary suffix rescues
     a natural fqn against a doubled-prefix stored name (Bug A); ambiguity → miss."""
 
-    def test_exact_match_is_returned_unchanged(self, store: DuckDBCodeGraphStore) -> None:
+    def test_exact_match_is_returned_unchanged(self, store: OverGraphCodeGraphStore) -> None:
         store.upsert_symbols([sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/x.py")])
         assert store._resolve_qn(_DOUBLED) == _DOUBLED  # pyright: ignore[reportPrivateUsage]
 
-    def test_natural_fqn_resolves_to_doubled(self, store: DuckDBCodeGraphStore) -> None:
+    def test_natural_fqn_resolves_to_doubled(self, store: OverGraphCodeGraphStore) -> None:
         store.upsert_symbols([sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/x.py")])
         assert store._resolve_qn(_NATURAL) == _DOUBLED  # pyright: ignore[reportPrivateUsage]
         # ...and the public getter that natural-fqn callers hit works end to end.
         got = store.symbol(_NATURAL)
         assert got is not None and got.qualified_name == _DOUBLED
 
-    def test_symbol_lookup_via_natural_fqn(self, store: DuckDBCodeGraphStore) -> None:
+    def test_symbol_lookup_via_natural_fqn(self, store: OverGraphCodeGraphStore) -> None:
         store.upsert_symbols([sym("mod.a", file_path="mod/a.py")])
         # exact still works after the resolve prepend
         assert store.symbol("mod.a") is not None
 
-    def test_governing_decisions_via_natural_fqn(self, store: DuckDBCodeGraphStore) -> None:
+    def test_governing_decisions_via_natural_fqn(self, store: OverGraphCodeGraphStore) -> None:
         store.upsert_symbols(
             [
                 sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/proxy_signal.py"),
@@ -280,7 +280,9 @@ class TestResolveQn:
         got = store.governing_decisions(_NATURAL)  # natural fqn, doubled store
         assert [d.qualified_name for d in got] == ["docs/design/x/approach.md::why"]
 
-    def test_ambiguous_suffix_is_a_miss_not_a_wrong_pick(self, store: DuckDBCodeGraphStore) -> None:
+    def test_ambiguous_suffix_is_a_miss_not_a_wrong_pick(
+        self, store: OverGraphCodeGraphStore
+    ) -> None:
         store.upsert_symbols(
             [
                 sym("pkg.one.Thing", kind="Class", file_path="a.py"),
@@ -291,7 +293,7 @@ class TestResolveQn:
         assert store._resolve_qn("Thing") == "Thing"  # pyright: ignore[reportPrivateUsage]
         assert store.symbol("Thing") is None
 
-    def test_underscore_is_escaped_not_a_wildcard(self, store: DuckDBCodeGraphStore) -> None:
+    def test_underscore_is_escaped_not_a_wildcard(self, store: OverGraphCodeGraphStore) -> None:
         # If `_` were an unescaped LIKE wildcard, "proxy_signal" would match BOTH
         # (ambiguous → miss). Escaped, only the literal-underscore name matches.
         store.upsert_symbols(
@@ -302,7 +304,7 @@ class TestResolveQn:
         )
         assert store._resolve_qn("proxy_signal") == "a.b.proxy_signal"  # pyright: ignore[reportPrivateUsage]
 
-    def test_unknown_fqn_does_not_crash(self, store: DuckDBCodeGraphStore) -> None:
+    def test_unknown_fqn_does_not_crash(self, store: OverGraphCodeGraphStore) -> None:
         store.upsert_symbols([sym("mod.a", file_path="mod/a.py")])
         assert store._resolve_qn("no.such.symbol") == "no.such.symbol"  # pyright: ignore[reportPrivateUsage]
         assert store.symbol("no.such.symbol") is None
@@ -310,81 +312,21 @@ class TestResolveQn:
         assert store.callers("no.such.symbol") == []
 
 
-# -- #527 C: real ALTER TABLE migration against a pre-existing 9-column edges --
-
-
-def test_migrate_adds_span_and_resolution_tier_to_old_edges_table(tmp_path: Path) -> None:
-    """``edges`` already exists in every user's index; CREATE TABLE IF NOT
-    EXISTS is a no-op against it. ``migrate()`` must ALTER the table so the
-    new write path (which now sends 11 placeholders) works against a
-    database that predates the ``span``/``resolution_tier`` columns."""
-    import duckdb
-
-    db_path = tmp_path / "graph.duck"
-    # Build the OLD 9-column edges table literally, bypassing _SCHEMA_DDL.
-    conn = duckdb.connect(str(db_path))
-    conn.execute(
-        """
-        CREATE TABLE symbols (
-          qualified_name TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
-          file_path TEXT, start_line BIGINT, end_line BIGINT, docstring TEXT,
-          decorators TEXT[], is_exported BOOLEAN, is_async BOOLEAN DEFAULT FALSE,
-          is_generator BOOLEAN DEFAULT FALSE, source_code TEXT,
-          contextual_prefix TEXT DEFAULT '', content_hash TEXT
-        );
-        CREATE TABLE edges (
-          src TEXT NOT NULL, dst TEXT NOT NULL, kind TEXT NOT NULL,
-          file_path TEXT DEFAULT '', line_start BIGINT DEFAULT 0,
-          col_start BIGINT DEFAULT 0, resolved_via TEXT DEFAULT 'unknown',
-          confidence DOUBLE DEFAULT 1.0, new_target TEXT DEFAULT ''
-        );
-        """
+def test_governs_edge_span_and_tier_roundtrip(store: OverGraphCodeGraphStore) -> None:
+    """GOVERNS edges carry their span + resolution tier through the store."""
+    store.upsert_symbols([sym("pkg.foo", kind="Function", file_path="pkg.py")])
+    n = store.upsert_edges(
+        [
+            CodeEdge(
+                src="doc::a",
+                dst="pkg.foo",
+                kind="GOVERNS",
+                file_path="doc",
+                span="pkg.foo",
+                resolution_tier=1,
+            )
+        ]
     )
-    cols_before = {r[1] for r in conn.execute("PRAGMA table_info(edges)").fetchall()}
-    assert cols_before == {
-        "src",
-        "dst",
-        "kind",
-        "file_path",
-        "line_start",
-        "col_start",
-        "resolved_via",
-        "confidence",
-        "new_target",
-    }
-    conn.close()
-
-    store = DuckDBCodeGraphStore(db_path)
-    try:
-        store.migrate()  # must ALTER the pre-existing table, not skip it
-        cols_after = {r[1] for r in store.conn.execute("PRAGMA table_info(edges)").fetchall()}
-        assert "span" in cols_after
-        assert "resolution_tier" in cols_after
-
-        # The new write path (11-placeholder upsert_edges) must work against
-        # the migrated table.
-        n = store.upsert_edges(
-            [
-                CodeEdge(
-                    src="doc::a",
-                    dst="pkg.foo",
-                    kind="GOVERNS",
-                    file_path="doc",
-                    span="pkg.foo",
-                    resolution_tier=1,
-                )
-            ]
-        )
-        assert n == 1
-        assert store.count_govern_edges_for_doc("doc") == 1
-        # Value round-trip, not just column presence/count — a count can't
-        # catch a mapping error in _edge_params.
-        row = store.conn.execute(
-            "SELECT span, resolution_tier FROM edges WHERE kind = 'GOVERNS'"
-        ).fetchone()
-        assert row == ("pkg.foo", 1)
-
-        # migrate() is idempotent — re-running it must not error.
-        store.migrate()
-    finally:
-        store.close()
+    assert n == 1
+    assert store.count_govern_edges_for_doc("doc") == 1
+    store.migrate()  # idempotent — re-running must not error

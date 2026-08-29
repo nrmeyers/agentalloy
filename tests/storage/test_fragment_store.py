@@ -1,8 +1,8 @@
-"""Unit tests for the LanceDB FragmentStore (v5 storage layer).
+"""Unit tests for the fragment side of the unified OverGraph corpus store.
 
-NOTE: these are self-contained (own tmp Lance dataset); they do not use the
-``conftest`` corpus fixtures, which are rewired to the two-engine backend in the
-test-porting step.
+NOTE: these are self-contained (own tmp store); they do not use the
+``conftest`` corpus fixtures. They are the behavioral parity contract the
+OverGraph store must satisfy for the retrieval legs.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from agentalloy.storage import EMBEDDING_DIM, EmbeddingDimMismatch, FragmentEmbedding
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
 DIM = EMBEDDING_DIM
 
@@ -28,7 +28,7 @@ def _frag(i: int) -> FragmentEmbedding:
         fragment_type="card" if i % 2 else "execution",
         embedded_at=1000 + i,
         embedding_model="nomic-embed-text-v1.5",
-        prose=f"fragment {i} about testing lance retrieval and duckdb",
+        prose=f"fragment {i} about testing vector retrieval and storage",
         phase_scope=(["build"], ["design", "build"], None)[i % 3],
         domain_tags=(["python"], ["testing", "pytest"], None)[i % 3],
     )
@@ -36,7 +36,7 @@ def _frag(i: int) -> FragmentEmbedding:
 
 @pytest.fixture
 def store(tmp_path):
-    fs = LanceFragmentStore(str(tmp_path / "fragments.lance"))
+    fs = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     yield fs
     fs.close()
 

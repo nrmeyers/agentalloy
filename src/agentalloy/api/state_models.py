@@ -367,8 +367,12 @@ class AdvanceRequest(BaseModel):
     one explicit, reliable action.
     """
 
-    slug: Annotated[str, Field(min_length=1, description="Short task identifier (e.g., 'workspace-llm-config')")]
-    contract_body: Annotated[str, Field(min_length=1, description="What the next phase needs to know")]
+    slug: Annotated[
+        str, Field(min_length=1, description="Short task identifier (e.g., 'workspace-llm-config')")
+    ]
+    contract_body: Annotated[
+        str, Field(min_length=1, description="What the next phase needs to know")
+    ]
     to_phase: str | None = Field(
         default=None,
         description="Target phase (optional, defaults to next phase in the workflow)",

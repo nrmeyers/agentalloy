@@ -6,7 +6,7 @@ Usage::
     python -m agentalloy.ingest <review.yaml> [--force] [--yes]
 
 The review YAML is produced by the Skill Authoring Agent. It covers both domain
-and system skills. No live embedder is required; the Lance ``fragments`` dataset
+and system skills. No live embedder is required; the fragment embedding index
 is populated by a separate re-embed pass.
 
 Exit codes
@@ -318,7 +318,7 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
@@ -465,7 +465,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB

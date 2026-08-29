@@ -908,7 +908,8 @@ def _unwire_repo_local(
                 deleted = 0
         else:
             settings = get_settings()
-            store = open_state_store(settings.duckdb_path, read_only=False)
+            state_path = Path(settings.corpus_store_path).parent / "state.duck"
+            store = open_state_store(str(state_path), read_only=False)
             try:
                 deleted = store.delete_repo_rows(repo_key)
             finally:

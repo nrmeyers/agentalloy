@@ -27,10 +27,7 @@ from agentalloy.install.subcommands.install_packs import (
 )
 from agentalloy.reembed.cli import run_bulk_reembed
 
-_LOCK_ERR = (
-    "RuntimeError: IO exception: Could not set lock on file agentalloy.duck: "
-    "Lock is held by PID 12345"
-)
+_LOCK_ERR = "ValueError: Failed to acquire Lockfile: LockBusy"
 
 
 @pytest.fixture()
@@ -206,7 +203,7 @@ class TestEnsureSkillSchema:
             patch("agentalloy.config.get_settings") as mock_settings,
             patch("agentalloy.storage.open.open_skills") as mock_open_skills,
         ):
-            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            mock_settings.return_value.corpus_store_path = str(tmp_path / "agentalloy.overgraph")
             _ensure_skill_schema()
         mock_open_skills.assert_called_once()
         mock_open_skills.return_value.migrate.assert_called_once()
@@ -221,7 +218,7 @@ class TestEnsureSkillSchema:
                 side_effect=RuntimeError("disk on fire"),
             ),
         ):
-            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            mock_settings.return_value.corpus_store_path = str(tmp_path / "agentalloy.overgraph")
             _ensure_skill_schema()  # must not raise
         err = capsys.readouterr().err
         assert "could not verify/create corpus graph schema" in err
@@ -237,10 +234,10 @@ class TestEnsureSkillSchema:
                 side_effect=RuntimeError(_LOCK_ERR),
             ),
         ):
-            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            mock_settings.return_value.corpus_store_path = str(tmp_path / "agentalloy.overgraph")
             _ensure_skill_schema()
         err = capsys.readouterr().err
-        assert "Another process is holding the corpus DB" in err
+        assert "writer lock" in err
         assert "server-stop" in err
 
 
@@ -307,7 +304,7 @@ class TestBulkReembedLockHint:
         assert rc == 2
         err = capsys.readouterr().err
         assert "reembed raised" in err
-        assert "Another process is holding the corpus DB" in err
+        assert "writer lock" in err
 
     def test_other_exception_has_no_lock_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
         with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError("kaboom")):
@@ -319,11 +316,11 @@ class TestBulkReembedLockHint:
 
 
 class TestIsLockHeldError:
-    def test_matches_both_lock_phrases(self) -> None:
-        from agentalloy.storage.skill_store import is_lock_held_error
+    def test_matches_overgraph_lock_markers(self) -> None:
+        from agentalloy.storage.protocols import is_lock_held_error
 
-        assert is_lock_held_error("Could not set lock on file /x/agentalloy.duck")
-        assert is_lock_held_error("IO Error: Conflicting lock is held by another process")
+        assert is_lock_held_error("ValueError: Failed to acquire Lockfile: LockBusy")
+        assert is_lock_held_error("failed to acquire index lock")
         assert not is_lock_held_error("Binder exception: Table skills does not exist.")
         assert not is_lock_held_error("")
 

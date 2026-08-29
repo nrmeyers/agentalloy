@@ -15,7 +15,7 @@ import pytest
 
 from agentalloy.api import knowledge_push
 from agentalloy.api.knowledge_push import build_decision_block
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.contracts import Contract, ContractScope
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
@@ -73,14 +73,14 @@ def governs(src: str, dst: str) -> CodeEdge:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
 
 
-def _seed_one(store: DuckDBCodeGraphStore, decision_qn: str) -> None:
+def _seed_one(store: OverGraphCodeGraphStore, decision_qn: str) -> None:
     store.upsert_symbols(
         [
             code_sym("pkg.a.foo", "pkg/a.py"),
@@ -110,7 +110,7 @@ def test_run_coro_from_live_event_loop() -> None:
     assert asyncio.run(_drive()) == 42
 
 
-def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:
+def test_push_present_for_governed_touch(store: OverGraphCodeGraphStore) -> None:
     _seed_one(store, "docs/design/x/approach.md::why-foo")
     push = build_decision_block(contract(["pkg/a.py"]), "", store)
     assert push is not None
@@ -126,7 +126,7 @@ def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:
     assert push.decisions[0].heading == "Why foo"
 
 
-def test_manifest_excludes_snippet_bodies(store: DuckDBCodeGraphStore) -> None:
+def test_manifest_excludes_snippet_bodies(store: OverGraphCodeGraphStore) -> None:
     # The manifest format lists decision headings + source paths but never
     # includes snippet bodies — the model must pull those via CLI.
     store.upsert_symbols(
@@ -151,13 +151,15 @@ def test_manifest_excludes_snippet_bodies(store: DuckDBCodeGraphStore) -> None:
     assert push.decisions[0].snippet is not None
 
 
-def test_none_when_no_touches_or_no_decisions(store: DuckDBCodeGraphStore) -> None:
+def test_none_when_no_touches_or_no_decisions(store: OverGraphCodeGraphStore) -> None:
     _seed_one(store, "docs/design/x/approach.md::why-foo")
     assert build_decision_block(contract([]), "", store) is None  # no scope
     assert build_decision_block(contract(["pkg/z.py"]), "", store) is None  # ungoverned file
 
 
-def test_defers_only_when_promoted_fragment_in_composed_text(store: DuckDBCodeGraphStore) -> None:
+def test_defers_only_when_promoted_fragment_in_composed_text(
+    store: OverGraphCodeGraphStore,
+) -> None:
     # a solutions-sourced decision -> slug "foo" -> skill_id "foo-lesson"
     _seed_one(store, "docs/solutions/foo.md::d")
     # promoted skill present in this turn's composed text -> defer -> None
@@ -170,7 +172,7 @@ def test_defers_only_when_promoted_fragment_in_composed_text(store: DuckDBCodeGr
     assert push is not None and push.count == 1
 
 
-def test_approach_md_never_deferred(store: DuckDBCodeGraphStore) -> None:
+def test_approach_md_never_deferred(store: OverGraphCodeGraphStore) -> None:
     _seed_one(store, "docs/design/x/approach.md::why-foo")
     # even with a -lesson skill in composed text, an approach.md decision pushes
     push = build_decision_block(contract(["pkg/a.py"]), "## skill: why-foo-lesson\n", store)
@@ -178,14 +180,14 @@ def test_approach_md_never_deferred(store: DuckDBCodeGraphStore) -> None:
 
 
 def test_superseded_filter_is_wired(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_one(store, "docs/design/x/approach.md::why-foo")
     monkeypatch.setattr(knowledge_push, "_is_superseded", lambda d: True)
     assert build_decision_block(contract(["pkg/a.py"]), "", store) is None
 
 
-def test_caps_and_truncation(store: DuckDBCodeGraphStore) -> None:
+def test_caps_and_truncation(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([code_sym("pkg.a.foo", "pkg/a.py")])
     n = knowledge_push._MAX_DECISIONS + 3
     for i in range(n):
@@ -198,7 +200,7 @@ def test_caps_and_truncation(store: DuckDBCodeGraphStore) -> None:
 
 
 def test_phase2_related_decisions(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Phase 2: related_decisions merges thematic decisions that also have a
     GOVERNS edge into a touched file (F3). Generic chunks without GOVERNS are
@@ -265,7 +267,7 @@ def test_phase2_related_decisions(
 
 
 def test_phase2_no_related_when_params_missing(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Phase 2 is skipped when any of state/slug/task_title is missing."""
     _seed_one(store, "docs/design/x/approach.md::why-foo")
@@ -308,7 +310,7 @@ def test_phase2_no_related_when_params_missing(
 
 
 def test_phase2_related_dedup_keeps_governed(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When related_decisions returns a decision already in the governed set, it is deduped."""
     _seed_one(store, "docs/design/x/approach.md::why-foo")
@@ -351,7 +353,7 @@ def test_phase2_related_dedup_keeps_governed(
 
 
 def test_phase2_graceful_degradation_on_failure(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When related_decisions raises, the function falls back to governed-only."""
     _seed_one(store, "docs/design/x/approach.md::why-foo")
@@ -386,7 +388,7 @@ def test_phase2_graceful_degradation_on_failure(
 
 
 def test_tf4_governed_returns_governs_decision_and_zero_generic(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TF4: A work-item whose scope.touches covers a governed file returns the
     GOVERNS-linked decision and zero generic README/doc heading chunks.
@@ -468,7 +470,7 @@ def test_tf4_governed_returns_governs_decision_and_zero_generic(
 
 
 def test_tf5_ungoverned_returns_empty_knowledge_leg(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TF5: A work-item touching no governed file returns an empty knowledge leg
     rather than generic prose.
@@ -541,7 +543,7 @@ def test_tf5_ungoverned_returns_empty_knowledge_leg(
 
 
 def test_phase2_filters_non_governed_related(
-    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+    store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Phase 2 related_decisions results without a GOVERNS edge into a touched
     file are excluded, even if thematically relevant."""

@@ -1,63 +1,73 @@
-"""Unit tests for the DuckDB SkillStore (v5 storage layer)."""
+"""Unit tests for the unified OverGraph corpus store (skill side)."""
 
 from __future__ import annotations
 
+import datetime as _dt
+
 import pytest
 
-from agentalloy.storage.skill_store import open_skill_store
+from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
+from agentalloy.storage.protocols import (
+    FragmentRow,
+    SkillDependencyRow,
+    SkillRow,
+    SkillVersionRow,
+)
+
+_UTC = _dt.UTC
 
 
 @pytest.fixture
 def store(tmp_path):
-    ss = open_skill_store(str(tmp_path / "agentalloy.duck"))  # writer: migrates
+    ss = open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))  # writer: migrates
     _seed(ss)
     yield ss
     ss.close()
 
 
 def _seed(ss):
-    ss.execute(
-        "INSERT INTO skills (skill_id, canonical_name, skill_class, category, "
-        "deprecated, current_version_id, phase_scope, domain_tags) VALUES (?,?,?,?,?,?,?,?)",
-        ["sk1", "Skill One", "domain", "engineering", False, "v1", ["build"], ["python"]],
+    now = _dt.datetime.now(tz=_UTC)
+    ss.insert_skill(
+        SkillRow(
+            skill_id="sk1",
+            canonical_name="Skill One",
+            category="engineering",
+            skill_class="domain",
+            domain_tags=["python"],
+            deprecated=False,
+            superseded_by=None,
+            always_apply=False,
+            phase_scope=["build"],
+            category_scope=None,
+            tier=None,
+            description=None,
+            current_version_id="v1",
+        )
     )
-    ss.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, status, raw_prose) "
-        "VALUES (?,?,?,?,?)",
-        ["v1", "sk1", 1, "active", "prose one"],
+    ss.insert_version(
+        SkillVersionRow(
+            version_id="v1",
+            skill_id="sk1",
+            version_number=1,
+            authored_at=now,
+            author="",
+            change_summary="",
+            status="active",
+            raw_prose="prose one",
+        )
     )
-    ss.execute(
-        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-        "VALUES (?,?,?,?,?)",
-        ["fr1", "v1", "execution", 0, "do the thing"],
+    ss.insert_fragment(
+        FragmentRow(
+            fragment_id="fr1",
+            version_id="v1",
+            fragment_type="execution",
+            sequence=0,
+            content="do the thing",
+        )
     )
-    ss.execute(
-        "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) VALUES (?,?,?)",
-        ["sk1", "sk2", "requires"],
+    ss.insert_dependency(
+        SkillDependencyRow(source_skill_id="sk1", target_skill_id="sk2", rel_type="requires")
     )
-
-
-def test_named_params_active_skill_join(store):
-    rows = store.execute(
-        "SELECT s.skill_id, v.version_id FROM skills s "
-        "JOIN skill_versions v ON v.version_id = s.current_version_id "
-        "WHERE v.status = $st AND s.deprecated = false ORDER BY s.skill_id",
-        {"st": "active"},
-    )
-    assert rows == [("sk1", "v1")]
-
-
-def test_list_has_any_and_any_membership(store):
-    assert store.execute(
-        "SELECT skill_id FROM skills WHERE list_has_any(phase_scope, $p)", {"p": ["build", "qa"]}
-    ) == [("sk1",)]
-    assert store.execute(
-        "SELECT skill_id FROM skills WHERE skill_class = ANY(?)", [["domain", "system"]]
-    ) == [("sk1",)]
-
-
-def test_scalar(store):
-    assert store.scalar("SELECT 1") == 1
 
 
 def test_corpus_meta(store):
@@ -68,56 +78,41 @@ def test_corpus_meta(store):
     assert store.get_meta("nope") is None
 
 
-def test_consistency_guard_b_clean(store):
-    # active version with a CURRENT_VERSION edge -> no orphan
-    assert (
-        store.execute(
-            "SELECT s.skill_id FROM skills s "
-            "JOIN skill_versions av ON av.skill_id = s.skill_id AND av.status = 'active' "
-            "LEFT JOIN skill_versions cur ON cur.version_id = s.current_version_id "
-            "WHERE cur.version_id IS NULL LIMIT 1"
-        )
-        == []
-    )
-
-
 def test_delete_skill_cascade(store):
+    assert store.count_skills() == 1
+    assert store.count_fragments() == 1
     assert store.delete_skill("sk1") == 1
-    assert store.scalar("SELECT count(*) FROM skills") == 0
-    assert store.scalar("SELECT count(*) FROM fragments") == 0
-    assert store.scalar("SELECT count(*) FROM skill_versions") == 0
-    assert store.scalar("SELECT count(*) FROM skill_dependencies") == 0
+    assert store.count_skills() == 0
+    assert store.count_fragments() == 0
+    assert store.get_version("v1") is None
+    assert store.get_dependencies("sk1") == []
 
 
 def test_rollback_batch(store):
     store.rollback_batch(["sk1", "missing"])  # soft-fail on missing
-    assert store.scalar("SELECT count(*) FROM skills") == 0
+    assert store.count_skills() == 0
 
 
 def test_read_only_open(tmp_path):
-    p = str(tmp_path / "agentalloy.duck")
-    open_skill_store(p).close()  # create + migrate, then release
-    ro = open_skill_store(p, read_only=True)
-    assert ro.scalar("SELECT 1") == 1
+    p = str(tmp_path / "agentalloy.overgraph")
+    open_overgraph_skill_store(p).close()  # create + migrate, then release
+    ro = open_overgraph_skill_store(p, read_only=True)
+    assert ro.count_skills() == 0
     with pytest.raises(RuntimeError):
         ro.migrate()  # RO cannot migrate
     ro.close()
 
 
-def test_released_lets_an_in_process_writer_attach_then_reconnects(tmp_path):
+def test_released_reconnects_and_sees_writer_changes(tmp_path):
     """The service holds the store read-only for its lifetime; released()
     closes the handle so an in-process writer (web reembed / pack install)
     can attach, then reconnects — the object stays valid for its holders."""
-    p = str(tmp_path / "agentalloy.duck")
-    open_skill_store(p).close()  # create + migrate, then release
+    p = str(tmp_path / "agentalloy.overgraph")
+    open_overgraph_skill_store(p).close()  # create + migrate, then release
 
-    holder = open_skill_store(p, read_only=True)
-    # Mixed-mode open in the same process is refused while the handle is live…
-    with pytest.raises(Exception, match="(?i)configuration|lock"):
-        open_skill_store(p)
-    # …but inside released() a writer attaches, and the holder reconnects after.
+    holder = open_overgraph_skill_store(p, read_only=True)
     with holder.released():
-        w = open_skill_store(p)
+        w = open_overgraph_skill_store(p)
         w.set_meta("k", "v")
         w.close()
     assert holder.get_meta("k") == "v"

@@ -299,7 +299,7 @@ class TestInstallLocalPack:
             patch("agentalloy.config.get_settings") as mock_settings,
             patch.object(ip, "open_skills", return_value=mock_store),
         ):
-            mock_settings.return_value.duckdb_path = str(tmp_path / "test.duck")
+            mock_settings.return_value.corpus_store_path = str(tmp_path / "test.overgraph")
             # Default strict=True: the fixture is lint-clean, so Gate 1 passes
             # for real and _ingest_yaml's mocked outcomes drive rollback below.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
@@ -322,12 +322,11 @@ class TestInstallLocalPack:
         fake_vs = MagicMock()
         fake_vs.embedding_dim.return_value = 1024
         fake_settings = MagicMock()
-        fake_settings.fragments_lance_path = "/tmp/fake.lance"
         fake_settings.runtime_embedding_model = "corpus-model"
 
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
-            patch.object(_ip, "open_fragments", return_value=fake_vs),
+            patch.object(_ip, "open_skills", return_value=fake_vs),
         ):
             capsys.readouterr()  # clear any pre-existing capture
             result = _ip._check_embedding_dim(manifest, tmp_path)  # pyright: ignore[reportPrivateUsage]
@@ -344,13 +343,12 @@ class TestInstallLocalPack:
         _write_pack_manifest(
             tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 3}]
         )
-        # Create corpus dir + files so the Pattern E corpus verification passes.
-        # Verification checks the ingest path (settings.duckdb_path), so point it
-        # at the seeded agentalloy.duck.
+        # Create corpus dir + store so the Pattern E corpus verification passes.
+        # Verification checks the ingest path (settings.corpus_store_path), so
+        # point it at the seeded unified store.
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "agentalloy.duck").touch()
-        (corpus_dir / "fragments.lance").mkdir()
+        (corpus_dir / "agentalloy.overgraph").touch()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(
@@ -371,8 +369,7 @@ class TestInstallLocalPack:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
-                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
+                    corpus_store_path=str(corpus_dir / "agentalloy.overgraph"),
                 ),
             ),
         ):
@@ -389,39 +386,48 @@ class TestInstallLocalPack:
 
 
 def _seed_skill_node(db_path: str, skill_id: str) -> None:
-    """Migrate a fresh skill store and insert a single live skill row."""
-    from agentalloy.storage.skill_store import open_skill_store
+    """Migrate a fresh corpus store and insert a single live skill row."""
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
+    from agentalloy.storage.protocols import SkillRow
 
-    with open_skill_store(db_path) as store:
-        store.migrate()
-        store.execute(
-            "INSERT INTO skills (skill_id, canonical_name, deprecated, always_apply) "
-            "VALUES (?, ?, false, false)",
-            [skill_id, skill_id],
+    with open_overgraph_skill_store(db_path) as store:
+        store.insert_skill(
+            SkillRow(
+                skill_id=skill_id,
+                canonical_name=skill_id,
+                category="",
+                skill_class="domain",
+                domain_tags=[],
+                deprecated=False,
+                superseded_by=None,
+                always_apply=False,
+                phase_scope=None,
+                category_scope=None,
+                tier=None,
+                description=None,
+                current_version_id=None,
+            )
         )
 
 
 def _read_skill_flags(db_path: str, skill_id: str) -> tuple[Any, Any] | None:
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-    with open_skill_store(db_path, read_only=True) as store:
-        rows = store.execute(
-            "SELECT deprecated, superseded_by FROM skills WHERE skill_id = ?",
-            [skill_id],
-        )
-    if not rows:
+    with open_overgraph_skill_store(db_path, read_only=True) as store:
+        skill = store.get_skill(skill_id)
+    if skill is None:
         return None
-    return rows[0][0], rows[0][1]
+    return skill.deprecated, skill.superseded_by
 
 
 class TestDeprecationPropagation:
     def test_updates_existing_skill_node(self, tmp_path: Path) -> None:
         """A deprecated YAML whose skill_id is already ingested updates the row."""
-        db_path = str(tmp_path / "agentalloy.duck")
+        db_path = str(tmp_path / "agentalloy.overgraph")
         _seed_skill_node(db_path, "old-skill")
 
         fake_settings = MagicMock()
-        fake_settings.duckdb_path = db_path
+        fake_settings.corpus_store_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             outcome = ip._propagate_deprecation("old-skill", "new-skill")  # pyright: ignore[reportPrivateUsage]
 
@@ -431,11 +437,11 @@ class TestDeprecationPropagation:
 
     def test_skips_when_skill_absent(self, tmp_path: Path) -> None:
         """A deprecated YAML for a skill not in the graph is a plain skip."""
-        db_path = str(tmp_path / "agentalloy.duck")
+        db_path = str(tmp_path / "agentalloy.overgraph")
         _seed_skill_node(db_path, "present-skill")
 
         fake_settings = MagicMock()
-        fake_settings.duckdb_path = db_path
+        fake_settings.corpus_store_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             outcome = ip._propagate_deprecation("missing-skill", "x")  # pyright: ignore[reportPrivateUsage]
 
@@ -448,8 +454,8 @@ class TestDeprecationPropagation:
     ) -> None:
         """A lock-held error warns with a FIX hint and degrades to a skip."""
         fake_settings = MagicMock()
-        fake_settings.duckdb_path = str(tmp_path / "agentalloy.duck")
-        boom = MagicMock(side_effect=RuntimeError("Could not set lock on file: held by PID 999"))
+        fake_settings.corpus_store_path = str(tmp_path / "agentalloy.overgraph")
+        boom = MagicMock(side_effect=RuntimeError("Failed to acquire Lockfile: LockBusy"))
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
             patch.object(ip, "open_skills", boom),
@@ -464,7 +470,7 @@ class TestDeprecationPropagation:
 
     def test_ingest_yaml_deprecated_branch_propagates(self, tmp_path: Path) -> None:
         """_ingest_yaml on a deprecated YAML reports deprecated_updated when the row exists."""
-        db_path = str(tmp_path / "agentalloy.duck")
+        db_path = str(tmp_path / "agentalloy.overgraph")
         _seed_skill_node(db_path, "dep-skill")
 
         yaml_path = tmp_path / "dep.yaml"
@@ -481,7 +487,7 @@ class TestDeprecationPropagation:
         )
 
         fake_settings = MagicMock()
-        fake_settings.duckdb_path = db_path
+        fake_settings.corpus_store_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             result = ip._ingest_yaml(yaml_path, tmp_path)  # pyright: ignore[reportPrivateUsage]
 
@@ -613,48 +619,70 @@ class TestPackSelector:
 
 def _seed_active_skill(db_path: str, skill_id: str) -> None:
     """Fresh store with one skill whose current version is active."""
-    from agentalloy.storage.skill_store import open_skill_store
+    import datetime as _dt
 
-    with open_skill_store(db_path) as store:
-        store.migrate()
-        store.execute(
-            "INSERT INTO skills (skill_id, canonical_name, deprecated, always_apply, "
-            "current_version_id) VALUES (?, ?, false, false, ?)",
-            [skill_id, skill_id, f"{skill_id}-v1"],
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
+    from agentalloy.storage.protocols import SkillRow, SkillVersionRow
+
+    version_id = f"{skill_id}-v1"
+    with open_overgraph_skill_store(db_path) as store:
+        store.insert_skill(
+            SkillRow(
+                skill_id=skill_id,
+                canonical_name=skill_id,
+                category="",
+                skill_class="domain",
+                domain_tags=[],
+                deprecated=False,
+                superseded_by=None,
+                always_apply=False,
+                phase_scope=None,
+                category_scope=None,
+                tier=None,
+                description=None,
+                current_version_id=version_id,
+            )
         )
-        store.execute(
-            "INSERT INTO skill_versions (version_id, skill_id, version_number, status, "
-            "raw_prose) VALUES (?, ?, 1, 'active', 'p')",
-            [f"{skill_id}-v1", skill_id],
+        store.insert_version(
+            SkillVersionRow(
+                version_id=version_id,
+                skill_id=skill_id,
+                version_number=1,
+                authored_at=_dt.datetime.now(tz=_dt.UTC),
+                author="",
+                change_summary="",
+                status="active",
+                raw_prose="p",
+            )
         )
 
 
 class TestCorpusMissingActive:
     def _settings(self, db_path: Path) -> MagicMock:
-        return MagicMock(duckdb_path=str(db_path))
+        return MagicMock(corpus_store_path=str(db_path))
 
     def test_present_active_skill_is_not_missing(self, tmp_path: Path) -> None:
-        db = tmp_path / "agentalloy.duck"
+        db = tmp_path / "agentalloy.overgraph"
         _seed_active_skill(str(db), "a")
         with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
             assert ip._corpus_missing_active(["a"]) == []  # pyright: ignore[reportPrivateUsage]
 
     def test_absent_skill_is_missing(self, tmp_path: Path) -> None:
-        db = tmp_path / "agentalloy.duck"
+        db = tmp_path / "agentalloy.overgraph"
         _seed_active_skill(str(db), "a")
         with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
             missing = ip._corpus_missing_active(["a", "b"])  # pyright: ignore[reportPrivateUsage]
         assert missing == ["b"]
 
     def test_no_store_file_reports_all_missing(self, tmp_path: Path) -> None:
-        db = tmp_path / "never-created.duck"
+        db = tmp_path / "never-created.overgraph"
         with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
             assert ip._corpus_missing_active(["a", "b"]) == ["a", "b"]  # pyright: ignore[reportPrivateUsage]
 
     def test_unreadable_store_reports_all_missing(self, tmp_path: Path) -> None:
         # A wrong skip is unfixable; a redundant re-ingest is idempotent.
-        db = tmp_path / "agentalloy.duck"
-        db.write_text("not a duckdb file")
+        db = tmp_path / "agentalloy.overgraph"
+        db.write_text("not an overgraph store")
         with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
             assert ip._corpus_missing_active(["a"]) == ["a"]  # pyright: ignore[reportPrivateUsage]
 
@@ -677,14 +705,13 @@ class TestCorpusAwareSkip:
 
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        db_path = corpus_dir / "agentalloy.duck"
-        (corpus_dir / "fragments.lance").mkdir()
+        db_path = corpus_dir / "agentalloy.overgraph"
         if seed_corpus_skill:
             _seed_active_skill(str(db_path), "a")
         else:
-            from agentalloy.storage.skill_store import open_skill_store
+            from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-            with open_skill_store(str(db_path)) as store:  # real, migrated, empty
+            with open_overgraph_skill_store(str(db_path)) as store:  # real, migrated, empty
                 store.migrate()
 
         # Registry says pack x is installed with EXACTLY this content.
@@ -719,8 +746,7 @@ class TestCorpusAwareSkip:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(db_path),
-                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
+                    corpus_store_path=str(db_path),
                 ),
             ),
         ):

@@ -1,7 +1,7 @@
 """Unit tests for the runtime dedup gate (``agentalloy.dedup_gate``).
 
 Deterministic unit vectors drive ``classify_hit`` and ``dedup_fragment`` against a
-real Lance ``FragmentStore`` in tmp_path — fast, isolated per test, no network.
+real unified OverGraph corpus store in tmp_path — fast, isolated per test, no network.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from agentalloy.dedup_gate import (
     classify_hit,
     dedup_fragment,
 )
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     FragmentEmbedding,
@@ -45,7 +45,7 @@ def _mixed_vec(a: int, b: int, alpha: float) -> list[float]:
 
 @pytest.fixture
 def store(tmp_path: Path):
-    s = LanceFragmentStore(tmp_path / "fragments.lance")
+    s = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     try:
         yield s
     finally:
@@ -53,7 +53,7 @@ def store(tmp_path: Path):
 
 
 @pytest.fixture
-def seeded_store(store: LanceFragmentStore):
+def seeded_store(store: OverGraphSkillStore):
     """Store pre-populated with 5 unit-vector fragments across 2 skills."""
     import time
 
@@ -113,7 +113,7 @@ def test_classify_hit_boundary_soft() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_fragment_detects_identical_match(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_fragment_detects_identical_match(seeded_store: OverGraphSkillStore) -> None:
     # Querying with the exact vector of existing-0 should produce a hard hit.
     hard, soft = dedup_fragment(
         label="frag-0",
@@ -126,7 +126,7 @@ def test_dedup_fragment_detects_identical_match(seeded_store: LanceFragmentStore
     assert hard.fragment_id == "existing-0"
 
 
-def test_dedup_fragment_picks_hardest_match(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_fragment_picks_hardest_match(seeded_store: OverGraphSkillStore) -> None:
     """Multiple hard hits: return the one with smallest distance."""
     # Add a second fragment in dim 0 with a slight perturbation.
     import time
@@ -156,7 +156,7 @@ def test_dedup_fragment_picks_hardest_match(seeded_store: LanceFragmentStore) ->
     assert hard.fragment_id == "existing-0"
 
 
-def test_dedup_fragment_only_soft_matches(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_fragment_only_soft_matches(seeded_store: OverGraphSkillStore) -> None:
     """Query with a vector that's similarity ~0.85 to existing-0."""
     import math
 
@@ -177,7 +177,7 @@ def test_dedup_fragment_only_soft_matches(seeded_store: LanceFragmentStore) -> N
     assert any(h.fragment_id == "existing-0" for h in soft)
 
 
-def test_dedup_fragment_no_matches(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_fragment_no_matches(seeded_store: OverGraphSkillStore) -> None:
     """Query with a vector orthogonal to every seed (similarity 0)."""
     hard, soft = dedup_fragment(
         label="q",
@@ -190,7 +190,7 @@ def test_dedup_fragment_no_matches(seeded_store: LanceFragmentStore) -> None:
     assert soft == []
 
 
-def test_dedup_fragment_respects_fragment_type_filter(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_fragment_respects_fragment_type_filter(seeded_store: OverGraphSkillStore) -> None:
     """Narrowing by fragment_type should only return matches of that type."""
     hard, soft = dedup_fragment(
         label="q",

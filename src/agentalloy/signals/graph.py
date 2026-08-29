@@ -97,11 +97,14 @@ class PhaseGraphState(TypedDict, total=False):
     # Workflow instructions embedded in the graph. The graph drives the workflow,
     # not just routes phases. The model follows the graph.
     workflow_instructions: str | None  # raw prose for the current phase
-    workflow_step: str | None  # current workflow step (e.g., "start", "write_spec", "present", "approve")
+    workflow_step: (
+        str | None
+    )  # current workflow step (e.g., "start", "write_spec", "present", "approve")
     # Gate evaluation results (passed to graph, used for routing decisions).
     # The graph is the single decision point for transitions.
     gates_met: list[str]  # gates that passed
     gates_unmet: list[str]  # gates that failed
+    gates_evaluated: bool  # whether gates have been evaluated for this orientation
     should_transition: bool  # whether gates allow transition
     to_phase: str | None  # target phase if transition allowed
     advisories: list[str]  # gate advisories
@@ -410,7 +413,7 @@ def _node(phase: str):
         # - add-skill → sdd-add-skill
         # - flow → sdd-flow
         lane = state.get("lane", "sdd-full")
-        
+
         if phase == "intake":
             if lane == "add-skill":
                 skill_file = "sdd-add-skill"
@@ -432,10 +435,10 @@ def _node(phase: str):
                 "ship": "sdd-deliver-and-ship",
             }
             skill_file = phase_to_skill.get(phase, f"sdd-{phase}")
-        
+
         # Load the workflow skill from the packaged YAML
         skill = _load_workflow_skill_by_file(skill_file)
-        
+
         state["phase"] = phase  # keep graph-phase in sync with the executing node
 
         # Embed workflow instructions into the graph state. The graph drives
@@ -447,7 +450,6 @@ def _node(phase: str):
         # Evaluate exit gates for this phase. Gates are passed via config.
         # The graph evaluates gates and stores results in state.
         # This makes the graph the single decision point for transitions.
-        from agentalloy.signals.gates import evaluate_phase_gate
 
         # Gate context is passed via config["configurable"]["gate_context"]
         # For now, we just mark that gates need evaluation. The actual
@@ -485,28 +487,28 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
     forward edges use gate results from state to decide routing.
     ``ship`` is terminal. Returns an *uncompiled* graph — callers choose whether
     and how to checkpointer it (task 05).
-    
+
     The graph is the single decision point for transitions. Gate evaluation
     happens outside the graph (needs store access), but routing decisions
     are made by the graph based on gate results in state.
     """
     g = StateGraph[PhaseGraphState](PhaseGraphState)
-    
+
     # Orientation node: routes to the current phase (from state).
     # This allows the graph to start at any phase, not just intake.
     def _orientation(state: PhaseGraphState) -> PhaseGraphState:
         # Orientation is a pass-through node that just marks the entry point.
         # The actual routing happens in the conditional edge below.
         return state
-    
+
     g.add_node("orientation", _orientation)
-    
+
     for phase in _PHASE_GRAPH:
         g.add_node(phase, _node(phase))  # pyright: ignore[reportUnknownMemberType]
-    
+
     # Start at orientation
     g.add_edge(START, "orientation")
-    
+
     # Orientation routes to the current phase (from state)
     def _route_to_phase(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)
@@ -515,7 +517,7 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
         if phase in _PHASE_GRAPH:
             return phase
         return "intake"
-    
+
     g.add_conditional_edges(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         "orientation",
         _route_to_phase,
@@ -524,17 +526,17 @@ def build_phase_graph() -> StateGraph[PhaseGraphState]:
 
     def _advance(state: PhaseGraphState) -> str:
         _d: dict[str, Any] = dict(state)
-        phase = _d["phase"]
-        
+        _d["phase"]
+
         # Use gate results from state to decide routing.
         # If should_transition is True and to_phase is set, advance.
         # Otherwise, terminate (END) to avoid infinite loops.
         should_transition = _d.get("should_transition", False)
         to_phase = _d.get("to_phase")
-        
+
         if should_transition and to_phase:
             return to_phase
-        
+
         # No transition allowed - terminate to avoid infinite loop
         return END
 

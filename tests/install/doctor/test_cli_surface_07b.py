@@ -372,7 +372,7 @@ class TestTE3UninstallSweepsAllRepos:
         mock_store.delete_repo_rows.return_value = 5
 
         mock_settings = MagicMock()
-        mock_settings.duckdb_path = str(tmp_path / "agentalloy.duck")
+        mock_settings.corpus_store_path = str(tmp_path / "agentalloy.overgraph")
 
         with (
             patch("agentalloy.storage.state_store.process_store", return_value=None),

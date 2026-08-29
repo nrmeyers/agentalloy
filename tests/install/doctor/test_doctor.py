@@ -25,6 +25,7 @@ from agentalloy.install.subcommands.doctor import (
     _run_doctor_container,  # pyright: ignore[reportPrivateUsage]
     run_doctor,
 )
+from agentalloy.storage.protocols import EMBEDDING_DIM
 
 # ---------------------------------------------------------------------------
 # Check 1: config
@@ -108,11 +109,11 @@ class TestCheckCorpusFiles:
     def test_missing_files_fails(self, tmp_path: Path) -> None:
         result = _check_corpus_files(tmp_path)
         assert result["passed"] is False
-        assert "agentalloy.duck" in result["error"] or "fragments.lance" in result["error"]
+        assert "agentalloy.overgraph" in result["error"] or "corpus.overgraph" in result["error"]
 
     def test_both_present_passes(self, tmp_path: Path) -> None:
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        (tmp_path / "fragments.lance").mkdir()
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        (tmp_path / "corpus.overgraph").mkdir()
         result = _check_corpus_files(tmp_path)
         assert result["passed"] is True
 
@@ -122,46 +123,48 @@ class TestCheckCorpusFiles:
 # ---------------------------------------------------------------------------
 
 
+_OPEN_STORE = "agentalloy.storage.overgraph_skill_store.open_overgraph_skill_store"
+
+
 class TestCheckSkillSchema:
     def test_schema_missing_fails(self, tmp_path: Path) -> None:
-        # DB file present but the skills table is missing — the open succeeds, the
-        # query raises. (File must exist or the absent-corpus guard fires first.)
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        with patch("agentalloy.storage.skill_store.open_skill_store") as mock_open:
+        # Store present but the skills collection is missing — the open
+        # succeeds, the query raises. (The store must exist or the
+        # absent-corpus guard fires first.)
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        with patch(_OPEN_STORE) as mock_open:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.count_skills.side_effect = Exception("Table skills does not exist")
             mock_open.return_value = mock_store
-            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is False
         assert result.get("lock_held") is False
         assert "remediation" in result
 
     def test_lock_held_sets_flag(self, tmp_path: Path) -> None:
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        with patch("agentalloy.storage.skill_store.open_skill_store") as mock_open:
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        with patch(_OPEN_STORE) as mock_open:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
-            mock_store.count_skills.side_effect = Exception(
-                "Could not set lock on file /corpus/agentalloy.duck"
-            )
+            mock_store.count_skills.side_effect = Exception("Failed to acquire Lockfile: LockBusy")
             mock_open.return_value = mock_store
-            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is False
         assert result["lock_held"] is True
         assert "remediation" in result
 
     def test_schema_ok_passes(self, tmp_path: Path) -> None:
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        with patch("agentalloy.storage.skill_store.open_skill_store") as mock_open:
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        with patch(_OPEN_STORE) as mock_open:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.count_skills.return_value = 1
             mock_open.return_value = mock_store
-            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is True
 
 
@@ -172,43 +175,27 @@ class TestCheckSkillSchema:
 
 class TestCheckCorpusCount:
     def test_empty_corpus_fails(self, tmp_path: Path) -> None:
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        (tmp_path / "fragments.lance").mkdir()
-        with (
-            patch("agentalloy.storage.skill_store.open_skill_store") as mock_open,
-            patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance,
-        ):
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        with patch(_OPEN_STORE) as mock_open:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.count_skills.return_value = 0
+            mock_store.count_embeddings.return_value = 0
             mock_open.return_value = mock_store
-            mock_vs = MagicMock()
-            mock_vs.count_embeddings.return_value = 0
-            mock_lance.return_value = mock_vs
-            result = _check_corpus_count(
-                str(tmp_path / "agentalloy.duck"), str(tmp_path / "fragments.lance")
-            )
+            result = _check_corpus_count(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is False
 
     def test_populated_corpus_passes(self, tmp_path: Path) -> None:
-        (tmp_path / "agentalloy.duck").write_bytes(b"")
-        (tmp_path / "fragments.lance").mkdir()
-        with (
-            patch("agentalloy.storage.skill_store.open_skill_store") as mock_open,
-            patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance,
-        ):
+        (tmp_path / "agentalloy.overgraph").write_bytes(b"")
+        with patch(_OPEN_STORE) as mock_open:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.count_skills.return_value = 30
+            mock_store.count_embeddings.return_value = 100
             mock_open.return_value = mock_store
-            mock_vs = MagicMock()
-            mock_vs.count_embeddings.return_value = 100
-            mock_lance.return_value = mock_vs
-            result = _check_corpus_count(
-                str(tmp_path / "agentalloy.duck"), str(tmp_path / "fragments.lance")
-            )
+            result = _check_corpus_count(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is True
         assert "30 skills" in result["detail"]
 
@@ -220,38 +207,46 @@ class TestCheckCorpusCount:
 
 class TestCheckEmbeddingDim:
     def test_dim_mismatch_fails(self, tmp_path: Path) -> None:
-        with patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance:
-            mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = 1024
-            mock_lance.return_value = mock_vs
-            result = _check_embedding_dim(str(tmp_path / "fragments.lance"))
+        with patch(_OPEN_STORE) as mock_open:
+            mock_store = MagicMock()
+            mock_store.__enter__ = MagicMock(return_value=mock_store)
+            mock_store.__exit__ = MagicMock(return_value=False)
+            mock_store.embedding_dim.return_value = 1024
+            mock_open.return_value = mock_store
+            result = _check_embedding_dim(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is False
         assert "1024" in result["error"]
 
     def test_dim_match_passes(self, tmp_path: Path) -> None:
-        with patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance:
-            mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = 768
-            mock_lance.return_value = mock_vs
-            result = _check_embedding_dim(str(tmp_path / "fragments.lance"))
+        with patch(_OPEN_STORE) as mock_open:
+            mock_store = MagicMock()
+            mock_store.__enter__ = MagicMock(return_value=mock_store)
+            mock_store.__exit__ = MagicMock(return_value=False)
+            mock_store.embedding_dim.return_value = EMBEDDING_DIM
+            mock_open.return_value = mock_store
+            result = _check_embedding_dim(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is True
 
     def test_empty_corpus_passes(self, tmp_path: Path) -> None:
-        with patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance:
-            mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = None
-            mock_lance.return_value = mock_vs
-            result = _check_embedding_dim(str(tmp_path / "fragments.lance"))
+        with patch(_OPEN_STORE) as mock_open:
+            mock_store = MagicMock()
+            mock_store.__enter__ = MagicMock(return_value=mock_store)
+            mock_store.__exit__ = MagicMock(return_value=False)
+            mock_store.embedding_dim.return_value = None
+            mock_open.return_value = mock_store
+            result = _check_embedding_dim(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is True
 
     def test_dim_mismatch_surfaces_tailored_message(self, tmp_path: Path) -> None:
         """A stored dim that differs from EMBEDDING_DIM surfaces the tailored
         reembed remediation."""
-        with patch("agentalloy.storage.fragment_store.LanceFragmentStore") as mock_lance:
-            mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = 1024
-            mock_lance.return_value = mock_vs
-            result = _check_embedding_dim(str(tmp_path / "fragments.lance"))
+        with patch(_OPEN_STORE) as mock_open:
+            mock_store = MagicMock()
+            mock_store.__enter__ = MagicMock(return_value=mock_store)
+            mock_store.__exit__ = MagicMock(return_value=False)
+            mock_store.embedding_dim.return_value = 1024
+            mock_open.return_value = mock_store
+            result = _check_embedding_dim(str(tmp_path / "agentalloy.overgraph"))
         assert result["passed"] is False
         assert "Stored dim 1024" in result["error"]
         assert "reembed --force" in result["remediation"]
@@ -538,7 +533,7 @@ class TestRepairLockHeld:
                 }
             ],
         }
-        with patch("agentalloy.storage.skill_store.open_skill_store") as mock_open:
+        with patch("agentalloy.storage.open.open_skills") as mock_open:
             _repair(result)
         mock_open.assert_not_called()
 
@@ -582,7 +577,7 @@ class TestRepairSchemaMissing:
             return 0
 
         with (
-            patch("agentalloy.storage.skill_store.open_skill_store", return_value=mock_store),
+            patch("agentalloy.storage.open.open_skills", return_value=mock_store),
             patch("agentalloy.config.get_settings"),
             patch("subprocess.run", side_effect=fake_subprocess_run),
             # _repair imports reembed's main function-locally; patch at source
@@ -626,20 +621,18 @@ class TestRepairNoop:
 
 class TestNoStubCreation:
     def test_skill_schema_absent_creates_no_stub(self, tmp_path: Path) -> None:
-        skills_db = tmp_path / "agentalloy.duck"
+        skills_db = tmp_path / "agentalloy.overgraph"
         result = _check_skill_schema(str(skills_db))
         assert result["passed"] is False
         assert "absent" in result["error"].lower()
         assert not skills_db.exists()
 
     def test_corpus_count_absent_creates_no_stub(self, tmp_path: Path) -> None:
-        skills_db = tmp_path / "agentalloy.duck"
-        fragments = tmp_path / "fragments.lance"
-        result = _check_corpus_count(str(skills_db), str(fragments))
+        store = tmp_path / "agentalloy.overgraph"
+        result = _check_corpus_count(str(store))
         assert result["passed"] is False
         assert "absent" in result["error"].lower()
-        assert not skills_db.exists()
-        assert not fragments.exists()
+        assert not store.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -360,8 +360,8 @@ def _add_actions(
             f"sdd-fast → 'fast.artifact'. "
             f"If the CLI is unavailable, PUT {service}/state/artifact?"
             f"repo_root={scope['repo_root']} with JSON body "
-            f"{{\"phase\": \"<phase>\", \"slug\": \"<task-slug>\", "
-            f"\"name\": \"<artifact-name>\", \"content\": \"<markdown body>\"}}. "
+            f'{{"phase": "<phase>", "slug": "<task-slug>", '
+            f'"name": "<artifact-name>", "content": "<markdown body>"}}. '
             f"In a spec artifact, '## AC-N: <text>' headings are merged into the "
             f"contract's success criteria automatically."
         )
@@ -388,16 +388,16 @@ def _add_actions(
             f"  - Decision docs (why code exists): GET {service}/code/search/related-decisions?repo={scope['repo']}&q=<query>\n"
             f"  - Entity edges for a symbol: GET {service}/code/search/entities?repo={scope['repo']}&query=<symbol>\n"
             f"  - Budgeted task context: POST {service}/code/context-bundle "
-            f"with JSON body: {{\"repo\": \"{scope['repo']}\", \"task\": \"<task description>\", \"budget_chars\": 24000}}\n"
+            f'with JSON body: {{"repo": "{scope["repo"]}", "task": "<task description>", "budget_chars": 24000}}\n'
             f"Use semantic search to find code, structural callers/callees to trace "
             f"impact, governing_decisions to find the rationale behind code."
         )
         # Phase advancement tool: single call to write contract + advance phase
         actions["advance"] = (
             f"To advance to the next phase, call POST {service}/state/advance?repo_root={scope['repo_root']} "
-            f"with JSON body: {{\"slug\": \"<task-slug>\", \"contract_body\": \"<what the next phase needs to know>\", "
-            f"\"to_phase\": \"<target-phase>\", \"route\": \"full\", \"approved\": true}}. "
-            f"Set \"approved\": true when the user has approved the presented work — it records the "
+            f'with JSON body: {{"slug": "<task-slug>", "contract_body": "<what the next phase needs to know>", '
+            f'"to_phase": "<target-phase>", "route": "full", "approved": true}}. '
+            f'Set "approved": true when the user has approved the presented work — it records the '
             f"approval and advances in one call (standalone: POST {service}/state/approve-phase). "
             f"Approval-gated phases (spec, design) block until approved; approval is refused until the "
             f"phase's exit artifact is recorded, and editing an approved artifact voids the approval."
@@ -414,7 +414,7 @@ def _add_actions(
         # Session management: list, stash, resume, archive, cancel
         actions["sessions"] = (
             f"To manage workflow sessions (all POSTs take JSON body: "
-            f"{{\"session_key\": \"<session-id>\"}}):\n"
+            f'{{"session_key": "<session-id>"}}):\n'
             f"  - List active: GET {service}/state/sessions/active?repo_root={scope['repo_root']}\n"
             f"  - Stash (park work-in-progress to resume later): "
             f"POST {service}/state/sessions/stash?repo_root={scope['repo_root']}\n"
@@ -432,7 +432,7 @@ def _add_actions(
         actions["reset"] = (
             f"To reset the workflow back to intake (start a new work item, or "
             f"abandon a stuck/finished one): POST {service}/state/phase?repo_root={scope['repo_root']} "
-            f"with JSON body: {{\"value\": \"intake\"}}. Resets are not gated. "
+            f'with JSON body: {{"value": "intake"}}. Resets are not gated. '
             f"Only reset when the user confirms the current work item is done or abandoned."
         )
     else:

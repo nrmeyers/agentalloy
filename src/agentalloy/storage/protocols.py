@@ -1,12 +1,17 @@
-"""Storage protocols, DTOs, and shared constants for the two-engine backend.
+"""Storage protocols, DTOs, and shared constants.
 
-v5 splits the old monolithic ``VectorStore`` (DuckDB-vss + DuckDB-fts + telemetry
-+ corpus_meta) and the legacy graph store into three focused stores:
+The corpus lives in ONE unified OverGraph store (``agentalloy.overgraph`` +
+its Tantivy BM25 sidecar), exposed through two protocol views:
 
-- ``FragmentStore``  — LanceDB ``fragments`` dataset: vector ANN (retrieval) +
-  exact-cosine (dedup) + native BM25. Derived index, rebuilt from the SQL source.
-- ``SkillStore``     — DuckDB ``agentalloy.duck``: skill metadata (folded out of
-  the legacy graph) + ``corpus_meta`` kv. Source of truth for fragment content/metadata.
+- ``SkillStore``     — skill metadata (folded out of the legacy graph) +
+  ``corpus_meta`` kv. Source of truth for fragment content/metadata.
+- ``FragmentStore``  — vector ANN (retrieval) + exact-cosine (dedup) + BM25
+  over the same store. Derived index, rebuilt from the canonical rows on
+  every reembed.
+
+``OverGraphSkillStore`` implements both, so one read-only handle serves the
+whole app (``open_skills``). Separately:
+
 - ``TelemetryStore`` — DuckDB ``telemetry.duck``: ``composition_traces`` only,
   service-owned so runtime writes never contend with the reembed writer.
 
@@ -26,7 +31,7 @@ from typing import Protocol, runtime_checkable
 
 EMBEDDING_DIM = 768
 """Vector dimensionality. Tied to ``nomic-embed-text-v1.5`` (768-dim). Fixed:
-the Lance ``embedding`` column is ``FixedSizeList(float32, 768)`` and the gate
+the OverGraph ``embedding`` attribute is a 768-float vector and the gate
 chain (pack manifest, corpus-stamp, doctor, health) enforces it everywhere."""
 
 
@@ -46,6 +51,22 @@ class EmbeddingDimMismatch(VectorStoreError):
     (``embedding_dim`` / ``EmbeddingDimMismatch`` / ``dimension`` /
     ``-dim embeddings``) so the self-heal re-embed path still fires.
     """
+
+
+class LockHeldError(Exception):
+    """Another process holds the corpus store's single writer lock."""
+
+
+def is_lock_held_error(text: str) -> bool:
+    """True if ``text`` looks like a corpus-store writer-lock conflict.
+
+    Matches the OverGraph/Tantivy ``LockBusy`` failure raised when a second
+    writer opens the store (its BM25 sidecar takes an exclusive index lock).
+    """
+    t = text.lower()
+    return (
+        "lockbusy" in t or "failed to acquire lockfile" in t or "failed to acquire index lock" in t
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +96,9 @@ def l2_normalize(vec: Sequence[float]) -> list[float]:
 @dataclass(frozen=True)
 class FragmentEmbedding:
     """A fragment's embedding plus the denormalized columns that make filtered
-    vector search cheap. In v5 these columns are a *derived projection* of the
-    SQL-canonical source (``agentalloy.duck``), rebuilt on every reembed, so
-    they cannot drift (decision D8: always consistent).
+    vector search cheap. These columns are a *derived projection* of the
+    canonical fragment rows, rebuilt on every reembed, so they cannot drift
+    (decision D8: always consistent).
     """
 
     fragment_id: str
@@ -161,7 +182,7 @@ class CompositionTrace:
 
 @dataclass(frozen=True)
 class CodeSymbol:
-    """One code symbol row in the per-repo DuckDB graph.
+    """One code symbol row in the per-repo code graph.
 
     Field names line up with ``code_index.facade.ParsedSymbol`` so ingest is a
     plain field-copy; ``contextual_prefix`` / ``content_hash`` are storage-side
@@ -268,9 +289,10 @@ class CodeSearchHit:
 
 @runtime_checkable
 class FragmentStore(Protocol):
-    """Vector + BM25 index over fragments (LanceDB). Derived from SkillStore."""
+    """Vector + BM25 index over fragments. Derived from SkillStore."""
 
     def insert_embeddings(self, items: Iterable[FragmentEmbedding]) -> int: ...
+    def bulk_replace(self, items: Iterable[FragmentEmbedding]) -> int: ...
     def search_similar(
         self,
         query_vec: Sequence[float],
@@ -393,8 +415,8 @@ class FragmentDiscoveryRow:
 class SkillStore(Protocol):
     """Skill metadata + fragments + corpus_meta.
 
-    Higher-level interface — no raw SQL. Implementations may use DuckDB,
-    OverGraph, or any other backend.
+    Higher-level interface — no raw SQL. The production implementation is
+    the OverGraph unified store.
     """
 
     # --- Lifecycle ---
@@ -506,8 +528,8 @@ class TelemetryStore(Protocol):
 
 @runtime_checkable
 class CodeGraphStore(Protocol):
-    """Per-repo symbol graph (DuckDB ``graph.duck``). Source of truth for the
-    code index; the Lance vector dataset is derived from it.
+    """Per-repo symbol graph (``graph.overgraph``). Source of truth for the
+    code index; the vector index is derived from it.
     """
 
     def migrate(self) -> None: ...
@@ -556,7 +578,7 @@ class CodeGraphStore(Protocol):
 
 @runtime_checkable
 class CodeVectorStore(Protocol):
-    """Per-repo vector ANN + BM25 over symbols (LanceDB ``vectors.lance``)."""
+    """Per-repo vector ANN + BM25 over symbols (served by the code graph store)."""
 
     def upsert(self, rows: Iterable[CodeVectorRow]) -> int: ...
     def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int: ...
@@ -646,26 +668,12 @@ class StateStore(Protocol):
     def close(self) -> None: ...
 
 
-@dataclass
-class Stores:
-    """Bundle returned by ``open_stores``. Callers request only what they need."""
-
-    fragments: FragmentStore
-    skills: SkillStore
-    telemetry: TelemetryStore
-
-    def close(self) -> None:
-        import contextlib
-
-        for s in (self.fragments, self.skills, self.telemetry):
-            with contextlib.suppress(Exception):
-                s.close()
-
-
 __all__ = [
     "EMBEDDING_DIM",
     "VectorStoreError",
     "EmbeddingDimMismatch",
+    "LockHeldError",
+    "is_lock_held_error",
     "l2_normalize",
     "FragmentEmbedding",
     "SimilarityHit",
@@ -678,7 +686,6 @@ __all__ = [
     "StateWriteResult",
     "LeaseResult",
     "LeaseConflict",
-    "Stores",
     "CodeSymbol",
     "CodeEdge",
     "CodeVectorRow",

@@ -28,7 +28,7 @@ def _register(data_root: Path, slug: str, repo: Path, *, active_job: bool = Fals
     """Seed the registry (and optionally an active job); returns the slug dir."""
     slug_dir = data_root / "repos" / slug
     slug_dir.mkdir(parents=True, exist_ok=True)
-    (slug_dir / "graph.duck").write_text("stub")
+    (slug_dir / "graph.overgraph").write_text("stub")
     store = CodeIndexJobsStore(data_root / "jobs.sqlite")
     try:
         store.upsert_repo(slug=slug, repo_path=str(repo), data_dir=str(slug_dir))

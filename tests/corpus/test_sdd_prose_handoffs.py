@@ -123,9 +123,7 @@ def test_no_artifact_markers_in_any_prose() -> None:
     """Marker extraction is off by default — prose must not teach markers."""
     for path in _PACKS.glob("sdd-*.yaml"):
         prose = _prose(path.name)
-        assert _ARTIFACT_MARKER not in prose, (
-            f"{path.name} still teaches disabled artifact markers"
-        )
+        assert _ARTIFACT_MARKER not in prose, f"{path.name} still teaches disabled artifact markers"
 
 
 def test_no_temp_file_transport_in_any_prose() -> None:

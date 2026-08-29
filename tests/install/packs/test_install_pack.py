@@ -196,19 +196,16 @@ class TestRenderHumanFailureDetail:
                 {
                     "yaml": "first.yaml",
                     "outcome": "failed",
-                    "stderr_tail": (
-                        "RuntimeError: IO exception: Could not set lock on file "
-                        "agentalloy.duck: Lock is held by PID 12345"
-                    ),
+                    "stderr_tail": "ValueError: Failed to acquire Lockfile: LockBusy",
                 }
             ],
             failures=1,
         )
         ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
         out = capsys.readouterr().out
-        # The remediation names the usual holder — a running service — and the
-        # stop/re-run/start sequence, not just "wait and retry".
-        assert "Another process is holding the corpus DB" in out
+        # The remediation names the writer lock, its usual holder, and the
+        # stop/re-run/start sequence when the service is running.
+        assert "writer lock" in out
         assert "server-stop" in out
 
 
@@ -276,8 +273,7 @@ class TestEmbedModelSoftWarn:
 
         manifest = {"embedding_dim": pack_dim, "embed_model": pack_model}
         fake_settings = SimpleNamespace(
-            duckdb_path="/tmp/unused.duck",
-            fragments_lance_path="/tmp/unused.lance",
+            corpus_store_path="/tmp/unused.overgraph",
             runtime_embedding_model=runtime_model,
         )
 
@@ -289,7 +285,7 @@ class TestEmbedModelSoftWarn:
         buf = io.StringIO()
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
-            patch.object(ip, "open_fragments", return_value=vs),
+            patch.object(ip, "open_skills", return_value=vs),
             patch("sys.stderr", buf),
         ):
             err = ip._check_embedding_dim(manifest, Path("/tmp"))  # pyright: ignore[reportPrivateUsage]

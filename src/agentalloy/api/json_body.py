@@ -21,12 +21,11 @@ Two mechanisms make the API tolerant:
 
 from __future__ import annotations
 
-from starlette.types import ASGIApp, Receive, Scope, Send
-
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 _BODY_PARSE_ERROR_TYPES = {
     "json_invalid",
@@ -51,9 +50,9 @@ class JsonBodyNormalizer:
             is_multipart = content_type.startswith(b"multipart/")
             if not is_json and not is_multipart:
                 scope = dict(scope)
-                scope["headers"] = [
-                    (k, v) for k, v in headers if k != b"content-type"
-                ] + [(b"content-type", b"application/json")]
+                scope["headers"] = [(k, v) for k, v in headers if k != b"content-type"] + [
+                    (b"content-type", b"application/json")
+                ]
         await self.app(scope, receive, send)
 
 
@@ -62,9 +61,7 @@ def install_json_body_tolerances(app: FastAPI) -> None:
     app.add_middleware(JsonBodyNormalizer)
 
     @app.exception_handler(RequestValidationError)
-    async def _body_parse_help(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def _body_parse_help(request: Request, exc: RequestValidationError) -> JSONResponse:
         errors = exc.errors()
         body_parse = any(
             tuple(err.get("loc") or ())[:1] == ("body",)
@@ -72,9 +69,7 @@ def install_json_body_tolerances(app: FastAPI) -> None:
             for err in errors
         )
         if not body_parse:
-            return JSONResponse(
-                status_code=422, content={"detail": jsonable_encoder(errors)}
-            )
+            return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
         target = request.url.path
         if request.url.query:
             target = f"{target}?{request.url.query}"

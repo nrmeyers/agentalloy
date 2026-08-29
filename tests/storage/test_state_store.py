@@ -1714,8 +1714,7 @@ class TestSessionRegistry:
             s = store.for_repo("test", stream_id="main")
             s.put_contract("ctr-v0", phase="build", slug="s")
             s.conn.execute(
-                "UPDATE sdd_contract SET status='superseded' "
-                "WHERE contract_id='ctr-v0'",
+                "UPDATE sdd_contract SET status='superseded' WHERE contract_id='ctr-v0'",
             )
         with DuckDBStateStore(db).open() as store:
             store.migrate()

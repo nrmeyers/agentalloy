@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -94,6 +95,14 @@ _EDGE_LABEL_TO_KIND["HasMember"] = "CONTAINS"
 _ALL_EDGE_LABELS = tuple(set(_KIND_TO_EDGE_LABEL.values()))
 
 _ENTITY_EDGE_LABELS = ("Requires", "Touches", "Constraints", "Command", "Stakeholder")
+
+# Label for anchor nodes standing in for edge endpoints that were never
+# indexed as symbols (dangling call sources/targets).
+_DANGLING_LABEL = "Dangling"
+
+# Anchor key for standalone entity edges (COMMAND / STAKEHOLDER) whose dst is
+# deliberately empty — reads map this anchor back to "".
+_STANDALONE_ANCHOR = "<standalone>"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -170,6 +179,32 @@ def _decode_or_none(val: Any) -> str | None:
     """Like _decode but returns None for empty strings."""
     s = _decode(val)
     return s if s else None
+
+
+def _parse_where_qn_set(where: str | None) -> set[str] | None:
+    """Minimal evaluator for the retrieval layer's ``where`` clause shape:
+    ``qualified_name IN ('a', 'b', ...)``. Returns the permitted qn set, or
+    None when the clause is absent/unrecognised (no filtering)."""
+    if not where:
+        return None
+    m = re.match(r"^\s*qualified_name\s+IN\s*\((.*)\)\s*$", where, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    items = re.findall(r"'((?:[^']|'')*)'", m.group(1))
+    return {i.replace("''", "'") for i in items}
+
+
+def _decision_row_from_src(key: str, props: dict[str, Any]) -> DecisionRow:
+    """DecisionRow off a GOVERNS edge's source node — a MarkdownDoc symbol:
+    file_path/start_line/name/source_code carry the doc location, the heading
+    and the snippet."""
+    return DecisionRow(
+        qualified_name=key,
+        file_path=_decode_or_none(props.get("file_path")),
+        start_line=_opt_int(props.get("start_line")),
+        heading=str(props.get("name") or ""),
+        snippet=_decode_or_none(props.get("source_code")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +327,50 @@ class OverGraphCodeGraphStore:
             pass
         return None
 
+    def _any_node_id(self, qualified_name: str) -> int | None:
+        """Node id across Symbol and dangling anchors (read path)."""
+        node_id = self._get_node_id(qualified_name)
+        if node_id is not None:
+            return node_id
+        try:
+            node = self._db.get_node_by_key(_DANGLING_LABEL, qualified_name)
+            nid = getattr(node, "id", None)
+            if nid is not None:
+                return int(nid)
+        except Exception:
+            pass
+        return None
+
+    def _ensure_endpoint_id(self, qualified_name: str, edge_file_path: str) -> int | None:
+        """Node id for an edge endpoint, creating a dangling anchor when the
+        symbol was never indexed (edges may legitimately point outside the
+        indexed set)."""
+        if qualified_name == "":
+            qualified_name = _STANDALONE_ANCHOR
+        node_id = self._get_node_id(qualified_name)
+        if node_id is not None:
+            return node_id
+        try:
+            node = self._db.get_node_by_key(_DANGLING_LABEL, qualified_name)
+            if node is not None:
+                nid = getattr(node, "id", None)
+                if nid is not None:
+                    return int(nid)
+            return int(
+                self._db.upsert_node(
+                    labels=[_DANGLING_LABEL],
+                    key=qualified_name,
+                    props={
+                        "qualified_name": qualified_name,
+                        "name": qualified_name.rsplit(".", 1)[-1],
+                        "file_path": edge_file_path or "",
+                    },
+                )
+            )
+        except Exception:
+            logger.debug("failed to ensure endpoint node for %s", qualified_name, exc_info=True)
+            return None
+
     # -- lifecycle -----------------------------------------------------------
 
     def close(self) -> None:
@@ -310,6 +389,9 @@ class OverGraphCodeGraphStore:
         self._db.ensure_node_label("Symbol")
         self._db.ensure_node_label("Decision")
         self._db.ensure_node_label("Meta")
+        # Anchor nodes for edge endpoints that were never indexed as symbols
+        # (dangling call targets/sources). Not Symbols: symbol() misses them.
+        self._db.ensure_node_label(_DANGLING_LABEL)
 
         # Ensure edge labels exist
         for label in _ALL_EDGE_LABELS:
@@ -330,19 +412,26 @@ class OverGraphCodeGraphStore:
             return False
 
     def _resolve_qn(self, fqn: str) -> str:
-        """Tolerant FQN resolution — exact match first, then suffix lookup."""
+        """Tolerant FQN resolution — exact match first, then suffix lookup.
+
+        An ambiguous suffix (more than one symbol shares the name) is a miss:
+        the input is returned unchanged rather than guessing between matches.
+        """
         if self._node_exists(fqn):
             return fqn
         # Try suffix match via GQL
         short_name = fqn.rsplit(".", 1)[-1] if "." in fqn else fqn
         try:
             result = self._db.execute_gql(
-                f"MATCH (n:Symbol) WHERE n.name = '{_esc(short_name)}' RETURN n.qualified_name LIMIT 1"
+                f"MATCH (n:Symbol) WHERE n.name = '{_esc(short_name)}' "
+                "RETURN n.qualified_name LIMIT 2"
             )
-            if isinstance(result, dict) and result.get("rows"):
-                key = _decode(result["rows"][0].get("n.qualified_name"))
-                if key:
-                    return key
+            if isinstance(result, dict):
+                rows = result.get("rows") or []
+                if len(rows) == 1:
+                    key = _decode(rows[0].get("n.qualified_name"))
+                    if key:
+                        return key
         except Exception:
             pass
         return fqn
@@ -359,7 +448,8 @@ class OverGraphCodeGraphStore:
         if isinstance(decos_raw, (list, tuple)):
             decorators = [str(d) for d in decos_raw]
         elif isinstance(decos_raw, str) and decos_raw:
-            decorators = [decos_raw]
+            # Stored comma-joined (see _symbol_props) — split back out.
+            decorators = [d for d in decos_raw.split(",") if d]
         else:
             decorators = []
 
@@ -398,12 +488,29 @@ class OverGraphCodeGraphStore:
             "source_code": s.source_code or "",
             "contextual_prefix": s.contextual_prefix or "",
             "content_hash": s.content_hash or "",
-            "pagerank": 0.0,
+            # Absent until write_centrality stamps it (read paths treat None
+            # as "no score", not zero).
+            "pagerank": None,
+            # NOTE: indexed_at/text/dense_vector are deliberately NOT set
+            # here — a symbol re-upsert must not wipe its vector membership
+            # (the unified node carries both the graph row and its embedding).
         }
+
+    def _existing_symbol_props(self, qualified_name: str) -> dict[str, Any]:
+        """Props of an existing node for this qn (Symbol or dangling anchor),
+        used as the merge base so upserts don't wipe vector membership."""
+        try:
+            node_id = self._any_node_id(qualified_name)
+            if node_id is not None:
+                node = self._db.get_node(node_id)
+                return dict(getattr(node, "props", {}) or {})
+        except Exception:
+            pass
+        return {}
 
     def _upsert_symbol_node(self, s: CodeSymbol) -> int:
         """Upsert a single Symbol node and return its ID."""
-        props = self._symbol_props(s)
+        props = {**self._existing_symbol_props(s.qualified_name), **self._symbol_props(s)}
         node_id = self._db.upsert_node(
             labels=["Symbol"],
             key=s.qualified_name,
@@ -417,10 +524,12 @@ class OverGraphCodeGraphStore:
         if not symbols:
             return 0
 
-        # Prepare batch data
+        # Prepare batch data. Merge over the existing node's props (upsert
+        # replaces them wholesale): the unified node may already carry vector
+        # membership (indexed_at/text) that a symbol re-upsert must preserve.
         batch_data = []
         for s in symbols:
-            props = self._symbol_props(s)
+            props = {**self._existing_symbol_props(s.qualified_name), **self._symbol_props(s)}
             batch_data.append(
                 {
                     "labels": ["Symbol"],
@@ -478,8 +587,8 @@ class OverGraphCodeGraphStore:
 
     def _upsert_edge(self, e: CodeEdge) -> int | None:
         """Upsert a single edge and return its ID."""
-        src_id = self._get_node_id(e.src)
-        dst_id = self._get_node_id(e.dst)
+        src_id = self._ensure_endpoint_id(e.src, e.file_path or "")
+        dst_id = self._ensure_endpoint_id(e.dst, e.file_path or "")
         if src_id is None or dst_id is None:
             return None
 
@@ -489,10 +598,15 @@ class OverGraphCodeGraphStore:
             "resolved_via": e.resolved_via,
             "file_path": e.file_path or "",
             "line_start": e.line_start,
+            "span": e.span or "",
         }
 
         if label == "Governs":
-            props = {"resolution_tier": e.resolution_tier or 0}
+            props = {
+                "resolution_tier": e.resolution_tier or 0,
+                "span": e.span or "",
+                "file_path": e.file_path or "",
+            }
 
         try:
             edge_id = self._db.upsert_edge(
@@ -514,8 +628,8 @@ class OverGraphCodeGraphStore:
         # Prepare batch data
         batch_data = []
         for e in edges:
-            src_id = self._get_node_id(e.src)
-            dst_id = self._get_node_id(e.dst)
+            src_id = self._ensure_endpoint_id(e.src, e.file_path or "")
+            dst_id = self._ensure_endpoint_id(e.dst, e.file_path or "")
             if src_id is None or dst_id is None:
                 continue
 
@@ -525,10 +639,15 @@ class OverGraphCodeGraphStore:
                 "resolved_via": e.resolved_via,
                 "file_path": e.file_path or "",
                 "line_start": e.line_start,
+                "span": e.span or "",
             }
 
             if label == "Governs":
-                props = {"resolution_tier": e.resolution_tier or 0}
+                props = {
+                    "resolution_tier": e.resolution_tier or 0,
+                    "span": e.span or "",
+                    "file_path": e.file_path or "",
+                }
 
             batch_data.append(
                 {
@@ -604,42 +723,74 @@ class OverGraphCodeGraphStore:
         return self._batch_upsert_edges(edge_list)
 
     def delete_for_files(self, file_paths: Sequence[str]) -> int:
-        """Delete symbols and edges for the given files."""
+        """Delete the symbols and edges indexed from the given files.
+
+        Mirrors the relational model this store replaces: symbol rows are
+        removed by file, and edge rows by their OWN file — an edge whose own
+        file is kept survives even when an endpoint symbol is deleted (the
+        anchor node is tombstoned: its Symbol label is dropped, so symbol()
+        misses it, but the edge stays traversable/listable). Returns the
+        number of symbols + edges removed.
+        """
         paths = list(file_paths)
         if not paths:
             return 0
 
-        # Find symbols to delete
-        deleted_count = 0
+        removed_edges = 0
+        removed_symbols = 0
         for path in paths:
+            # Edges indexed from this file (their own file_path property).
+            # GOVERNS is exempt: its lifecycle is doc-scoped
+            # (delete_govern_edges_for_doc), and stale govern edges must
+            # survive symbol churn so the rename re-derive flow can see them.
+            for label in _ALL_EDGE_LABELS:
+                if label == "Governs":
+                    continue
+                try:
+                    result = self._db.execute_gql(
+                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}' RETURN id(r)"
+                    )
+                    if isinstance(result, dict):
+                        for row in result.get("rows", []):
+                            rid = row.get("id(r)")
+                            if rid is None:
+                                continue
+                            try:
+                                self._db.delete_edge(int(rid))
+                                removed_edges += 1
+                            except Exception:
+                                logger.debug("failed to delete edge %s", rid, exc_info=True)
+                except Exception:
+                    logger.debug("failed to scan %s edges for file %s", label, path, exc_info=True)
+
+            # Symbols indexed from this file — tombstone, don't detach.
             try:
                 result = self._db.execute_gql(
-                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' RETURN n.qualified_name, id(n)"
+                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' "
+                    "RETURN n.qualified_name, id(n)"
                 )
                 if isinstance(result, dict):
                     for row in result.get("rows", []):
                         key = _decode(row.get("n.qualified_name"))
                         node_id = row.get("id(n)")
-                        if key and node_id is not None:
-                            node_id = int(node_id)
-                            # Delete edges touching this node
-                            for label in _ALL_EDGE_LABELS:
-                                if label == "Governs":
-                                    continue
-                                self._db.execute_gql(
-                                    f"MATCH ()-[r:{label}]->() WHERE id(r) IN "
-                                    f"(MATCH (n) WHERE id(n) = {node_id} RETURN id(n)) DELETE r"
-                                )
-                            # Delete the node
-                            self._db.execute_gql(
-                                f"MATCH (n) WHERE id(n) = {node_id} DETACH DELETE n"
-                            )
+                        if node_id is None:
+                            continue
+                        try:
+                            # Nodes must keep at least one label — swap
+                            # Symbol for the dangling anchor label.
+                            self._db.add_node_label(int(node_id), _DANGLING_LABEL)
+                            self._db.remove_node_label(int(node_id), "Symbol")
+                            removed_symbols += 1
+                        except Exception:
+                            logger.debug("failed to tombstone %s", key, exc_info=True)
+                        if key:
                             self._qn_to_id.pop(key, None)
-                            deleted_count += 1
             except Exception:
                 logger.warning("failed to delete symbols for file %s", path, exc_info=True)
 
-        return deleted_count
+        if removed_edges or removed_symbols:
+            self._db.flush()
+        return removed_symbols + removed_edges
 
     # -- symbol lookup -------------------------------------------------------
 
@@ -670,7 +821,7 @@ class OverGraphCodeGraphStore:
             neighbors = list(self._db.neighbors(node_id, direction="incoming"))
             for neighbor in neighbors:
                 # Check if the edge is a Calls edge
-                edge_label = getattr(neighbor, "edge_label", None)
+                edge_label = getattr(neighbor, "label", None)
                 if edge_label != "Calls":
                     continue
 
@@ -682,9 +833,16 @@ class OverGraphCodeGraphStore:
                         continue
                     seen.add(caller_key)
 
-                    props = getattr(caller_node, "props", {}) or {}
-                    fp = _decode_or_none(props.get("file_path"))
-                    line = _opt_int(props.get("start_line"))
+                    # Call-site location comes off the edge; the file falls
+                    # back to the caller symbol (edges may carry no file, and
+                    # dangling callers carry none at all).
+                    edge = self._db.get_edge(getattr(neighbor, "edge_id", -1))
+                    eprops = getattr(edge, "props", {}) or {} if edge else {}
+                    line = _opt_int(eprops.get("line_start"))
+                    fp = _decode_or_none(eprops.get("file_path"))
+                    if not fp:
+                        nprops = getattr(caller_node, "props", {}) or {}
+                        fp = _decode_or_none(nprops.get("file_path"))
 
                     results.append(CallSite(qualified_name=caller_key, file_path=fp, line=line))
                 except Exception:
@@ -708,7 +866,7 @@ class OverGraphCodeGraphStore:
         try:
             neighbors = list(self._db.neighbors(node_id, direction="outgoing"))
             for neighbor in neighbors:
-                edge_label = getattr(neighbor, "edge_label", None)
+                edge_label = getattr(neighbor, "label", None)
                 if edge_label != "Calls":
                     continue
 
@@ -755,7 +913,7 @@ class OverGraphCodeGraphStore:
                 try:
                     neighbors = list(self._db.neighbors(nid, direction="incoming"))
                     for neighbor in neighbors:
-                        edge_label = getattr(neighbor, "edge_label", None)
+                        edge_label = getattr(neighbor, "label", None)
                         if edge_label != "Calls":
                             continue
                         caller_id = neighbor.node_id
@@ -822,22 +980,32 @@ class OverGraphCodeGraphStore:
         return results
 
     def decision_qns(self) -> list[str]:
-        """List all decision qualified names."""
+        """List all decision qualified names — decision docs are indexed as
+        MarkdownDoc symbols, sorted for stable ``where`` clause building."""
         results: list[str] = []
         try:
-            rows = self._fetch_rows("MATCH (n:Decision) RETURN n.qualified_name")
+            rows = self._fetch_rows(
+                "MATCH (n:Symbol) WHERE n.kind = 'MarkdownDoc' RETURN n.qualified_name"
+            )
             for row in rows:
                 key = _decode(row.get("n.qualified_name"))
                 if key:
                     results.append(key)
         except Exception:
             logger.debug("failed to fetch decision QNs", exc_info=True)
-        return results
+        return sorted(results)
 
     def governing_decisions(self, fqn: str) -> list[DecisionRow]:
-        """Decisions that govern fqn — reverse traversal over Governs edges."""
-        fqn = self._resolve_qn(fqn)
-        node_id = self._get_node_id(fqn)
+        """Decisions that govern fqn — reverse traversal over Governs edges.
+
+        Tombstone-aware: a renamed-away symbol's stale edges still surface
+        (that is how the rename re-derive flow detects them). Exact match
+        first — suffix resolution must not remap a tombstoned qn onto its
+        renamed sibling."""
+        node_id = self._any_node_id(fqn)
+        if node_id is None:
+            fqn = self._resolve_qn(fqn)
+            node_id = self._any_node_id(fqn)
         if node_id is None:
             return []
 
@@ -845,7 +1013,7 @@ class OverGraphCodeGraphStore:
         try:
             neighbors = list(self._db.neighbors(node_id, direction="incoming"))
             for neighbor in neighbors:
-                edge_label = getattr(neighbor, "edge_label", None)
+                edge_label = getattr(neighbor, "label", None)
                 if edge_label != "Governs":
                     continue
 
@@ -854,21 +1022,50 @@ class OverGraphCodeGraphStore:
                     decision_node = self._db.get_node(decision_id)
                     decision_key = getattr(decision_node, "key", "")
                     props = getattr(decision_node, "props", {}) or {}
-
-                    results.append(
-                        DecisionRow(
-                            qualified_name=decision_key,
-                            file_path=_decode_or_none(props.get("source_path")),
-                            start_line=None,
-                            heading=str(props.get("title") or ""),
-                            snippet=_decode_or_none(props.get("body")),
-                        )
-                    )
+                    results.append(_decision_row_from_src(decision_key, props))
                 except Exception:
                     continue
         except Exception:
             logger.debug("failed to fetch governing decisions for %s", fqn, exc_info=True)
 
+        return results
+
+    def governs_edges_for_symbol(self, fqn: str) -> list[CodeEdge]:
+        """Incoming GOVERNS edges to fqn with their provenance (span +
+        resolution tier + decision-doc file path) intact."""
+        node_id = self._any_node_id(fqn)
+        if node_id is None:
+            fqn = self._resolve_qn(fqn)
+            node_id = self._any_node_id(fqn)
+        if node_id is None:
+            return []
+
+        results: list[CodeEdge] = []
+        try:
+            neighbors = list(self._db.neighbors(node_id, direction="incoming"))
+            for neighbor in neighbors:
+                if getattr(neighbor, "label", None) != "Governs":
+                    continue
+                try:
+                    src_node = self._db.get_node(neighbor.node_id)
+                    src_key = getattr(src_node, "key", "")
+                    edge = self._db.get_edge(getattr(neighbor, "edge_id", -1))
+                    eprops = getattr(edge, "props", {}) or {} if edge else {}
+                    results.append(
+                        CodeEdge(
+                            src=src_key,
+                            dst=fqn,
+                            kind="GOVERNS",
+                            file_path=_decode_or_none(eprops.get("file_path")) or "",
+                            span=_decode_or_none(eprops.get("span")),
+                            resolution_tier=_opt_int(eprops.get("resolution_tier")) or 0,
+                        )
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            logger.debug("failed to fetch governs edges for %s", fqn, exc_info=True)
+        results.sort(key=lambda e: (e.src, e.dst))
         return results
 
     def decisions_for_files(self, file_paths: Sequence[str]) -> list[DecisionRow]:
@@ -904,7 +1101,7 @@ class OverGraphCodeGraphStore:
             try:
                 neighbors = list(self._db.neighbors(node_id, direction="incoming"))
                 for neighbor in neighbors:
-                    edge_label = getattr(neighbor, "edge_label", None)
+                    edge_label = getattr(neighbor, "label", None)
                     if edge_label != "Governs":
                         continue
 
@@ -917,15 +1114,7 @@ class OverGraphCodeGraphStore:
                         seen.add(decision_key)
 
                         props = getattr(decision_node, "props", {}) or {}
-                        results.append(
-                            DecisionRow(
-                                qualified_name=decision_key,
-                                file_path=_decode_or_none(props.get("source_path")),
-                                start_line=None,
-                                heading=str(props.get("title") or ""),
-                                snippet=_decode_or_none(props.get("body")),
-                            )
-                        )
+                        results.append(_decision_row_from_src(decision_key, props))
                     except Exception:
                         continue
             except Exception:
@@ -935,20 +1124,23 @@ class OverGraphCodeGraphStore:
         return results
 
     def decision_docs_governing(self, fqns: Sequence[str]) -> list[str]:
-        """Document paths that govern the given symbols."""
+        """Document paths that govern the given symbols.
+
+        Tombstone-aware on purpose: this is the rename-detection query (a
+        renamed-away fqn must NOT require a live Symbol join)."""
         qns = list(fqns)
         if not qns:
             return []
 
         docs: set[str] = set()
         for qn in qns:
-            node_id = self._get_node_id(qn)
+            node_id = self._any_node_id(qn)
             if node_id is None:
                 continue
             try:
                 neighbors = list(self._db.neighbors(node_id, direction="incoming"))
                 for neighbor in neighbors:
-                    edge_label = getattr(neighbor, "edge_label", None)
+                    edge_label = getattr(neighbor, "label", None)
                     if edge_label != "Governs":
                         continue
 
@@ -956,7 +1148,7 @@ class OverGraphCodeGraphStore:
                     try:
                         decision_node = self._db.get_node(decision_id)
                         props = getattr(decision_node, "props", {}) or {}
-                        sp = _decode_or_none(props.get("source_path"))
+                        sp = _decode_or_none(props.get("file_path"))
                         if sp:
                             docs.add(sp)
                     except Exception:
@@ -967,69 +1159,77 @@ class OverGraphCodeGraphStore:
         return sorted(docs)
 
     def delete_govern_edges_for_doc(self, doc_path: str) -> int:
-        """Delete all Governs edges from decisions with the given source path."""
+        """Delete all Governs edges whose source (decision doc) lives in the
+        given file. Scoped: other docs' GOVERNS edges and every non-Governs
+        edge are untouched."""
         count = 0
         try:
-            # Find decisions with this source_path
             rows = self._fetch_rows(
-                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n) AS nid"
+                f"MATCH (a)-[r:Governs]->() WHERE a.file_path = '{_esc(doc_path)}' "
+                "RETURN id(r) AS rid"
             )
             for row in rows:
-                decision_id = row.get("nid")
-                if decision_id is not None:
-                    decision_id = int(decision_id)
-                    # Delete outgoing Governs edges
-                    try:
-                        neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
-                        for neighbor in neighbors:
-                            if getattr(neighbor, "edge_label", None) == "Governs":
-                                # Delete the edge
-                                self._db.execute_gql(
-                                    f"MATCH ()-[r:Governs]->() WHERE id(r) = {neighbor.edge_id} DELETE r"
-                                )
-                                count += 1
-                    except Exception:
-                        continue
+                rid = row.get("rid")
+                if rid is None:
+                    continue
+                try:
+                    self._db.delete_edge(int(rid))
+                    count += 1
+                except Exception:
+                    logger.debug("failed to delete govern edge %s", rid, exc_info=True)
+            if count:
+                self._db.flush()
         except Exception:
             logger.debug("failed to delete govern edges for doc %s", doc_path, exc_info=True)
         return count
 
     def delete_entity_edges_for_docs(self, file_paths: Sequence[str]) -> int:
-        """Delete entity edges (Requires, Touches, etc.) for the given files."""
-        # Entity edges don't have a direct file_path filter in OverGraph
-        # Return 0 as a safe default (same as NebulaGraph implementation)
-        logger.debug(
-            "delete_entity_edges_for_docs: entity edge types have no file_path "
-            "property in OverGraph schema; returning 0"
-        )
-        return 0
+        """Delete entity edges (Requires, Touches, etc.) indexed from the
+        given doc files. Entity edges carry the doc path on the edge itself,
+        and GOVERNS edges are out of scope (they belong to the decision
+        phase)."""
+        removed = 0
+        for path in file_paths:
+            for label in _ENTITY_EDGE_LABELS:
+                try:
+                    rows = self._fetch_rows(
+                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}' "
+                        "RETURN id(r) AS rid"
+                    )
+                    for row in rows:
+                        rid = row.get("rid")
+                        if rid is None:
+                            continue
+                        try:
+                            self._db.delete_edge(int(rid))
+                            removed += 1
+                        except Exception:
+                            logger.debug("failed to delete entity edge %s", rid, exc_info=True)
+                except Exception:
+                    logger.debug("failed to scan %s edges for doc %s", label, path, exc_info=True)
+        if removed:
+            self._db.flush()
+        return removed
 
     def count_govern_edges_for_doc(self, doc_path: str) -> int:
-        """Count Governs edges from decisions with the given source path."""
-        count = 0
+        """Count Governs edges whose source (decision doc) lives in the given
+        file. Non-destructive read."""
         try:
             rows = self._fetch_rows(
-                f"MATCH (n:Decision) WHERE n.source_path = '{_esc(doc_path)}' RETURN id(n) AS nid"
+                f"MATCH (a)-[r:Governs]->() WHERE a.file_path = '{_esc(doc_path)}' "
+                "RETURN id(r) AS rid"
             )
-            for row in rows:
-                decision_id = row.get("nid")
-                if decision_id is not None:
-                    decision_id = int(decision_id)
-                    try:
-                        neighbors = list(self._db.neighbors(decision_id, direction="outgoing"))
-                        for neighbor in neighbors:
-                            if getattr(neighbor, "edge_label", None) == "Governs":
-                                count += 1
-                    except Exception:
-                        continue
+            return len(rows)
         except Exception:
             logger.debug("failed to count govern edges for doc %s", doc_path, exc_info=True)
-        return count
+            return 0
 
     def typed_edges_for_fqn(self, fqn: str) -> list[CodeEdge]:
         """Entity edges (Requires, Touches, etc.) incoming to fqn."""
-        fqn = self._resolve_qn(fqn)
-        node_id = self._get_node_id(fqn)
+        node_id = self._any_node_id(fqn)
+        if node_id is None:
+            fqn = self._resolve_qn(fqn)
+            node_id = self._any_node_id(fqn)
         if node_id is None:
             return []
 
@@ -1039,7 +1239,7 @@ class OverGraphCodeGraphStore:
                 kind = _kind_for_edge_label(label)
                 neighbors = list(self._db.neighbors(node_id, direction="incoming"))
                 for neighbor in neighbors:
-                    if getattr(neighbor, "edge_label", None) != label:
+                    if getattr(neighbor, "label", None) != label:
                         continue
                     src_id = neighbor.node_id
                     try:
@@ -1080,7 +1280,7 @@ class OverGraphCodeGraphStore:
             for qn in chunk_qns:
                 if len(results) >= limit:
                     break
-                node_id = self._get_node_id(qn)
+                node_id = self._any_node_id(qn)
                 if node_id is None:
                     continue
                 try:
@@ -1088,23 +1288,26 @@ class OverGraphCodeGraphStore:
                     for neighbor in neighbors:
                         if len(results) >= limit:
                             break
-                        if getattr(neighbor, "edge_label", None) != label:
+                        if getattr(neighbor, "label", None) != label:
                             continue
                         dst_id = neighbor.node_id
                         try:
                             dst_node = self._db.get_node(dst_id)
                             dst_key = getattr(dst_node, "key", "")
-                            if dst_key:
-                                results.append(
-                                    CodeEdge(
-                                        src=qn,
-                                        dst=dst_key,
-                                        kind=kind,
-                                        file_path="",
-                                        span=None,
-                                        resolution_tier=0,
-                                    )
+                            if dst_key == _STANDALONE_ANCHOR:
+                                dst_key = ""
+                            edge = self._db.get_edge(getattr(neighbor, "edge_id", -1))
+                            eprops = getattr(edge, "props", {}) or {} if edge else {}
+                            results.append(
+                                CodeEdge(
+                                    src=qn,
+                                    dst=dst_key,
+                                    kind=kind,
+                                    file_path=_decode_or_none(eprops.get("file_path")) or "",
+                                    span=_decode_or_none(eprops.get("span")),
+                                    resolution_tier=_opt_int(eprops.get("resolution_tier")) or 0,
                                 )
+                            )
                         except Exception:
                             continue
                 except Exception:
@@ -1157,12 +1360,16 @@ class OverGraphCodeGraphStore:
         return sorted_files[offset : offset + max(1, int(limit))]
 
     def calls_edges(self) -> list[tuple[str, str]]:
-        """All Calls edges as (src, dst) pairs."""
+        """All Calls edges as (src, dst) pairs.
+
+        Endpoints are matched label-free so edges anchored on tombstoned or
+        dangling nodes still surface (edges are independent rows in the
+        relational model this replaces).
+        """
         results: list[tuple[str, str]] = []
         try:
             rows = self._fetch_rows(
-                "MATCH (a:Symbol)-[r:Calls]->(b:Symbol) "
-                "RETURN a.qualified_name AS src, b.qualified_name AS dst"
+                "MATCH (a)-[r:Calls]->(b) RETURN a.qualified_name AS src, b.qualified_name AS dst"
             )
             for row in rows:
                 src = _decode(row.get("src"))
@@ -1176,8 +1383,15 @@ class OverGraphCodeGraphStore:
     # -- centrality ----------------------------------------------------------
 
     def write_centrality(self, scores: Mapping[str, float]) -> int:
-        """Write pagerank scores to Symbol nodes."""
+        """Replace all pagerank scores (symbols absent from ``scores`` lose
+        any prior score)."""
+        try:
+            # Replace semantics: clear every existing score first.
+            self._db.execute_gql("MATCH (n:Symbol) SET n.pagerank = NULL")
+        except Exception:
+            logger.debug("failed to clear prior centrality scores", exc_info=True)
         if not scores:
+            self._db.flush()
             return 0
 
         count = 0
@@ -1193,6 +1407,7 @@ class OverGraphCodeGraphStore:
                 count += 1
             except Exception:
                 logger.debug("failed to write centrality for %s", qn, exc_info=True)
+        self._db.flush()
         return count
 
     def read_centrality(self, qualified_names: Sequence[str]) -> dict[str, float]:
@@ -1360,9 +1575,11 @@ class OverGraphCodeGraphStore:
     def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int:
         """Atomically replace the entire vector dataset.
 
-        Delegates to ``upsert()`` which uses ``upsert_node(dense_vector=...)``
-        — this overwrites both the node properties and the HNSW index entries
-        in a single transactional batch, followed by ``db.flush()``.
+        Unified-store invariant: Symbol nodes also back the code graph, so the
+        replace clears the *vector membership* of existing symbols
+        (``indexed_at`` — the marker count/search/read paths filter on) rather
+        than deleting nodes. Stale HNSW entries for cleared symbols are then
+        filtered out of search results. The new batch is upserted on top.
         """
         batch = list(rows)
 
@@ -1373,6 +1590,15 @@ class OverGraphCodeGraphStore:
                     f"qualified_name={r.qualified_name}: embedding has {len(r.embedding)} "
                     f"dimensions, expected {self._vector_dimension}",
                 )
+
+        # Clear vector membership for all existing symbols.
+        try:
+            self._db.execute_gql(
+                "MATCH (n:Symbol) WHERE n.indexed_at IS NOT NULL SET n.indexed_at = NULL"
+            )
+            self._db.flush()
+        except Exception:
+            logger.debug("bulk_replace: failed to clear existing vectors", exc_info=True)
 
         # upsert() handles txn + flush; it overwrites vectors for existing
         # nodes and creates new ones as needed.
@@ -1393,26 +1619,36 @@ class OverGraphCodeGraphStore:
 
         # Normalize query vector
         normalized_query = l2_normalize(query_vec)
+        allowed_qns = _parse_where_qn_set(where)
 
         try:
-            # Use OverGraph's vector search
+            # Over-fetch when a where filter applies so k hits survive it.
+            fetch_k = max(k * 4, 64) if allowed_qns is not None else k
             hits = list(
                 self._db.vector_search(
                     mode="dense",
-                    k=k,
+                    k=fetch_k,
                     dense_query=normalized_query,
                 )
             )
 
             results: list[CodeSearchHit] = []
             for hit in hits:
+                if len(results) >= k:
+                    break
                 node_id = hit.node_id
                 score = float(hit.score)  # OverGraph returns cosine similarity directly
 
                 try:
                     node = self._db.get_node(node_id)
                     props = getattr(node, "props", {}) or {}
+                    # Skip symbols whose vector membership was cleared (a
+                    # bulk_replace left their HNSW entry behind).
+                    if props.get("indexed_at") is None:
+                        continue
                     key = getattr(node, "key", "")
+                    if allowed_qns is not None and key not in allowed_qns:
+                        continue
 
                     results.append(
                         CodeSearchHit(
@@ -1444,19 +1680,25 @@ class OverGraphCodeGraphStore:
 
         # OverGraph doesn't have built-in FTS, so we use GQL with LIKE
         # This is a simplified implementation; a real FTS would need a separate index
+        allowed_qns = _parse_where_qn_set(where)
         results: list[tuple[str, float]] = []
         try:
+            # Over-fetch when a where filter applies so k hits survive it.
+            fetch_k = max(k * 4, 64) if allowed_qns is not None else k
             # Simple substring match (not true BM25)
             rows = self._fetch_rows(
                 f"MATCH (n:Symbol) WHERE n.text CONTAINS '{_esc(query)}' "
-                f"RETURN n.qualified_name, n.text LIMIT {k}"
+                f"RETURN n.qualified_name, n.text LIMIT {fetch_k}"
             )
             for row in rows:
+                if len(results) >= k:
+                    break
                 key = _decode(row.get("n.qualified_name"))
                 text = _decode(row.get("n.text"))
-                if key:
-                    score = float(text.lower().count(query.lower())) if text else 0.0
-                    results.append((key, score))
+                if not key or (allowed_qns is not None and key not in allowed_qns):
+                    continue
+                score = float(text.lower().count(query.lower())) if text else 0.0
+                results.append((key, score))
         except Exception:
             logger.debug("failed to perform BM25 search", exc_info=True)
 

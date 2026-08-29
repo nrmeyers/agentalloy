@@ -125,8 +125,8 @@ async def repo_stats(
         raise HTTPException(status_code=404, detail=f"no index for repo: {slug}")
 
     def _collect() -> RepoStats:
-        # "service" role matches the job writer's connection config so DuckDB's
-        # in-process instance cache shares the database with a running job.
+        # "service" role opens read-only so these stats reads never contend
+        # with a running index job's writes.
         handles = open_code_index(state.settings, slug, role="service", repo_path=repo.repo_path)
         try:
             return RepoStats(

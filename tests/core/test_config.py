@@ -10,8 +10,7 @@ from agentalloy.config import Settings
 
 _ENV_KEYS = (
     "RUNTIME_EMBED_BASE_URL",
-    "DUCKDB_PATH",
-    "FRAGMENTS_LANCE_PATH",
+    "CORPUS_STORE_PATH",
     "TELEMETRY_DB_PATH",
     "RUNTIME_EMBEDDING_MODEL",
     "UPSTREAM_URL",
@@ -29,11 +28,10 @@ def test_defaults_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.chdir(tmp_path)
     s = Settings()
     assert s.runtime_embed_base_url == "http://localhost:47951"
-    # v5 two-engine storage: ladybug_db_path is gone; the skill DuckDB is now
-    # agentalloy.duck, with the Lance fragment dataset + telemetry DuckDB alongside.
+    # Unified storage: the corpus is one OverGraph store (agentalloy.overgraph),
+    # with the telemetry DuckDB alongside.
     expected_corpus = str(tmp_path / "_xdg_data" / "agentalloy" / "corpus")
-    assert s.duckdb_path == f"{expected_corpus}/agentalloy.duck"
-    assert s.fragments_lance_path == f"{expected_corpus}/fragments.lance"
+    assert s.corpus_store_path == f"{expected_corpus}/agentalloy.overgraph"
     assert s.telemetry_db_path == f"{expected_corpus}/telemetry.duck"
     assert s.runtime_embedding_model == "nomic-embed-text-v1.5.Q8_0.gguf"
 
@@ -41,10 +39,10 @@ def test_defaults_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUNTIME_EMBED_BASE_URL", "http://embed.internal:52625")
-    monkeypatch.setenv("DUCKDB_PATH", "/var/lib/agentalloy.duck")
+    monkeypatch.setenv("CORPUS_STORE_PATH", "/var/lib/agentalloy.overgraph")
     s = Settings()
     assert s.runtime_embed_base_url == "http://embed.internal:52625"
-    assert s.duckdb_path == "/var/lib/agentalloy.duck"
+    assert s.corpus_store_path == "/var/lib/agentalloy.overgraph"
 
 
 # ---------------------------------------------------------------------------

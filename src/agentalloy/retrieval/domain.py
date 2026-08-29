@@ -2,14 +2,14 @@
 """Domain fragment retrieval pipeline.
 
 Given a task + phase + optional filters, embed the task via the inference
-runtime, query the Lance ``fragments`` dataset for top-k by cosine, fuse with
-a BM25 lexical leg via Reciprocal Rank Fusion (RRF), hydrate
-ActiveFragment metadata from the DuckDB skill store, then apply skill-granular
+runtime, query the unified OverGraph corpus store for top-k by cosine, fuse
+with a BM25 lexical leg via Reciprocal Rank Fusion (RRF), hydrate
+ActiveFragment metadata from the skill store, then apply skill-granular
 selection to prevent sibling skills from crowding out unrelated relevant skills.
 
-In v5, vector storage is the Lance ``fragments`` dataset; cosine ranking
-(ANN for retrieval, exact for dedup) happens inside LanceDB over L2-normalized
-vectors.
+Vector storage lives in the unified corpus store; cosine ranking (ANN for
+retrieval, exact for dedup) runs over L2-normalized vectors in the OverGraph
+HNSW index.
 
 Improvements (v5.4+):
 - Rule-based keyword extraction boosts BM25 lexical recall.
@@ -602,15 +602,15 @@ def retrieve_domain_candidates(
 
     ``source`` may be a ``RuntimeCache`` (startup-loaded snapshot) or a raw
     ``SkillStore`` (wrapped automatically via ``StoreFragmentSource``).
-    ``vector_store`` is a ``FragmentStore`` (the Lance ``fragments`` dataset)
+    ``vector_store`` is a ``FragmentStore`` (the unified corpus store)
     populated via the reembed CLI.
 
     Stages:
 
     1. Check circuit breaker — if open, skip embedding and return BM25-only
     2. bound the task (``build_retrieval_query``), embed via ``safe_embed``; empty -> BM25-only
-    3. DuckDB top-k vector search filtered by phase categories
-    4. DuckDB BM25 search on prose column filtered by phase categories (with keyword extraction)
+    3. HNSW top-k vector search filtered by phase categories
+    4. Tantivy BM25 search over fragment prose filtered by phase categories (with keyword extraction)
     5. Reciprocal Rank Fusion of both legs (with phase-specific weighting)
     6. hydrate ActiveFragment metadata from ``source`` and apply optional
        domain_tags filter

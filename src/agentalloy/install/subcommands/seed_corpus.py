@@ -1,11 +1,11 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 """``seed-corpus`` subcommand — presence + integrity check.
 
-The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`` as the
-v5 two-engine store: ``agentalloy.duck`` (skill graph + corpus_meta),
-``fragments.lance`` (vector + BM25 index), and ``telemetry.duck``. This
-subcommand verifies the skill store exists, the schema version matches, and the
-skill count meets the minimum threshold. No network calls.
+The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`` as
+the unified OverGraph store ``agentalloy.overgraph`` (skills + fragments +
+vectors + BM25) plus ``telemetry.duck``. This subcommand verifies the store
+exists, the schema version matches, and the skill count meets the minimum
+threshold. No network calls.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def corpus_skill_count() -> int:
     success but the corpus never populated). Never raises.
     """
     settings = get_settings()
-    if not Path(settings.duckdb_path).exists():
+    if not Path(settings.corpus_store_path).exists():
         return 0
     try:
         return int(_check_skill_store(settings).get("skill_count") or 0)
@@ -49,29 +49,28 @@ def corpus_skill_count() -> int:
 
 
 def corpus_embedding_count() -> int:
-    """Vector count in ``fragments.lance``; 0 if absent/empty/unreadable.
+    """Fragment-embedding count in the corpus store; 0 if absent/unreadable.
 
-    Post-upgrade guard seam: a same-dim engine migration (v4 stored vectors in
-    DuckDB, v5 in Lance) leaves this at 0 even when ``corpus_skill_count()`` is
-    healthy — install-packs writes fragment *metadata* to ``agentalloy.duck`` but
-    the vector index is built by reembed. Callers use a 0 here to force a reembed
-    the dim-mismatch check can't see. Never raises.
+    Post-upgrade guard seam: install-packs writes fragment *metadata* but the
+    vectors are built by reembed, so this can be 0 even when
+    ``corpus_skill_count()`` is healthy. Callers use a 0 here to force a
+    reembed the dim-mismatch check can't see. Never raises.
     """
-    from agentalloy.storage.open import open_fragments
+    from agentalloy.storage.open import open_skills
 
     settings = get_settings()
     try:
-        vs = open_fragments(settings)
+        store = open_skills(settings, read_only=True)
         try:
-            return int(vs.count_embeddings())
+            return int(store.count_embeddings())
         finally:
-            vs.close()
+            store.close()
     except Exception:
         return 0
 
 
 def _check_skill_store(settings: Settings) -> dict[str, Any]:
-    """Read skill/fragment counts + recorded schema_version from ``agentalloy.duck``.
+    """Read skill/fragment counts + recorded schema_version from the corpus store.
 
     Returns ``corpus_schema_version_recorded=None`` if the corpus pre-dates the
     metadata kv (callers treat this as "implicit v1" with a soft warning).
@@ -105,37 +104,37 @@ def _check_skill_store(settings: Settings) -> dict[str, Any]:
 
 
 def _embedding_meta(settings: Settings) -> dict[str, Any]:
-    """Best-effort embedding metadata from the Lance fragment store.
+    """Best-effort embedding metadata from the corpus store.
 
-    ``embedding_dim`` is row-count gated (None on an empty dataset);
+    ``embedding_dim`` is row-count gated (None on an empty store);
     ``embedding_model`` falls back to the configured runtime model since the
-    Lance store exposes no public per-row model accessor.
+    store exposes no public per-row model accessor.
     """
-    from agentalloy.storage.open import open_fragments
+    from agentalloy.storage.open import open_skills
 
     embedding_dim: int | None = None
     embedding_model: str | None = None
     try:
-        vs = open_fragments(settings)
+        store = open_skills(settings, read_only=True)
         try:
-            embedding_dim = vs.embedding_dim()
+            embedding_dim = store.embedding_dim()
             if embedding_dim is not None:
                 embedding_model = settings.runtime_embedding_model
         finally:
-            vs.close()
+            store.close()
     except Exception:
         pass
     return {"embedding_dim": embedding_dim, "embedding_model": embedding_model}
 
 
 def _initialize_empty_corpus(settings: Settings) -> None:
-    """Initialize the three v5 stores in an empty corpus dir.
+    """Initialize the corpus + telemetry stores in an empty corpus dir.
 
-    Writer-mode opens create the file and run the (idempotent) schema migration,
-    so the subsequent ``install-packs`` step has tables to write into. The Lance
-    dataset and telemetry DB are created on first open.
+    The writer-mode open creates the OverGraph store and runs the (idempotent)
+    schema migration, so the subsequent ``install-packs`` step has a schema to
+    write into. The telemetry DB is created on first open.
     """
-    from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
+    from agentalloy.storage.open import open_skills, open_telemetry
 
     settings.ensure_data_dirs()
     skills = open_skills(settings, read_only=False)
@@ -143,7 +142,6 @@ def _initialize_empty_corpus(settings: Settings) -> None:
         skills.migrate()
     finally:
         skills.close()
-    open_fragments(settings).close()
     open_telemetry(settings, read_only=False).close()
 
 
@@ -152,19 +150,19 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 �
 
     The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/``
     (user-scoped). The wheel no longer ships a pre-built corpus; this step
-    initializes an empty corpus (skill store + Lance + telemetry) so the
+    initializes an empty corpus (OverGraph store + telemetry) so the
     subsequent ``install-packs`` step can populate it from chosen packs.
     """
     t0 = time.monotonic()
 
     settings = get_settings()
     user_corpus, _was_seeded = install_state.ensure_corpus_seeded()
-    duck_path = Path(settings.duckdb_path)
+    store_path = Path(settings.corpus_store_path)
 
-    # New flow: if the skill store is absent (post-pack-refactor wheels),
+    # New flow: if the corpus store is absent (post-pack-refactor wheels),
     # initialize empty stores. Don't return missing_files — that's the old
     # behavior from when the wheel shipped a populated corpus.
-    if not duck_path.exists():
+    if not store_path.exists():
         try:
             _initialize_empty_corpus(settings)
         except Exception as exc:
@@ -335,8 +333,8 @@ def run(args: argparse.Namespace) -> int:
     st = install_state.load_state()
     if install_state.is_step_completed(st, "seed-corpus"):
         prev = install_state.get_step_output(st, "seed-corpus")
-        duck_present = Path(settings.duckdb_path).exists()
-        if prev and prev.get("output_path") and duck_present:
+        store_present = Path(settings.corpus_store_path).exists()
+        if prev and prev.get("output_path") and store_present:
             p = Path(prev["output_path"])
             if p.exists():
                 import json as _json

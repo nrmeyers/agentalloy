@@ -1,4 +1,4 @@
-"""LanceCodeVectorStore — merge semantics, atomic replace, search, dim guard."""
+"""OverGraphCodeGraphStore — merge semantics, atomic replace, search, dim guard."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_index.store.vector_store import LanceCodeVectorStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     CodeVectorRow,
@@ -43,15 +43,15 @@ def row(
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> LanceCodeVectorStore:
-    return LanceCodeVectorStore(tmp_path / "vectors.lance")
+def store(tmp_path: Path) -> OverGraphCodeGraphStore:
+    return OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
 
 
-def test_satisfies_protocol(store: LanceCodeVectorStore) -> None:
+def test_satisfies_protocol(store: OverGraphCodeGraphStore) -> None:
     assert isinstance(store, CodeVectorStore)
 
 
-def test_upsert_and_count(store: LanceCodeVectorStore) -> None:
+def test_upsert_and_count(store: OverGraphCodeGraphStore) -> None:
     assert store.count() == 0
     assert store.embedding_dim() is None  # empty dataset contract
     n = store.upsert([row("m.a", vec(0)), row("m.b", vec(1))])
@@ -61,7 +61,7 @@ def test_upsert_and_count(store: LanceCodeVectorStore) -> None:
     assert store.upsert([]) == 0
 
 
-def test_upsert_merges_on_qualified_name(store: LanceCodeVectorStore) -> None:
+def test_upsert_merges_on_qualified_name(store: OverGraphCodeGraphStore) -> None:
     store.upsert([row("m.a", vec(0))])
     store.upsert([row("m.a", vec(1))])  # re-embed same symbol
     assert store.count() == 1  # replaced, not duplicated
@@ -70,7 +70,7 @@ def test_upsert_merges_on_qualified_name(store: LanceCodeVectorStore) -> None:
     assert hits[0].score == pytest.approx(1.0, abs=1e-5)
 
 
-def test_bulk_replace_atomicity(store: LanceCodeVectorStore) -> None:
+def test_bulk_replace_atomicity(store: OverGraphCodeGraphStore) -> None:
     store.upsert([row("old.a", vec(0)), row("old.b", vec(1))])
     n = store.bulk_replace([row("new.c", vec(2))])
     assert n == 1
@@ -82,7 +82,7 @@ def test_bulk_replace_atomicity(store: LanceCodeVectorStore) -> None:
     assert store.count() == 0
 
 
-def test_dim_mismatch_raises(store: LanceCodeVectorStore) -> None:
+def test_dim_mismatch_raises(store: OverGraphCodeGraphStore) -> None:
     bad = row("m.a", [1.0, 0.0, 0.0])
     with pytest.raises(EmbeddingDimMismatch):
         store.upsert([bad])
@@ -92,7 +92,7 @@ def test_dim_mismatch_raises(store: LanceCodeVectorStore) -> None:
         store.search_similar([1.0] * 5)
 
 
-def test_search_similar_ordering(store: LanceCodeVectorStore) -> None:
+def test_search_similar_ordering(store: OverGraphCodeGraphStore) -> None:
     store.upsert(
         [
             row("hit.exact", vec(0)),  # cosine 1.0 vs query
@@ -110,19 +110,20 @@ def test_search_similar_ordering(store: LanceCodeVectorStore) -> None:
     assert store.search_similar(vec(0), k=2) == hits[:2]
 
 
-def test_search_similar_empty_dataset(store: LanceCodeVectorStore) -> None:
+def test_search_similar_empty_dataset(store: OverGraphCodeGraphStore) -> None:
     assert store.search_similar(vec(0)) == []
 
 
-def test_search_bm25(store: LanceCodeVectorStore) -> None:
+def test_search_bm25(store: OverGraphCodeGraphStore) -> None:
     store.upsert(
         [
             row("m.frob", vec(0), text="def frobnicate(widget): return widget.spin()"),
             row("m.other", vec(1), text="def unrelated(): pass"),
         ]
     )
-    # No FTS index yet — BM25 leg degrades to [].
-    assert store.search_bm25("frobnicate") == []
+    # Unified store: the keyword leg is served off the Symbol nodes directly,
+    # so it works as soon as rows are upserted; rebuild_fts_index() is a
+    # protocol no-op kept for call-site compatibility.
     store.rebuild_fts_index()
     hits = store.search_bm25("frobnicate")
     assert [qn for qn, _ in hits] == ["m.frob"]
@@ -130,7 +131,7 @@ def test_search_bm25(store: LanceCodeVectorStore) -> None:
     assert store.search_bm25("   ") == []
 
 
-def test_delete(store: LanceCodeVectorStore) -> None:
+def test_delete(store: OverGraphCodeGraphStore) -> None:
     store.upsert([row("m.a", vec(0)), row("m.b", vec(1)), row("m.c", vec(2))])
     assert store.delete(["m.a", "m.c", "m.missing"]) == 2
     assert store.count() == 1

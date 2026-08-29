@@ -1,8 +1,8 @@
-"""Container-aware database lock resolution helpers.
+"""Container-aware corpus lock resolution helpers.
 
-Provides functions for detecting container environments, stopping/starting
-the uvicorn service, and testing corpus DB write-lock release — all needed
-for the container-aware DuckDB lock resolution mechanism (TASK-1).
+Provides functions for detecting container environments and stopping /
+starting the uvicorn service so corpus writers (ingest, reembed) can run
+without colliding with the running service's store handles.
 """
 
 from __future__ import annotations
@@ -265,52 +265,4 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
         except Exception:  # noqa: BLE001 — includes TimeoutExpired; force-kill below
             with contextlib.suppress(OSError):
                 proc.kill()
-    return False
-
-
-def test_corpus_lock_released() -> bool:
-    """Test whether the corpus DB (agentalloy.duck) write-lock is released.
-
-    Prefers ``DUCKDB_PATH`` env var (set by the container run env to
-    ``/app/data/agentalloy.duck``) over ``corpus_dir()`` — the latter
-    resolves to the host home directory and silently skips the check
-    inside a container where the volume-mounted DB lives elsewhere.
-
-    Opens a read-only skill-store connection, then closes it in a
-    ``finally`` block so the file lock is released before the caller
-    opens the real skill-store connection.
-
-    Retries up to 5 seconds at 0.5-second intervals.
-    Returns ``True`` if the lock is released, ``False`` if still locked.
-    """
-    # T3: prefer DUCKDB_PATH env (container run env sets /app/data/agentalloy.duck)
-    env_path = os.environ.get("DUCKDB_PATH")
-    if env_path is not None:
-        skills_path = Path(env_path)
-    else:
-        skills_path = install_state.corpus_dir() / "agentalloy.duck"
-
-    assert skills_path is not None, "skills_path must resolve to a non-None Path"  # P10-R5
-
-    from agentalloy.storage.protocols import SkillStore
-    from agentalloy.storage.skill_store import open_skill_store
-
-    max_retries = 10  # P10-R2: 10 iterations × 0.5s = 5s max wait
-    retry_interval = 0.5
-
-    for attempt in range(max_retries):  # P10-R2: bounded = max_retries = 10
-        store: SkillStore | None = None
-        try:
-            # A read-only open succeeds only when no writer holds the lock.
-            store = open_skill_store(str(skills_path), read_only=True)
-            # Success — lock is released.
-            return True
-        except Exception:
-            if attempt < max_retries - 1:
-                time.sleep(retry_interval)
-        finally:
-            # T4: explicitly release file handle before caller opens real connection.
-            if store is not None:
-                store.close()  # P10-R7: drops the read-only handle → lock release
-
     return False

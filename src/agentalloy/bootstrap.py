@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB

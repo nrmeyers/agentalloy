@@ -137,7 +137,7 @@ class TestStateContainment:
 
 class TestCorpusSeedAtomicity:
     def test_partial_seed_recovers(self, tmp_path: Path) -> None:
-        """A half-written corpus file from an interrupted prior run must not
+        """A half-written corpus store from an interrupted prior run must not
         block re-seeding: the next call wipes the .part sibling and retries."""
         from agentalloy.install import state as install_state
 
@@ -145,25 +145,23 @@ class TestCorpusSeedAtomicity:
         # previous interrupted copy still on disk.
         user_corpus = install_state.corpus_dir()
         user_corpus.mkdir(parents=True, exist_ok=True)
-        partial = user_corpus / "fragments.lance.part"
+        partial = user_corpus / "agentalloy.overgraph.part"
         partial.write_text("interrupted")
         # Stub the bundled corpus into a tmp source so we can fake a real one.
         bundled = tmp_path / "_bundled"
         bundled.mkdir()
-        (bundled / "agentalloy.duck").write_text("fake-duck")
-        (bundled / "fragments.lance").write_text("fake-fragments")
+        (bundled / "agentalloy.overgraph").write_text("fake-store")
         with patch.object(install_state, "bundled_corpus_dir", return_value=bundled):
             install_state.ensure_corpus_seeded()
-        # `.part` from prior failure must be cleaned up; final files present.
+        # `.part` from prior failure must be cleaned up; final store present.
         assert not partial.exists()
-        assert (user_corpus / "agentalloy.duck").exists()
-        assert (user_corpus / "fragments.lance").exists()
+        assert (user_corpus / "agentalloy.overgraph").exists()
 
 
 class TestBundledCorpusSentinel:
     def test_empty_dir_not_treated_as_corpus(self, tmp_path: Path) -> None:
-        """A `_corpus/` dir that exists but lacks `agentalloy.duck` must NOT be
-        used (defends against shadow packages on PYTHONPATH)."""
+        """A `_corpus/` dir that exists but lacks `agentalloy.overgraph` must
+        NOT be used (defends against shadow packages on PYTHONPATH)."""
         from agentalloy.install import state as install_state
 
         empty = tmp_path / "_corpus"
@@ -171,7 +169,7 @@ class TestBundledCorpusSentinel:
         # Direct unit test of the helper used by both code paths.
         assert install_state._is_real_corpus(empty) is False  # pyright: ignore[reportPrivateUsage]
         # And one with the sentinel file IS treated as real.
-        (empty / "agentalloy.duck").write_text("x")
+        (empty / "agentalloy.overgraph").write_text("x")
         assert install_state._is_real_corpus(empty) is True  # pyright: ignore[reportPrivateUsage]
 
 

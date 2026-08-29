@@ -16,10 +16,8 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0",
     "duckdb>=1.5.4",
-    "lancedb>=0.13",
     "overgraph>=0.17.0",
     "tantivy>=0.26",
-    "pyarrow>=15.0",
     "watchdog>=6.0.0",
     # codex provider writes .codex/config.toml (reads use stdlib tomllib).
     "tomli-w>=1.0",
@@ -80,7 +78,7 @@ exclude = ["pytest-of-*/", "*.backup.*", "_check_*.py", "_verify_*.py"]
 packages = ["src/agentalloy"]
 # Pack source YAMLs live INSIDE the package at src/agentalloy/_packs/ so
 # hatchling ships them with the wheel automatically. Binary corpus
-# (Lance + DuckDB) is no longer shipped; it's generated locally on
+# (OverGraph + Tantivy BM25) is no longer shipped; it's generated locally on
 # first install when users pick packs via `agentalloy install-packs`.
 artifacts = [
     "src/agentalloy/_corpus/.gitkeep",

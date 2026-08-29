@@ -1498,7 +1498,7 @@ class TestEntrypointPrebuiltCorpusSeed:
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert '[ ! -f "$APP_DIR/data/agentalloy.duck" ]' in script
+        assert '[ ! -d "$APP_DIR/data/agentalloy.overgraph" ]' in script
 
     def test_pack_ingest_gated_on_not_seeded(self):
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
@@ -1507,7 +1507,7 @@ class TestEntrypointPrebuiltCorpusSeed:
         assert '[ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]' in script
         # The gate also requires no existing volume corpus, so a reused/populated
         # volume never runs a partial always-on reconcile.
-        assert '&& [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then' in script
+        assert '&& [ ! -d "$APP_DIR/data/agentalloy.overgraph" ]; then' in script
         # seed branch is decided before the ingest gate consumes it
         assert script.index("CORPUS_SEEDED=false") < script.index('[ "$CORPUS_SEEDED" = "false" ]')
 

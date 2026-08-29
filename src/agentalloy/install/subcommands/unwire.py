@@ -91,8 +91,8 @@ def add_parser(
 # Service-first (DELETE /code/index/{slug} — stops watches, honors the
 # active-job 409); direct fallback when the service is down. The direct path
 # deliberately avoids importing agentalloy.code_index.store (its __init__
-# pulls DuckDB/Lance, which may not be installed without the extra): the
-# registry is plain SQLite and removal is an rmtree — no DB engine needed.
+# pulls the OverGraph engine, which may not be installed without the extra):
+# the registry is plain SQLite and removal is an rmtree — no DB engine needed.
 # ---------------------------------------------------------------------------
 
 

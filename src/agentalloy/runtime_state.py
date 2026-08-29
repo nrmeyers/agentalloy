@@ -136,7 +136,8 @@ class RuntimeCache:
         The cache itself loads only non-deprecated skills (via the active reads
         which filter ``deprecated = false``); this list is captured separately
         at load time so retrieval can exclude deprecated fragments from the
-        DuckDB vector store, which is populated independently of the cache.
+        corpus store's embedding index, which is populated independently of
+        the cache.
         """
         return list(self._deprecated_skill_ids)
 

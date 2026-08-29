@@ -1424,9 +1424,7 @@ class TestOrientationAnnounceCadence:
         assert result.pending_orientation is not None
         assert result.pending_orientation[0] == "build"
 
-    def test_orientation_does_not_fire_for_unidentifiable_requests(
-        self, tmp_path: Path
-    ) -> None:
+    def test_orientation_does_not_fire_for_unidentifiable_requests(self, tmp_path: Path) -> None:
         """No session header and no fingerprintable user text → no session key
         → the turn is not an orientation carrier."""
         _set_phase(tmp_path, "build")

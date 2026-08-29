@@ -20,13 +20,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
 from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     BM25Hit,
+    EmbeddingDimMismatch,
     FragmentDiscoveryRow,
     FragmentEmbedding,
     FragmentRow,
@@ -103,6 +104,30 @@ class OverGraphSkillStore:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    @contextlib.contextmanager
+    def released(self) -> Iterator[None]:
+        """Temporarily release the store handle; reopen on exit.
+
+        Mirrors the DuckDB store's contract for in-process writers (web
+        reembed / pack install): the long-lived service keeps this store
+        open, so a write phase wraps itself in this context manager. The
+        object stays valid for everyone holding a reference; the underlying
+        database and BM25 sidecar are closed for the write window and
+        reopened after with the same read-only mode.
+        """
+        self.close()
+        try:
+            yield
+        finally:
+            import overgraph
+
+            self._db = overgraph.OverGraph.open(
+                self._db_path,
+                dense_vector_dimension=self._vector_dimension,
+            )
+            bm25_path = Path(self._db_path).parent / (Path(self._db_path).stem + ".bm25")
+            self._bm25 = TantivyBM25Index(bm25_path, read_only=self._read_only)
 
     # -- transactions --------------------------------------------------------
 
@@ -196,6 +221,30 @@ class OverGraphSkillStore:
             "current_version_id": skill.current_version_id,
         }
         self._db.upsert_node(labels=["Skill"], key=skill.skill_id, props=props)
+        self._sync_current_version_edge(skill.skill_id, skill.current_version_id)
+
+    def _sync_current_version_edge(self, skill_id: str, version_id: str) -> None:
+        """Align the CurrentVersion graph edge with the skill's
+        ``current_version_id`` property — the reads layer joins on the edge,
+        so a row-level update must move it too (insert_version only creates
+        the edge for versions that arrive already active)."""
+        skill_node = self._db.get_node_by_key("Skill", skill_id)
+        if skill_node is None:
+            return
+        self._db.execute_gql(
+            f"MATCH (s:Skill)-[r:{_EDGE_CURRENT_VERSION}]->() "
+            f"WHERE id(s) = {skill_node.id} DELETE r"
+        )
+        if not version_id:
+            return
+        ver_node = self._db.get_node_by_key("SkillVersion", version_id)
+        if ver_node is None:
+            return
+        self._db.upsert_edge(
+            from_id=skill_node.id,
+            to_id=ver_node.id,
+            label=_EDGE_CURRENT_VERSION,
+        )
 
     def delete_skill(self, skill_id: str) -> int:
         """Delete a skill and all its versions/fragments/deps. Returns count."""
@@ -587,46 +636,49 @@ class OverGraphSkillStore:
         if categories is not None:
             cats = ", ".join(f"'{_gql_esc(c)}'" for c in categories)
             filters.append(f"s.category IN [{cats}]")
-        if domain_tags is not None:
-            tags = ", ".join(f"'{_gql_esc(t)}'" for t in domain_tags)
-            filters.append(f"ANY(t IN s.domain_tags WHERE t IN [{tags}])")
+        # domain_tags list-membership (ANY) is outside the GQL subset — the
+        # predicate is applied in Python against the parent skill's tags below.
         filter_clause = " AND ".join(filters)
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
             f"WHERE {filter_clause} "
-            f"RETURN id(f) AS fid, f.version_id, f.fragment_type, f.sequence, f.content "
+            f"RETURN id(s) AS sid, id(f) AS fid, f.version_id, f.fragment_type, f.sequence, f.content "
             f"ORDER BY s.key, f.sequence"
         )
         results = []
         if isinstance(rows, dict):
             for row in rows.get("rows", []):
                 fid = row.get("fid")
+                sid = row.get("sid")
                 if fid is None:
                     continue
                 node = self._db.get_node(int(fid))
                 if node is None:
                     continue
+                # Parent-derived columns come off the skill node (the source of
+                # truth) so fragments that predate their embedding pass still
+                # carry them.
+                skill_node = self._db.get_node(int(sid)) if sid is not None else None
+                sprops = dict(skill_node.props) if skill_node is not None else {}
+                tags = list(sprops.get("domain_tags", []) or [])
+                if domain_tags is not None and not set(tags) & set(domain_tags):
+                    continue
+                fprops = dict(node.props)
                 results.append(
                     FragmentRow(
                         fragment_id=getattr(node, "key", "") or "",
-                        version_id=row.get("f.version_id", "") or node.props.get("version_id", ""),
+                        version_id=row.get("f.version_id", "") or fprops.get("version_id", ""),
                         fragment_type=row.get("f.fragment_type", "")
-                        or node.props.get("fragment_type", ""),
-                        sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
-                        content=row.get("f.content", "") or node.props.get("content", ""),
-                        skill_id=node.props.get("skill_id", "") if hasattr(node, "props") else "",
-                        category=node.props.get("category", "") if hasattr(node, "props") else "",
-                        skill_class="",
-                        domain_tags=list(node.props.get("domain_tags", []) or [])
-                        if hasattr(node, "props")
-                        else [],
-                        phase_scope=node.props.get("phase_scope")
-                        if hasattr(node, "props")
-                        else None,
-                        category_scope=None,
-                        description=node.props.get("description")
-                        if hasattr(node, "props")
-                        else None,
+                        or fprops.get("fragment_type", ""),
+                        sequence=int(row.get("f.sequence", 0) or fprops.get("sequence", 0)),
+                        content=row.get("f.content", "") or fprops.get("content", ""),
+                        skill_id=getattr(skill_node, "key", "") or "",
+                        category=sprops.get("category", ""),
+                        skill_class=sprops.get("skill_class", ""),
+                        domain_tags=tags,
+                        phase_scope=sprops.get("phase_scope"),
+                        category_scope=sprops.get("category_scope"),
+                        description=sprops.get("description"),
                     )
                 )
         return results
@@ -637,6 +689,7 @@ class OverGraphSkillStore:
         source = self._db.get_node_by_key("Skill", skill_id)
         if source is None:
             return []
+        sprops = dict(source.props)
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion)-[:{_EDGE_DECOMPOSES_TO}]->(f:Fragment) "
             f"WHERE id(s) = {source.id} AND v.status = 'active' AND s.deprecated = false "
@@ -660,6 +713,13 @@ class OverGraphSkillStore:
                         or node.props.get("fragment_type", ""),
                         sequence=int(row.get("f.sequence", 0) or node.props.get("sequence", 0)),
                         content=row.get("f.content", "") or node.props.get("content", ""),
+                        skill_id=skill_id,
+                        category=sprops.get("category", ""),
+                        skill_class=sprops.get("skill_class", ""),
+                        domain_tags=list(sprops.get("domain_tags", []) or []),
+                        phase_scope=sprops.get("phase_scope"),
+                        category_scope=sprops.get("category_scope"),
+                        description=sprops.get("description"),
                     )
                 )
         return results
@@ -753,7 +813,7 @@ class OverGraphSkillStore:
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
             f"WHERE v.status <> 'active' "
-            f"RETURN id(s) AS sid, v.status LIMIT 1"
+            f"RETURN id(s) AS sid, v.status AS status LIMIT 1"
         )
         if isinstance(rows, dict) and rows.get("rows"):
             row = rows["rows"][0]
@@ -763,6 +823,38 @@ class OverGraphSkillStore:
             raise InconsistentActiveVersionError(
                 skill_key,
                 f"CURRENT_VERSION points at status={row.get('status')!r} version",
+            )
+
+        # Check for active versions that lack a CURRENT_VERSION edge. Two
+        # passes + a Python diff: a negated-path predicate is outside the GQL
+        # subset, and one query per skill would hit the per-request guard too
+        # hard.
+        rows = self._db.execute_gql(
+            f"MATCH (s:Skill)-[:{_EDGE_HAS_VERSION}]->(v:SkillVersion) "
+            "WHERE v.status = 'active' "
+            "RETURN id(s) AS sid"
+        )
+        missing: set[int] = set()
+        if isinstance(rows, dict):
+            for row in rows.get("rows", []):
+                sid = row.get("sid")
+                if sid is not None:
+                    missing.add(int(sid))
+        if missing:
+            rows = self._db.execute_gql(
+                f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->() RETURN id(s) AS sid"
+            )
+            if isinstance(rows, dict):
+                for row in rows.get("rows", []):
+                    sid = row.get("sid")
+                    if sid is not None:
+                        missing.discard(int(sid))
+        if missing:
+            node = self._db.get_node(next(iter(missing)))
+            skill_key = (getattr(node, "key", "") or "") if node is not None else ""
+            raise InconsistentActiveVersionError(
+                skill_key,
+                "active version exists but no CURRENT_VERSION edge",
             )
 
     def check_consistency_for(self, skill_id: str) -> None:
@@ -776,13 +868,29 @@ class OverGraphSkillStore:
         rows = self._db.execute_gql(
             f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->(v:SkillVersion) "
             f"WHERE id(s) = {source.id} AND v.status <> 'active' "
-            f"RETURN v.status LIMIT 1"
+            f"RETURN v.status AS status LIMIT 1"
         )
         if isinstance(rows, dict) and rows.get("rows"):
             raise InconsistentActiveVersionError(
                 skill_id,
                 f"CURRENT_VERSION points at status={rows['rows'][0].get('status')!r} version",
             )
+        # Active version present but no CURRENT_VERSION edge.
+        rows = self._db.execute_gql(
+            f"MATCH (s:Skill)-[:{_EDGE_HAS_VERSION}]->(v:SkillVersion) "
+            f"WHERE id(s) = {source.id} AND v.status = 'active' "
+            "RETURN id(v) AS vid LIMIT 1"
+        )
+        if isinstance(rows, dict) and rows.get("rows"):
+            cv_rows = self._db.execute_gql(
+                f"MATCH (s:Skill)-[:{_EDGE_CURRENT_VERSION}]->() "
+                f"WHERE id(s) = {source.id} RETURN id(s) AS sid LIMIT 1"
+            )
+            if not (isinstance(cv_rows, dict) and cv_rows.get("rows")):
+                raise InconsistentActiveVersionError(
+                    skill_id,
+                    "active version exists but no CURRENT_VERSION edge",
+                )
 
     # -- corpus metadata KV --------------------------------------------------
 
@@ -887,6 +995,15 @@ class OverGraphSkillStore:
             if not item.fragment_id:
                 logger.debug("skipping embedding with None fragment_id")
                 continue
+            # Guard BEFORE touching the HNSW index: a stored-vs-configured dim
+            # mismatch must surface as the marker upgrade.py greps for to
+            # trigger the self-heal re-embed (not a raw DB error).
+            if len(item.embedding) != self._vector_dimension:
+                raise EmbeddingDimMismatch(
+                    f"stored embedding dimension {len(item.embedding)} does not match "
+                    f"configured EMBEDDING_DIM {self._vector_dimension} — "
+                    "run `agentalloy reembed --force` to rebuild the index"
+                )
             # Skip zero vectors (from failed embeddings)
             import math
 
@@ -1105,36 +1222,85 @@ class OverGraphSkillStore:
         except Exception:
             return 0
 
+    def _canonical_fragments(self, *, skill_id: str | None = None) -> tuple[list[FragmentRow], int]:
+        """Snapshot authored fragment rows + count embedded ones.
+
+        Returns ``(rows, embedded_count)``. Rows with no ``version_id`` are
+        synthetic card documents — regenerated by reembed, not preserved.
+        """
+        where = f" WHERE f.skill_id = '{_gql_esc(skill_id)}'" if skill_id else ""
+        gql_rows = self._db.execute_gql(f"MATCH (f:Fragment){where} RETURN id(f) AS nid")
+        keep: list[FragmentRow] = []
+        embedded = 0
+        if isinstance(gql_rows, dict):
+            for row in gql_rows.get("rows", []):
+                nid = row.get("nid")
+                if nid is None:
+                    continue
+                node = self._db.get_node(int(nid))
+                if node is None:
+                    continue
+                props = dict(node.props)
+                if props.get("embedded_at") is not None:
+                    embedded += 1
+                version_id = props.get("version_id", "") or ""
+                if not version_id:
+                    continue
+                keep.append(
+                    FragmentRow(
+                        fragment_id=getattr(node, "key", "") or "",
+                        version_id=version_id,
+                        fragment_type=props.get("fragment_type", ""),
+                        sequence=int(props.get("sequence", 0)),
+                        content=props.get("content", ""),
+                    )
+                )
+        return keep, embedded
+
     def delete_skill_fragments(self, skill_id: str) -> int:
         """Delete only fragment embeddings for a skill (keeps skill node).
 
-        Used by the re-embed pipeline to clear stale embeddings before
-        re-inserting.  Distinct from the SkillStore ``delete_skill`` which
-        removes the skill node, versions, and dependencies too.
+        Unified-store invariant: Fragment nodes also carry authored content,
+        so the canonical rows are snapshotted and re-linked after the wipe —
+        only the embedding side (vectors + BM25 docs) goes away. Used by the
+        re-embed pipeline to clear stale embeddings before re-inserting.
+        Distinct from the SkillStore ``delete_skill`` which removes the skill
+        node, versions, and dependencies too. Returns embeddings deleted.
         """
         try:
+            keep, embedded = self._canonical_fragments(skill_id=skill_id)
             rows = self._db.execute_gql(
                 f"MATCH (f:Fragment) WHERE f.skill_id = '{_gql_esc(skill_id)}' RETURN id(f) AS nid"
             )
-            count = 0
             if isinstance(rows, dict):
                 for row in rows.get("rows", []):
                     nid = row.get("nid")
                     if nid is not None:
                         self._db.execute_gql(f"MATCH (n) WHERE id(n) = {nid} DETACH DELETE n")
-                        count += 1
             self._db.flush()
-            return count
+            self._bm25.delete_skill(skill_id)
+            for frag in keep:
+                self.insert_fragment(frag)
+            return embedded
         except Exception:
+            logger.debug("delete_skill_fragments failed", exc_info=True)
             return 0
 
     def delete_all(self) -> int:
-        """Delete all fragment embeddings."""
+        """Delete all fragment embeddings. Returns the number deleted.
+
+        Unified-store invariant: authored fragment content survives the wipe
+        (canonical rows are snapshotted and re-linked); synthetic card docs
+        are dropped and rebuilt by the card-index pass.
+        """
         try:
+            keep, embedded = self._canonical_fragments()
             self._db.execute_gql("MATCH (f:Fragment) DETACH DELETE f")
             self._db.flush()
             self._bm25.delete_all()
-            return 1
+            for frag in keep:
+                self.insert_fragment(frag)
+            return embedded
         except Exception:
             logger.debug("delete_all failed", exc_info=True)
             return 0
@@ -1203,8 +1369,21 @@ def open_overgraph_skill_store(
     *,
     read_only: bool = False,
 ) -> OverGraphSkillStore:
-    """Open (and, in writer mode, migrate) the OverGraph skill store."""
-    store = OverGraphSkillStore(db_path, read_only=read_only)
+    """Open (and, in writer mode, migrate) the OverGraph skill store.
+
+    Translates a writer-lock conflict (the BM25 sidecar's exclusive Tantivy
+    lock, held by an out-of-process reembed / install-pack writer) into
+    :class:`LockHeldError` so callers get the same contract the DuckDB store
+    provided.
+    """
+    from agentalloy.storage.protocols import LockHeldError, is_lock_held_error
+
+    try:
+        store = OverGraphSkillStore(db_path, read_only=read_only)
+    except Exception as exc:
+        if not read_only and is_lock_held_error(str(exc)):
+            raise LockHeldError(str(exc)) from exc
+        raise
     if not read_only:
         store.migrate()
     return store

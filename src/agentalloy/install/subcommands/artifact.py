@@ -28,8 +28,7 @@ def run_artifact_put(args: argparse.Namespace) -> int:
         content = sys.stdin.read()
     if not content.strip():
         print(
-            "Error: artifact content is empty — pipe the body on stdin "
-            "or pass --file <path>.",
+            "Error: artifact content is empty — pipe the body on stdin or pass --file <path>.",
             file=sys.stderr,
         )
         return 1
@@ -57,15 +56,11 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     put_parser.add_argument(
         "--phase", required=True, help="Workflow phase (e.g. spec, design, plan)"
     )
-    put_parser.add_argument(
-        "--slug", required=True, help="Task/work-item slug (e.g. llm-config)"
-    )
+    put_parser.add_argument("--slug", required=True, help="Task/work-item slug (e.g. llm-config)")
     put_parser.add_argument(
         "--name",
         required=True,
         help="Artifact name the phase's exit gate matches (e.g. tasks.artifact)",
     )
-    put_parser.add_argument(
-        "--file", help="Read content from this existing file instead of stdin"
-    )
+    put_parser.add_argument("--file", help="Read content from this existing file instead of stdin")
     put_parser.set_defaults(func=run_artifact_put)

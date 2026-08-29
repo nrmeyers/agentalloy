@@ -1,7 +1,7 @@
 """Stage 0 — skill-card indexing helpers (deterministic document expansion).
 
 Both retrieval legs index only fragment *body* text: ``frag.content`` is what
-gets embedded into DuckDB and what the BM25 index searches. A skill's
+gets embedded into the corpus store and what the BM25 index searches. A skill's
 ``canonical_name``, ``domain_tags`` and self-``description`` never reach the
 index, so the corpus can know "React is for websites" while retrieval is never
 told. This module builds the two deterministic document-expansion shapes the
@@ -25,7 +25,7 @@ from enum import StrEnum
 
 # fragment_type stamped on synthetic card rows. Distinct from the authored
 # 6-type taxonomy so cards are trivially identifiable (and excludable) in both
-# the DuckDB rows and the fused candidate list.
+# the embedding rows and the fused candidate list.
 CARD_FRAGMENT_TYPE = "card"
 
 # fragment_id namespace for cards. ``card::<skill_id>`` round-trips to the

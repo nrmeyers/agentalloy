@@ -22,34 +22,33 @@ from agentalloy.retrieval.embedding_errors import (
     EmbeddingErrorResult,
 )
 from agentalloy.retrieval.query_bounds import build_retrieval_query
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.protocols import (
     BM25Hit,
     FragmentStore,
     SimilarityHit,
 )
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from tests.support import StubLMClient
 
 
 @pytest.fixture
-def populated(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def populated(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 @pytest.fixture
-def populated_vectors(corpus_dir: Path) -> FragmentStore:
-    """Pre-embedded Lance fragment store from the shared corpus template. Vectors
-    are StubLMClient values for every active fragment — coherent with the
-    retrieval path's stub embedder for cosine ranking."""
-    return LanceFragmentStore(corpus_dir / "fragments.lance")
+def populated_vectors(populated: OverGraphSkillStore) -> FragmentStore:
+    """Unified corpus store — the fragment/vector leg is the same store as
+    ``populated`` (vectors are StubLMClient values, coherent with the
+    retrieval path's stub embedder for cosine ranking)."""
+    return populated
 
 
 # -------- AC-1: eligibility filter --------
 
 
 def test_only_domain_fragments_returned(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -66,7 +65,7 @@ def test_only_domain_fragments_returned(
 
 
 def test_retrieval_is_phase_agnostic(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # Phase no longer hard-gates the candidate pool by category. The hard
     # category gate was A/B-confirmed performance-neutral (gold-hit 18/18 and
@@ -92,7 +91,7 @@ def test_retrieval_is_phase_agnostic(
 
 
 def test_domain_tags_narrow_further(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -329,7 +328,7 @@ def test_skill_granular_empty_input() -> None:
 
 
 def test_skill_granular_skills_ranked_populated_on_retrieval(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # RetrievalResult.skills_ranked must be populated on a real retrieval.
     result = retrieve_domain_candidates(
@@ -353,7 +352,7 @@ def test_skill_granular_skills_ranked_populated_on_retrieval(
 
 
 def test_empty_eligible_returns_empty_result(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # No fragments match a nonsense domain_tag
     result = retrieve_domain_candidates(
@@ -372,7 +371,7 @@ def test_empty_eligible_returns_empty_result(
 
 
 def test_retrieval_records_latency(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -388,7 +387,7 @@ def test_retrieval_records_latency(
 
 
 def test_circuit_open_falls_back_to_bm25(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -413,7 +412,7 @@ def test_circuit_open_falls_back_to_bm25(
 
 
 def test_embedding_error_also_falls_back_to_bm25(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -440,7 +439,7 @@ def test_embedding_error_also_falls_back_to_bm25(
 
 
 def test_model_not_loaded_does_not_degrade(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -468,7 +467,7 @@ def test_model_not_loaded_does_not_degrade(
 
 
 def test_k_larger_than_eligible_returns_all(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -558,7 +557,7 @@ def test_card_boost_ties_keep_fused_order() -> None:
 
 
 def test_degradable_embedding_error_with_empty_bm25(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -704,7 +703,7 @@ def test_maybe_rerank_scorer_failure_degrades(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_retrieve_sets_reranked_flag(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -733,7 +732,7 @@ def test_retrieve_sets_reranked_flag(
 
 
 def test_raw_scores_bypass_skips_reranker(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -756,7 +755,7 @@ def test_raw_scores_bypass_skips_reranker(
 
 
 def test_diversity_off_bypass_skips_reranker(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -782,7 +781,7 @@ def test_diversity_off_bypass_skips_reranker(
 
 
 def _retrieve_design(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> domain_module.RetrievalResult:
     result = retrieve_domain_candidates(
         populated,
@@ -799,7 +798,7 @@ def _retrieve_design(
 
 
 def test_lm_assist_off_is_byte_identical_baseline(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -815,7 +814,7 @@ def test_lm_assist_off_is_byte_identical_baseline(
 
 
 def test_lm_assist_unreachable_matches_off(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -842,7 +841,7 @@ def test_lm_assist_unreachable_matches_off(
 
 
 def test_lm_assist_hit_filters_to_kept_fragments(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -872,7 +871,7 @@ def test_lm_assist_hit_filters_to_kept_fragments(
 
 
 def test_lm_assist_hit_with_zero_survivors_falls_back_deterministic(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -907,7 +906,7 @@ def test_lm_assist_hit_with_zero_survivors_falls_back_deterministic(
 
 
 def test_lm_assist_hit_routes_survivors_through_skill_granular_select(
-    populated: DuckDBSkillStore,
+    populated: OverGraphSkillStore,
     populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -967,7 +966,7 @@ class _RecordingLMClient(StubLMClient):
 
 
 def test_retrieval_query_is_bounded_before_embedding(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # First user turn = a real instruction buried under a giant injected
     # <system-reminder> dump (the 6050-token-500 shape). The dense leg must embed
@@ -997,7 +996,7 @@ def test_retrieval_query_is_bounded_before_embedding(
 
 
 def test_noise_only_task_skips_dense_leg(
-    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+    populated: OverGraphSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # Once injected context is stripped the first turn carries no instruction, so
     # the bounded query is empty. Skip the dense embed entirely (embedding "" is a

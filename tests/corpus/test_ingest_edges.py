@@ -26,13 +26,12 @@ from agentalloy.ingest import (
     _validate,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.ingest import main as ingest_main
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 
 class _FakeSettings:
     def __init__(self, db_path: str) -> None:
-        self.duckdb_path = db_path
-        self.skill_store_backend = "duckdb"
+        self.corpus_store_path = db_path
 
 
 def _skill_yaml(skill_id: str, *, requires: str = "") -> str:
@@ -60,20 +59,16 @@ def _skill_yaml(skill_id: str, *, requires: str = "") -> str:
     return body
 
 
-def _edges(store: DuckDBSkillStore, source_id: str) -> list[str]:
+def _edges(store: OverGraphSkillStore, source_id: str) -> list[str]:
     # The sole edge type is ``requires`` (REQUIRES_COMPOSITIONAL), folded into
     # the skill_dependencies relation.
-    rows = store.execute(
-        "SELECT target_skill_id FROM skill_dependencies "
-        "WHERE source_skill_id = ? AND rel_type = 'requires' ORDER BY target_skill_id",
-        [source_id],
-    )
-    return [str(r[0]) for r in rows]
+    deps = store.get_dependencies(source_id)
+    return sorted(d.target_skill_id for d in deps if d.rel_type == "requires")
 
 
 def _fresh_store(tmp_path: Path) -> str:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
     return db_path
 
@@ -184,7 +179,7 @@ def test_ingest_writes_requires_edge(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(f), "--yes"]) == EXIT_OK
 
-    store = open_skill_store(db_path, read_only=True)
+    store = open_overgraph_skill_store(db_path, read_only=True)
     assert _edges(store, "sk-a") == ["sk-b"]
     store.close()
 
@@ -196,7 +191,7 @@ def test_ingest_no_edges_when_field_absent(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(f), "--yes"]) == EXIT_OK
 
-    store = open_skill_store(db_path, read_only=True)
+    store = open_overgraph_skill_store(db_path, read_only=True)
     assert _edges(store, "sk-a") == []
     store.close()
 
@@ -212,7 +207,7 @@ def test_single_ingest_forward_ref_is_warning_not_error(tmp_path: Path, capsys) 
     err = capsys.readouterr().err
     assert "sk-z" in err and "warning" in err.lower()
 
-    store = open_skill_store(db_path, read_only=True)
+    store = open_overgraph_skill_store(db_path, read_only=True)
     assert _edges(store, "sk-a") == []
     store.close()
 
@@ -227,7 +222,7 @@ def test_batch_resolves_cross_pack_forward_ref(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(batch), "--yes"]) == EXIT_OK
 
-    store = open_skill_store(db_path, read_only=True)
+    store = open_overgraph_skill_store(db_path, read_only=True)
     # The retry pass wired the forward ref.
     assert _edges(store, "sk-a") == ["sk-b"]
     store.close()
@@ -246,8 +241,8 @@ def test_batch_dangling_requires_warns_not_fails(tmp_path: Path, capsys) -> None
         assert ingest_main([str(batch), "--yes"]) == EXIT_OK
     assert "sk-missing" in capsys.readouterr().err
 
-    store = open_skill_store(db_path, read_only=True)
-    assert int(store.execute("SELECT count(*) FROM skills")[0][0]) == 2  # both persisted
+    store = open_overgraph_skill_store(db_path, read_only=True)
+    assert store.count_skills() == 2  # both persisted
     assert _edges(store, "sk-a") == []  # dangling edge skipped
     store.close()
 
@@ -270,7 +265,7 @@ def test_reingest_replaces_outgoing_edges(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(fa), "--yes", "--force"]) == EXIT_OK
 
-    store = open_skill_store(db_path, read_only=True)
+    store = open_overgraph_skill_store(db_path, read_only=True)
     # Old edge gone, new edge present — no duplication.
     assert _edges(store, "sk-a") == ["sk-c"]
     store.close()

@@ -18,7 +18,7 @@ from agentalloy.ingest import (
     _validate_gate_spec,  # type: ignore[reportPrivateUsage]
     main,
 )
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 _DOMAIN_YAML = textwrap.dedent("""\
     skill_id: test-domain-skill
@@ -74,21 +74,20 @@ _SYSTEM_YAML = textwrap.dedent("""\
 
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
-        duckdb_path = db_path
-        skill_store_backend = "duckdb"
+        corpus_store_path = db_path
 
     return FakeSettings()
 
 
 @pytest.fixture
-def seeded_db(tmp_path: Path) -> tuple[str, DuckDBSkillStore]:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+def seeded_db(tmp_path: Path) -> tuple[str, OverGraphSkillStore]:
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
     return db_path, store
 
 
-def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
+def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
@@ -98,26 +97,17 @@ def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillSt
 
     assert code == EXIT_OK
 
-    store.open()
-    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'test-domain-skill'")
-    assert name == "Test Domain Skill"
-    fragment_count = store.scalar(
-        """
-        SELECT count(*) FROM fragments f
-        JOIN skill_versions v ON v.version_id = f.version_id
-        WHERE v.skill_id = 'test-domain-skill'
-        """
-    )
-    assert fragment_count == 2
-    current = store.scalar(
-        "SELECT current_version_id FROM skills WHERE skill_id = 'test-domain-skill'"
-    )
-    assert current == "test-domain-skill-v1"
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = ro.get_skill("test-domain-skill")
+    assert skill is not None
+    assert skill.canonical_name == "Test Domain Skill"
+    assert len(ro.get_active_fragments_for_skill("test-domain-skill")) == 2
+    assert skill.current_version_id == "test-domain-skill-v1"
+    ro.close()
 
 
 def test_insert_benchmark_category_domain_skill(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """A domain skill with `category: benchmark` ingests cleanly.
 
@@ -141,15 +131,15 @@ def test_insert_benchmark_category_domain_skill(
 
     assert code == EXIT_OK
 
-    store.open()
-    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'test-benchmark-skill'")
-    assert name == "Test Benchmark Skill"
-    category = store.scalar("SELECT category FROM skills WHERE skill_id = 'test-benchmark-skill'")
-    assert category == "benchmark"
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = ro.get_skill("test-benchmark-skill")
+    assert skill is not None
+    assert skill.canonical_name == "Test Benchmark Skill"
+    assert skill.category == "benchmark"
+    ro.close()
 
 
-def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
+def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "system.yaml"
     yaml_file.write_text(_SYSTEM_YAML)
@@ -159,20 +149,13 @@ def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillSt
 
     assert code == EXIT_OK
 
-    store.open()
-    fragment_count = store.scalar(
-        """
-        SELECT count(*) FROM fragments f
-        JOIN skill_versions v ON v.version_id = f.version_id
-        WHERE v.skill_id = 'sys-test-governance'
-        """
-    )
-    assert fragment_count == 1
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert len(ro.get_active_fragments_for_skill("sys-test-governance")) == 1
+    ro.close()
 
 
 def test_insert_workflow_skill_creates_no_fragments(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """Workflow skills are raw_prose-only — ingest must persist zero fragments."""
     db_path, store = seeded_db
@@ -184,20 +167,13 @@ def test_insert_workflow_skill_creates_no_fragments(
 
     assert code == EXIT_OK
 
-    store.open()
-    fragment_count = store.scalar(
-        """
-        SELECT count(*) FROM fragments f
-        JOIN skill_versions v ON v.version_id = f.version_id
-        WHERE v.skill_id = 'sdd-spec-authoring'
-        """
-    )
-    assert fragment_count == 0
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert len(ro.get_active_fragments_for_skill("sdd-spec-authoring")) == 0
+    ro.close()
 
 
 def test_duplicate_skill_id_without_force_fails(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     yaml_file = tmp_path / "domain.yaml"
@@ -215,7 +191,7 @@ def test_duplicate_skill_id_without_force_fails(
 
 
 def test_canonical_name_collision_without_force_fails(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     first = tmp_path / "first.yaml"
@@ -232,7 +208,7 @@ def test_canonical_name_collision_without_force_fails(
     assert code == EXIT_DUPLICATE
 
 
-def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
+def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
@@ -243,14 +219,13 @@ def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'test-domain-skill'")
-    assert count == 1
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.get_skill("test-domain-skill") is not None
+    ro.close()
 
 
 def test_force_replaces_same_canonical_different_skill_id(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """bughunt 4b: --force with a canonical_name collision (different skill_id)
     replaces the existing skill instead of leaving a duplicate row."""
@@ -267,12 +242,9 @@ def test_force_replaces_same_canonical_different_skill_id(
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills WHERE canonical_name = 'Test Domain Skill'")
-    assert count == 1
-    sid = store.scalar("SELECT skill_id FROM skills WHERE canonical_name = 'Test Domain Skill'")
-    assert sid == "test-domain-skill-b"
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.get_skill_id_by_name("Test Domain Skill") == "test-domain-skill-b"
+    ro.close()
 
 
 def test_file_not_found_returns_usage_error() -> None:
@@ -495,7 +467,7 @@ def _write_domain(path: Path, skill_id: str, canonical_name: str) -> None:
 
 
 def test_batch_loads_all_valid_files(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
@@ -509,10 +481,9 @@ def test_batch_loads_all_valid_files(
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills")
-    assert count == 2
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.count_skills() == 2
+    ro.close()
 
 
 def test_batch_empty_directory_returns_usage_error(tmp_path: Path) -> None:
@@ -523,7 +494,7 @@ def test_batch_empty_directory_returns_usage_error(tmp_path: Path) -> None:
 
 
 def test_batch_skips_invalid_and_loads_valid(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
@@ -552,14 +523,13 @@ def test_batch_skips_invalid_and_loads_valid(
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills")
-    assert count == 1
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.count_skills() == 1
+    ro.close()
 
 
 def test_batch_blocks_duplicates_without_force(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     batch_dir = tmp_path / "batch"
@@ -575,7 +545,7 @@ def test_batch_blocks_duplicates_without_force(
 
 
 def test_batch_force_overwrites_duplicates(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
@@ -589,10 +559,9 @@ def test_batch_force_overwrites_duplicates(
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'batch-force-a'")
-    assert count == 1
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.get_skill("batch-force-a") is not None
+    ro.close()
 
 
 # ---------------------------------------------------------------------------
@@ -725,7 +694,7 @@ def test_workflow_skill_with_position_marker_no_w1(tmp_path: Path) -> None:
 
 
 def test_no_restart_skips_container_stop_restart_in_container(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """When --no-restart is passed and we're in a container,
     stop_service_in_container and restart_service_in_container must NOT be called."""
@@ -753,7 +722,7 @@ def test_no_restart_skips_container_stop_restart_in_container(
 
 
 def test_without_no_restart_calls_container_stop_restart_in_container(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """Without --no-restart, when in a container, stop_service_in_container
     and restart_service_in_container MUST be called."""
@@ -783,7 +752,7 @@ def test_without_no_restart_calls_container_stop_restart_in_container(
 
 
 def test_no_restart_skips_in_container_batch_mode(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """--no-restart in batch mode must also skip container stop/restart."""
     db_path, _ = seeded_db
@@ -811,7 +780,7 @@ def test_no_restart_skips_in_container_batch_mode(
 
 
 def test_not_in_container_noops_container_functions(
-    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+    tmp_path: Path, seeded_db: tuple[str, OverGraphSkillStore]
 ) -> None:
     """When not in a container, container stop/restart functions must NOT be called."""
     db_path, _ = seeded_db

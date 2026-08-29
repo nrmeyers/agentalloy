@@ -204,9 +204,9 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
             if artifact is not None and artifact.get("content") is not None:
                 tasks = _count_task_items(artifact["content"])
         else:
-            tasks_glob: str = args.get(
-                "tasks", "docs/design/{slug}/tasks.md"
-            ).replace("{slug}", slug)
+            tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace(
+                "{slug}", slug
+            )
             for f in _glob_files(ctx.project_root, tasks_glob):
                 tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)

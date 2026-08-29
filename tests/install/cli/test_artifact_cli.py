@@ -29,7 +29,16 @@ class TestArtifactSubcommandParsing:
 
     def test_put_parses_with_required_identifiers(self) -> None:
         args = self._parser().parse_args(
-            ["artifact", "put", "--phase", "plan", "--slug", "llm-config", "--name", "tasks.artifact"]
+            [
+                "artifact",
+                "put",
+                "--phase",
+                "plan",
+                "--slug",
+                "llm-config",
+                "--name",
+                "tasks.artifact",
+            ]
         )
         assert args.func is run_artifact_put
         assert args.phase == "plan"
@@ -54,7 +63,9 @@ def _stdin(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
 
 
 class TestArtifactPut:
-    def test_reads_stdin_and_records(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reads_stdin_and_records(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _stdin(monkeypatch, "# Tasks\n\nT-1 — do the thing\n")
         rc = run_artifact_put(
             argparse.Namespace(phase="plan", slug="llm-config", name="tasks.artifact", file=None)
@@ -62,8 +73,10 @@ class TestArtifactPut:
         assert rc == 0
         from agentalloy.install.subcommands._state import phase_access
 
-        row = phase_access(repo_root).artifact_handle().get_artifact(
-            "plan", "llm-config", "tasks.artifact"
+        row = (
+            phase_access(repo_root)
+            .artifact_handle()
+            .get_artifact("plan", "llm-config", "tasks.artifact")
         )
         assert row is not None
         assert row["content"] == "# Tasks\n\nT-1 — do the thing\n"
@@ -82,15 +95,15 @@ class TestArtifactPut:
         assert rc == 0
         from agentalloy.install.subcommands._state import phase_access
 
-        row = phase_access(repo_root).artifact_handle().get_artifact(
-            "design", "llm-config", "approach.artifact"
+        row = (
+            phase_access(repo_root)
+            .artifact_handle()
+            .get_artifact("design", "llm-config", "approach.artifact")
         )
         assert row is not None
         assert row["content"] == "# Approach\n\nThe way forward.\n"
 
-    def test_missing_file_fails(
-        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_file_fails(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _stdin(monkeypatch, "")
         rc = run_artifact_put(
             argparse.Namespace(
@@ -120,9 +133,7 @@ class TestArtifactPut:
         out = capsys.readouterr().out
         assert "Recorded spec/x/spec.artifact" in out
 
-    def test_upserts_on_second_put(
-        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_upserts_on_second_put(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _stdin(monkeypatch, "# v1")
         run_artifact_put(
             argparse.Namespace(phase="plan", slug="x", name="tasks.artifact", file=None)

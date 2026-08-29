@@ -217,19 +217,19 @@ def add_parser(
 
 
 def _ensure_skill_schema() -> None:
-    """Create the skill-store schema if it's missing. Best-effort.
+    """Create the corpus-store schema if it's missing. Best-effort.
 
     A ``setup --force`` re-run can leave corpus files on disk without the
-    skill-graph tables (issue #84); every subsequent ingest then fails with
-    "Table skills does not exist" and the pack rolls back. ``migrate()`` is
-    idempotent, so running it up front is safe. Failures (e.g. the DB
-    lock is held by a concurrent writer) are non-fatal — the per-skill
-    ingest errors will surface them.
+    skill-graph collections (issue #84); every subsequent ingest then fails
+    and the pack rolls back. ``migrate()`` is idempotent, so running it up
+    front is safe. Failures (e.g. the store's writer lock is held by a
+    concurrent writer) are non-fatal — the per-skill ingest errors will
+    surface them.
     """
     from agentalloy.config import get_settings
     from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
     from agentalloy.storage.open import open_skills
-    from agentalloy.storage.skill_store import is_lock_held_error
+    from agentalloy.storage.protocols import is_lock_held_error
 
     store = None
     try:
@@ -422,10 +422,10 @@ def _run(args: argparse.Namespace) -> int:
         )
 
     # Lock-held detection: if any per-skill ingest failure looks like the
-    # skill store's single-writer lock error, surface the retry hint instead
-    # of leaving the user to decode "Failures: N" (issue #84).
+    # corpus store's writer-lock error, surface the retry hint instead of
+    # leaving the user to decode "Failures: N" (issue #84).
     from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
-    from agentalloy.storage.skill_store import is_lock_held_error
+    from agentalloy.storage.protocols import is_lock_held_error
 
     if any(
         is_lock_held_error(str(ir.get("stderr_tail") or ""))

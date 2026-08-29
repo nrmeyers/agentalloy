@@ -3,11 +3,11 @@
 Not a product capability. Only used by tests and by local developers to get a
 representative runtime store without going through the real ingest flow.
 
-In v5 the skill graph (skills / skill_versions / fragments + folded edges) lives
-in DuckDB ``agentalloy.duck`` (the ``SkillStore``); embeddings live in the Lance
-``fragments`` dataset. This loader only writes the skill graph. After loading
-fixtures, run ``python -m agentalloy.reembed`` to build the Lance fragments
-dataset from the active fragments.
+The skill graph (skills / skill_versions / fragments + folded edges) and the
+fragment embeddings live together in the unified OverGraph corpus store
+(``agentalloy.overgraph``). This loader only writes the skill graph. After
+loading fixtures, run ``python -m agentalloy.reembed`` to build the fragment
+embeddings from the active fragments.
 
 The fixtures intentionally carry multiple versions per skill (a superseded v1
 plus an active v2) and explicit version/fragment ids, so they are written
@@ -46,7 +46,7 @@ def load_fixtures(
 ) -> LoadSummary:
     """Wipe the skill graph tables and re-seed from YAML fixtures.
 
-    To populate the Lance ``fragments`` dataset after loading, run
+    To populate the fragment embedding index after loading, run
     ``python -m agentalloy.reembed``.
     """
     store.migrate()  # idempotent; ensures the schema exists before writing

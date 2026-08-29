@@ -1,20 +1,20 @@
 # pyright: reportPrivateUsage=false
-"""Re-embed pass: build the Lance ``fragments`` dataset from the skill store's
-active fragments.
+"""Re-embed pass: build fragment embeddings in the unified corpus store from
+the skill store's active fragments.
 
-The migration model separates ingest (graph writes to ``agentalloy.duck``) from
-embedding (vector writes to the Lance ``fragments`` dataset). This CLI is the
-embedding half — it runs after ingest and can be re-run safely: fragments whose
-ids already have Lance rows are skipped.
+The migration model separates ingest (skill/fragment metadata writes) from
+embedding (vector writes). This CLI is the embedding half — it runs after
+ingest and can be re-run safely: fragments whose ids already have embedding
+rows are skipped.
 
-Reembed needs the corpus writer lock, and DuckDB grants a writer only while no
-other process holds ``agentalloy.duck`` — including the running service's
-lifetime read-only handle. In native mode the CLI therefore stops the main API
+Reembed needs the corpus writer lock (the store's BM25 sidecar takes an
+exclusive index lock), and the running service plus any concurrent ingest may
+hold store handles. In native mode the CLI therefore stops the main API
 service for the duration and restarts it afterwards (the restart also reloads
 the service's in-memory cache, so it serves the corpus this pass wrote). Pass
 ``--no-restart`` when a caller manages the service itself (``upgrade``) or the
-call is in-process (the web UI, which releases its own handle instead). Lance
-is MVCC and telemetry is a separate file, so nothing else needs pausing.
+call is in-process (the web UI, which releases its own handle instead).
+Telemetry is a separate file, so nothing else needs pausing.
 
 Usage::
 
@@ -58,9 +58,12 @@ from agentalloy.storage.card_index import (
     build_card_text,
     card_fragment_id,
 )
-from agentalloy.storage.open import open_fragments, open_skills
-from agentalloy.storage.protocols import FragmentEmbedding
-from agentalloy.storage.skill_store import LockHeldError, is_lock_held_error
+from agentalloy.storage.open import open_skills
+from agentalloy.storage.protocols import (
+    FragmentEmbedding,
+    LockHeldError,
+    is_lock_held_error,
+)
 
 if TYPE_CHECKING:
     from agentalloy.storage.protocols import FragmentStore, SkillStore
@@ -77,16 +80,15 @@ _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
 _EMBED_BATCH_SIZE = 32  # texts per /v1/embeddings call (matches code-index pipeline)
 
-# Shown when the corpus DB is held by another process. The usual holder is the
-# running agentalloy service (its read-only handle blocks writers for its whole
-# lifetime); a concurrent ingest/reembed is the transient case.
+# Shown when the corpus store's writer lock is held by another process. The
+# usual holder is a concurrent ingest/reembed writer; a running service is
+# stopped automatically by this CLI unless --no-restart was passed.
 LOCK_HELD_REMEDIATION = (
-    "Another process is holding the corpus DB (agentalloy.duck) open. A running "
-    "agentalloy service blocks writers for its whole lifetime — reembed "
-    "stops/restarts it automatically unless --no-restart was passed; for other "
-    "commands run `agentalloy server-stop` first, then `agentalloy server-start` "
-    "after. If a concurrent ingest/reembed briefly holds the lock instead, wait "
-    "and re-run."
+    "Another process is holding the corpus store's writer lock. A running "
+    "agentalloy service is stopped/restarted automatically by reembed unless "
+    "--no-restart was passed; for other commands run `agentalloy server-stop` "
+    "first, then `agentalloy server-start` after. If a concurrent "
+    "ingest/reembed briefly holds the lock instead, wait and re-run."
 )
 
 
@@ -100,8 +102,8 @@ class FragmentNeedingEmbedding:
     """An active fragment pulled from the skill store with its parent skill metadata.
 
     The denormalized columns (``skill_id``, ``category``, ``fragment_type``)
-    carry through to the Lance row so compose-time filtered search doesn't
-    need a cross-engine join.
+    carry through to the embedding row so compose-time filtered search
+    doesn't need a join back to the skill rows.
 
     ``canonical_name`` / ``domain_tags`` / ``description`` carry the parent
     skill's identity so Stage 0 card indexing can build a header without a
@@ -151,10 +153,10 @@ def discover_unembedded_fragments(
     skill_id: str | None = None,
     force: bool = False,
 ) -> list[FragmentNeedingEmbedding]:
-    """Pull active fragments from the skill store; filter out those already in Lance.
+    """Pull active fragments from the skill store; filter out those already embedded.
 
-    ``force=True`` returns every fragment regardless of Lance state — useful for
-    "wipe and re-embed" scenarios (Lance ``insert_embeddings`` upserts on
+    ``force=True`` returns every fragment regardless of embedding state — useful
+    for "wipe and re-embed" scenarios (``insert_embeddings`` upserts on
     ``fragment_id``, so a duplicate id replaces rather than conflicts).
     """
     discovery_rows = store.discover_fragments(skill_id=skill_id)
@@ -278,7 +280,7 @@ def reembed_fragments(
     on_embedded: Callable[[FragmentNeedingEmbedding, list[float]], None] | None = None,
     card_index: CardIndexMode = CardIndexMode.OFF,
 ) -> ReembedStats:
-    """Embed each fragment and upsert it into the Lance dataset. Returns run stats.
+    """Embed each fragment and upsert it into the corpus store. Returns run stats.
 
     ``embed_fn`` takes a content string and returns a raw (non-normalized)
     vector. The vector_store normalizes on insert. Injected rather than
@@ -297,10 +299,10 @@ def reembed_fragments(
     — done by the caller after this batch (see ``insert_cards``). ``off`` is a
     byte-for-byte no-op vs the pre-Stage-0 index.
 
-    Lance is MVCC with no exclusive writer lock, so each ``insert_embeddings``
-    is its own atomic upsert (keyed on ``fragment_id``). A failure mid-run
-    leaves the already-inserted rows committed; idempotency means a re-run picks
-    up the rest, and ``fragment_id`` upserts make replays safe.
+    Each ``insert_embeddings`` is its own atomic upsert (keyed on
+    ``fragment_id``). A failure mid-run leaves the already-inserted rows
+    committed; idempotency means a re-run picks up the rest, and
+    ``fragment_id`` upserts make replays safe.
     """
     stats = ReembedStats(discovered=len(fragments))
     now = int(time.time())
@@ -398,14 +400,15 @@ def insert_cards(
     """Embed and insert one synthetic card document per distinct skill.
 
     Cards carry ``fragment_type='card'`` and a ``card::<skill_id>`` id so they
-    are trivially identifiable in both the Lance dataset and the fused candidate
-    list. They participate in dense + BM25 retrieval (boosting their skill's
-    rank) but are excluded from ``/compose`` assembly — no skill-store fragment
-    hydrates them, and ``retrieval.domain`` drops card ids before selection.
+    are trivially identifiable in both the embedding index and the fused
+    candidate list. They participate in dense + BM25 retrieval (boosting their
+    skill's rank) but are excluded from ``/compose`` assembly — no skill-store
+    fragment hydrates them, and ``retrieval.domain`` drops card ids before
+    selection.
 
     Caller is responsible for clearing pre-existing cards (``delete_cards``)
     when re-running, mirroring the ``--force`` fragment path. Returns the count
-    of cards inserted (each an atomic Lance upsert keyed on ``fragment_id``).
+    of cards inserted (each an atomic upsert keyed on ``fragment_id``).
     """
     cards = _distinct_skill_cards(fragments)
     if not cards:
@@ -491,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m agentalloy.reembed",
         description=(
             "Compute embeddings for the skill store's active fragments and write "
-            "them to the Lance fragment store. Idempotent on re-run."
+            "them to the corpus store's fragment embedding index. Idempotent on re-run."
         ),
     )
     parser.add_argument(
@@ -537,7 +540,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Report what would be embedded without calling LM Studio or writing the Lance store",
+        help="Report what would be embedded without calling the embed server or writing the store",
     )
     parser.add_argument(
         "--rebuild-fts",
@@ -590,13 +593,13 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
     model_id = args.model or settings.runtime_embedding_model
     settings.ensure_data_dirs()
 
-    # Lance is MVCC and telemetry is a separate file; only the skill store
-    # needs the exclusive DuckDB writer. A writer is granted only while no
-    # other process holds the file — and a running native service keeps a
-    # read-only handle for its whole lifetime — so on a lock conflict we stop
-    # the service, take the lock, and restart it in the finally below (the
-    # restart also reloads its in-memory cache, so it serves this pass's
-    # corpus). ``--no-restart`` opts out for callers that manage the service
+    # Telemetry lives in a separate file. The corpus store's writer lock (the
+    # Tantivy BM25 index) is exclusive between writers; the running native
+    # service holds only a read handle and never blocks this open. On a lock
+    # conflict (a concurrent ingest/reembed writer) we stop the service, retry
+    # the open, and restart the service in the finally below — the restart
+    # also reloads its in-memory cache, so it serves this pass's corpus.
+    # ``--no-restart`` opts out for callers that manage the service
     # themselves (`upgrade`) or run in-process (the web UI).
     store: SkillStore | None = None
     vs: FragmentStore | None = None
@@ -611,11 +614,12 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             if service_mode is None:
                 raise
             store = _reopen_after_stop(settings)
-        vs = open_fragments(settings)
+        # Fragments live in the same unified store as skills.
+        vs = cast("FragmentStore", store)
         # Writer-mode open already migrated; re-assert idempotently.
         store.migrate()
 
-        # --force: drop existing Lance rows for the scope before re-embedding.
+        # --force: drop existing embedding rows for the scope before re-embedding.
         # A full wipe is required when changing embedding models (a dimension
         # change makes existing vectors incompatible with the new index).
         if args.force:
@@ -640,7 +644,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             "discovered %d fragment(s) to embed (model=%s, target=%s)",
             len(fragments),
             model_id,
-            settings.fragments_lance_path,
+            settings.corpus_store_path,
         )
 
         if args.dry_run:
@@ -703,7 +707,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                 payloads = [_prepare(text) for _, text in indexed_texts]
                 all_vectors = _batch_embed_with_retry(_embed_batch, payloads)
 
-                # Distribute vectors back and insert into Lance.
+                # Distribute vectors back and insert into the corpus store.
                 now = int(time.time())
                 stats = ReembedStats(discovered=len(fragments))
                 progress_tty = sys.stderr.isatty()
@@ -825,9 +829,9 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
             logger.warning("could not record schema_version meta: %s", exc)
 
-        # Keep authored phase eligibility in sync with the Lance rows on every
-        # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall back to
-        # the phase->category map at query time.
+        # Keep authored phase eligibility in sync with the embedding rows on
+        # every pass (cheap updates, vectors untouched). NULL scope rows fall
+        # back to the phase->category map at query time.
         try:
             from agentalloy.migrate import phase_scope_by_skill
 
@@ -978,8 +982,8 @@ def run_bulk_reembed(
     ``result_sink``, if given, is forwarded to :func:`main` and populated
     with ``dedup_hard``/``dedup_soft`` match detail — see its docstring.
 
-    Never raises: a reembed failure (including a held DuckDB writer lock)
-    is logged/printed with remediation and surfaced as exit code 2, not
+    Never raises: a reembed failure (including a held corpus store writer
+    lock) is logged/printed with remediation and surfaced as exit code 2, not
     propagated as an exception, so callers can fold it into their own result
     dict without a try/except of their own.
     """
@@ -993,7 +997,6 @@ def run_bulk_reembed(
     except Exception as exc:  # noqa: BLE001 — surface but don't crash the caller
         print(f"reembed raised: {exc}", file=sys.stderr)
         from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
-        from agentalloy.storage.skill_store import is_lock_held_error
 
         if is_lock_held_error(str(exc)):
             print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)

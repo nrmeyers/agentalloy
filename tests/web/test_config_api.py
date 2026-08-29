@@ -57,7 +57,7 @@ def test_put_requires_csrf_header(client):
 
 
 def test_put_rejects_unknown_and_readonly_fields(client):
-    r = client.put("/api/config", json={"duckdb_path": "/x"}, headers=_CSRF)
+    r = client.put("/api/config", json={"corpus_store_path": "/x"}, headers=_CSRF)
     assert r.status_code == 400
     assert "read-only" in r.json()["detail"]["detail"]
 

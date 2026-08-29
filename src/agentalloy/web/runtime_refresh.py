@@ -3,7 +3,7 @@
 The service loads its RuntimeCache once at boot; a corpus write made from a
 web endpoint (POST /api/reembed, the wizard's pack install) would otherwise
 serve stale skills until the next restart. Call this after the write completes
-and the store handle has reconnected (see ``DuckDBSkillStore.released``).
+and the store handle has reconnected (see ``OverGraphSkillStore.released``).
 
 The CLI writer path doesn't need this: ``agentalloy reembed`` restarts the
 service it stopped, and the restart reloads the cache.

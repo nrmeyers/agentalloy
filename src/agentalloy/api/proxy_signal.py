@@ -33,7 +33,6 @@ from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE
 from agentalloy.signals.predicates import section_completeness, store_section_completeness
 from agentalloy.signals.prefilter import (
-    PreFilterMatch,
     _extract_artifact_contains_specs,  # type: ignore[reportPrivateUsage]
     _extract_artifact_contains_store_specs,  # type: ignore[reportPrivateUsage]
     _extract_artifact_exists_store_specs,  # type: ignore[reportPrivateUsage]
@@ -1192,27 +1191,29 @@ async def evaluate_signal(
         make_thread_key,
         phase_graph,
     )
-    
+
     thread_key = make_thread_key(cwd)
     input_state = initial_phase_graph_state(phase=phase, lane="sdd-full")
     # Set should_transition=False to terminate after the current phase node.
     # We just want the workflow instructions for the current phase, not routing.
     input_state["should_transition"] = False
     input_state["to_phase"] = None
-    
+
     graph = phase_graph()
     config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-    
+
     try:
         graph_result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-        graph_workflow_instructions = graph_result.get("workflow_instructions") if graph_result else None
+        graph_workflow_instructions = (
+            graph_result.get("workflow_instructions") if graph_result else None
+        )
     except Exception:
         logger.debug("Graph invocation failed, falling back to skill.raw_prose", exc_info=True)
         graph_workflow_instructions = None
-    
+
     # Use graph's workflow_instructions, fall back to skill.raw_prose
     workflow_instructions = graph_workflow_instructions or (skill.get("raw_prose") or None)
-    
+
     # Inject on phase entry, new session, or orientation. The agent needs workflow
     # instructions when entering a phase or starting a new session.
     should_inject_prose = phase_changed or is_new_session or announce_orientation or announce
@@ -1255,18 +1256,19 @@ async def evaluate_signal(
             # the linear intake → spec.
             route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
             lane = route_hint if route_hint else "sdd-full"
-            
+
             # Intent-based contract creation: if we're in intake and the trigger fired,
             # auto-create the first contract before gate evaluation. This eliminates
             # the fragile dependency on the agent outputting HTML comment markers.
             if phase == INTAKE_PHASE and ctx.store is not None:
                 # Generate a slug from the task (first 50 chars, sanitized)
                 import re as _re
+
                 task_text = task or "intake"
-                slug = _re.sub(r'[^a-z0-9]+', '-', task_text.lower())[:50].strip('-')
+                slug = _re.sub(r"[^a-z0-9]+", "-", task_text.lower())[:50].strip("-")
                 if not slug:
                     slug = "intake"
-                
+
                 # Check if a contract already exists for spec phase
                 existing = ctx.store.list_contracts(phase="spec", status="active")
                 if not existing:
@@ -1328,9 +1330,7 @@ async def evaluate_signal(
                     # resolve it here: the intake intent branch only binds its local
                     # when it created the first spec contract, and that local must
                     # not shadow this path for spec→design and beyond.
-                    source_contract_id, _ = _resolve_current_contract(
-                        cwd, phase, session_key
-                    )
+                    source_contract_id, _ = _resolve_current_contract(cwd, phase, session_key)
                     _auto_create_next_contract(
                         cwd,
                         to_phase,

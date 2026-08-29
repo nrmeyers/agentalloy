@@ -1216,9 +1216,7 @@ class TestArchiveAll:
         assert state_store.get_contract("build/feat-parked")["status"] == "stashed"
         assert state_store.get_contract("build/feat-live")["status"] == "cancelled"
 
-    def test_archive_all_rejects_invalid_outcome(
-        self, state_client: TestClient
-    ) -> None:
+    def test_archive_all_rejects_invalid_outcome(self, state_client: TestClient) -> None:
         resp = state_client.post("/state/archive-all", json={"outcome": "superseded"})
         assert resp.status_code == 422
 

@@ -86,9 +86,6 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # JIT push phase 2: merge related (thematic) decisions into the
         # decision block (default on — measured ~4 ms median overhead).
         "KNOWLEDGE_RELATED_ENABLED",
-        # Graph backend selection — behavioral toggle for code index and skill store.
-        "CODE_INDEX_GRAPH_BACKEND",
-        "SKILL_STORE_BACKEND",
     },
 )
 
@@ -96,8 +93,7 @@ INTENT_KEYS: frozenset[str] = frozenset(
 HOST_TOPOLOGY_KEYS: frozenset[str] = frozenset(
     {
         # Volume-resident data paths, baked to /app/data/* by the renderer.
-        "DUCKDB_PATH",
-        "FRAGMENTS_LANCE_PATH",
+        "CORPUS_STORE_PATH",
         "TELEMETRY_DB_PATH",
         # The container runs its own baked llama-server + GGUF; switching the
         # embed model is a re-embed, not a config change (EmbeddingDimMismatch).

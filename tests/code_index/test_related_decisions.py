@@ -22,8 +22,7 @@ import pytest
 from agentalloy.code_index.api.state import CodeIndexState
 from agentalloy.code_index.retrieval.hybrid import related_decisions
 from agentalloy.code_index.store import open_jobs
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
-from agentalloy.code_index.store.vector_store import LanceCodeVectorStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.config import Settings
 from agentalloy.storage.protocols import CodeSymbol
 
@@ -65,7 +64,7 @@ def _decision_symbol(qn: str, docstring: str = "", file_path: str | None = None)
 
 def test_decision_qns_returns_only_markdown_docs(tmp_path: Path) -> None:
     """UT-5: decision_qns() returns only MarkdownDoc qualified names, sorted."""
-    store = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+    store = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     store.migrate()
     store.upsert_symbols(
         [
@@ -82,7 +81,7 @@ def test_decision_qns_returns_only_markdown_docs(tmp_path: Path) -> None:
 
 def test_decision_qns_empty_repo(tmp_path: Path) -> None:
     """UT-6: decision_qns() returns [] when no MarkdownDoc symbols."""
-    store = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+    store = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     store.migrate()
     store.upsert_symbols(
         [
@@ -100,8 +99,8 @@ def test_decision_qns_empty_repo(tmp_path: Path) -> None:
 
 def test_search_similar_where_predicate(tmp_path: Path) -> None:
     """UT-1: search_similar with `where` predicate filters correctly."""
-    db_path = tmp_path / "vectors.lance"
-    store = LanceCodeVectorStore(db_path)
+    db_path = tmp_path / "graph.overgraph"
+    store = OverGraphCodeGraphStore(db_path)
     store.bulk_replace(
         [
             vector_row(
@@ -131,8 +130,8 @@ def test_search_similar_where_predicate(tmp_path: Path) -> None:
 
 def test_search_bm25_where_predicate(tmp_path: Path) -> None:
     """UT-2: search_bm25 with `where` predicate filters correctly."""
-    db_path = tmp_path / "vectors.lance"
-    store = LanceCodeVectorStore(db_path)
+    db_path = tmp_path / "graph.overgraph"
+    store = OverGraphCodeGraphStore(db_path)
     store.bulk_replace(
         [
             vector_row(

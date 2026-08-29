@@ -815,11 +815,11 @@ class TestGeneratedRunCommandEnvForwarding:
         env, _ = self._generated_env(
             monkeypatch,
             tmp_path,
-            "DUCKDB_PATH=/host/evil.duck\nCODE_INDEX_DATA_DIR=/host/idx\n"
+            "CORPUS_STORE_PATH=/host/evil.overgraph\nCODE_INDEX_DATA_DIR=/host/idx\n"
             "RUNTIME_EMBED_BASE_URL=http://localhost:9999\n",
         )
         # Baked container values win; host-topology keys are dropped entirely.
-        assert env["DUCKDB_PATH"] == "/app/data/agentalloy.duck"
+        assert env["CORPUS_STORE_PATH"] == "/app/data/agentalloy.overgraph"
         assert "CODE_INDEX_DATA_DIR" not in env
         assert "RUNTIME_EMBED_BASE_URL" not in env
 
@@ -831,8 +831,7 @@ class TestGeneratedRunCommandEnvForwarding:
         assert secret, "the ingest secret must be baked into the container env"
         assert env == {
             "AGENTALLOY_PACKS": "all",
-            "DUCKDB_PATH": "/app/data/agentalloy.duck",
-            "FRAGMENTS_LANCE_PATH": "/app/data/fragments.lance",
+            "CORPUS_STORE_PATH": "/app/data/agentalloy.overgraph",
             "TELEMETRY_DB_PATH": "/app/data/telemetry.duck",
             "AGENTALLOY_RUNTIME_STATE_DIR": "/app/data/runtime-state",
             "LOG_LEVEL": "info",

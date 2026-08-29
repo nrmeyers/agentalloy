@@ -837,9 +837,7 @@ def test_artifact_contains_advisory_names_missing_sections(tmp_path: Path):
     store.migrate()
     try:
         store.put_contract("design/feat-a", phase="design", slug="feat-a")
-        store.set_artifact(
-            "design", "feat-a", "approach.artifact", "# Doc\n\n## Overview\n..."
-        )
+        store.set_artifact("design", "feat-a", "approach.artifact", "# Doc\n\n## Overview\n...")
         gate = {
             "artifact_contains": {
                 "phase": "design",

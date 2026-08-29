@@ -28,9 +28,8 @@ from agentalloy.retrieval.domain import (
     retrieve_domain_candidates,
 )
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.protocols import FragmentStore
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from tests.support import StubLMClient
 
 # --------------------------------------------------------------------------
@@ -201,15 +200,15 @@ def test_only_top_three_skills_expanded() -> None:
 
 
 @pytest.fixture
-def populated(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def populated(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 @pytest.fixture
-def vectors(corpus_dir: Path) -> FragmentStore:
-    """Pre-embedded Lance fragment store from the shared corpus template
-    (StubLMClient vectors + rebuilt FTS index)."""
-    return LanceFragmentStore(corpus_dir / "fragments.lance")
+def vectors(populated: OverGraphSkillStore) -> FragmentStore:
+    """Unified corpus store — the fragment/vector leg is the same store as
+    ``populated`` (StubLMClient vectors + rebuilt FTS index)."""
+    return populated
 
 
 def _retrieve(cache: RuntimeCache, vectors: FragmentStore) -> list[str]:
@@ -227,7 +226,7 @@ def _retrieve(cache: RuntimeCache, vectors: FragmentStore) -> list[str]:
 
 
 def test_flag_off_is_byte_identical(
-    populated: DuckDBSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
+    populated: OverGraphSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """RETRIEVAL_GRAPH_EXPAND unset/off → identical candidate ids to a corpus
     that has graph edges but the flag disabled (same guarantee as card-index
@@ -254,7 +253,7 @@ def test_flag_off_is_byte_identical(
 
 
 def test_flag_on_appends_required_without_displacing(
-    populated: DuckDBSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
+    populated: OverGraphSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache = load_runtime_cache(populated)
     # Find a real top-ranked skill, then declare it requires a skill that is

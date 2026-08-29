@@ -26,7 +26,7 @@ from agentalloy.api.state_router import (
     get_state_store,
 )
 from agentalloy.api.state_router import router as state_router
-from agentalloy.storage.state_store import DuckDBStateStore, open_state_store
+from agentalloy.storage.state_store import open_state_store
 
 _ARTIFACT_PATH = "/state/artifact"
 
@@ -92,9 +92,7 @@ class TestJsonBodyTolerance:
 class TestActionableBody422:
     """Unparseable bodies return the transport fix, not a validation dump."""
 
-    def test_genuine_form_fields_get_actionable_message(
-        self, tolerant_client: TestClient
-    ) -> None:
+    def test_genuine_form_fields_get_actionable_message(self, tolerant_client: TestClient) -> None:
         resp = tolerant_client.put(
             _artifact_url(),
             content=b"phase=plan&slug=ct-probe&name=probe.artifact",
@@ -113,9 +111,7 @@ class TestActionableBody422:
         assert isinstance(detail, str)
         assert "Content-Type: application/json" in detail
 
-    def test_field_validation_422_keeps_default_shape(
-        self, tolerant_client: TestClient
-    ) -> None:
+    def test_field_validation_422_keeps_default_shape(self, tolerant_client: TestClient) -> None:
         # Missing required fields: loc is ("body", <field>), type "missing" —
         # not a parse failure, so the default list-of-errors shape is kept.
         resp = tolerant_client.put(
