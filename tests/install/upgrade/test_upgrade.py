@@ -600,18 +600,18 @@ def test_installed_packs_tolerates_bare_strings():
 def test_drop_legacy_corpus_files_removes_v4_artifacts(tmp_path: Any):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
-    (corpus / "agentalloy.duck").write_text("v5")  # new engine — must survive
+    (corpus / "agentalloy.overgraph").write_text("v5")  # new engine — must survive
     (corpus / "skills.duck").write_text("v4")
     lady = corpus / "ladybug"  # ladybug has shipped as a dir
     lady.mkdir()
     (lady / "node.kz").write_text("kuzu")
-    settings = MagicMock(duckdb_path=str(corpus / "agentalloy.duck"))
+    settings = MagicMock(corpus_store_path=str(corpus / "agentalloy.overgraph"))
     with patch("agentalloy.config.get_settings", return_value=settings):
         removed = up._drop_legacy_corpus_files()
     assert set(removed) == {"skills.duck", "ladybug"}
     assert not (corpus / "skills.duck").exists()
     assert not lady.exists()
-    assert (corpus / "agentalloy.duck").exists()  # v5 files untouched
+    assert (corpus / "agentalloy.overgraph").exists()  # v5 files untouched
     # idempotent — nothing left to remove
     with patch("agentalloy.config.get_settings", return_value=settings):
         assert up._drop_legacy_corpus_files() == []

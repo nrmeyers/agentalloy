@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.health_router import HealthChecker, HealthResponse
 from agentalloy.runtime_state import load_runtime_cache
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -25,8 +25,8 @@ from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 
 @pytest.fixture
-def store(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def store(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def store(corpus_dir: Path) -> DuckDBSkillStore:
 # ---------------------------------------------------------------------------
 
 
-def test_load_runtime_cache_populates_skills(store: DuckDBSkillStore) -> None:
+def test_load_runtime_cache_populates_skills(store: OverGraphSkillStore) -> None:
     """AC-1: after loading, all active skills are available in the cache."""
     cache = load_runtime_cache(store)
 
@@ -43,7 +43,7 @@ def test_load_runtime_cache_populates_skills(store: DuckDBSkillStore) -> None:
     assert len(cache.get_active_skills()) == 8
 
 
-def test_load_runtime_cache_populates_fragments(store: DuckDBSkillStore) -> None:
+def test_load_runtime_cache_populates_fragments(store: OverGraphSkillStore) -> None:
     """AC-1: all active fragments are in the cache."""
     cache = load_runtime_cache(store)
 
@@ -52,7 +52,7 @@ def test_load_runtime_cache_populates_fragments(store: DuckDBSkillStore) -> None
     assert len(fragments) == cache.fragment_count
 
 
-def test_cache_get_active_skill_by_id_returns_correct_skill(store: DuckDBSkillStore) -> None:
+def test_cache_get_active_skill_by_id_returns_correct_skill(store: OverGraphSkillStore) -> None:
     """AC-1: by-id lookup works from cache."""
     cache = load_runtime_cache(store)
 
@@ -66,13 +66,13 @@ def test_cache_get_active_skill_by_id_returns_correct_skill(store: DuckDBSkillSt
     assert result.canonical_name == first.canonical_name
 
 
-def test_cache_get_active_skill_by_id_missing_returns_none(store: DuckDBSkillStore) -> None:
+def test_cache_get_active_skill_by_id_missing_returns_none(store: OverGraphSkillStore) -> None:
     """AC-1: unknown skill_id returns None without error."""
     cache = load_runtime_cache(store)
     assert cache.get_active_skill_by_id("does-not-exist") is None
 
 
-def test_cache_skill_class_filter(store: DuckDBSkillStore) -> None:
+def test_cache_skill_class_filter(store: OverGraphSkillStore) -> None:
     """AC-1: skill_class filter works in-memory."""
     cache = load_runtime_cache(store)
 
@@ -85,7 +85,7 @@ def test_cache_skill_class_filter(store: DuckDBSkillStore) -> None:
     assert all(s.skill_class == "system" for s in system)
 
 
-def test_cache_fragment_filter_by_category(store: DuckDBSkillStore) -> None:
+def test_cache_fragment_filter_by_category(store: OverGraphSkillStore) -> None:
     """AC-1: category filter narrows fragment list."""
     cache = load_runtime_cache(store)
 
@@ -97,7 +97,7 @@ def test_cache_fragment_filter_by_category(store: DuckDBSkillStore) -> None:
     assert all(f.category == "design" for f in design_frags)
 
 
-def test_cache_version_detail_populated(store: DuckDBSkillStore) -> None:
+def test_cache_version_detail_populated(store: OverGraphSkillStore) -> None:
     """AC-1: version detail (raw_prose, author, etc.) is cached and retrievable."""
     cache = load_runtime_cache(store)
 
@@ -110,7 +110,7 @@ def test_cache_version_detail_populated(store: DuckDBSkillStore) -> None:
     assert isinstance(detail.author, str)
 
 
-def test_cache_fragments_for_skill(store: DuckDBSkillStore) -> None:
+def test_cache_fragments_for_skill(store: OverGraphSkillStore) -> None:
     """AC-1: per-skill fragment retrieval from cache is ordered by sequence."""
     cache = load_runtime_cache(store)
 
@@ -129,7 +129,7 @@ def test_cache_fragments_for_skill(store: DuckDBSkillStore) -> None:
 
 def test_reload_reflects_new_active_data(corpus_dir: Path) -> None:
     """AC-2: a new cache load (simulating restart) picks up re-seeded data."""
-    s = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+    s = open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
     cache_v1 = load_runtime_cache(s)
     skill_ids_v1 = {sk.skill_id for sk in cache_v1.get_active_skills()}
@@ -146,7 +146,7 @@ def test_reload_reflects_new_active_data(corpus_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cache_reads_do_not_hit_store_after_load(store: DuckDBSkillStore) -> None:
+def test_cache_reads_do_not_hit_store_after_load(store: OverGraphSkillStore) -> None:
     """AC-3: once loaded, cache reads are pure in-memory — store is not consulted."""
     cache = load_runtime_cache(store)
 
@@ -226,8 +226,7 @@ def test_health_reports_healthy_when_cache_loaded(app: FastAPI) -> None:
 def test_health_checker_runtime_load_error_propagates() -> None:
     """AC-4: HealthChecker built with runtime_load_error reports it in dependencies."""
 
-    mock_store = MagicMock(spec=DuckDBSkillStore)
-    mock_store.scalar.return_value = 1
+    mock_store = MagicMock(spec=OverGraphSkillStore)
     mock_lm = MagicMock()
     mock_lm.list_models.return_value = ["embed-model", "assembly-model"]
 
@@ -260,11 +259,12 @@ def test_health_checker_runtime_load_error_propagates() -> None:
 
 def test_load_runtime_cache_raises_on_store_error(tmp_path: Path) -> None:
     """AC-4: load_runtime_cache propagates errors so lifespan can catch them."""
-    s = open_skill_store(str(tmp_path / "agentalloy.duck"))
+    s = open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
     # Do NOT load fixtures — store has no active skills, but that's fine (returns empty).
-    # Simulate a store error by patching execute to raise.
+    # Simulate a store error by patching the consistency guard (the first store
+    # call load_runtime_cache makes via the reads layer) to raise.
     with (
-        patch.object(s, "execute", side_effect=RuntimeError("store exploded")),
+        patch.object(s, "check_consistency", side_effect=RuntimeError("store exploded")),
         pytest.raises(RuntimeError, match="store exploded"),
     ):
         load_runtime_cache(s)

@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from agentalloy.code_index.ingest.entity_extract import (
     extract_entities_from_chunk,
 )
 from agentalloy.code_index.ingest.markdown import MarkdownChunk
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.config import Settings
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
@@ -70,16 +71,16 @@ def make_chunk(
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
 
 
 @pytest.fixture
-def populated_store(tmp_path: Path) -> DuckDBCodeGraphStore:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def populated_store(tmp_path: Path) -> OverGraphCodeGraphStore:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     s.upsert_symbols(
         [
@@ -122,7 +123,7 @@ def populated_store(tmp_path: Path) -> DuckDBCodeGraphStore:
 class TestPatternMatching:
     """UT-1: pattern matching for each edge kind."""
 
-    def test_constraints_must_not_touch(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_constraints_must_not_touch(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="The auth middleware must not touch src/auth/middleware.py — "
             "legal flagged it for storing session tokens.",
@@ -134,7 +135,7 @@ class TestPatternMatching:
         # dst_fqn should be the resolved symbol fqn (or subject if unresolved)
         assert constraint_edges[0].dst_fqn == "src/auth/middleware.py"
 
-    def test_constraints_is_prohibited(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_constraints_is_prohibited(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="src/code_index/ingest/pipeline.py is prohibited from editing without approval.",
         )
@@ -145,7 +146,7 @@ class TestPatternMatching:
         # Subject is resolved as dst
         assert constraint_edges[0].dst_fqn == "src/code_index/ingest/pipeline.py"
 
-    def test_constraints_cannot(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_constraints_cannot(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="The pipeline cannot modify src/code_index/store/graph_store.py directly.",
         )
@@ -156,7 +157,7 @@ class TestPatternMatching:
         # Subject is resolved as dst
         assert constraint_edges[0].dst_fqn == "src/code_index/store/graph_store.py"
 
-    def test_touches_affects(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_touches_affects(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="Editing src/code_index/ingest/pipeline.py affects src/code_index/store/jobs_store.py.",
         )
@@ -168,7 +169,7 @@ class TestPatternMatching:
         assert touch_edges[0].dst_fqn == "src/code_index/store/jobs_store.py"
 
     def test_touches_unresolvable_target_dropped(
-        self, populated_store: DuckDBCodeGraphStore
+        self, populated_store: OverGraphCodeGraphStore
     ) -> None:
         """Regression 2.5d: an unresolved target is dropped, not re-pointed at
         the subject (the old fallback inverted REQUIRES/TOUCHES direction)."""
@@ -180,7 +181,7 @@ class TestPatternMatching:
         # edge is emitted at all.
         assert [e for e in edges if e.kind == "TOUCHES"] == []
 
-    def test_requires_depends_on(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_requires_depends_on(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="agentalloy.api.knowledge_push depends on src/auth/middleware.py "
             "for the code index API.",
@@ -192,7 +193,7 @@ class TestPatternMatching:
         # dst_fqn is the resolved dependency — the target, not the subject.
         assert require_edges[0].dst_fqn == "src/auth/middleware.py"
 
-    def test_command_backtick(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_command_backtick(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="Run `gh pr create` to open the PR, or use `npx skills add` for installation.",
         )
@@ -202,7 +203,7 @@ class TestPatternMatching:
         assert command_edges[0].kind == "COMMAND"
         assert command_edges[0].dst_fqn == ""  # standalone
 
-    def test_stakeholder_legal_flagged(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_stakeholder_legal_flagged(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(
             body="Legal flagged auth middleware for storing session tokens in a way that doesn't meet compliance.",
         )
@@ -212,7 +213,7 @@ class TestPatternMatching:
         assert stakeholder_edges[0].kind == "STAKEHOLDER"
         assert stakeholder_edges[0].dst_fqn == ""  # standalone
 
-    def test_no_false_positives(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_no_false_positives(self, populated_store: OverGraphCodeGraphStore) -> None:
         """Doc without entity patterns should produce zero entity edges."""
         chunk = make_chunk(
             body="This is a plain design doc with no constraints, touches, or commands.",
@@ -220,7 +221,7 @@ class TestPatternMatching:
         edges = extract_entities_from_chunk(chunk, populated_store)
         assert len(edges) == 0
 
-    def test_no_edge_when_chunk_empty(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_no_edge_when_chunk_empty(self, populated_store: OverGraphCodeGraphStore) -> None:
         chunk = make_chunk(body="")
         edges = extract_entities_from_chunk(chunk, populated_store)
         assert len(edges) == 0
@@ -234,7 +235,7 @@ class TestPatternMatching:
 class TestBoundedExtraction:
     """UT-2: bounded extraction (entities_per_doc cap, edges_per_job cap)."""
 
-    def test_entities_per_doc_cap(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_entities_per_doc_cap(self, populated_store: OverGraphCodeGraphStore) -> None:
         """When max_entities=1, only one entity is extracted even if patterns match."""
         chunk = make_chunk(
             body=(
@@ -247,7 +248,7 @@ class TestBoundedExtraction:
         assert len(edges) <= 1
 
     def test_edges_per_job_cap(
-        self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+        self, populated_store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When max_per_job=2, the index function caps total entities across all chunks."""
         import agentalloy.code_index.ingest.entity_extract as ee_mod
@@ -271,7 +272,7 @@ class TestBoundedExtraction:
         assert result.entities_written <= 2
 
     def test_entity_exhausted_flag(
-        self, populated_store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+        self, populated_store: OverGraphCodeGraphStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When a chunk produces >= max_entities, entities_exhausted is True."""
         import agentalloy.code_index.ingest.entity_extract as ee_mod
@@ -306,7 +307,7 @@ class TestBoundedExtraction:
 class TestUpsertEdgesNewKinds:
     """UT-3: upsert_edges with new kinds (no schema break)."""
 
-    def test_upsert_constraints_kind(self, store: DuckDBCodeGraphStore) -> None:
+    def test_upsert_constraints_kind(self, store: OverGraphCodeGraphStore) -> None:
         edge = CodeEdge(
             src="doc::a",
             dst="mod.b",
@@ -317,14 +318,13 @@ class TestUpsertEdgesNewKinds:
         )
         n = store.upsert_edges([edge])
         assert n == 1
-        # Should not break; kind is free string
-        rows = store.conn.execute(
-            "SELECT src, dst, kind FROM edges WHERE kind = 'CONSTRAINTS'"
-        ).fetchall()
-        assert len(rows) == 1
-        assert rows[0] == ("doc::a", "mod.b", "CONSTRAINTS")
+        # Should not break; kind is free string. Read back via the typed-edge
+        # traversal off the governed endpoint.
+        got = store.typed_edges_for_fqn("mod.b")
+        assert [e.kind for e in got] == ["CONSTRAINTS"]
+        assert got[0].src == "doc::a"
 
-    def test_upsert_standalone_command_kind(self, store: DuckDBCodeGraphStore) -> None:
+    def test_upsert_standalone_command_kind(self, store: OverGraphCodeGraphStore) -> None:
         edge = CodeEdge(
             src="doc::a",
             dst="",  # standalone
@@ -335,11 +335,10 @@ class TestUpsertEdgesNewKinds:
         )
         n = store.upsert_edges([edge])
         assert n == 1
-        rows = store.conn.execute(
-            "SELECT src, dst, kind FROM edges WHERE kind = 'COMMAND'"
-        ).fetchall()
-        assert len(rows) == 1
-        assert rows[0] == ("doc::a", "", "COMMAND")
+        got = store.typed_edges_from_chunks(["doc::a"])
+        assert [e.kind for e in got] == ["COMMAND"]
+        assert got[0].src == "doc::a" and got[0].dst == ""
+        assert got[0].span == "gh pr create"
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +349,7 @@ class TestUpsertEdgesNewKinds:
 class TestQueryEdgesByKind:
     """UT-4: query_edges(kind) returns correct edges."""
 
-    def test_typed_edges_for_fqn(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_typed_edges_for_fqn(self, populated_store: OverGraphCodeGraphStore) -> None:
         populated_store.upsert_edges(
             [
                 CodeEdge(
@@ -375,7 +374,7 @@ class TestQueryEdgesByKind:
         kinds = {e.kind for e in edges}
         assert "CONSTRAINTS" in kinds
 
-    def test_typed_edges_from_chunks(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_typed_edges_from_chunks(self, populated_store: OverGraphCodeGraphStore) -> None:
         populated_store.upsert_edges(
             [
                 CodeEdge(
@@ -404,7 +403,7 @@ class TestQueryEdgesByKind:
         assert "COMMAND" in kinds
         assert "STAKEHOLDER" in kinds
 
-    def test_typed_edges_for_fqn_empty_when_no_edges(self, store: DuckDBCodeGraphStore) -> None:
+    def test_typed_edges_for_fqn_empty_when_no_edges(self, store: OverGraphCodeGraphStore) -> None:
         edges = store.typed_edges_for_fqn("no.such.symbol")
         assert edges == []
 
@@ -471,7 +470,7 @@ class TestPipelineIntegration:
 
     def test_index_entity_edges_does_not_modify_gov_edges(
         self,
-        populated_store: DuckDBCodeGraphStore,
+        populated_store: OverGraphCodeGraphStore,
     ) -> None:
         """Entity extraction writes typed edges without affecting GOVERNS edges."""
         # Set up a GOVERNS edge
@@ -501,7 +500,7 @@ class TestPipelineIntegration:
         gov_count_after = populated_store.count_govern_edges_for_doc("docs/solutions/x.md")
         assert gov_count_before == gov_count_after
 
-    def test_entity_and_gov_edges_coexist(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_entity_and_gov_edges_coexist(self, populated_store: OverGraphCodeGraphStore) -> None:
         """Both GOVERNS and typed edges can coexist in the same graph."""
         populated_store.upsert_edges(
             [
@@ -523,21 +522,16 @@ class TestPipelineIntegration:
                 ),
             ]
         )
-        # governing_decisions returns DecisionRow (markdown docs), not edges
+        # GOVERNS exists (governing_decisions sees it)...
         gov = populated_store.governing_decisions("src/auth/middleware.py")
         assert len(gov) >= 1
-        # typed_edges_for_fqn explicitly excludes GOVERNS (entity kinds only)
-        # but we can verify GOVERNS and CONSTRAINTS coexist via raw query
+        # ...while typed_edges_for_fqn excludes GOVERNS by design (entity
+        # kinds only) — the CONSTRAINTS edge coexists beside it.
         typed = populated_store.typed_edges_for_fqn("src/auth/middleware.py")
         assert len(typed) >= 1
         kinds = {e.kind for e in typed}
         assert "CONSTRAINTS" in kinds
-        # GOVERNS exists but typed_edges_for_fqn filters it out by design
-        gov_rows = populated_store.conn.execute(
-            "SELECT src, dst, kind FROM edges WHERE dst = ? AND kind = 'GOVERNS'",
-            ["src/auth/middleware.py"],
-        ).fetchall()
-        assert len(gov_rows) >= 1
+        assert "GOVERNS" not in kinds
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +542,9 @@ class TestPipelineIntegration:
 class TestContractIngestion:
     """CT-1: ingestion job with entity prose produces typed edges."""
 
-    def test_entity_extraction_produces_result(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_entity_extraction_produces_result(
+        self, populated_store: OverGraphCodeGraphStore
+    ) -> None:
         """Running entity extraction on a chunk with entity prose returns a valid result."""
         chunk = make_chunk(
             qualified_name="docs/design/x/approach.md::design",
@@ -568,13 +564,15 @@ class TestContractIngestion:
         kinds = set(result.entity_counts_by_kind.keys())
         assert "CONSTRAINTS" in kinds or "TOUCHES" in kinds or "REQUIRES" in kinds
 
-    def test_entity_extraction_empty_chunk(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_entity_extraction_empty_chunk(self, populated_store: OverGraphCodeGraphStore) -> None:
         """Empty chunk produces zero entities."""
         result = _index_entity_edges(populated_store, [make_chunk(body="")], Settings())
         assert result.entities_written == 0
         assert result.entity_counts_by_kind == {}
 
-    def test_entity_extraction_multiple_chunks(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_entity_extraction_multiple_chunks(
+        self, populated_store: OverGraphCodeGraphStore
+    ) -> None:
         """Multiple chunks produce aggregated entities."""
         chunks = [
             make_chunk(
@@ -605,15 +603,18 @@ class TestReindexDedup:
     delete-then-insert, N reindex runs leave N copies of the same edge.
     """
 
-    def _entity_edge_count(self, store: DuckDBCodeGraphStore) -> int:
-        return int(
-            store.conn.execute(
-                "SELECT count(*) FROM edges WHERE kind IN "
-                "('REQUIRES','TOUCHES','CONSTRAINTS','COMMAND','STAKEHOLDER')"
-            ).fetchone()[0]
-        )
+    def _entity_edge_count(self, store: OverGraphCodeGraphStore) -> int:
+        total = 0
+        for label in ("Requires", "Touches", "Constraints", "Command", "Stakeholder"):
+            with contextlib.suppress(Exception):
+                total += len(
+                    store._db.get_edges_by_label(label)  # pyright: ignore[reportPrivateUsage]
+                )
+        return total
 
-    def test_reindex_twice_no_duplicate_edges(self, populated_store: DuckDBCodeGraphStore) -> None:
+    def test_reindex_twice_no_duplicate_edges(
+        self, populated_store: OverGraphCodeGraphStore
+    ) -> None:
         chunk = make_chunk(
             qualified_name="docs/design/x/approach.md::design",
             file_path="docs/design/x/approach.md",
@@ -636,7 +637,7 @@ class TestReindexDedup:
         assert count_after_second == count_after_first
 
     def test_reindex_across_two_docs_dedups_per_doc(
-        self, populated_store: DuckDBCodeGraphStore
+        self, populated_store: OverGraphCodeGraphStore
     ) -> None:
         """Two docs re-derived together: each doc's edges are cleared and
         re-inserted, so the total stays flat across runs."""

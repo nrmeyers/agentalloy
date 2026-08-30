@@ -3,7 +3,7 @@
 Covers the four guarantees the design requires:
 
 (a) ``prefix`` mode changes the embedded/BM25-indexed text but never the stored
-    fragment ``content`` (SkillStore / agentalloy.duck) returned by reads;
+    fragment ``content`` (SkillStore / corpus store) returned by reads;
 (b) cards rank (boost their skill) but never assemble — ``_apply_card_boost``;
 (c) ``off`` mode is a byte-identical no-op vs the pre-Stage-0 index;
 (d) the ``description`` column round-trips through ingest and reads.
@@ -36,9 +36,11 @@ from agentalloy.storage.card_index import (
     is_card_id,
     skill_id_from_card_id,
 )
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import (
+    OverGraphSkillStore,
+    open_overgraph_skill_store,
+)
 from agentalloy.storage.protocols import FragmentEmbedding
-from agentalloy.storage.skill_store import open_skill_store
 from tests.support import StubLMClient
 
 # --------------------------------------------------------------------------
@@ -79,17 +81,10 @@ def _stub_embed_fn() -> tuple[list[str], object]:
     return captured, embed_fn
 
 
-def _prose_of(vs: LanceFragmentStore, fragment_id: str) -> str:
-    safe = fragment_id.replace("'", "''")
-    rows = (
-        vs._table.search()  # pyright: ignore[reportPrivateUsage]
-        .where(f"fragment_id = '{safe}'")
-        .select(["prose"])
-        .limit(1)
-        .to_list()
-    )
-    assert rows
-    return str(rows[0]["prose"])
+def _prose_of(vs: OverGraphSkillStore, fragment_id: str) -> str:
+    node = vs._db.get_node_by_key("Fragment", fragment_id)  # pyright: ignore[reportPrivateUsage]
+    assert node is not None
+    return str(node.props.get("prose", ""))
 
 
 # --------------------------------------------------------------------------
@@ -143,7 +138,7 @@ def test_indexed_text_prefix_prepends_header() -> None:
 
 
 def test_prefix_mode_indexes_header_but_stores_body_unchanged(tmp_path: Path) -> None:
-    vs = LanceFragmentStore(tmp_path / "vectors.lance")
+    vs = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     captured, embed_fn = _stub_embed_fn()
     frag = _frag("f1", "BODY TEXT")
 
@@ -166,25 +161,20 @@ def test_prefix_mode_indexes_header_but_stores_body_unchanged(tmp_path: Path) ->
 
 def test_prefix_mode_leaves_skill_store_content_untouched(tmp_path: Path) -> None:
     """The SkillStore Fragment.content (source of /compose prose) is never
-    rewritten by card indexing — only the Lance indexed representation is."""
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    rewritten by card indexing — only the indexed representation is."""
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(yaml_file), "--yes"]) == EXIT_OK
 
-    store.open()
-    content = store.scalar(
-        """
-        SELECT f.content FROM fragments f
-        JOIN skill_versions v ON v.version_id = f.version_id
-        WHERE v.skill_id = 'test-domain-skill' AND f.sequence = 1
-        """
-    )
-    store.close()
-    # The stored content has no card header — prefix mode only touched the Lance index.
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    frags = ro.get_active_fragments_for_skill("test-domain-skill")
+    ro.close()
+    content = next(f.content for f in frags if f.sequence == 1)
+    # The stored content has no card header — prefix mode only touched the index.
     assert content is not None
     assert not str(content).startswith("skill:")
 
@@ -200,7 +190,7 @@ def test_indexed_text_off_is_identity() -> None:
 
 
 def test_off_mode_prose_equals_content(tmp_path: Path) -> None:
-    vs = LanceFragmentStore(tmp_path / "vectors.lance")
+    vs = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     captured, embed_fn = _stub_embed_fn()
     frag = _frag("f1", "BODY TEXT")
 
@@ -220,7 +210,7 @@ def test_off_mode_matches_default(tmp_path: Path) -> None:
     """``card_index=OFF`` is the default — explicit OFF == omitting the arg."""
     frag = _frag("f1", "BODY TEXT")
 
-    vs_default = LanceFragmentStore(tmp_path / "a.lance")
+    vs_default = open_overgraph_skill_store(str(tmp_path / "corpus-a.overgraph"))
     _, fn_a = _stub_embed_fn()
     reembed_fragments(
         [frag],
@@ -229,7 +219,7 @@ def test_off_mode_matches_default(tmp_path: Path) -> None:
         embedding_model="stub",  # type: ignore[arg-type]
     )
 
-    vs_off = LanceFragmentStore(tmp_path / "b.lance")
+    vs_off = open_overgraph_skill_store(str(tmp_path / "corpus-b.overgraph"))
     _, fn_b = _stub_embed_fn()
     reembed_fragments(
         [frag],
@@ -297,7 +287,7 @@ def test_card_boost_keeps_real_order_when_card_ranks_low() -> None:
 # --------------------------------------------------------------------------
 
 
-def _insert_card(vs: LanceFragmentStore, skill_id: str) -> None:
+def _insert_card(vs: OverGraphSkillStore, skill_id: str) -> None:
     stub = StubLMClient()
     vs.insert_embeddings(
         [
@@ -316,7 +306,7 @@ def _insert_card(vs: LanceFragmentStore, skill_id: str) -> None:
 
 
 def test_delete_cards_unscoped_drops_all(tmp_path: Path) -> None:
-    vs = LanceFragmentStore(tmp_path / "v.lance")
+    vs = open_overgraph_skill_store(str(tmp_path / "corpus-v.overgraph"))
     _insert_card(vs, "sk-1")
     _insert_card(vs, "sk-2")
     assert vs.count_cards() == 2
@@ -326,7 +316,7 @@ def test_delete_cards_unscoped_drops_all(tmp_path: Path) -> None:
 
 def test_delete_cards_scoped_drops_only_that_skill(tmp_path: Path) -> None:
     """The fix: a skill-scoped rebuild must not wipe other skills' cards."""
-    vs = LanceFragmentStore(tmp_path / "v.lance")
+    vs = open_overgraph_skill_store(str(tmp_path / "corpus-v.overgraph"))
     _insert_card(vs, "sk-1")
     _insert_card(vs, "sk-2")
 
@@ -335,14 +325,8 @@ def test_delete_cards_scoped_drops_only_that_skill(tmp_path: Path) -> None:
     assert dropped == 1
     assert vs.count_cards() == 1
     # sk-2's card survives the scoped delete.
-    rows = (
-        vs._table.search()  # pyright: ignore[reportPrivateUsage]
-        .where(f"fragment_type = '{CARD_FRAGMENT_TYPE}'")
-        .select(["skill_id"])
-        .limit(10)
-        .to_list()
-    )
-    assert len(rows) == 1 and rows[0]["skill_id"] == "sk-2"
+    assert vs.fragment_ids_present([card_fragment_id("sk-2")]) == {card_fragment_id("sk-2")}
+    assert vs.fragment_ids_present([card_fragment_id("sk-1")]) == set()
 
 
 # --------------------------------------------------------------------------
@@ -373,8 +357,8 @@ def test_load_yaml_defaults_description_blank(tmp_path: Path) -> None:
 
 
 def test_description_round_trips_through_ingest(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     yaml_file = tmp_path / "domain.yaml"
@@ -382,17 +366,17 @@ def test_description_round_trips_through_ingest(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(yaml_file), "--yes"]) == EXIT_OK
 
-    store.open()
-    skill = get_active_skill_by_id(store, "test-domain-skill")
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = get_active_skill_by_id(ro, "test-domain-skill")
+    ro.close()
     assert skill is not None
     assert skill.description == "my skill description"
 
 
 def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
     """No ``description:`` → "" on the record → NULL on insert → None on read."""
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     yaml_file = tmp_path / "domain.yaml"
@@ -400,9 +384,9 @@ def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
         assert ingest_main([str(yaml_file), "--yes"]) == EXIT_OK
 
-    store.open()
-    skill = get_active_skill_by_id(store, "test-domain-skill")
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = get_active_skill_by_id(ro, "test-domain-skill")
+    ro.close()
     assert skill is not None
     assert skill.description is None
 
@@ -414,7 +398,7 @@ def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
 
 class _FakeSettings:
     def __init__(self, db_path: str) -> None:
-        self.duckdb_path = db_path
+        self.corpus_store_path = db_path
 
 
 _DOMAIN_YAML = textwrap.dedent("""\

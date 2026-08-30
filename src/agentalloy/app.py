@@ -28,6 +28,7 @@ from agentalloy.api.diagnostics_router import DiagnosticsChecker
 from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker, ReadinessChecker
 from agentalloy.api.health_router import router as health_router
+from agentalloy.api.json_body import install_json_body_tolerances
 from agentalloy.api.proxy_passthrough_router import router as passthrough_router
 from agentalloy.api.proxy_responses_router import router as responses_router
 from agentalloy.api.proxy_router import router as proxy_router
@@ -54,7 +55,7 @@ from agentalloy.orchestration.compose import (
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersionError
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
-from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
+from agentalloy.storage.open import open_skills, open_telemetry
 from agentalloy.storage.state_store import bind_process_store, open_state_store
 from agentalloy.telemetry import DuckDBTelemetryWriter
 from agentalloy.telemetry.phase_writer import PhaseTelemetryWriter
@@ -106,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     endpoint reflects ``unavailable`` while runtime handlers 503.
 
     In tests we override ``get_orchestrator`` via ``app.dependency_overrides``
-    so no real DuckDB/Lance or embedding connection is created.
+    so no real store or embedding connection is created.
     """
     settings = get_settings()
     settings.ensure_data_dirs()
@@ -120,21 +121,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Read-only /app mount (or similar): best-effort — the dir may
             # already exist or be baked into the image. Don't crash startup.
             logger.warning("could not create /app/data: %s", exc)
-    # Ensure the skill schema exists, then serve it READ-ONLY for the app's
-    # lifetime. DuckDB grants a writer only while nothing else holds the file
-    # — this read-only handle included — so out-of-process writers (the
-    # reembed / install-pack CLIs) stop this service first (`agentalloy
-    # reembed` does so automatically), and in-process writers (web reembed /
-    # wizard install) wrap the write in ``store.released()``. The brief
-    # writer-migrate here runs before serving begins. Fragments live in Lance
-    # (MVCC, no lock); telemetry is a separate service-owned RW file.
+    # Ensure the store schema exists, then serve it READ-ONLY for the app's
+    # lifetime. The OverGraph store is single-writer (its BM25 sidecar takes
+    # an exclusive lock), so out-of-process writers (the reembed /
+    # install-pack CLIs) stop this service first (`agentalloy reembed` does
+    # so automatically), and in-process writers (web reembed / wizard
+    # install) wrap the write in ``store.released()``. The brief
+    # writer-migrate here runs before serving begins. Fragments and skills
+    # are the SAME unified store, so the read-only handle serves both
+    # surfaces. Telemetry is a separate service-owned RW DuckDB file.
     _writer = open_skills(settings, read_only=False)
     try:
         _writer.migrate()
     finally:
         _writer.close()
     store = open_skills(settings, read_only=True)
-    vector_store = open_fragments(settings)
+    vector_store = store
     telemetry_store = open_telemetry(settings, read_only=False)
     embed_client: EmbedClient = get_embed_client(settings)
     telemetry = DuckDBTelemetryWriter(telemetry_store)
@@ -150,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # (``get_repo_store``); the deployment repo is only the default for callers
     # that send no ``repo_root``.  The re-key drains the pre-task-11 bucket,
     # where the key came from the DB filename and every repo shared one row.
-    state_db_path = str(Path(settings.duckdb_path).parent / "state.duck")
+    state_db_path = str(Path(settings.corpus_store_path).parent / "state.duck")
     deployment_root = os.environ.get("AGENTALLOY_PROJECT_DIR") or str(Path.cwd())
     state_store = open_state_store(state_db_path, repo=_repo_key_for(deployment_root))
     try:
@@ -237,12 +239,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.telemetry_querier = TelemetryQuerier(telemetry_store)
     # Expose for proxy router dependencies
     app.state.embed_client = embed_client
-    # The Lance fragment store (vector + BM25). Name kept as ``vector_store`` for
-    # the diagnostics/proxy app.state contract; it is a FragmentStore in v5.
+    # The unified corpus store (vector + BM25). Name kept as ``vector_store``
+    # for the diagnostics/proxy app.state contract; it is a FragmentStore.
     app.state.vector_store = vector_store
     # Service-owned telemetry.duck handle — the proxy trace writers and the
     # telemetry querier record/read composition traces here (decoupled from the
-    # skill graph + Lance index so the reembed writer never contends — D4).
+    # skill graph + vector index so the reembed writer never contends — D4).
     app.state.telemetry_store = telemetry_store
     # Phase-event writer (task 04) — the proxy router / signal layer read this
     # to avoid constructing a fresh writer (and re-running its schema DDL) on
@@ -398,7 +400,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bind_process_store(None)
         # Guard each close independently: a failure in one (e.g. an in-flight
         # passthrough request at shutdown) must not skip the rest and leak the
-        # DuckDB / Lance connections.
+        # store connections.
         cached_upstreams = list(getattr(app.state, "upstream_client_cache", {}).values())
         for aclient in (embed_async_client, upstream_client, *cached_upstreams):
             if aclient is not None:
@@ -447,9 +449,10 @@ def _stage_error_response(stage: str, err: object) -> JSONResponse:
 def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     """Build the FastAPI app.
 
-    ``use_default_lifespan=False`` skips the production lifespan (which opens the
-    DuckDB/Lance stores and the embedding client). Tests pass ``False`` and wire
-    their own dependency overrides via ``app.dependency_overrides``.
+    ``use_default_lifespan=False`` skips the production lifespan (which opens
+    the corpus/state/telemetry stores and the embedding client). Tests pass
+    ``False`` and wire their own dependency overrides via
+    ``app.dependency_overrides``.
     """
     configure_logging()
     settings = get_settings()
@@ -459,6 +462,10 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
         description="Just-in-time context engine: instruction composition + code index.",
         lifespan=lifespan if use_default_lifespan else None,
     )
+
+    # Agents hand-roll these calls (curl --data, urllib) and routinely mistag
+    # a JSON body as form-urlencoded; accept the valid JSON anyway.
+    install_json_body_tolerances(app)
 
     @app.exception_handler(RetrievalStageError)
     async def _retrieval_handler(_req: Request, err: RetrievalStageError) -> JSONResponse:

@@ -25,56 +25,16 @@ from agentalloy.code_index.api.models import (
     WatchToggleRequest,
     WatchToggleView,
 )
+from agentalloy.code_index.api.prune_rules import (
+    PRUNE_GRACE_SECONDS,
+    absence_is_corroborated,
+    prunable_store_dir,
+)
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
 from agentalloy.code_index.ingest.watch import WatchCapacityError
-from agentalloy.code_index.store import IndexedRepo, code_index_paths, open_code_index
+from agentalloy.code_index.store import code_index_paths, open_code_index
 
 router = APIRouter()
-
-#: A checkout must be observed absent at least this long before its index is
-#: deleted. Long enough that an unattended upgrade run during a down mount or a
-#: mid-move worktree only ever stamps the clock; short enough that dead rows do
-#: not accumulate across a normal upgrade cadence.
-PRUNE_GRACE_SECONDS = 7 * 24 * 3600
-
-
-def _absence_is_corroborated(repo_path: Path) -> bool:
-    """True when the checkout looks deleted rather than merely unreachable.
-
-    A removed worktree leaves its parent directory in place. A down NFS mount,
-    an unplugged drive, or an unmounted volume takes whole ancestors with it —
-    so an absent path whose parent is also absent is not evidence of deletion,
-    and must never start the prune clock.
-    """
-    parent = repo_path.parent
-    return parent != repo_path and parent.is_dir()
-
-
-def _prunable_store_dir(
-    state: CodeIndexState,
-    repo: IndexedRepo,
-    survivors: list[IndexedRepo],
-) -> Path | None:
-    """The directory a dead registry row owns outright, or None.
-
-    The registry is keyed ``(slug, repo_path)``, so several checkouts share a
-    slug — which is the whole reason the per-checkout layout exists. A dead row
-    still in the legacy layout owns ``repos/{slug}/``, the *parent* of every
-    live sibling's store, so deleting it by slug alone would wipe indexes that
-    are still in use. Only delete a directory no surviving row lives in or
-    under.
-    """
-    own = Path(repo.data_dir)
-    if not own.exists():
-        return None
-    for other in survivors:
-        for cand in (
-            Path(other.data_dir),
-            code_index_paths(state.settings, other.slug, repo_path=other.repo_path).repo_dir,
-        ):
-            if cand == own or own in cand.parents:
-                return None
-    return own
 
 
 def _git_current_head(repo_path: Path) -> str | None:
@@ -125,8 +85,8 @@ async def repo_stats(
         raise HTTPException(status_code=404, detail=f"no index for repo: {slug}")
 
     def _collect() -> RepoStats:
-        # "service" role matches the job writer's connection config so DuckDB's
-        # in-process instance cache shares the database with a running job.
+        # "service" role opens read-only so these stats reads never contend
+        # with a running index job's writes.
         handles = open_code_index(state.settings, slug, role="service", repo_path=repo.repo_path)
         try:
             return RepoStats(
@@ -272,7 +232,7 @@ async def migrate_layout(
             continue
 
         if not repo_path.is_dir():
-            corroborated = _absence_is_corroborated(repo_path)
+            corroborated = absence_is_corroborated(repo_path)
             verdict = "missing" if corroborated else "unreachable"
             counts[verdict] += 1
             action = "none"
@@ -316,7 +276,7 @@ async def migrate_layout(
                 ]
                 if state.watch is not None and not any(r.slug == repo.slug for r in survivors):
                     state.watch.stop(repo.slug)
-                target = _prunable_store_dir(state, repo, survivors)
+                target = prunable_store_dir(state, repo, survivors)
                 if target is not None:
                     await asyncio.to_thread(shutil.rmtree, target, True)
                 state.jobs.delete_repo(repo.slug, repo_path=repo.repo_path)

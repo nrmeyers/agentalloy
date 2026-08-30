@@ -71,7 +71,7 @@ stamp_value() {
 # still refresh.
 NEED_SEED=false
 if [ -f "$SEED_DIR/corpus-stamp.json" ]; then
-    if [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then
+    if [ ! -d "$APP_DIR/data/agentalloy.overgraph" ]; then
         NEED_SEED=true
     elif [ ! -f "$VOL_STAMP" ]; then
         # Corpus present but unstamped (e.g. a pre-stamp volume, or one
@@ -90,9 +90,9 @@ fi
 if [ "$NEED_SEED" = "true" ]; then
     echo ">> Seeding prebuilt corpus from image (skipping pack ingest + re-embed)"
     mkdir -p "$APP_DIR/data"
-    rm -rf "$APP_DIR/data/agentalloy.duck" "$APP_DIR/data/fragments.lance"
-    cp "$SEED_DIR/agentalloy.duck" "$APP_DIR/data/agentalloy.duck"
-    cp -a "$SEED_DIR/fragments.lance" "$APP_DIR/data/fragments.lance"
+    rm -rf "$APP_DIR/data/agentalloy.overgraph" "$APP_DIR/data/agentalloy.bm25"
+    cp -a "$SEED_DIR/agentalloy.overgraph" "$APP_DIR/data/agentalloy.overgraph"
+    if [ -d "$SEED_DIR/agentalloy.bm25" ]; then cp -a "$SEED_DIR/agentalloy.bm25" "$APP_DIR/data/agentalloy.bm25"; fi
     cp "$SEED_DIR/corpus-stamp.json" "$VOL_STAMP"
     CORPUS_SEEDED=true
     # Surface the seed to host-side readiness polling (same atomic
@@ -179,11 +179,11 @@ fi
 trap 'kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM SIGINT
 
 # Pack ingest runs only when there is no corpus to start from: not seeded
-# this boot (CORPUS_SEEDED) AND no existing volume corpus (agentalloy.duck). A
-# reused/populated volume is left to the seed logic above, so we never run a
-# partial always-on reconcile over an already-full corpus.
+# this boot (CORPUS_SEEDED) AND no existing volume corpus (agentalloy.overgraph).
+# A reused/populated volume is left to the seed logic above, so we never run
+# a partial always-on reconcile over an already-full corpus.
 if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ] \
-   && [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then
+   && [ ! -d "$APP_DIR/data/agentalloy.overgraph" ]; then
     if [ -n "${AGENTALLOY_PACKS:-}" ]; then
         IFS="," read -ra PACK_LIST <<< "$AGENTALLOY_PACKS"
         TOTAL=${#PACK_LIST[@]}
@@ -221,7 +221,8 @@ if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
     echo ">> Bootstrap complete"
 fi
 
-# Start uvicorn AFTER bootstrap completes to avoid DuckDB single-writer lock conflicts.
+# Start uvicorn AFTER bootstrap completes so the ingest writer's corpus
+# store lock is never contended and the service sees a complete corpus.
 # Workers: default 2 for capacity, override via AGENTALLOY_WORKERS.
 WORKERS=${AGENTALLOY_WORKERS:-2}
 echo ">> Starting uvicorn (${WORKERS} worker(s))..."

@@ -107,12 +107,80 @@ def _build_approval_advisory(ctx: PredicateContext) -> str:
     )
 
 
+def _build_artifact_missing_advisory(args: dict[str, Any], ctx: PredicateContext) -> str:
+    """Advisory for ``artifact_exists`` NOT_MET — name the store endpoint.
+
+    The exit artifact is a store record, not a file; the advisory must point at
+    the recording endpoint so the agent doesn't invent a filesystem path.
+    """
+    phase = str(args.get("phase") or ctx.current_phase or "this phase")
+    name = str(args.get("name") or args.get("name_glob") or "<name>.artifact")
+    return (
+        f"Phase '{phase}' isn't complete yet: its exit artifact '{name}' is not "
+        f"recorded. Record it by piping the body straight to the store: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {name} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback). A file on disk is not an artifact — the store is the "
+        f"artifact's only home. Then present the work for approval."
+    )
+
+
+def _build_artifact_sections_advisory(args: dict[str, Any], ctx: PredicateContext) -> str:
+    """Advisory for ``artifact_contains`` NOT_MET — name the missing headings.
+
+    The fix for the bare-'not_met' block: the artifact exists but lacks required
+    section headings, and without this advisory the agent cannot tell which. Names
+    the artifact, the exact missing headings, and the re-record path — including
+    the consequence (re-record voids the approval digest, so re-approval follows).
+    """
+    from agentalloy.signals.predicates import (  # noqa: PLC0415
+        _resolve_workitem_slug_for,
+        _section_present,
+    )
+
+    phase = str(args.get("phase") or ctx.current_phase or "this phase")
+    name = str(args.get("name") or args.get("name_glob") or "<name>.artifact")
+    sections = list(args.get("sections") or [])
+    if ctx.store is None:
+        return _build_artifact_missing_advisory(args, ctx)
+    slug = _resolve_workitem_slug_for(ctx.store, ctx.project_root, phase)
+    rows = ctx.store.list_artifacts(phase, slug=slug, name_glob=name)
+    if not rows:
+        return _build_artifact_missing_advisory(args, ctx)
+    body = rows[0].get("content", "")
+    missing = [s for s in sections if not _section_present(body, s)] or sections
+    names = ", ".join(f"'## {s}'" for s in missing)
+    return (
+        f"The '{name}' artifact is recorded but missing required section heading(s): "
+        f"{names}. Update the body to include those headings and re-record it: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {name} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback). Re-recording voids any existing approval for '{phase}', so "
+        f"present the updated artifact for re-approval."
+    )
+
+
+def _build_artifact_size_advisory(args: dict[str, Any], ctx: PredicateContext) -> str:
+    """Advisory for ``artifact_size_min`` NOT_MET — the artifact is too thin."""
+    phase = str(args.get("phase") or ctx.current_phase or "this phase")
+    glob = str(args.get("name_glob") or args.get("name") or "*.artifact")
+    minimum = args.get("minimum_size", 0)
+    return (
+        f"Phase '{phase}' exit artifact matching '{glob}' is below the minimum "
+        f"size ({minimum} chars). Flesh out the artifact body and re-record it: "
+        f"agentalloy artifact put --phase {phase} --slug <task-slug> "
+        f"--name {glob} (content on stdin; PUT /state/artifact is the HTTP "
+        f"fallback)."
+    )
+
+
 def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
     """Advisory for ``build_contracts_cover_tasks`` NOT_MET (the §6 density floor).
 
-    Cursor-scoped (#378) to match the predicate: counts against the active design
-    work-item's tasks.md and its own build contracts, so the numbers reported are
-    the same ones the gate judged (never the repo aggregate).
+    Cursor-scoped (#378) to match the predicate: counts against the active
+    work-item's tasks (store artifact when ``tasks_from_store``, else the disk
+    glob) and its own build contracts, so the numbers reported are the same
+    ones the gate judged (never the repo aggregate).
     """
     from agentalloy.signals.predicates import (  # noqa: PLC0415
         _count_task_items,
@@ -120,18 +188,27 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
         _resolve_workitem_slug,
     )
 
-    slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
+    phase = str(args.get("phase") or "design")
+    slug = _resolve_workitem_slug(ctx, phase)
     if slug is None:
         return None
-    tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
 
     # Legacy glob tolerance: pass through if present (traces deprecation)
     contracts_glob: str | None = args.get("contracts")
 
     try:
         tasks = 0
-        for f in _glob_files(ctx.project_root, tasks_glob):
-            tasks += _count_task_items(_read_file(f) or "")
+        if args.get("tasks_from_store") and ctx.store is not None:
+            tasks_name = str(args.get("tasks_artifact_name") or "tasks.artifact")
+            artifact = ctx.store.get_artifact(phase, slug, tasks_name)
+            if artifact is not None and artifact.get("content") is not None:
+                tasks = _count_task_items(artifact["content"])
+        else:
+            tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace(
+                "{slug}", slug
+            )
+            for f in _glob_files(ctx.project_root, tasks_glob):
+                tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)
         contracts_list = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
         if contracts_list is None:
@@ -140,9 +217,12 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     except Exception:
         return None
     return (
-        f"Design emitted {contracts} build contract(s) for {tasks} task(s) in tasks.md. "
-        f"Emit ONE build contract per task before advancing to build — "
-        f"each centered on a single tech surface. Contracts are auto-created on phase transition."
+        f"{contracts} build contract(s) recorded for {tasks} counted task(s) — "
+        f"one build contract per task is required before advancing (POST "
+        f"/contracts with work_item '{slug}'; each centered on ONE dominant "
+        f"tech surface, <=2 domain_tags). Tasks are counted as top-level "
+        f"bullets under the tasks artifact's '## Tasks' heading — '### T-N' "
+        f"headings count as zero."
     )
 
 
@@ -150,22 +230,22 @@ def _build_contract_exists_advisory(args: dict[str, Any], ctx: PredicateContext)
     """Advisory for ``contract_exists`` NOT_MET during intake.
 
     When the intake phase's ``contract_exists`` gate fires but no contracts exist
-    in the next phase, tell the agent the concrete action: emit a contract marker
-    (the agent-facing way to create the first contract) and present it for
-    approval, then STOP. This gives intake's gate forward gear instead of echoing
-    the posture, by pointing at a real tool the agent has (anomaly D-1).
+    in the next phase, tell the agent the concrete action: use the advance
+    endpoint (it writes the next-phase contract and advances in one call —
+    the agent-facing way to create the first contract), then present it for
+    approval. This gives intake's gate forward gear instead of echoing the
+    posture, by pointing at a real tool the agent has (anomaly D-1).
     """
     target_phase = str(args.get("phase", "spec"))
     to_phase = _get_next().get(target_phase, target_phase)
     return (
         f"You are in intake, but no contracts exist for phase '{target_phase}'. "
-        f"Emit a contract marker to create it: "
-        f"<!-- agentalloy:contract phase={target_phase} slug=<task-slug> route=<route> -->"
-        f"<body>"
-        f"<!-- /agentalloy:contract -->. "
+        f"Create it with your state panel's advance action: POST /state/advance "
+        f"with `slug`, `contract_body` (a concrete restatement of what the user "
+        f"wants), and `to_phase` '{target_phase}'. "
         f"Fill the body with a concrete restatement of what the user wants, then "
         f"PRESENT it in full and STOP — do not draft solutions. "
-        f"The user will advance to '{to_phase}' once they approve the contract."
+        f"The phase advances to '{to_phase}' once the user approves."
     )
 
 
@@ -317,6 +397,12 @@ def evaluate_node(
         advisory = _build_contract_exists_advisory(args, ctx)
     elif predicate_name == "approval_recorded" and result == PredicateResult.NOT_MET:
         advisory = _build_approval_advisory(ctx)
+    elif predicate_name == "artifact_exists" and result == PredicateResult.NOT_MET:
+        advisory = _build_artifact_missing_advisory(args, ctx)
+    elif predicate_name == "artifact_contains" and result == PredicateResult.NOT_MET:
+        advisory = _build_artifact_sections_advisory(args, ctx)
+    elif predicate_name == "artifact_size_min" and result == PredicateResult.NOT_MET:
+        advisory = _build_artifact_size_advisory(args, ctx)
     elif predicate_name == "build_contracts_cover_tasks" and result == PredicateResult.NOT_MET:
         advisory = _build_contract_coverage_advisory(args, ctx)
     elif predicate_name == "build_contract_tag_focus" and result == PredicateResult.NOT_MET:
@@ -446,6 +532,12 @@ def decide_transition(
 
         to_phase = _PHASE_GRAPH.get(current_phase)
 
+    # A same-phase "transition" (terminal ship, or a no-op write) has nowhere
+    # to advance to — suppress the leaf advisories so the agent isn't nagged
+    # about producing an exit artifact for a phase that doesn't leave.
+    if current_phase == to_phase:
+        advisories = []
+
     # The trigger fired (decide_transition is only called after a transition
     # trigger matches), but the deterministic guard isn't satisfied. Tell the
     # agent WHICH required exit artifact is missing rather than silently staying
@@ -453,26 +545,15 @@ def decide_transition(
     # by a soft/semantic check on a file that already exists shouldn't read as
     # "produce this file".
     if not should_transition and current_phase != to_phase:
-        from agentalloy.signals.prefilter import (
+        from agentalloy.signals.prefilter import (  # noqa: PLC0415
             _extract_gate_paths,
-            _extract_gate_store_specs,
         )
 
+        # Store-backed artifacts are covered by the leaf-level advisories
+        # (_build_artifact_missing_advisory / _build_artifact_sections_advisory);
+        # this branch handles the remaining disk-path gates.
         required = dict.fromkeys(_extract_gate_paths(gate_spec))
         missing = [p for p in required if not _glob_files(ctx.project_root, p)]
-
-        # Store-backed artifacts (spec/design, post-migration): no filesystem
-        # glob to check, so report what's missing by querying the store instead.
-        store_specs = dict.fromkeys(_extract_gate_store_specs(gate_spec))
-        for phase_name, name_glob in store_specs:
-            rows = ctx.store.list_artifacts(phase_name, name_glob=name_glob) if ctx.store else []
-            if not rows:
-                advisories.append(
-                    f"Phase '{current_phase}' isn't complete yet, so staying in "
-                    f"'{current_phase}'. To advance to '{to_phase}', record its exit "
-                    f"artifact using an artifact marker: "
-                    f"`<!-- agentalloy:artifact name={name_glob} -->...<!-- /agentalloy:artifact -->`.",
-                )
         # Split missing paths into "wrote it somewhere wrong" vs "doesn't exist at
         # all". A near-miss (the deliverable exists but at the wrong path — e.g.
         # `linkvault-spec.md` at the repo root vs the gate's `docs/spec/*.md`) gets
@@ -692,8 +773,9 @@ def evaluate_phase_gate(
         if approval_blocked:
             advisory = (
                 f"'{current_phase}' requires human approval before advancing "
-                f"to '{target_phase}'. Present the work for approval; the phase "
-                f"advances automatically once the user approves."
+                f"to '{target_phase}'. PRESENT the work in full and STOP; when "
+                f"the user approves, advance via your state panel's advance "
+                f"action (POST /state/advance) with `approved: true`."
             )
             if store_unreachable:
                 advisory = (

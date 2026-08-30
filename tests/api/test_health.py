@@ -33,9 +33,9 @@ def test_health_service_block_without_checker(client: TestClient) -> None:
 
 def test_health_service_block_with_real_store(app: FastAPI, corpus_dir: Path) -> None:
     from agentalloy import __version__
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-    store = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+    store = open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
     try:
         app.state.health_checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
         with TestClient(app) as c:
@@ -49,9 +49,9 @@ def test_health_service_block_with_real_store(app: FastAPI, corpus_dir: Path) ->
 
 
 def test_corpus_stamp_stable_across_calls(corpus_dir: Path) -> None:
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-    store = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+    store = open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
     try:
         checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
         assert checker._corpus_stamp() == checker._corpus_stamp()  # pyright: ignore[reportPrivateUsage]
@@ -62,9 +62,9 @@ def test_corpus_stamp_stable_across_calls(corpus_dir: Path) -> None:
 def test_corpus_stamp_changes_when_active_set_changes(corpus_dir: Path) -> None:
     from agentalloy.ingest import FragmentRecord, ReviewRecord
     from agentalloy.ingest import _insert as ingest_insert  # pyright: ignore[reportPrivateUsage]
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-    store = open_skill_store(str(corpus_dir / "agentalloy.duck"))
+    store = open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"))
     try:
         checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
         before = checker._corpus_stamp()  # pyright: ignore[reportPrivateUsage]
@@ -96,7 +96,7 @@ def test_corpus_stamp_changes_when_active_set_changes(corpus_dir: Path) -> None:
 
 def test_corpus_stamp_none_when_store_unreachable() -> None:
     broken = MagicMock()
-    broken.execute.side_effect = RuntimeError("db locked")
+    broken.get_active_skills.side_effect = RuntimeError("db locked")
     checker = HealthChecker(broken, MagicMock(), MagicMock(), "stub-embed")
     assert checker._corpus_stamp() is None  # pyright: ignore[reportPrivateUsage]
 

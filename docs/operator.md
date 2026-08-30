@@ -212,14 +212,15 @@ Shipped defaults are immutable; operators override via project or profile layers
 
 ### Data Plane
 
-Two embedded engines:
+Three embedded engines:
 
 | Store | Engine | Role |
 |-------|--------|------|
-| **`agentalloy.duck`** | DuckDB (columnar) | Skill graph — `skills` / `skill_versions` / `fragments` / `skill_dependencies` + `corpus_meta` kv. SQL-canonical source of truth for skill content/metadata. Telemetry lives in a separate service-owned `telemetry.duck`; per-profile datastores remain `skills.duck`. |
-| **`fragments.lance`** | LanceDB | 768-dim vector index (ANN for retrieval, exact cosine for dedup) + native Tantivy BM25 over fragment prose — "find the most relevant fragments". Derived from the DuckDB skill graph. |
+| **`agentalloy.overgraph`** | OverGraph (graph + vector) | Skill graph — `Skill` / `SkillVersion` / `Fragment` nodes + `CurrentVersion` / `HasVersion` / `DecomposesTo` / `Requires` edges + `corpus_meta` kv. Source of truth for skill content/metadata; 768-dim fragment embeddings live on the `Fragment` nodes (HNSW for retrieval, exact cosine for dedup). |
+| **`agentalloy.bm25`** | Tantivy (BM25 sidecar) | Keyword index over fragment prose — "find the most relevant fragments" lexically. Derived from the OverGraph skill graph. |
+| **`telemetry.duck`** | DuckDB (columnar) | Service-owned composition/proxy traces. Per-profile datastores remain `skills.duck`. |
 
-Embeddings are stored in the LanceDB `fragments.lance` dataset (vector ANN + native Tantivy BM25), not in DuckDB.
+Embeddings are stored on the `Fragment` nodes of the OverGraph store (HNSW vector search), not in a separate dataset.
 
 ### Service
 
@@ -258,7 +259,7 @@ Single model for all embedding needs: `nomic-embed-text-v1.5.Q8_0.gguf` at 768 d
 
 nomic serves on stock llama.cpp via the nomic-bert architecture. It requires `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048`. nomic also has a prefix footgun: embed **queries** with a literal `search_query: ` prefix and **documents** with `search_document: `.
 
-Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --embeddings` exposes. The runtime honors `RUNTIME_EMBED_BASE_URL`, so it also accepts any other OpenAI-compatible embed endpoint that returns 768-dim vectors. The `EmbeddingDimMismatch` startup guard raises if an existing corpus was built at a different dimension than 768 — switching embed models needs a re-embed, not a config change (`EMBEDDING_DIM = 768` in `src/agentalloy/storage/vector_store.py` is the single source of truth).
+Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --embeddings` exposes. The runtime honors `RUNTIME_EMBED_BASE_URL`, so it also accepts any other OpenAI-compatible embed endpoint that returns 768-dim vectors. The `EmbeddingDimMismatch` startup guard raises if an existing corpus was built at a different dimension than 768 — switching embed models needs a re-embed, not a config change (`EMBEDDING_DIM = 768` in `src/agentalloy/storage/protocols.py` is the single source of truth).
 
 ### Telemetry
 
@@ -274,8 +275,8 @@ The proxy records each intercepted request as a single consolidated trace row (`
 
 User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced into the service process; honors `XDG_CONFIG_HOME`). Runtime data — corpus, per-profile datastores, profiles registry — lives under `~/.local/share/agentalloy/` (honors `XDG_DATA_HOME`). The `.env` is written by `agentalloy write-env --preset <name>` from a hardware preset; the keys it manages (the override allow-list in `install/subcommands/write_env.py`, mapping to `Settings` fields in `config.py`) are:
 
-- `FRAGMENTS_LANCE_PATH` — Lance fragment dataset (vectors + BM25) location
-- `DUCKDB_PATH` — DuckDB (vector + FTS + traces) location
+- `CORPUS_STORE_PATH` — OverGraph corpus store (skill graph + fragment vectors) location
+- `TELEMETRY_DB_PATH` — DuckDB trace store location
 - `RUNTIME_EMBED_BASE_URL` — embedding llama-server URL (default `http://localhost:47951`)
 - `RUNTIME_EMBEDDING_MODEL` — embedding model GGUF (default `nomic-embed-text-v1.5.Q8_0.gguf`)
 - `SIGNAL_INTENT_BACKEND` — phase-gate intent backend (`reranker`/`cosine`)
@@ -291,7 +292,7 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 
 `write-env` renders the full `.env` from a hardware preset; to flip a single module toggle afterward without a full re-render, use `agentalloy config status|enable|disable <feature>` (a targeted `.env` upsert via `install.state.upsert_env_file` — comments and other keys are preserved verbatim). Currently manages `code-index` only; `COMPOSE_ENABLED` is not yet exposed there.
 
-Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/vector_store.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding is **per repo, per harness** — declared in each repo's `.agentalloy/upstream` (a YAML map keyed by harness, written by `agentalloy add <harness>`). The native passthrough surfaces resolve **only** their own harness's entry: Claude Code defaults to `ANTHROPIC_UPSTREAM_URL` and Codex to `RESPONSES_UPSTREAM_URL` unless a per-harness override exists, and an upstream adopted for one harness can never redirect another. The legacy global `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` knobs are deprecated and remain only as a last-resort fallback for the OpenAI chat surface (per-repo entries always win); their removal is tracked.
+Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/protocols.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding is **per repo, per harness** — declared in each repo's `.agentalloy/upstream` (a YAML map keyed by harness, written by `agentalloy add <harness>`). The native passthrough surfaces resolve **only** their own harness's entry: Claude Code defaults to `ANTHROPIC_UPSTREAM_URL` and Codex to `RESPONSES_UPSTREAM_URL` unless a per-harness override exists, and an upstream adopted for one harness can never redirect another. The legacy global `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` knobs are deprecated and remain only as a last-resort fallback for the OpenAI chat surface (per-repo entries always win); their removal is tracked.
 
 ### Profiles Config
 

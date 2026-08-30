@@ -263,9 +263,7 @@ def _run(args: argparse.Namespace) -> int:
         corpus_present = service_reachable
         corpus_location = "container volume (agentalloy-data)"
     else:
-        corpus_present = (corpus_path / "agentalloy.duck").exists() and (
-            corpus_path / "fragments.lance"
-        ).exists()
+        corpus_present = (corpus_path / "agentalloy.overgraph").exists()
         corpus_location = str(corpus_path)
 
     snapshot: dict[str, Any] = {

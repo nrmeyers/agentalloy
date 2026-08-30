@@ -1,7 +1,8 @@
-"""Active-version-only read queries against the DuckDB skill store.
+"""Active-version-only read queries against the unified corpus store.
 
-Ported from Cypher to SQL (``agentalloy.duck``) in the v5 two-engine
-rebuild. The graph edges are folded into relational columns/tables:
+Ported from Cypher to SQL in the v5 two-engine rebuild, and now served by
+the OverGraph corpus store (``agentalloy.overgraph``). The graph edges are
+folded into relational columns/tables:
 ``CURRENT_VERSION`` -> ``skills.current_version_id``; ``HAS_VERSION`` ->
 ``skill_versions.skill_id``; ``DECOMPOSES_TO`` -> ``fragments.version_id``.
 
@@ -14,9 +15,10 @@ preserved 1:1 with the v5.3 Cypher path.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
+from agentalloy.storage.protocols import FragmentRow, SkillRow
 
 if TYPE_CHECKING:
     from agentalloy.storage.protocols import SkillStore  # pyright: ignore[reportUnusedImport]
@@ -31,33 +33,45 @@ class InconsistentActiveVersionError(Exception):
         super().__init__(f"inconsistent active version for {skill_id}: {reason}")
 
 
-# Column projections that feed the row-mappers below (order is load-bearing).
-_SKILL_COLS = (
-    "s.skill_id, s.canonical_name, s.category, s.skill_class, "
-    "s.domain_tags, s.always_apply, s.phase_scope, s.category_scope, "
-    "v.version_id, s.tier, s.description"
-)
-_FRAGMENT_COLS = (
-    "f.fragment_id, f.fragment_type, f.sequence, f.content, "
-    "s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags, "
-    "s.phase_scope, s.description, s.category_scope"
-)
-_ACTIVE_JOIN = "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id"
-_FRAGMENT_JOIN = _ACTIVE_JOIN + " JOIN fragments f ON f.version_id = v.version_id"
+# -------- DTO mapping --------
 
 
-def _class_pred(
-    skill_class: SkillClass | tuple[str, ...] | None,
-    params: dict[str, Any],
-) -> str | None:
-    """Build a skill_class predicate, recording the param. None when unfiltered."""
-    if skill_class is None:
-        return None
-    if isinstance(skill_class, tuple):
-        params["skill_class"] = list(skill_class)
-        return "list_contains($skill_class, s.skill_class)"
-    params["skill_class"] = skill_class
-    return "s.skill_class = $skill_class"
+def _skill_row_to_active(row: SkillRow) -> ActiveSkill:
+    """Map a store ``SkillRow`` to the read-path ``ActiveSkill`` DTO."""
+    return ActiveSkill(
+        skill_id=row.skill_id,
+        canonical_name=row.canonical_name,
+        category=row.category,
+        skill_class=row.skill_class,  # type: ignore[arg-type]
+        domain_tags=list(row.domain_tags),
+        always_apply=row.always_apply,
+        phase_scope=list(row.phase_scope) if row.phase_scope else None,
+        category_scope=list(row.category_scope) if row.category_scope else None,
+        active_version_id=row.current_version_id,
+        tier=row.tier,
+        description=row.description,
+    )
+
+
+def _fragment_row_to_active(
+    frag: FragmentRow,
+    skill: SkillRow,
+) -> ActiveFragment:
+    """Map a store ``FragmentRow`` + parent ``SkillRow`` to ``ActiveFragment``."""
+    return ActiveFragment(
+        fragment_id=frag.fragment_id,
+        fragment_type=frag.fragment_type,
+        sequence=frag.sequence,
+        content=frag.content,
+        skill_id=skill.skill_id,
+        version_id=frag.version_id,
+        skill_class=skill.skill_class,  # type: ignore[arg-type]
+        category=skill.category,
+        domain_tags=list(skill.domain_tags),
+        phase_scope=tuple(skill.phase_scope) if skill.phase_scope else None,
+        description=skill.description,
+        category_scope=tuple(skill.category_scope) if skill.category_scope else None,
+    )
 
 
 # -------- public API --------
@@ -70,35 +84,22 @@ def get_active_skills(
 ) -> list[ActiveSkill]:
     """Return every skill whose CURRENT_VERSION is active, after consistency checks."""
     _run_consistency_guard(store, skill_class=skill_class)
-
-    params: dict[str, Any] = {}
-    filters = ["v.status = 'active'", "s.deprecated = false"]
-    cls = _class_pred(skill_class, params)
-    if cls:
-        filters.append(cls)
-
-    sql = f"SELECT {_SKILL_COLS} {_ACTIVE_JOIN} WHERE {' AND '.join(filters)} ORDER BY s.skill_id"
-    return [_row_to_active_skill(row) for row in store.execute(sql, params)]
+    rows = store.get_active_skills(skill_class=skill_class)
+    return [_skill_row_to_active(r) for r in rows]
 
 
 def get_deprecated_skill_ids(store: SkillStore) -> list[str]:
     """Return the skill_ids of every skill with ``deprecated = true``."""
-    sql = "SELECT skill_id FROM skills WHERE deprecated = true"
-    return [str(row[0]) for row in store.execute(sql)]
+    return store.get_deprecated_skill_ids()
 
 
 def get_active_skill_by_id(store: SkillStore, skill_id: str) -> ActiveSkill | None:
     """Single active skill lookup. None if missing or no active version."""
     _run_consistency_guard_for(store, skill_id)
-
-    sql = (
-        f"SELECT {_SKILL_COLS} {_ACTIVE_JOIN} "
-        "WHERE s.skill_id = $skill_id AND v.status = 'active' AND s.deprecated = false"
-    )
-    rows = store.execute(sql, {"skill_id": skill_id})
-    if not rows:
+    row = store.get_active_skill_by_id(skill_id)
+    if row is None:
         return None
-    return _row_to_active_skill(rows[0])
+    return _skill_row_to_active(row)
 
 
 def get_active_fragments(
@@ -116,45 +117,38 @@ def get_active_fragments(
     """
     _run_consistency_guard(store, skill_class=skill_class)
 
-    params: dict[str, Any] = {}
-    filters = ["v.status = 'active'", "s.deprecated = false"]
-    cls = _class_pred(skill_class, params)
-    if cls:
-        filters.append(cls)
-    if categories is not None and phases:
-        params["categories"] = list(categories)
-        params["phases"] = list(phases)
-        filters.append(
-            "(list_contains($categories, s.category)"
-            " OR (s.phase_scope IS NOT NULL AND list_has_any(s.phase_scope, $phases)))",
-        )
-    elif categories is not None:
-        params["categories"] = list(categories)
-        filters.append("list_contains($categories, s.category)")
-    elif phases:
-        params["phases"] = list(phases)
-        filters.append("(s.phase_scope IS NOT NULL AND list_has_any(s.phase_scope, $phases))")
-    if domain_tags is not None:
-        params["domain_tags"] = list(domain_tags)
-        filters.append("(s.domain_tags IS NOT NULL AND list_has_any(s.domain_tags, $domain_tags))")
+    # Fetch all active skills (unfiltered by fragment-level predicates) so we
+    # can build a version_id → SkillRow lookup. The store's get_active_fragments
+    # returns bare FragmentRow objects; we re-attach the parent skill metadata
+    # that ActiveFragment carries.
+    all_skills = store.get_active_skills()
+    version_to_skill: dict[str, SkillRow] = {s.current_version_id: s for s in all_skills}
 
-    sql = (
-        f"SELECT {_FRAGMENT_COLS} {_FRAGMENT_JOIN} "
-        f"WHERE {' AND '.join(filters)} ORDER BY s.skill_id, f.sequence"
+    fragments = store.get_active_fragments(
+        skill_class=skill_class,
+        categories=categories,
+        phases=phases,
+        domain_tags=domain_tags,
     )
-    return [_row_to_active_fragment(row) for row in store.execute(sql, params)]
+
+    result: list[ActiveFragment] = []
+    for frag in fragments:
+        skill = version_to_skill.get(frag.version_id)
+        if skill is None:
+            continue  # fragment's parent skill is not active (shouldn't happen after guard)
+        result.append(_fragment_row_to_active(frag, skill))
+    return result
 
 
 def get_active_fragments_for_skill(store: SkillStore, skill_id: str) -> list[ActiveFragment]:
     """Fragments of the active version of a single skill."""
     _run_consistency_guard_for(store, skill_id)
 
-    sql = (
-        f"SELECT {_FRAGMENT_COLS} {_FRAGMENT_JOIN} "
-        "WHERE s.skill_id = $skill_id AND v.status = 'active' AND s.deprecated = false "
-        "ORDER BY f.sequence"
-    )
-    return [_row_to_active_fragment(row) for row in store.execute(sql, {"skill_id": skill_id})]
+    skill = store.get_active_skill_by_id(skill_id)
+    if skill is None:
+        return []
+    fragments = store.get_active_fragments_for_skill(skill_id)
+    return [_fragment_row_to_active(frag, skill) for frag in fragments]
 
 
 def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, Any]:
@@ -164,32 +158,21 @@ def get_active_version_by_id(store: SkillStore, version_id: str) -> dict[str, An
     active; :class:`RuntimeError` if not found at all. The single enforced gate
     for version-id-based fetches.
     """
-    rows = store.execute(
-        "SELECT version_id, version_number, authored_at, author, "
-        "change_summary, raw_prose, status FROM skill_versions WHERE version_id = $vid",
-        {"vid": version_id},
-    )
-    if not rows:
+    version = store.get_version(version_id)
+    if version is None:
         raise RuntimeError(f"version {version_id!r} not found")
-    row = rows[0]
-    status = str(row[6])
-    if status != "active":
-        skill_rows = store.execute(
-            "SELECT skill_id FROM skill_versions WHERE version_id = $vid",
-            {"vid": version_id},
-        )
-        skill_id = str(skill_rows[0][0]) if skill_rows else f"<unknown skill for {version_id}>"
+    if version.status != "active":
         raise InconsistentActiveVersionError(
-            skill_id,
-            f"version {version_id!r} has status={status!r}, expected 'active'",
+            version.skill_id,
+            f"version {version_id!r} has status={version.status!r}, expected 'active'",
         )
     return {
-        "version_id": str(row[0]),
-        "version_number": int(row[1]),
-        "authored_at": row[2],
-        "author": str(row[3]),
-        "change_summary": str(row[4]),
-        "raw_prose": str(row[5]),
+        "version_id": version.version_id,
+        "version_number": version.version_number,
+        "authored_at": version.authored_at,
+        "author": version.author,
+        "change_summary": version.change_summary,
+        "raw_prose": version.raw_prose,
     }
 
 
@@ -202,99 +185,15 @@ def _run_consistency_guard(
     skill_class: SkillClass | tuple[str, ...] | None = None,
 ) -> None:
     """Scan for CURRENT_VERSION / active-version mismatches. Raises on first one."""
-    params: dict[str, Any] = {}
-    cls = _class_pred(skill_class, params)
-    class_and = f" AND {cls}" if cls else ""
-
-    # (a) CURRENT_VERSION points at a non-active version.
-    rows = store.execute(
-        f"SELECT s.skill_id, v.status {_ACTIVE_JOIN} WHERE v.status <> 'active'{class_and} LIMIT 1",
-        params,
-    )
-    if rows:
-        sid, status = rows[0][0], rows[0][1]
-        raise InconsistentActiveVersionError(
-            sid, f"CURRENT_VERSION points at status={status!r} version"
-        )
-
-    # (b) An active version exists (HAS_VERSION) but there is no CURRENT_VERSION edge.
-    rows = store.execute(
-        "SELECT s.skill_id FROM skills s "
-        "JOIN skill_versions av ON av.skill_id = s.skill_id AND av.status = 'active' "
-        "LEFT JOIN skill_versions cur ON cur.version_id = s.current_version_id "
-        f"WHERE cur.version_id IS NULL{class_and} LIMIT 1",
-        params,
-    )
-    if rows:
-        raise InconsistentActiveVersionError(
-            rows[0][0],
-            "active SkillVersion exists but no CURRENT_VERSION edge",
-        )
+    store.check_consistency(skill_class=skill_class)
 
 
 def _run_consistency_guard_for(store: SkillStore, skill_id: str) -> None:
     """Scoped single-skill variant of :func:`_run_consistency_guard`."""
-    rows = store.execute(
-        f"SELECT v.status {_ACTIVE_JOIN} "
-        "WHERE s.skill_id = $skill_id AND v.status <> 'active' LIMIT 1",
-        {"skill_id": skill_id},
-    )
-    if rows:
-        raise InconsistentActiveVersionError(
-            skill_id,
-            f"CURRENT_VERSION points at status={rows[0][0]!r} version",
-        )
-
-    rows = store.execute(
-        "SELECT s.skill_id FROM skills s "
-        "JOIN skill_versions av ON av.skill_id = s.skill_id AND av.status = 'active' "
-        "LEFT JOIN skill_versions cur ON cur.version_id = s.current_version_id "
-        "WHERE s.skill_id = $skill_id AND cur.version_id IS NULL LIMIT 1",
-        {"skill_id": skill_id},
-    )
-    if rows:
-        raise InconsistentActiveVersionError(
-            skill_id,
-            "active SkillVersion exists but no CURRENT_VERSION edge",
-        )
+    store.check_consistency_for(skill_id)
 
 
-# -------- row mapping --------
-
-
-def _row_to_active_skill(row: Any) -> ActiveSkill:
-    return ActiveSkill(
-        skill_id=cast("str", row[0]),
-        canonical_name=cast("str", row[1]),
-        category=cast("str", row[2]),
-        skill_class=cast("SkillClass", row[3]),
-        domain_tags=list(row[4] or []),
-        always_apply=bool(row[5]),
-        phase_scope=_optional_list(row[6]),
-        category_scope=_optional_list(row[7]),
-        active_version_id=cast("str", row[8]),
-        tier=cast("str | None", row[9]) if len(row) > 9 else None,
-        description=_optional_str(row[10]) if len(row) > 10 else None,
-    )
-
-
-def _row_to_active_fragment(row: Any) -> ActiveFragment:
-    raw_scope = row[9] if len(row) > 9 else None
-    raw_cat_scope = row[11] if len(row) > 11 else None
-    return ActiveFragment(
-        fragment_id=cast("str", row[0]),
-        fragment_type=cast("str", row[1]),
-        sequence=int(cast("int", row[2])),
-        content=cast("str", row[3]),
-        skill_id=cast("str", row[4]),
-        version_id=cast("str", row[5]),
-        skill_class=cast("SkillClass", row[6]),
-        category=cast("str", row[7]),
-        domain_tags=list(row[8] or []),
-        phase_scope=tuple(cast("list[str]", raw_scope)) if raw_scope else None,
-        description=_optional_str(row[10]) if len(row) > 10 else None,
-        category_scope=tuple(cast("list[str]", raw_cat_scope)) if raw_cat_scope else None,
-    )
+# -------- row mapping helpers (kept for test imports) --------
 
 
 def _optional_str(value: Any) -> str | None:
@@ -311,4 +210,4 @@ def _optional_list(value: Any) -> list[str] | None:
         return None
     if isinstance(value, list) and not value:
         return None
-    return list(cast("list[str]", value))
+    return list(value)

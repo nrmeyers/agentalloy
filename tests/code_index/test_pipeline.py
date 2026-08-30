@@ -363,24 +363,18 @@ async def test_decision_doc_removed_not_in_store_retains_edges_without_flag(
         handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
         try:
             # No decision_source_exists bound and no --prune-decisions: the
-            # GOVERNS edge row is retained (the escape hatch defaults closed).
-            # NOTE: without decision_source_exists, the doc's MarkdownDoc
-            # symbol IS pruned by delete_for_files (only GOVERNS edges are
-            # exempted at the store layer) — so the retained edge is
-            # currently DANGLING: governing_decisions()'s LEFT JOIN to the
-            # now-missing symbol yields file_path=None/heading=""/snippet=
-            # None, not a hydrated decision. It self-heals the moment the doc
-            # reappears (doc-granular re-derive re-upserts the symbol and the
-            # edge already survived). This is the documented behavior for the
-            # "doc genuinely gone, no flag" case — #526 is guard-only, so the
-            # read path (governing_decisions/decisions_for_files) is
-            # deliberately NOT filtering dangling rows out here.
+            # GOVERNS edge is retained (the escape hatch defaults closed).
+            # Unified store: delete_for_files tombstones the doc's MarkdownDoc
+            # node (label swap) rather than deleting its row, so the retained
+            # edge reads back FULLY hydrated — no degraded dangling output, and
+            # it self-heals the moment the doc reappears. #526 is guard-only,
+            # so the read path deliberately does not filter these rows out.
             rows = handles.graph.governing_decisions("demo.pkg.util.helper")
             assert len(rows) == 1
             assert rows[0].qualified_name.startswith(_DECISION_DOC_PATH)
-            assert rows[0].file_path is None  # dangling: symbol was pruned
-            assert rows[0].heading == ""
-            assert rows[0].snippet is None
+            assert rows[0].file_path == _DECISION_DOC_PATH
+            assert rows[0].heading == "Approach"
+            assert rows[0].snippet is not None
         finally:
             handles.close()
     finally:

@@ -180,6 +180,66 @@ class TestBuildStateLeg:
         assert f"?repo_root={scope['repo_root']}" in query
         assert f"?repo={scope['repo']}" in query
 
+    def test_scope_record_artifact_documents_put_endpoint(self) -> None:
+        result = build_state_leg("spec", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        scope = state["scope"]
+        hint = state["actions"]["record_artifact"]
+        assert f"PUT {scope['service']}/state/artifact?repo_root={scope['repo_root']}" in hint
+        assert '"content"' in hint
+        # Gate artifact names must be spelled out — gates match on the name
+        assert "spec.artifact" in hint
+        assert "approach.artifact" in hint
+        assert "tasks.artifact" in hint
+        # Recording goes straight to the store via the CLI — never via a
+        # temp file on disk
+        assert "agentalloy artifact put" in hint
+        assert "temp file" not in hint
+
+    def test_record_artifact_endpoint_fallback_without_scope(self) -> None:
+        result = build_state_leg("spec")
+        assert result is not None
+        state = json.loads(result)
+        assert "PUT /state/artifact" in state["actions"]["record_artifact"]
+
+    def test_scope_actions_include_reset_to_intake(self) -> None:
+        result = build_state_leg("ship", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        scope = state["scope"]
+        reset = state["actions"]["reset"]
+        assert "/state/phase" in reset
+        assert '"value": "intake"' in reset
+        assert f"?repo_root={scope['repo_root']}" in reset
+
+    def test_reset_available_in_every_phase(self) -> None:
+        for phase in ("intake", "spec", "design", "plan", "build", "qa", "ship"):
+            result = build_state_leg(phase, repo_root="/home/u/dev/agentalloy")
+            assert result is not None
+            state = json.loads(result)
+            assert "reset" in state["actions"], f"reset missing in {phase}"
+
+    def test_scope_actions_include_code_index(self) -> None:
+        result = build_state_leg("build", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        scope = state["scope"]
+        code_index = state["actions"]["code_index"]
+        assert "/code/search/semantic" in code_index
+        assert "/code/search/lexical" in code_index
+        assert "/code/search/structural" in code_index
+        assert "/code/search/related-decisions" in code_index
+        assert "/code/context-bundle" in code_index
+        assert f"?repo={scope['repo']}" in code_index
+
+    def test_ship_advance_points_to_reset_action(self) -> None:
+        result = build_state_leg("ship", repo_root="/home/u/dev/agentalloy")
+        assert result is not None
+        state = json.loads(result)
+        assert "reset" in state["actions"]["advance_phase"]
+        assert "agentalloy phase set" not in state["actions"]["advance_phase"]
+
 
 # ---------------------------------------------------------------------------
 # _extract_routed_findings() — QA artifact parsing

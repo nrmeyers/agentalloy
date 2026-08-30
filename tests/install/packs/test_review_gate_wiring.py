@@ -69,7 +69,7 @@ def _run_to_post_gate(tmp_path: Path, *, allow_unreviewed: bool = False) -> dict
         patch("agentalloy.config.get_settings") as ms,
         patch.object(ip, "open_skills", return_value=MagicMock()),
     ):
-        ms.return_value.duckdb_path = str(tmp_path / "t.duck")
+        ms.return_value.corpus_store_path = str(tmp_path / "t.duck")
         return ip.install_local_pack(
             tmp_path, root=tmp_path, run_reembed=False, allow_unreviewed=allow_unreviewed
         )

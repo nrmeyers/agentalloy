@@ -45,8 +45,8 @@ async def with_handles[T](
 ) -> T:
     """Run a synchronous store read in a worker thread with open/close managed.
 
-    ``service`` role matches the job writer's connection config so DuckDB's
-    in-process instance cache shares the database with a running job.
+    ``service`` role opens read-only so API reads never contend with a
+    running index job's writes.
 
     When ``repo_path`` is provided, the data directory is scoped to that
     specific checkout (multiple checkouts of the same remote coexist).

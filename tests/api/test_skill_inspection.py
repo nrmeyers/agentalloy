@@ -9,30 +9,30 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentalloy.api.skill_router import get_skill_store
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 
 @pytest.fixture
-def populated_store(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def populated_store(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 @pytest.fixture
-def client_with_store(app: FastAPI, populated_store: DuckDBSkillStore) -> TestClient:
+def client_with_store(app: FastAPI, populated_store: OverGraphSkillStore) -> TestClient:
     app.dependency_overrides[get_skill_store] = lambda: populated_store
     with TestClient(app) as c:
         return c
 
 
-def _first_skill_id(store: DuckDBSkillStore) -> str:
-    rows = store.execute("SELECT skill_id FROM skills LIMIT 1")
-    assert rows, "fixture store has no skills"
-    return str(rows[0][0])
+def _first_skill_id(store: OverGraphSkillStore) -> str:
+    skills = store.get_active_skills()
+    assert skills, "fixture store has no skills"
+    return skills[0].skill_id
 
 
 # AC-1: known skill returns identity, class, category, active version metadata + prose
 def test_known_skill_returns_full_identity(
-    client_with_store: TestClient, populated_store: DuckDBSkillStore
+    client_with_store: TestClient, populated_store: OverGraphSkillStore
 ) -> None:
     skill_id = _first_skill_id(populated_store)
     resp = client_with_store.get(f"/skills/{skill_id}")
@@ -57,7 +57,7 @@ def test_known_skill_returns_full_identity(
 
 # AC-2: active version with fragments returns fragment details
 def test_active_skill_returns_fragments(
-    client_with_store: TestClient, populated_store: DuckDBSkillStore
+    client_with_store: TestClient, populated_store: OverGraphSkillStore
 ) -> None:
     skill_id = _first_skill_id(populated_store)
     resp = client_with_store.get(f"/skills/{skill_id}")
@@ -72,7 +72,7 @@ def test_active_skill_returns_fragments(
 
 # AC-3: is_active clearly set to True for the runtime-eligible version
 def test_is_active_is_true(
-    client_with_store: TestClient, populated_store: DuckDBSkillStore
+    client_with_store: TestClient, populated_store: OverGraphSkillStore
 ) -> None:
     skill_id = _first_skill_id(populated_store)
     resp = client_with_store.get(f"/skills/{skill_id}")

@@ -1,7 +1,7 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Reembed-boundary dedup gate — cross-pack near-duplicate detection.
 
-Runs after new fragments have been written to the Lance dataset.  For each
+Runs after new fragments have been written to the corpus store.  For each
 newly-embedded skill, compares its fragments against every *other* skill
 already present in the fragment store and classifies matches as HARD
 (≥ hard_threshold) or SOFT (≥ soft_threshold). Uses exact cosine (D2).
@@ -72,7 +72,7 @@ def classify_hit(
 ) -> str:
     """Return ``"hard"``, ``"soft"``, or ``"ignore"`` for a single similarity hit.
 
-    Convention: vectors in the Lance dataset are L2-normalized, so
+    Convention: stored vectors are L2-normalized, so
     ``similarity = 1.0 - cosine_distance``.
     """
     similarity = 1.0 - hit.distance
@@ -166,7 +166,7 @@ def run_dedup_gate(
         queries the fragment store which normalises internally, so consistency
         is maintained.
     vector_store:
-        Open FragmentStore (Lance) — must already contain the newly-inserted rows
+        Open FragmentStore — must already contain the newly-inserted rows
         so that ``search_similar`` can find existing fragments by other skills.
     hard_similarity / soft_similarity:
         Thresholds (in [0, 1]) from ``Settings``.
@@ -185,7 +185,7 @@ def run_dedup_gate(
 
     total = len(new_fragment_vecs)
     logger.info("dedup gate: scanning %d new fragment(s) for cross-pack near-duplicates", total)
-    # Each fragment is a Lance exact-cosine search, so a full re-embed (thousands
+    # Each fragment is an exact-cosine search, so a full re-embed (thousands
     # of fragments) is otherwise silent for minutes. Emit ~10 progress ticks.
     step = max(1, total // 10)
 

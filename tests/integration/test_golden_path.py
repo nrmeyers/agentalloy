@@ -38,8 +38,7 @@ from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.runtime_state import load_runtime_cache
-from agentalloy.storage.fragment_store import LanceFragmentStore
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.telemetry_store import open_telemetry_store
 from agentalloy.telemetry.writer import DuckDBTelemetryWriter
 
@@ -84,11 +83,11 @@ def _embed_model_responds(model: str) -> bool:
 
 
 @pytest.fixture(scope="module")
-def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> DuckDBSkillStore:
+def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> OverGraphSkillStore:
     if not _embed_model_responds(EMBED_MODEL):
         pytest.skip(f"embed runtime at {LM_BASE} has no model responding")
     tmp = tmp_path_factory.mktemp("golden")
-    store = open_skill_store(str(tmp / "agentalloy.duck"))
+    store = open_overgraph_skill_store(str(tmp / "agentalloy.overgraph"))
     store.migrate()
     summary = load_fixtures(store)
     assert summary.skills > 0, "fixture loader must seed at least one skill"
@@ -96,7 +95,9 @@ def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> DuckDBSkillStore:
 
 
 @pytest.fixture(scope="module")
-def golden_app(seeded_store: DuckDBSkillStore, tmp_path_factory: pytest.TempPathFactory) -> FastAPI:
+def golden_app(
+    seeded_store: OverGraphSkillStore, tmp_path_factory: pytest.TempPathFactory
+) -> FastAPI:
     if not _embed_model_responds(EMBED_MODEL):
         pytest.skip(f"embed runtime at {LM_BASE} has no model responding")
 
@@ -106,7 +107,7 @@ def golden_app(seeded_store: DuckDBSkillStore, tmp_path_factory: pytest.TempPath
     runtime = load_runtime_cache(seeded_store)
     # v5 splits the old conflated store: Lance for fragment search, a separate
     # telemetry.duck for composition traces.
-    fragment_store = LanceFragmentStore(tmp / "fragments.lance")
+    fragment_store = open_overgraph_skill_store(str(tmp / "corpus.overgraph"))
     telemetry_store = open_telemetry_store(tmp / "telemetry.duck")
     telemetry = DuckDBTelemetryWriter(telemetry_store)
 
@@ -224,7 +225,7 @@ def test_compose_includes_system_skills(golden_app: FastAPI) -> None:
 
 
 def test_retrieve_by_id_returns_active_skill(
-    golden_app: FastAPI, seeded_store: DuckDBSkillStore
+    golden_app: FastAPI, seeded_store: OverGraphSkillStore
 ) -> None:
     """GET /retrieve/{skill_id} must return active skill content."""
     rows = seeded_store.execute(
@@ -259,7 +260,7 @@ def test_semantic_retrieve_returns_ranked_hits(golden_app: FastAPI) -> None:
 
 
 def test_skill_inspection_returns_full_detail(
-    golden_app: FastAPI, seeded_store: DuckDBSkillStore
+    golden_app: FastAPI, seeded_store: OverGraphSkillStore
 ) -> None:
     """GET /skills/{skill_id} must return active version detail and fragments."""
     rows = seeded_store.execute(

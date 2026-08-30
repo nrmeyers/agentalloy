@@ -17,7 +17,8 @@ applies_to_phases:
 # keep these verbatim.
 prose_invariants:
   - "state panel"
-  - "agentalloy:artifact"
+  - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     # Prove the build touched the declared scope (``scope.touches`` of the
@@ -144,7 +145,7 @@ raw_prose: |
 
   Work within the current task contract's `scope.touches`. Spreading wider than you planned is
   the signal to stop and check: is this scope creep (cut it), or did design miss
-  something (fix it there — state that the phase is complete. The phase advances automatically once exit gates pass.)? Don't quietly grow
+  something (surface it and go back to design)? Don't quietly grow
   the blast radius.
 
   ## 6. Done when
@@ -155,14 +156,17 @@ raw_prose: |
   app's real entry point and confirm data flows end to end — green unit tests
   prove the unit works, not that the running app uses it.
 
-  Then seed **qa's work-item** — record the artifact using an artifact marker: `<!-- agentalloy:artifact name=work-item -->...<!-- /agentalloy:artifact -->`
+  Then seed **qa's work-item** — record the artifact: `agentalloy artifact put
+  --phase build --slug <task-slug> --name work-item` (content on stdin;
+  PUT /state/artifact is the HTTP fallback).
 
   Fill `domain_tags` with the *verification surface* (the tech qa will probe —
   the risk areas you touched, the test types that matter here) and write the body
   as what to verify for this feature; set `scope.touches`. That body is qa's
   retrieval prompt, so review opens already primed with the right testing skills.
 
-  Then advance yourself — don't wait to be told. With the suite green, state that the phase is complete. The phase advances automatically once exit gates pass. Phase advance ends this
+  Then advance — don't wait to be told. With the suite green, advance via your
+  state panel's advance action (POST /state/advance). Phase advance ends this
   session; the next phase begins in a fresh one, and the state panel provides context automatically. If anything's unresolved —
   a case you couldn't make pass, a regression you can't explain — **stop and
   surface it** instead of advancing; a red suite isn't done. The phase guard

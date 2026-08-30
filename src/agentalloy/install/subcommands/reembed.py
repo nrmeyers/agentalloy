@@ -25,7 +25,7 @@ def add_parser(
         help="Compute embeddings for unembedded skill-store fragments.",
         description=(
             "Compute embeddings for the skill store's active fragments and write "
-            "them to the Lance fragment store. Idempotent on re-run."
+            "them to the unified corpus store. Idempotent on re-run."
         ),
     )
     p.add_argument(

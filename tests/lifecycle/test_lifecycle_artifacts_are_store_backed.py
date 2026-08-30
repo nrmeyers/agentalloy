@@ -126,7 +126,7 @@ def test_sdd_fast_prose_names_the_store_command() -> None:
     skill = load_shipped_skill("sdd-fast")
     assert skill is not None
     prose = skill["raw_prose"]
-    assert "<!-- agentalloy:artifact" in prose
+    assert "PUT /state/artifact" in prose
     # `docs/fast/` may appear ONLY as an explicit prohibition, never as a target.
     assert "Do **NOT** create `docs/fast/`" in prose
     # Shipped prose satisfies its own invariants — otherwise every override path

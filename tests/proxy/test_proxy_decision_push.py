@@ -14,7 +14,7 @@ import pytest
 
 from agentalloy.api import code_index_gate
 from agentalloy.api.proxy_apply import _compose_decision_push
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.contracts import Contract, ContractScope
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
@@ -38,8 +38,8 @@ def _contract(touches: list[str], phase: str = "design") -> Contract:
     )
 
 
-def _seeded_store(tmp_path: Path) -> DuckDBCodeGraphStore:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def _seeded_store(tmp_path: Path) -> OverGraphCodeGraphStore:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     s.upsert_symbols(
         [
@@ -87,7 +87,7 @@ def _seeded_store(tmp_path: Path) -> DuckDBCodeGraphStore:
 
 
 def _wire(
-    monkeypatch: pytest.MonkeyPatch, store: DuckDBCodeGraphStore | None, available: bool
+    monkeypatch: pytest.MonkeyPatch, store: OverGraphCodeGraphStore | None, available: bool
 ) -> dict[str, int]:
     calls = {"open": 0}
 

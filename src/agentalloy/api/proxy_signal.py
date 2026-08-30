@@ -33,7 +33,6 @@ from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE
 from agentalloy.signals.predicates import section_completeness, store_section_completeness
 from agentalloy.signals.prefilter import (
-    PreFilterMatch,
     _extract_artifact_contains_specs,  # type: ignore[reportPrivateUsage]
     _extract_artifact_contains_store_specs,  # type: ignore[reportPrivateUsage]
     _extract_artifact_exists_store_specs,  # type: ignore[reportPrivateUsage]
@@ -934,6 +933,7 @@ async def evaluate_signal(
     # the phase as of the start of this turn", never this turn's own write.
     # One store read, projected three ways (phase, actor, flow mode).
     # hand this request a mixed view of the same row.
+    seeded_this_turn = False
     phase_state = _phase_state(cwd)
     phase = phase_state.phase if phase_state else None
     transitioned_by = phase_state.transitioned_by if phase_state else None
@@ -966,6 +966,7 @@ async def evaluate_signal(
             _write_phase_atomic(cwd, phase)
             phase_state = _phase_state(cwd)
             transitioned_by = phase_state.transitioned_by if phase_state else None
+            seeded_this_turn = True
 
     # 1b. Pause guard (single guard point). ``mode: paused`` in the phase row
     # flips the whole request into compose-only handling: no orientation, no
@@ -1103,11 +1104,6 @@ async def evaluate_signal(
         except Exception:  # noqa: BLE001 — soft-fail by design
             logger.debug("phase_start telemetry write failed", exc_info=True)
 
-    # System-prompt leg of the workflow prose. Threaded onto EVERY carrier return below
-    # (quiet passthrough included) — unlike `workflow_prose`, which is announce-gated.
-    # See the field docstring on `SignalResult` for why the cadence differs.
-    workflow_system_prose = (skill.get("raw_prose") or None) if is_carrier else None
-
     # Per-turn banner (recency anchor). Built on a carrier turn that lands on the cadence
     # tick (`emit_banner`) under the active lifecycle mode + a valid phase; independent of
     # should_compose / announce / cursor, so it threads onto every return below — quiet
@@ -1138,6 +1134,23 @@ async def evaluate_signal(
         # Proxy has no file/tool events — only prompt text
     )
 
+    # Register session in the registry if it's new. This makes session tracking
+    # explicit and reliable, not dependent on fragile fingerprint detection.
+    is_new_session = False
+    if session_key and ctx.store is not None:
+        try:
+            existing = ctx.store.get_session(session_key)
+            if existing is None:
+                # New session - create it in the registry
+                ctx.store.create_session(session_key, task_slug=None, phase=phase)
+                logger.info("Registered new session: %s", session_key)
+                is_new_session = True
+            else:
+                # Existing session - update activity
+                ctx.store.update_session_activity(session_key, phase=phase)
+        except Exception:
+            logger.debug("Session registry update failed", exc_info=True)
+
     # 4. Announce cadence: a phase's orientation block is emitted once per
     #    (phase, session). `.agentalloy/announced` records the last phase AND the
     #    session key we announced for; we announce when either changed — a fresh
@@ -1150,28 +1163,61 @@ async def evaluate_signal(
     phase_changed = last_phase != phase
     # With a session key: announce on a new phase OR a session not yet oriented for
     # this phase. Without one (no user text): phase-only cadence (announce on entry).
-    # Gated on `is_carrier` so a background micro-request never burns the marker — the
-    # orientation waits for the next real agent turn instead of being lost to a ping.
-    announce = is_carrier and (
-        (phase_changed or session_key not in last_sessions) if session_key else phase_changed
-    )
+    # Removed is_carrier gate: workflow instructions should inject on phase entry
+    # regardless of session detection.
+    announce = (phase_changed or session_key not in last_sessions) if session_key else phase_changed
 
     # 4b. Orientation cadence: the orientation marker fires once per (phase, session),
     #    BEFORE the workflow block. Uses its own cadence file (`_read_orientation_announced`
     #    / `_write_orientation_announced_atomic`) so the workflow announce and orientation
     #    cadence are independent — a degraded workflow announce never burns the orientation
-    #    marker, and vice versa. Same carrier gate: a background tool-less request must not
-    #    burn the orientation marker. Unlike Tier 1 announce, orientation REQUIRES an
-    #    explicit session_id (not a fingerprinted key) — anonymous requests never get
-    #    orientation.
+    #    marker, and vice versa. Removed session_id requirement: orientation should fire
+    #    for any identifiable session (header or fingerprint), enabling resume after
+    #    interruption even when harnesses don't send session headers.
     last_orientation_phase, last_orientation_sessions = _read_orientation_announced(cwd)
     orientation_phase_changed = last_orientation_phase != phase
-    # Only fire orientation when there's an explicit session_id (not fingerprinted).
-    announce_orientation = (
-        is_carrier
-        and bool(session_id)
-        and (orientation_phase_changed or session_key not in last_orientation_sessions)
+    # Fire orientation for any identifiable session (session_key from header or fingerprint).
+    # This enables resume after interruption (power loss, etc.) even when harnesses
+    # don't send explicit session_id headers.
+    announce_orientation = bool(session_key) and (
+        orientation_phase_changed or session_key not in last_orientation_sessions
     )
+
+    # System-prompt leg of the workflow prose. Get workflow instructions from
+    # the LangGraph. The graph starts at orientation and routes to the current
+    # phase, embedding workflow instructions in its state.
+    from agentalloy.signals.graph import (  # noqa: PLC0415
+        initial_phase_graph_state,
+        make_thread_key,
+        phase_graph,
+    )
+
+    thread_key = make_thread_key(cwd)
+    input_state = initial_phase_graph_state(phase=phase, lane="sdd-full")
+    # Set should_transition=False to terminate after the current phase node.
+    # We just want the workflow instructions for the current phase, not routing.
+    input_state["should_transition"] = False
+    input_state["to_phase"] = None
+
+    graph = phase_graph()
+    config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
+
+    try:
+        graph_result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+        graph_workflow_instructions = (
+            graph_result.get("workflow_instructions") if graph_result else None
+        )
+    except Exception:
+        logger.debug("Graph invocation failed, falling back to skill.raw_prose", exc_info=True)
+        graph_workflow_instructions = None
+
+    # Use graph's workflow_instructions, fall back to skill.raw_prose
+    workflow_instructions = graph_workflow_instructions or (skill.get("raw_prose") or None)
+
+    # Inject on phase entry, new session, or orientation. The agent needs workflow
+    # instructions when entering a phase or starting a new session.
+    should_inject_prose = phase_changed or is_new_session or announce_orientation or announce
+    workflow_system_prose = workflow_instructions if should_inject_prose else None
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
@@ -1179,13 +1225,20 @@ async def evaluate_signal(
     #    so an in-progress phase stays silent unless it is also an entry turn.
     #    Runs in a worker thread (like the gate eval below) so the reranker /
     #    embed network I/O never blocks the single uvicorn event loop.
-    match: PreFilterMatch | None = await asyncio.to_thread(
-        check_transition_trigger,
-        signal_keywords,
-        exit_gates,
-        ctx,
-        embed_client,
-    )
+    if seeded_this_turn:
+        # The seeding turn orients — the repo just entered lifecycle
+        # management and the agent needs its intake turn before any gate
+        # runs. Evaluating here would let a trigger auto-advance the same
+        # request that created the phase row.
+        match = None
+    else:
+        match = await asyncio.to_thread(
+            check_transition_trigger,
+            signal_keywords,
+            exit_gates,
+            ctx,
+            embed_client,
+        )
 
     # 6. Eval (only when the trigger fired): evaluate exit gates, transition the
     #    phase if met, and collect gate advisories. Runs in a thread so the
@@ -1203,22 +1256,42 @@ async def evaluate_signal(
             # the linear intake → spec.
             route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
             lane = route_hint if route_hint else "sdd-full"
-            # Execute the LangGraph to route the transition (task 07).
-            # The graph's nodes load workflow prose; conditional edges decide routing.
-            from agentalloy.signals.graph import (  # noqa: PLC0415
-                initial_phase_graph_state,
-                make_thread_key,
-                phase_graph,
-            )
 
-            thread_key = make_thread_key(cwd)
-            input_state = initial_phase_graph_state(phase=phase, lane=lane)
-            graph = phase_graph()
-            config = {"configurable": {"thread_id": thread_key.as_tuple()}}  # type: ignore[assignment]
-            result = graph.invoke(input_state, config=config)  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-            to_phase = result.get("phase") if result else None
+            # Intent-based contract creation: if we're in intake and the trigger fired,
+            # auto-create the first contract before gate evaluation. This eliminates
+            # the fragile dependency on the agent outputting HTML comment markers.
+            if phase == INTAKE_PHASE and ctx.store is not None:
+                # Generate a slug from the task (first 50 chars, sanitized)
+                import re as _re
 
-            # Gate evaluation still runs via _route_step for advisories/gates_met
+                task_text = task or "intake"
+                slug = _re.sub(r"[^a-z0-9]+", "-", task_text.lower())[:50].strip("-")
+                if not slug:
+                    slug = "intake"
+
+                # Check if a contract already exists for spec phase
+                existing = ctx.store.list_contracts(phase="spec", status="active")
+                if not existing:
+                    # Auto-create the first contract for spec phase
+                    contract_id = f"spec/{slug}"
+                    try:
+                        ctx.store.put_contract(
+                            contract_id,
+                            phase="spec",
+                            slug=slug,
+                            domain_tags=[],
+                            scope_touches=[],
+                            scope_avoids=[],
+                            body=task or "",  # Use the task as the initial contract body
+                        )
+                        logger.info(
+                            "Intent-based: auto-created first contract for phase=spec slug=%s",
+                            slug,
+                        )
+                    except Exception:
+                        logger.debug("intent-based contract creation failed", exc_info=True)
+            # Evaluate gates and decide the transition. _route_step is the single
+            # decision point for proxy/HTTP/CLI (slice 09).
             from agentalloy.signals.graph import (  # noqa: PLC0415
                 _route_step,
             )
@@ -1227,10 +1300,8 @@ async def evaluate_signal(
             # predicates and the approval gate against the real repo, not the
             # proxy's process cwd (the uv tool dir).
             out = _route_step(phase, lane, project_root=cwd, store=ctx.store)
-            # Defensive: only write to_phase when the gate allows the transition.
-            # Never use the graph's ungated terminal result (always 'ship' for the
-            # full lane) as a fallback write target — the graph is "reactive, not
-            # driving" per its docstring. When the gate blocks, stay put.
+            # Only write to_phase when the gate allows the transition.
+            # When the gate blocks, stay put.
             to_phase = out.to_phase if out.should_transition else None
             if mutate and to_phase:
                 # Design → plan migration: auto-copy design's tasks.md /
@@ -1254,10 +1325,16 @@ async def evaluate_signal(
                     # Auto-create next-phase contract if the transition warrants it.
                     # This runs AFTER _write_phase_atomic (which clears cursors), so
                     # we re-seed the cursor to the new contract if creation succeeds.
+                    # Carry slug/scope forward from the current phase's work-item
+                    # contract (cursor/sole-active fallback). Every transition must
+                    # resolve it here: the intake intent branch only binds its local
+                    # when it created the first spec contract, and that local must
+                    # not shadow this path for spec→design and beyond.
+                    source_contract_id, _ = _resolve_current_contract(cwd, phase, session_key)
                     _auto_create_next_contract(
                         cwd,
                         to_phase,
-                        contract_id,
+                        source_contract_id,
                         ctx.store,
                     )
                     # Rewrite enforcement posture for wired Tier A harnesses (D1–D9).

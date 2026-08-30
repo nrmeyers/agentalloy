@@ -177,6 +177,51 @@ class MigrateLayoutView(BaseModel):
     jobs: list[JobView]
 
 
+class PruneRequest(BaseModel):
+    """POST /code/prune body."""
+
+    slug: str | None = Field(
+        default=None,
+        description="Target row's slug. Omit to prune every ripe orphan (batch mode).",
+    )
+    repo_path: str | None = Field(
+        default=None,
+        description="Disambiguates a slug that has several checkouts; ignored in batch mode.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Classify and report dispositions but change nothing.",
+    )
+    force: bool = Field(
+        default=False,
+        description="Bypass the 7-day grace gate (explicit user intent to delete now).",
+    )
+
+
+class PruneEntry(BaseModel):
+    """One registry row's prune disposition."""
+
+    slug: str
+    repo_path: str
+    verdict: str  # pruned | stamped | waiting | live | unreachable | busy
+    row_deleted: bool = False
+    store_dir: str | None = None
+    store_dir_removed: bool = False
+    detail: str | None = None
+
+
+class PruneView(BaseModel):
+    """POST /code/prune response (single-target: total==1, one entry)."""
+
+    dry_run: bool
+    forced: bool
+    total: int
+    pruned: int
+    stamped: int
+    skipped: int
+    entries: list[PruneEntry]
+
+
 class CentralityEntry(BaseModel):
     qualified_name: str
     pagerank: float

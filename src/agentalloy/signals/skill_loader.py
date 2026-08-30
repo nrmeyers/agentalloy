@@ -271,15 +271,17 @@ def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | No
         if seed:
             _write_cursor_atomic(project_root, seed)
 
-        # Auto-archive on intake: any non-intake → intake transition ends a work
-        # cycle, so sweep the just-completed cycle's live contracts into
-        # archive/<phase>/ before the next cycle starts writing into active/.
+        # Auto-close on intake: any non-intake → intake transition ends a work
+        # cycle, so sweep the just-ended cycle's live contracts before the
+        # next cycle starts writing.  Leaving ship = reached product
+        # (archived); leaving any earlier phase = abandoned (cancelled).
+        # Stashed contracts are untouched — parked work survives the reset.
         # This is an in-process path, so it goes through the store handle rather
         # than the HTTP client — `test_signals_module_no_state_client_import`
         # enforces that.
         if phase == "intake" and prev is not None and prev != "intake":
             try:
-                view.archive_all()
+                view.archive_all("archived" if prev == "ship" else "cancelled")
             except Exception:
                 logger.warning("archive_all failed — store archiving skipped in proxy path")
 

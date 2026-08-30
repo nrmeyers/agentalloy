@@ -64,7 +64,7 @@ def _no_ambient_project_dir(
 
 
 from agentalloy.app import create_app
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore
 
 # Port used by the agentalloy server — must be freed between tests.
 _DEFAULT_PORT = 47950
@@ -507,7 +507,7 @@ def clear_container_sentinel():
 
 @pytest.fixture
 def app() -> FastAPI:
-    # Skip the production lifespan (which opens the DuckDB/Lance stores + embedder).
+    # Skip the production lifespan (which opens the corpus store + embedder).
     # Per-test fixtures wire dependency_overrides explicitly.
     return create_app(use_default_lifespan=False)
 
@@ -519,17 +519,19 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def vector_store(tmp_path: Path) -> Iterator[LanceFragmentStore]:
-    """Empty Lance fragment store at a tmp path. Tests that exercise
+def vector_store(tmp_path: Path) -> Iterator[OverGraphSkillStore]:
+    """Empty unified corpus store at a tmp path. Tests that exercise
     compose/retrieve construction use this for the ``vector_store``
-    constructor parameter (a FragmentStore in v5). Empty store means
+    constructor parameter (a FragmentStore). Empty store means
     search_similar returns no hits — fine for tests that mock retrieval
     results anyway."""
-    fs = LanceFragmentStore(tmp_path / "fragments.lance")
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
+
+    store = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     try:
-        yield fs
+        yield store
     finally:
-        fs.close()
+        store.close()
 
 
 # ---------------------------------------------------------------------------
@@ -547,37 +549,36 @@ _STUB_EMBED_MODEL = "stub-embed"
 
 @pytest.fixture(scope="session")
 def corpus_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Build the fixture corpus (DuckDB skill graph + embedded Lance dataset)
-    once per session. Returns a directory holding ``agentalloy.duck`` and
-    ``fragments.lance``."""
+    """Build the fixture corpus (unified OverGraph store: skills + fragments +
+    embeddings + BM25) once per session. Returns a directory holding
+    ``agentalloy.overgraph`` (+ its ``agentalloy.bm25`` sidecar)."""
     from agentalloy.fixtures.loader import load_fixtures
     from agentalloy.install.importer import reembed_corpus
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
     from tests.support import StubLMClient
 
     base = tmp_path_factory.mktemp("corpus_template")
-    ss = open_skill_store(str(base / "agentalloy.duck"))
-    ss.migrate()
-    load_fixtures(ss)
+    # Writer open runs migrate() and takes the BM25 writer lock for the build.
+    store = open_overgraph_skill_store(str(base / "agentalloy.overgraph"))
+    load_fixtures(store)
     stub = StubLMClient()
-    fs = LanceFragmentStore(base / "fragments.lance")
     reembed_corpus(
-        fs,
-        ss,
+        store,
+        store,
         embed=lambda texts: stub.embed(model=_STUB_EMBED_MODEL, texts=texts),
         model=_STUB_EMBED_MODEL,
     )
-    fs.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
-    fs.close()
-    ss.close()
+    store.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
+    store.close()
     return base
 
 
 @pytest.fixture
 def corpus_dir(corpus_template: Path, tmp_path: Path) -> Path:
     """An isolated per-test copy of the session corpus template. Returns a dir
-    holding ``agentalloy.duck`` (file) + ``fragments.lance`` (dir). Cheap (copy,
-    not rebuild), so tests that mutate the store stay independent."""
+    holding ``agentalloy.overgraph`` (+ its ``agentalloy.bm25`` sidecar).
+    Cheap (copy, not rebuild), so tests that mutate the store stay
+    independent."""
     import shutil
 
     dst = tmp_path / "corpus"

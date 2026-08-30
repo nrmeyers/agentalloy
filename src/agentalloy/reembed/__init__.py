@@ -1,7 +1,8 @@
-"""Re-embed CLI: walks the skill store's fragments, embeds via LM Studio,
-writes L2-normalized rows to DuckDB fragment_embeddings.
+"""Re-embed CLI: walks the skill store's fragments, embeds via the embed
+server, and writes L2-normalized rows to the corpus store's fragment
+embedding index.
 
-Idempotent — skips fragments whose fragment_id is already in DuckDB.
+Idempotent — skips fragments whose fragment_id is already embedded.
 Bounded retries on transient embedding-call failures.
 
 Entry point: ``python -m agentalloy.reembed``

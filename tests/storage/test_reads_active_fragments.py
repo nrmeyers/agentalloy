@@ -13,13 +13,17 @@ from agentalloy.ingest import (
 )
 from agentalloy.reads import active as reads_active
 from agentalloy.reads import get_active_fragments, get_active_fragments_for_skill
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import (
+    OverGraphSkillStore,
+    open_overgraph_skill_store,
+)
+from agentalloy.storage.protocols import FragmentRow
 
 
 @pytest.fixture
-def store(corpus_dir: Path) -> DuckDBSkillStore:
+def store(corpus_dir: Path) -> OverGraphSkillStore:
     # writer mode: _insert / direct fragment inserts below mutate the corpus copy
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"))
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"))
 
 
 def _workflow_record() -> ReviewRecord:
@@ -67,7 +71,7 @@ def _domain_record() -> ReviewRecord:
     )
 
 
-def test_returns_fragments_with_full_context(store: DuckDBSkillStore) -> None:
+def test_returns_fragments_with_full_context(store: OverGraphSkillStore) -> None:
     fragments = get_active_fragments(store)
     assert fragments, "expected at least one active fragment"
     for f in fragments:
@@ -86,7 +90,7 @@ def test_returns_fragments_with_full_context(store: DuckDBSkillStore) -> None:
         assert f.skill_class in {"domain", "system"}
 
 
-def test_fragments_carry_parent_skill_category_scope(store: DuckDBSkillStore) -> None:
+def test_fragments_carry_parent_skill_category_scope(store: OverGraphSkillStore) -> None:
     # E7 demotion keys on category_scope; each fragment must mirror its parent
     # skill's authored value (None-tolerant for pre-column corpora).
     from agentalloy.reads import get_active_skills
@@ -99,13 +103,13 @@ def test_fragments_carry_parent_skill_category_scope(store: DuckDBSkillStore) ->
         assert f.category_scope == (tuple(expected) if expected else None)
 
 
-def test_skill_class_filter_domain_only(store: DuckDBSkillStore) -> None:
+def test_skill_class_filter_domain_only(store: OverGraphSkillStore) -> None:
     fragments = get_active_fragments(store, skill_class="domain")
     for f in fragments:
         assert f.skill_class == "domain"
 
 
-def test_categories_filter_list_based(store: DuckDBSkillStore) -> None:
+def test_categories_filter_list_based(store: OverGraphSkillStore) -> None:
     # Per phase_to_categories locked mapping: design maps to [design, governance, meta]
     fragments = get_active_fragments(store, categories=["design", "governance", "meta"])
     categories = {f.category for f in fragments}
@@ -113,19 +117,19 @@ def test_categories_filter_list_based(store: DuckDBSkillStore) -> None:
     assert "design" in categories  # fixtures include design-category skills
 
 
-def test_categories_filter_narrows_correctly(store: DuckDBSkillStore) -> None:
+def test_categories_filter_narrows_correctly(store: OverGraphSkillStore) -> None:
     only_build = get_active_fragments(store, skill_class="domain", categories=["build"])
     assert {f.category for f in only_build} == {"build"}
 
 
-def test_domain_tags_filter(store: DuckDBSkillStore) -> None:
+def test_domain_tags_filter(store: OverGraphSkillStore) -> None:
     py_frags = get_active_fragments(store, domain_tags=["python"])
     assert py_frags, "expected python-tagged fragments"
     for f in py_frags:
         assert "python" in f.domain_tags
 
 
-def test_fragments_for_single_skill(store: DuckDBSkillStore) -> None:
+def test_fragments_for_single_skill(store: OverGraphSkillStore) -> None:
     frags = get_active_fragments_for_skill(store, "py-fastapi-endpoint-design")
     assert frags
     for f in frags:
@@ -133,28 +137,26 @@ def test_fragments_for_single_skill(store: DuckDBSkillStore) -> None:
         assert f.version_id == "py-fastapi-endpoint-design-v2"
 
 
-def test_unknown_skill_returns_empty(store: DuckDBSkillStore) -> None:
+def test_unknown_skill_returns_empty(store: OverGraphSkillStore) -> None:
     assert get_active_fragments_for_skill(store, "does-not-exist") == []
 
 
-def test_fragments_ordered_by_sequence(store: DuckDBSkillStore) -> None:
+def test_fragments_ordered_by_sequence(store: OverGraphSkillStore) -> None:
     frags = get_active_fragments_for_skill(store, "py-fastapi-endpoint-design")
     assert frags == sorted(frags, key=lambda f: f.sequence)
 
 
-def test_superseded_version_fragments_excluded(store: DuckDBSkillStore) -> None:
+def test_superseded_version_fragments_excluded(store: OverGraphSkillStore) -> None:
     # Manually attach a fragment to a superseded version (the folded DECOMPOSES_TO
     # edge is just fragments.version_id); confirm it's not returned.
-    store.execute(
-        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [
-            "should-not-appear",
-            "py-fastapi-endpoint-design-v1",  # superseded version in fixtures
-            "execution",
-            99,
-            "from superseded version",
-        ],
+    store.insert_fragment(
+        FragmentRow(
+            fragment_id="should-not-appear",
+            version_id="py-fastapi-endpoint-design-v1",  # superseded in fixtures
+            fragment_type="execution",
+            sequence=99,
+            content="from superseded version",
+        )
     )
     ids = {f.fragment_id for f in get_active_fragments(store)}
     assert "should-not-appear" not in ids
@@ -174,7 +176,7 @@ def test_superseded_version_fragments_excluded(store: DuckDBSkillStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_domain_string_query_excludes_workflow(store: DuckDBSkillStore) -> None:
+def test_domain_string_query_excludes_workflow(store: OverGraphSkillStore) -> None:
     """get_active_fragments(skill_class="domain") only returns domain, not workflow."""
     _insert(store, _workflow_record(), force=False)
     _insert(store, _domain_record(), force=False)

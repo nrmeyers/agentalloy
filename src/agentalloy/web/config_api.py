@@ -186,8 +186,7 @@ async def get_config() -> dict[str, Any]:
         "code_index_enabled": s.code_index_enabled,
         "code_index_watch": s.code_index_watch,
         "code_index_data_dir": s.code_index_data_dir,
-        "duckdb_path": s.duckdb_path,
-        "fragments_lance_path": s.fragments_lance_path,
+        "corpus_store_path": s.corpus_store_path,
         "telemetry_db_path": s.telemetry_db_path,
         "env_file_path": str(_env_file_path()),
     }

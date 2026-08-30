@@ -24,9 +24,10 @@ from typing import TYPE_CHECKING
 from agentalloy.config import get_settings
 from agentalloy.skill_md.parser import ParsedSystemSkill, ParseError, parse_file
 from agentalloy.storage.open import open_skills
+from agentalloy.storage.protocols import FragmentRow, SkillRow, SkillVersionRow
 
 if TYPE_CHECKING:
-    from agentalloy.storage.skill_store import DuckDBSkillStore
+    from agentalloy.storage.protocols import SkillStore
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
@@ -116,10 +117,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: schema migration failed: {exc}", file=sys.stderr)
                 return EXIT_DB
 
-        existing_name = store.scalar(
-            "SELECT canonical_name FROM skills WHERE skill_id = ?",
-            [skill.skill_id],
-        )
+        existing_skill = store.get_skill(skill.skill_id)
+        existing_name = existing_skill.canonical_name if existing_skill else None
         if existing_name is not None and not args.force:
             print(
                 f"error: skill_id '{skill.skill_id}' already exists "
@@ -129,10 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_VALIDATION
 
         if existing_name is None:
-            existing_id_by_name = store.scalar(
-                "SELECT skill_id FROM skills WHERE canonical_name = ?",
-                [skill.canonical_name],
-            )
+            existing_id_by_name = store.get_skill_id_by_name(skill.canonical_name)
             if existing_id_by_name is not None and not args.force:
                 print(
                     f"error: canonical_name '{skill.canonical_name}' is already used by "
@@ -159,11 +155,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- check superseded_by reference (needs DB access) ---
         if skill.superseded_by:
-            ref_exists = store.scalar(
-                "SELECT skill_id FROM skills WHERE skill_id = ?",
-                [skill.superseded_by],
-            )
-            if ref_exists is None:
+            ref = store.get_skill(skill.superseded_by)
+            if ref is None:
                 print(
                     f"validation error: superseded_by '{skill.superseded_by}' "
                     f"references a non-existent skill_id",
@@ -246,7 +239,7 @@ def _print_summary(skill: ParsedSystemSkill, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: DuckDBSkillStore, skill: ParsedSystemSkill, *, force: bool) -> None:
+def _insert(store: SkillStore, skill: ParsedSystemSkill, *, force: bool) -> None:
     """Insert a system skill (skill, active version, single guardrail fragment).
 
     Mirrors ``install.importer.import_skill``'s system-class path: the version is
@@ -260,46 +253,45 @@ def _insert(store: DuckDBSkillStore, skill: ParsedSystemSkill, *, force: bool) -
     if force:
         store.delete_skill(skill.skill_id)
 
-    store.execute(
-        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
-        "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
-        "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            skill.skill_id,
-            skill.canonical_name,
-            skill.category,
-            "system",
-            [],
-            skill.deprecated,
-            skill.superseded_by or None,
-            skill.always_apply,
-            list(skill.phase_scope) if skill.phase_scope else None,
-            list(skill.category_scope) if skill.category_scope else None,
-            None,
-            None,
-            version_id,
-        ],
+    store.insert_skill(
+        SkillRow(
+            skill_id=skill.skill_id,
+            canonical_name=skill.canonical_name,
+            category=skill.category,
+            skill_class="system",
+            domain_tags=[],
+            deprecated=skill.deprecated,
+            superseded_by=skill.superseded_by or None,
+            always_apply=skill.always_apply,
+            phase_scope=list(skill.phase_scope) if skill.phase_scope else None,
+            category_scope=list(skill.category_scope) if skill.category_scope else None,
+            tier=None,
+            description=None,
+            current_version_id=version_id,
+        )
     )
 
-    store.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
-        "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
-        [
-            version_id,
-            skill.skill_id,
-            1,
-            now,
-            skill.author,
-            skill.change_summary,
-            "active",
-            skill.raw_prose,
-        ],
+    store.insert_version(
+        SkillVersionRow(
+            version_id=version_id,
+            skill_id=skill.skill_id,
+            version_number=1,
+            authored_at=now,
+            author=skill.author,
+            change_summary=skill.change_summary,
+            status="active",
+            raw_prose=skill.raw_prose,
+        )
     )
 
-    store.execute(
-        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-        "VALUES (?,?,?,?,?)",
-        [fragment_id, version_id, "guardrail", 1, skill.raw_prose],
+    store.insert_fragment(
+        FragmentRow(
+            fragment_id=fragment_id,
+            version_id=version_id,
+            fragment_type="guardrail",
+            sequence=1,
+            content=skill.raw_prose,
+        )
     )
 
 

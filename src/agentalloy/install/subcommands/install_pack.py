@@ -49,24 +49,26 @@ from agentalloy.pack_validation import (
     validate_pack_skills,
     validate_review_verdicts,
 )
-from agentalloy.storage.open import open_fragments, open_skills
-from agentalloy.storage.skill_store import is_lock_held_error
+from agentalloy.storage.open import open_skills
+from agentalloy.storage.protocols import is_lock_held_error
 
 logger = __import__("logging").getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
 
-# Shown when the corpus DB is held by another process. The usual holder is the
-# running agentalloy service (its read-only handle blocks writers for its whole
-# lifetime); a concurrent ingest/reembed is the transient case. Imported by
-# install_packs and reembed.
+# Shown when the corpus store's writer lock (the Tantivy BM25 index on the
+# unified OverGraph store) is held by another process. The usual holder is a
+# concurrent ingest/reembed; the running service holds only a read handle and
+# does not block writers, but stopping it is still the right move so it
+# reloads the fresh embeddings afterwards. Imported by install_packs and
+# reembed.
 LOCK_HELD_REMEDIATION = (
-    "Another process is holding the corpus DB (agentalloy.duck) open. A running "
-    "agentalloy service blocks writers for its whole lifetime — stop it first "
-    "(`agentalloy server-stop`), re-run this command, then `agentalloy "
-    "server-start`. If a concurrent ingest/reembed briefly holds the lock "
-    "instead, wait and re-run."
+    "Another process holds the corpus store writer lock (usually a concurrent "
+    "ingest or reembed) — wait for it to finish, then re-run. If the "
+    "agentalloy service is running, stop it first (`agentalloy server-stop`) "
+    "so it picks up the fresh embeddings, re-run this command, then "
+    "`agentalloy server-start`."
 )
 
 # Hardcoded URL pattern. The placeholder org is ``navistone``; this lands
@@ -204,22 +206,18 @@ def _propagate_deprecation(skill_id: str, superseded_by: str) -> str:
     """
     if not skill_id:
         return "deprecated"
+    from dataclasses import replace
+
     from agentalloy.config import get_settings
 
     store = None
     try:
         settings = get_settings()
         store = open_skills(settings, read_only=False)
-        exists = store.scalar(
-            "SELECT count(*) FROM skills WHERE skill_id = ?",
-            [skill_id],
-        )
-        if not exists:
+        skill = store.get_skill(skill_id)
+        if skill is None:
             return "deprecated"
-        store.execute(
-            "UPDATE skills SET deprecated = true, superseded_by = ? WHERE skill_id = ?",
-            [superseded_by, skill_id],
-        )
+        store.insert_skill(replace(skill, deprecated=True, superseded_by=superseded_by))
         logger.info(
             "deprecation propagated: skill %s marked deprecated (superseded_by=%r)",
             skill_id,
@@ -340,7 +338,7 @@ def _ingest_yaml(
 
 
 def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]]) -> int:
-    """Delete Lance vectors for a pack's skills so the next reembed re-creates them.
+    """Delete fragment embeddings for a pack's skills so the next reembed re-creates them.
 
     Needed after a force re-ingest on a version bump: the skill rows are rewritten
     but their fragment_ids are positionally stable, so a non-force reembed would
@@ -354,13 +352,13 @@ def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]]) -> int:
     from agentalloy.config import get_settings
 
     deleted = 0
-    vs = None
+    store = None
     try:
-        vs = open_fragments(get_settings())
+        store = open_skills(get_settings())
         for entry in skills_entries:
             sid = str(entry.get("skill_id", ""))
             if sid:
-                deleted += vs.delete_skill(sid)
+                deleted += store.delete_skill_fragments(sid)
     except Exception as exc:  # noqa: BLE001 — invalidation is best-effort; reembed is the backstop
         logger.warning(
             "could not invalidate pack vectors (run `agentalloy reembed --force` "
@@ -369,8 +367,8 @@ def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]]) -> int:
         )
         return 0
     finally:
-        if vs is not None:
-            vs.close()
+        if store is not None:
+            store.close()
     if deleted:
         logger.info("invalidated %d stale embedding(s) for version-bumped pack", deleted)
     return deleted
@@ -519,13 +517,13 @@ def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
     pack_model = manifest.get("embed_model")
     if not isinstance(pack_dim, int):
         return None  # nothing to check against; let ingest decide
-    vs = None
+    store = None
     try:
         from agentalloy.config import get_settings
 
         settings = get_settings()
-        vs = open_fragments(settings)
-        current_dim = vs.embedding_dim()
+        store = open_skills(settings, read_only=True)
+        current_dim = store.embedding_dim()
         if current_dim is None:
             return None  # corpus is empty; pack defines the dim
         if current_dim != pack_dim:
@@ -555,8 +553,8 @@ def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
     except Exception:  # noqa: BLE001 — best-effort; let downstream surface real failures
         return None
     finally:
-        if vs is not None:
-            vs.close()
+        if store is not None:
+            store.close()
     return None
 
 
@@ -574,19 +572,25 @@ def _corpus_missing_active(skill_ids: list[str]) -> list[str]:
         return []
     try:
         from agentalloy.config import get_settings
-        from agentalloy.storage.skill_store import open_skill_store
 
         settings = get_settings()
-        if not Path(settings.duckdb_path).exists():
+        store_path = Path(settings.corpus_store_path)
+        if not store_path.exists():
             return list(skill_ids)
-        with open_skill_store(settings.duckdb_path, read_only=True) as store:
-            rows = store.execute(
-                "SELECT s.skill_id FROM skills s "
-                "JOIN skill_versions v ON v.version_id = s.current_version_id "
-                "WHERE v.status = 'active' AND list_contains($ids, s.skill_id)",
-                {"ids": list(skill_ids)},
-            )
-        present = {str(r[0]) for r in rows}
+        store = open_skills(settings, read_only=True)
+        try:
+            present: set[str] = set()
+            for sid in skill_ids:
+                skill = store.get_skill(sid)
+                if skill is None:
+                    continue
+                # Replicates the old JOIN: the skill only counts as present when
+                # its current_version_id points at a version with status='active'.
+                version = store.get_version(skill.current_version_id)
+                if version is not None and version.status == "active":
+                    present.add(sid)
+        finally:
+            store.close()
         return [sid for sid in skill_ids if sid not in present]
     except Exception:  # noqa: BLE001 — unreadable store → re-ingest, never skip
         return list(skill_ids)
@@ -878,25 +882,27 @@ def install_local_pack(
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
 
-    # Verify corpus files were actually created (Pattern E fix).
+    # Verify the corpus store was actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
     # Verify the same path the ingest actually wrote to — settings honor the
-    # DUCKDB_PATH env override (e.g. the container points it at /app/data).
+    # CORPUS_STORE_PATH env override (e.g. the container points it at /app/data).
     # corpus_dir() is the XDG/profile default and diverges from that override,
-    # so it must not be used for verification. ingest writes the skill store
-    # (agentalloy.duck); the Lance fragments dataset is built later by reembed.
+    # so it must not be used for verification. ingest writes the unified corpus
+    # store (agentalloy.overgraph); fragment embeddings are built later by reembed.
     from agentalloy.config import get_settings
 
     _settings = get_settings()
-    duck_path = Path(_settings.duckdb_path)
-    if not duck_path.exists():
+    store_path = Path(_settings.corpus_store_path)
+    if not store_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "corpus_verification_failed",
             "pack": name,
             "pack_dir": str(pack_dir),
-            "error": (f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"),
+            "error": (
+                f"Corpus store missing after ingest: agentalloy.overgraph={store_path.exists()}"
+            ),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "
                 "then re-install the pack."
@@ -905,11 +911,11 @@ def install_local_pack(
         }
 
     # Version-bump upgrade: the force re-ingest above rewrote each skill's rows,
-    # but Lance vectors are keyed by positionally-stable fragment_ids
+    # but embeddings are keyed by positionally-stable fragment_ids
     # ({skill_id}-v1-f{seq}), so the downstream non-force bulk reembed treats them
     # as already-present and skips them, leaving stale embeddings. Drop the pack's
-    # vectors here so the reembed re-creates them from the new prose. (Workflow
-    # skills carry no vectors, so this is a harmless no-op for them.)
+    # embeddings here so the reembed re-creates them from the new prose. (Workflow
+    # skills carry no embeddings, so this is a harmless no-op for them.)
     if force_reingest:
         _invalidate_pack_vectors(skills_entries)
 
@@ -1251,25 +1257,27 @@ def install_pack(
             "duration_ms": duration_ms,
         }
 
-    # 5. Verify corpus files were actually created (Pattern E fix).
+    # 5. Verify the corpus store was actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
     # Verify the same path the ingest actually wrote to — settings honor the
-    # DUCKDB_PATH env override (e.g. the container points it at /app/data).
+    # CORPUS_STORE_PATH env override (e.g. the container points it at /app/data).
     # corpus_dir() is the XDG/profile default and diverges from that override,
-    # so it must not be used for verification. ingest writes the skill store
-    # (agentalloy.duck); the Lance fragments dataset is built later by reembed.
+    # so it must not be used for verification. ingest writes the unified corpus
+    # store (agentalloy.overgraph); fragment embeddings are built later by reembed.
     from agentalloy.config import get_settings
 
     _settings = get_settings()
-    duck_path = Path(_settings.duckdb_path)
-    if not duck_path.exists():
+    store_path = Path(_settings.corpus_store_path)
+    if not store_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "corpus_verification_failed",
             "pack": name,
             "manifest_url": url,
-            "error": (f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"),
+            "error": (
+                f"Corpus store missing after ingest: agentalloy.overgraph={store_path.exists()}"
+            ),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "
                 "then re-install the pack."

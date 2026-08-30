@@ -17,7 +17,7 @@ from agentalloy.api.diagnostics_router import (
 from agentalloy.api.health_router import DependencyStatus, HealthChecker, HealthResponse
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.runtime_state import RuntimeCache, VersionDetail, load_runtime_cache
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -25,12 +25,12 @@ from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 
 @pytest.fixture
-def populated_store(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def populated_store(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 @pytest.fixture
-def loaded_cache(populated_store: DuckDBSkillStore) -> RuntimeCache:
+def loaded_cache(populated_store: OverGraphSkillStore) -> RuntimeCache:
     return load_runtime_cache(populated_store)
 
 
@@ -81,7 +81,7 @@ def _degraded_checker(
     return checker
 
 
-def _stale_cache(populated_store: DuckDBSkillStore, stale_skill_id: str) -> RuntimeCache:
+def _stale_cache(populated_store: OverGraphSkillStore, stale_skill_id: str) -> RuntimeCache:
     """Build a RuntimeCache where one skill has a deliberately wrong version_id."""
     real = load_runtime_cache(populated_store)
     real_skill = real.get_active_skill_by_id(stale_skill_id)
@@ -125,7 +125,7 @@ def _stale_cache(populated_store: DuckDBSkillStore, stale_skill_id: str) -> Runt
 # ---------------------------------------------------------------------------
 
 
-def test_runtime_cache_loads_from_store(populated_store: DuckDBSkillStore) -> None:
+def test_runtime_cache_loads_from_store(populated_store: OverGraphSkillStore) -> None:
     cache = load_runtime_cache(populated_store)
     skills = cache.get_active_skills()
     assert len(skills) > 0
@@ -136,16 +136,11 @@ def test_runtime_cache_loads_from_store(populated_store: DuckDBSkillStore) -> No
 
 
 def test_runtime_cache_entries_match_store_active_versions(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """Cache version_ids should match what the store reports."""
-    rows = populated_store.execute(
-        "SELECT s.skill_id, v.version_id FROM skills s "
-        "JOIN skill_versions v ON v.version_id = s.current_version_id "
-        "WHERE v.status = 'active' AND s.deprecated = false"
-    )
-    store_map = {str(r[0]): str(r[1]) for r in rows}
+    store_map = {s.skill_id: s.current_version_id for s in populated_store.get_active_skills()}
     cache_map = {s.skill_id: s.active_version_id for s in loaded_cache.get_active_skills()}
     assert cache_map == store_map
 
@@ -207,7 +202,7 @@ def test_consistency_version_mismatch() -> None:
 
 @pytest.mark.asyncio
 async def test_diagnostics_consistent_when_cache_matches_store(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-1/AC-2: cache loaded from same store → fully consistent."""
@@ -222,16 +217,12 @@ async def test_diagnostics_consistent_when_cache_matches_store(
 
 @pytest.mark.asyncio
 async def test_diagnostics_detects_stale_cache(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
 ) -> None:
     """AC-1/AC-3: deliberately stale cache → mismatch flagged."""
-    real_skill_rows = populated_store.execute(
-        "SELECT s.skill_id FROM skills s "
-        "JOIN skill_versions v ON v.version_id = s.current_version_id "
-        "WHERE v.status = 'active' LIMIT 1"
-    )
-    assert real_skill_rows, "fixture store must have at least one active skill"
-    skill_id = str(real_skill_rows[0][0])
+    real_skills = populated_store.get_active_skills()
+    assert real_skills, "fixture store must have at least one active skill"
+    skill_id = real_skills[0].skill_id
 
     stale = _stale_cache(populated_store, skill_id)
     checker = DiagnosticsChecker(populated_store, stale, _healthy_checker())
@@ -242,7 +233,7 @@ async def test_diagnostics_detects_stale_cache(
 
 @pytest.mark.asyncio
 async def test_diagnostics_per_path_all_up_when_all_deps_ok(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-4: all deps ok → all paths ready."""
@@ -257,7 +248,7 @@ async def test_diagnostics_per_path_all_up_when_all_deps_ok(
 
 @pytest.mark.asyncio
 async def test_diagnostics_per_path_embedding_down(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-4: embedding down → compose and retrieve fail; inspect and telemetry unaffected."""
@@ -273,7 +264,7 @@ async def test_diagnostics_per_path_embedding_down(
 
 @pytest.mark.asyncio
 async def test_diagnostics_per_path_assembly_down(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-4: assembly down → only compose fails."""
@@ -290,7 +281,7 @@ async def test_diagnostics_per_path_assembly_down(
 
 @pytest.mark.asyncio
 async def test_diagnostics_per_path_telemetry_down(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-4: telemetry down → only telemetry path fails."""
@@ -305,7 +296,7 @@ async def test_diagnostics_per_path_telemetry_down(
 
 @pytest.mark.asyncio
 async def test_diagnostics_per_path_store_down(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-4: store down → compose, retrieve, inspect all fail."""
@@ -336,7 +327,7 @@ def test_diagnostics_endpoint_no_checker_returns_stub(client: TestClient) -> Non
 
 def test_diagnostics_endpoint_with_checker(
     app: FastAPI,
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
     loaded_cache: RuntimeCache,
 ) -> None:
     """AC-1/AC-2: endpoint returns populated consistent diagnostics."""
@@ -359,15 +350,10 @@ def test_diagnostics_endpoint_with_checker(
 
 def test_diagnostics_endpoint_stale_cache_detected(
     app: FastAPI,
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
 ) -> None:
     """AC-3: operator can distinguish stale cache via endpoint."""
-    real_skill_rows = populated_store.execute(
-        "SELECT s.skill_id FROM skills s "
-        "JOIN skill_versions v ON v.version_id = s.current_version_id "
-        "WHERE v.status = 'active' LIMIT 1"
-    )
-    skill_id = str(real_skill_rows[0][0])
+    skill_id = populated_store.get_active_skills()[0].skill_id
 
     stale = _stale_cache(populated_store, skill_id)
     app.state.diagnostics_checker = DiagnosticsChecker(populated_store, stale, _healthy_checker())

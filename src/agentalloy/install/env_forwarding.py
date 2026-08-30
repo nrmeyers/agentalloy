@@ -93,8 +93,7 @@ INTENT_KEYS: frozenset[str] = frozenset(
 HOST_TOPOLOGY_KEYS: frozenset[str] = frozenset(
     {
         # Volume-resident data paths, baked to /app/data/* by the renderer.
-        "DUCKDB_PATH",
-        "FRAGMENTS_LANCE_PATH",
+        "CORPUS_STORE_PATH",
         "TELEMETRY_DB_PATH",
         # The container runs its own baked llama-server + GGUF; switching the
         # embed model is a re-embed, not a config change (EmbeddingDimMismatch).

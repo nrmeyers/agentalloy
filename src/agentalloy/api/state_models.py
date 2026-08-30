@@ -29,8 +29,11 @@ ALL_KINDS: frozenset[str] = frozenset(
 # Kinds that participate in lease-based concurrency control.
 LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
-# Valid contract statuses stored in sdd_contract.
-ContractStatus = Literal["active", "archived", "superseded"]
+# Valid contract statuses stored in sdd_contract. Four states: one in-flight
+# (active), one parked (stashed — waiting to resume), two terminal outcomes
+# (archived — reached product; cancelled — never reached product, whether
+# abandoned or retired by a revision fork).
+ContractStatus = Literal["active", "stashed", "archived", "cancelled"]
 
 # Valid contract route values.
 ContractRoute = Literal["full", "sdd-fast", "add-skill"]
@@ -348,3 +351,91 @@ class ResumeResponse(BaseModel):
     cursor_contract: ResumeContractInfo | None = None
     owed_artifacts: list[str] | None = None
     governing_decisions: list[str] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Advance endpoint (contract writing + phase advancement in one call)
+# ---------------------------------------------------------------------------
+
+
+class AdvanceRequest(BaseModel):
+    """Input to POST /state/advance — write contract and advance phase in one call.
+
+    This is the single tool call the agent uses to advance the workflow.
+    It writes the contract for the next phase and advances the phase if
+    exit gates pass. No marker extraction, no trigger detection — just
+    one explicit, reliable action.
+    """
+
+    slug: Annotated[
+        str, Field(min_length=1, description="Short task identifier (e.g., 'workspace-llm-config')")
+    ]
+    contract_body: Annotated[
+        str, Field(min_length=1, description="What the next phase needs to know")
+    ]
+    to_phase: str | None = Field(
+        default=None,
+        description="Target phase (optional, defaults to next phase in the workflow)",
+    )
+    route: ContractRoute | None = Field(
+        default=None,
+        description="Route type: full | fast | add-skill | flow (defaults to full)",
+    )
+    approved: bool = Field(
+        default=False,
+        description=(
+            "Record human approval for the CURRENT phase before evaluating the "
+            "gate.  The service computes the approval digest server-side over the "
+            "phase's exit artifact — pass this when the user has approved the "
+            "presented work.  Refused when the phase has no exit artifact yet."
+        ),
+    )
+    domain_tags: list[str] | None = Field(default=None, description="Domain tag list")
+    scope_touches: list[str] | None = Field(default=None, description="Files the contract touches")
+    scope_avoids: list[str] | None = Field(default=None, description="Files the contract avoids")
+
+
+class AdvanceResponse(BaseModel):
+    """Response for POST /state/advance."""
+
+    success: bool
+    phase: str
+    contract_id: str | None = None
+    contract_slug: str | None = None
+    to_phase: str | None = None
+    gate_verdict: dict[str, Any] | None = None
+    advisories: list[str] | None = None
+    message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Approval endpoint (server-computed digest)
+# ---------------------------------------------------------------------------
+
+
+class PhaseApproveRequest(BaseModel):
+    """Input to POST /state/approve-phase.
+
+    ``phase`` defaults to the live phase.  The service resolves the active
+    work item the same way the approval gate does, digests the phase's exit
+    artifact, and records the approval — the digest is never computed
+    client-side.
+    """
+
+    phase: str | None = Field(
+        default=None,
+        description="Phase to approve (defaults to the current live phase)",
+    )
+    approver: str | None = Field(
+        default=None,
+        description="Who approved (defaults to 'agent-on-user-approval')",
+    )
+
+
+class PhaseApproveResponse(BaseModel):
+    """Response for POST /state/approve-phase."""
+
+    ok: bool = True
+    phase: str
+    slug: str | None = None
+    artifact_digest: str | None = None

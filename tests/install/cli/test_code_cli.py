@@ -50,6 +50,8 @@ class TestParserRegistration:
         assert _parse(["code", "callees", "a.b"]).func is code_mod._run_callees  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "bundle", "task"]).func is code_mod._run_bundle  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "remove", "--yes"]).func is code_mod._run_remove  # pyright: ignore[reportPrivateUsage]
+        assert _parse(["code", "prune", "--yes"]).func is code_mod._run_prune  # pyright: ignore[reportPrivateUsage]
+        assert _parse(["code", "prune", "--all", "--yes"]).func is code_mod._run_prune  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "watch", "status"]).func is code_mod._run_watch  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "watch", "enable"]).func is code_mod._run_watch_enable  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "watch", "disable", "/x"]).func is code_mod._run_watch_disable  # pyright: ignore[reportPrivateUsage]
@@ -1110,3 +1112,424 @@ class TestMigrateLayout:
         _mock_client(monkeypatch, handler)
         args = _parse(["code", "migrate-layout", "--quiet"])
         assert args.func(args) == 1
+
+
+class TestPrune:
+    """`agentalloy code prune` — the explicit orphan path (spec R2).
+
+    The CLI is a thin client: slug resolution is registry-authoritative (like
+    remove), real deletion needs --yes or an interactive "yes", --all is a dry
+    run unless --yes, and every service error maps to ERROR/CAUSE/FIX.
+    """
+
+    def _prune_handler(self, seen: dict[str, Any], body: dict[str, Any]) -> Any:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            assert request.url.path == "/code/prune"
+            assert request.method == "POST"
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, json=body)
+
+        return handler
+
+    def test_pruned_success_prints_summary(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": False,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 1,
+                    "stamped": 0,
+                    "skipped": 0,
+                    "entries": [
+                        {
+                            "slug": "org__repo",
+                            "repo_path": "/gone",
+                            "verdict": "pruned",
+                            "row_deleted": True,
+                            "store_dir": "/data/repos/org__repo/x",
+                            "store_dir_removed": True,
+                        }
+                    ],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen == {"slug": "org__repo", "repo_path": None, "dry_run": False, "force": False}
+        out = capsys.readouterr().out
+        assert "Pruned org__repo" in out
+        assert "store dir removed" in out
+
+    def test_stamped_success(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": False,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 0,
+                    "stamped": 1,
+                    "skipped": 0,
+                    "entries": [{"slug": "org__repo", "repo_path": "/gone", "verdict": "stamped"}],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "Stamped org__repo" in out
+        assert "grace period" in out
+
+    def test_404_is_nonzero_with_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(404, json={"detail": "no such registry row: nope"})
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "nope", "--yes", "--port", "1"])
+        assert args.func(args) == 1
+        err = capsys.readouterr().err
+        assert "ERROR:" in err
+        assert "CAUSE: no such registry row: nope" in err
+        assert "FIX:" in err
+
+    def test_400_live_checkout_points_at_remove(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(
+                400, json={"detail": "repo_path still exists (/x); use `agentalloy code remove`"}
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 1
+        err = capsys.readouterr().err
+        assert "400" in err
+        assert "code remove" in err
+
+    @pytest.mark.parametrize(
+        "detail", ["grace not elapsed; ~3.2 days remaining (use force to bypass)"]
+    )
+    def test_409_is_nonzero(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        detail: str,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(409, json={"detail": detail})
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 1
+        err = capsys.readouterr().err
+        assert "CAUSE: grace not elapsed" in err
+
+    def test_single_dry_run_skips_confirmation(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # pytest stdin is not a TTY; a dry run must still go through.
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": True,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 1,
+                    "stamped": 0,
+                    "skipped": 0,
+                    "entries": [
+                        {
+                            "slug": "org__repo",
+                            "repo_path": "/gone",
+                            "verdict": "pruned",
+                            "detail": "dry run: would prune",
+                        }
+                    ],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "org__repo", "--dry-run", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen == {"slug": "org__repo", "repo_path": None, "dry_run": True, "force": False}
+        assert "Would prune org__repo" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        ("store_dir", "expected"),
+        [
+            ("/data/repos/org__repo/x", "store dir would be removed"),
+            (None, "store dir preserved (shared or absent)"),
+        ],
+    )
+    def test_dry_run_reports_store_dir_disposition(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        store_dir: str | None,
+        expected: str,
+    ) -> None:
+        # AC-4: a dry run names exactly which store dir would be removed — and
+        # distinguishes it from one that would be preserved (shared/absent).
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                {},
+                {
+                    "dry_run": True,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 1,
+                    "stamped": 0,
+                    "skipped": 0,
+                    "entries": [
+                        {
+                            "slug": "org__repo",
+                            "repo_path": "/gone",
+                            "verdict": "pruned",
+                            "store_dir": store_dir,
+                            "store_dir_removed": False,
+                        }
+                    ],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "org__repo", "--dry-run", "--port", "1"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "Would prune org__repo" in out
+        assert expected in out
+
+    def test_all_defaults_to_dry_run(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": True,
+                    "forced": False,
+                    "total": 3,
+                    "pruned": 1,
+                    "stamped": 1,
+                    "skipped": 1,
+                    "entries": [
+                        {"slug": "a", "repo_path": "/a", "verdict": "pruned"},
+                        {"slug": "b", "repo_path": "/b", "verdict": "stamped"},
+                        {"slug": "c", "repo_path": "/c", "verdict": "live"},
+                    ],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "--all", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen == {"slug": None, "repo_path": None, "dry_run": True, "force": False}
+        out = capsys.readouterr().out
+        assert "Would prune summary: 1 pruned, 1 stamped, 1 skipped of 3" in out
+        assert "  pruned     a" in out
+        assert "  stamped    b" in out
+        assert "  live       c" not in out  # live rows are omitted
+
+    def test_all_yes_executes_with_force(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": False,
+                    "forced": True,
+                    "total": 1,
+                    "pruned": 1,
+                    "stamped": 0,
+                    "skipped": 0,
+                    "entries": [{"slug": "a", "repo_path": "/a", "verdict": "pruned"}],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "--all", "--yes", "--force", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen == {"slug": None, "repo_path": None, "dry_run": False, "force": True}
+        assert "Pruned summary:" in capsys.readouterr().out
+
+    def test_all_force_alone_is_still_dry_run(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # --force bypasses the grace gate, never the execution consent.
+        seen: dict[str, Any] = {}
+        _mock_client(
+            monkeypatch,
+            self._prune_handler(
+                seen,
+                {
+                    "dry_run": True,
+                    "forced": True,
+                    "total": 0,
+                    "pruned": 0,
+                    "stamped": 0,
+                    "skipped": 0,
+                    "entries": [],
+                },
+            ),
+        )
+        args = _parse(["code", "prune", "--all", "--force", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen == {"slug": None, "repo_path": None, "dry_run": True, "force": True}
+
+    def test_non_tty_real_deletion_refuses_without_yes(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def _boom(port: int) -> httpx.Client:
+            raise AssertionError("HTTP call must not happen before the guard")
+
+        monkeypatch.setattr(code_mod, "_make_client", _boom)
+        args = _parse(["code", "prune", "org__repo", "--port", "1"])
+        assert args.func(args) == 1
+        err = capsys.readouterr().err
+        assert "ERROR: Refusing to prune" in err
+        assert "--yes" in err
+
+    def test_tty_prompt_declined_cancels(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # Simulate a TTY: the guard then prompts; a "n" cancels with exit 0
+        # and no endpoint call.
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+
+        def _boom(port: int) -> httpx.Client:
+            raise AssertionError("HTTP call must not happen on a declined prompt")
+
+        monkeypatch.setattr(code_mod, "_make_client", _boom)
+        args = _parse(["code", "prune", "org__repo", "--port", "1"])
+        assert args.func(args) == 0
+        assert "Cancelled." in capsys.readouterr().out
+
+    def test_module_off_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"status": "healthy", "modules": {"code_index": "disabled"}}
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 1
+        assert "ERROR: The code-index module is disabled" in capsys.readouterr().err
+
+    def test_service_down_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 1
+        err = capsys.readouterr().err
+        assert "ERROR: Cannot reach the agentalloy service" in err
+        assert "FIX:" in err
+
+    def test_gone_path_resolves_via_registry(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        # The checkout is gone: the shared _resolve_repo_slug would treat a
+        # non-existent path as a bare slug (404). The prune resolver must
+        # resolve it against the registry instead.
+        gone = tmp_path / "worktrees" / "demo"  # never created on disk
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            if request.url.path == "/code/repos":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "slug": "demo",
+                            "repo_path": str(gone),
+                            "is_stale": False,
+                            "watch_enabled": False,
+                        }
+                    ],
+                )
+            assert request.url.path == "/code/prune"
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "dry_run": False,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 0,
+                    "stamped": 1,
+                    "skipped": 0,
+                    "entries": [{"slug": "demo", "repo_path": str(gone), "verdict": "stamped"}],
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", str(gone), "--yes", "--port", "1"])
+        assert args.func(args) == 0
+        assert seen["slug"] == "demo"  # registry match, not the raw path
+        assert seen["repo_path"] == str(gone)  # carried to disambiguate sibling checkouts
+
+    def test_bare_slug_short_circuits_without_registry(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # No separator, not a directory: treated as a slug, no /code/repos call.
+        paths: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            paths.append(request.url.path)
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            assert request.url.path == "/code/prune"
+            return httpx.Response(
+                200,
+                json={
+                    "dry_run": False,
+                    "forced": False,
+                    "total": 1,
+                    "pruned": 0,
+                    "stamped": 1,
+                    "skipped": 0,
+                    "entries": [{"slug": "org__repo", "repo_path": "/x", "verdict": "stamped"}],
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "prune", "org__repo", "--yes", "--port", "1"])
+        assert args.func(args) == 0
+        assert "/code/repos" not in paths

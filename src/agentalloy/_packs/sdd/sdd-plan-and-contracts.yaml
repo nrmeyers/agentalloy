@@ -1,6 +1,6 @@
 skill_id: sdd-plan-and-contracts
 canonical_name: SDD — Plan (sdd-plan)
-description: "Turn the design approach into an ordered task plan, unit test cases, and one build contract per task — recorded as tasks.artifact and test-plan.artifact via artifact markers, with a contract auto-created for each build task."
+description: "Turn the design approach into an ordered task plan, unit test cases, and one build contract per task — recorded as tasks.artifact and test-plan.artifact via the state panel artifact endpoint, with one build contract written per task."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -29,7 +29,8 @@ applies_to_phases:
 prose_invariants:
   - "state panel"
   - "present the work for human approval"
-  - "agentalloy:artifact"
+  - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -91,9 +92,7 @@ contract_template: |
   ## Plan
 
   Tasks and test cases are recorded as plan artifacts
-  (tasks.artifact, test-plan.artifact) via artifact markers:
-  `<!-- agentalloy:artifact name=tasks.artifact -->...<!-- /agentalloy:artifact -->`
-  and `<!-- agentalloy:artifact name=test-plan.artifact -->...<!-- /agentalloy:artifact -->`.
+  (tasks.artifact, test-plan.artifact) via `agentalloy artifact put` or PUT /state/artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -107,8 +106,11 @@ raw_prose: |
   **Checkpoint first.** Check your state panel and confirm the design artifact
   exists and carries an **Approach**. If it does not, you skipped design;
   STOP and record it. You MUST NOT write any `src/` code in this phase: plan
-  produces artifacts and contracts only, recorded via artifact markers and
-  auto-created contracts. There is no file to write — if you are editing source,
+  produces artifacts and contracts only — artifacts piped straight to the store
+  (`agentalloy artifact put`, content on stdin; PUT /state/artifact is the HTTP
+  fallback), contracts via POST /contracts.
+  There is no file to write — a file on disk is not an artifact, and it exists
+  only once the recording succeeds. If you are editing source,
   you are in the wrong phase.
 
   Design settled the approach and decisions. Plan turns that into an ordered
@@ -158,18 +160,12 @@ raw_prose: |
   ## 4. Record it
 
   Plan fans out into named artifacts build reads from — two load-bearing ones,
-  with the exact section headers the gates check. Record each using an artifact
-  marker:
+  with the exact section headers the gates check. Record each by piping its body
+  to the store: `agentalloy artifact put --phase plan --slug <task-slug>
+  --name <name>` (content on stdin; PUT /state/artifact is the HTTP fallback):
 
-      <!-- agentalloy:artifact name=tasks.artifact -->
-      ## Tasks
-      ...
-      <!-- /agentalloy:artifact -->
-
-      <!-- agentalloy:artifact name=test-plan.artifact -->
-      ## Test Cases
-      ...
-      <!-- /agentalloy:artifact -->
+  - name `tasks.artifact`, body starting `## Tasks`
+  - name `test-plan.artifact`, body starting `## Test Cases`
 
   Then **check your state panel to verify tasks.artifact and test-plan.artifact
   exist with their required sections**. That completes the artifact recording.
@@ -177,14 +173,19 @@ raw_prose: |
   ## 5. Emit one build contract per task
 
   **MUST: emit ONE build contract per task — never one whole-feature contract.**
+  The density gate counts the tasks artifact's top-level bullets under its
+  `## Tasks` heading (`- T-1 …` — `### T-N` headings count as zero) and blocks
+  the advance until at least that many build contracts are recorded, so format
+  the artifact accordingly and match the count exactly.
   Build retrieval is budgeted to a small ~4-skill cap per contract. A single
   contract that carries every task's tags spreads that budget across all of
   them, so most surfaces get zero skills. One contract per task, centered on
   one surface, keeps the budget on target. Design is the cheap place to do it,
   with the whole plan in front of you.
 
-  A contract is auto-created for each build task. State that the phase is
-  complete and the build contracts are created as part of the phase transition.
+  Write one contract per build task via POST /contracts (scoped by
+  `?repo_root=`, like every state endpoint). Then advance via your state
+  panel's advance action once the gates below pass.
 
   Each build contract is stamped with `work_item:` (this plan item's slug,
   from the active plan cursor) so the density and tag-focus gates judge *your*
@@ -229,8 +230,9 @@ raw_prose: |
 
   Then **PRESENT the plan, test cases, and all build contracts in full and
   STOP** — do not advance yourself. The forward jump to build is a human
-  checkpoint: present the work for human approval. The phase advances
-  automatically once exit gates pass and approval is recorded. After approval,
+  checkpoint: present the work for human approval. Only once the user
+  explicitly approves do you advance, via your state panel's advance action
+  (POST /state/advance) with `"approved": true`. After approval,
   work the contracts top to bottom — the state panel shows your current task
   and progress. State that each task is complete and the next loads automatically.
   The work-item cursor advances as you go, which is how every later phase knows

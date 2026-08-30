@@ -75,45 +75,44 @@ def _git_status(repo_root: Path) -> dict[str, Any]:
     return info
 
 
-def _read_corpus_schema_version(duck_path: Path) -> int | None:
-    """Read schema_version from the ``corpus_meta`` table if present."""
-    if not duck_path.exists():
+def _read_corpus_schema_version(store_path: Path) -> int | None:
+    """Read schema_version from the corpus store meta if present."""
+    if not store_path.exists():
         return None
     try:
-        import duckdb
+        from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-        con = duckdb.connect(str(duck_path), read_only=True)
+        store = open_overgraph_skill_store(store_path, read_only=True)
         try:
-            row = con.execute(
-                "SELECT value FROM corpus_meta WHERE key = 'schema_version' LIMIT 1",
-            ).fetchone()
-            if row and row[0] is not None:
-                return int(row[0])
-        except duckdb.CatalogException:
-            return None
+            raw = store.get_meta("schema_version")
+            if raw is not None:
+                return int(raw)
         finally:
-            con.close()
+            store.close()
     except Exception:
         return None
     return None
 
 
-def _stamp_corpus_schema_version(duck_path: Path, version: int) -> bool:
+def _stamp_corpus_schema_version(store_path: Path, version: int) -> bool:
     """Write the ``schema_version`` marker in place (brief writer open).
 
-    Returns False when the writer lock is unavailable — a running service or a
-    concurrent ingest holds the file — leaving the caller to warn instead. In
-    the ``upgrade`` flow the service is stopped when this runs, so the marker
-    lands here and the old post-upgrade advice to run a full ``reembed
-    --force`` (30–40 min on CPU) just to stamp one row never fires.
+    Returns False when the writer lock is unavailable — a concurrent reembed /
+    ingest holds it — leaving the caller to warn instead. In the ``upgrade``
+    flow the service is stopped when this runs, so the marker lands here and
+    the old post-upgrade advice to run a full ``reembed --force`` (30–40 min
+    on CPU) just to stamp one row never fires.
     """
     try:
         from agentalloy.storage.card_index import META_KEY_SCHEMA_VERSION
-        from agentalloy.storage.skill_store import DuckDBSkillStore
+        from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-        with DuckDBSkillStore(str(duck_path)) as store:
-            store.migrate()  # legacy corpora may predate the corpus_meta table
+        store = open_overgraph_skill_store(store_path, read_only=False)
+        try:
+            store.migrate()  # legacy corpora may predate the meta kv
             store.set_meta(META_KEY_SCHEMA_VERSION, str(version))
+        finally:
+            store.close()
         return True
     except Exception:
         return False
@@ -127,7 +126,7 @@ def _expected_corpus_schema_version() -> int:
 
 
 def _run_migrations(
-    duck_path: Path,
+    store_path: Path,
     from_version: int,
     to_version: int,
 ) -> list[dict[str, Any]]:
@@ -147,7 +146,7 @@ def _run_migrations(
             )
             return applied
         try:
-            MIGRATIONS[step](duck_path)
+            MIGRATIONS[step](store_path)
             applied.append({"from": cur, "to": cur + 1, "applied": True})
         except Exception as exc:  # noqa: BLE001
             applied.append({"from": cur, "to": cur + 1, "applied": False, "error": str(exc)})
@@ -211,16 +210,15 @@ def update(root: Path | None = None) -> dict[str, Any]:
 
     # 1. Corpus presence + schema version (user-scoped corpus dir)
     user_corpus = install_state.corpus_dir()
-    duck_path = user_corpus / "agentalloy.duck"
-    fragments_path = user_corpus / "fragments.lance"
-    if not duck_path.exists() or not fragments_path.exists():
+    store_path = user_corpus / "agentalloy.overgraph"
+    if not store_path.exists():
         summary["corpus"] = {"present": False}
         summary["warnings"].append(
             f"Corpus missing at {user_corpus} — run "
             "`python -m agentalloy.install seed-corpus` to seed from the bundled wheel.",
         )
     else:
-        recorded = _read_corpus_schema_version(duck_path)
+        recorded = _read_corpus_schema_version(store_path)
         expected = _expected_corpus_schema_version()
         summary["corpus"] = {
             "present": True,
@@ -234,20 +232,20 @@ def update(root: Path | None = None) -> dict[str, Any]:
             # Missing marker means "current" (no migrations to run) — so stamp
             # it in place rather than telling the user to run a full corpus
             # rebuild for one metadata row. Falls back to a warning when the
-            # file is held open (a running service blocks the brief writer).
-            if _stamp_corpus_schema_version(duck_path, expected):
+            # writer lock is held (a concurrent reembed / ingest holds it).
+            if _stamp_corpus_schema_version(store_path, expected):
                 summary["corpus"]["recorded_schema_version"] = expected
                 summary["corpus"]["schema_version_stamped"] = True
             else:
                 summary["warnings"].append(
                     f"Corpus predates the schema_version marker; treating as "
                     f"v{expected} (current — harmless). Could not stamp it in "
-                    "place (the corpus DB is held open, likely by the running "
-                    "service); the marker is written by the next `agentalloy "
-                    "upgrade` or reembed pass.",
+                    "place (the corpus store's writer lock is held, likely by a "
+                    "concurrent reembed/ingest); the marker is written by the "
+                    "next `agentalloy upgrade` or reembed pass.",
                 )
         elif recorded < expected:
-            summary["migrations"] = _run_migrations(duck_path, recorded, expected)
+            summary["migrations"] = _run_migrations(store_path, recorded, expected)
             failed = [m for m in summary["migrations"] if not m.get("applied")]
             if failed:
                 summary["warnings"].append(

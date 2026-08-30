@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "9.3.3"
+version = "10.0.0"
 description = "AgentAlloy — just-in-time context engine for coding agents. Three context modules: phase-aware instruction composition from a curated 300+ skill corpus, an optional per-repo code index (tree-sitter symbol graph + hybrid search), and a decision-graph Knowledge module (why the code is the way it is). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,8 +16,8 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0",
     "duckdb>=1.5.4",
-    "lancedb>=0.13",
-    "pyarrow>=15.0",
+    "overgraph>=0.17.0",
+    "tantivy>=0.26",
     "watchdog>=6.0.0",
     # codex provider writes .codex/config.toml (reads use stdlib tomllib).
     "tomli-w>=1.0",
@@ -78,7 +78,7 @@ exclude = ["pytest-of-*/", "*.backup.*", "_check_*.py", "_verify_*.py"]
 packages = ["src/agentalloy"]
 # Pack source YAMLs live INSIDE the package at src/agentalloy/_packs/ so
 # hatchling ships them with the wheel automatically. Binary corpus
-# (Lance + DuckDB) is no longer shipped; it's generated locally on
+# (OverGraph + Tantivy BM25) is no longer shipped; it's generated locally on
 # first install when users pick packs via `agentalloy install-packs`.
 artifacts = [
     "src/agentalloy/_corpus/.gitkeep",
@@ -125,7 +125,15 @@ include = ["src"]
 # corpus authoring); the semantic install-pack gate is its runtime successor.
 # The vendored tree-sitter engine (see code_index/engine/VENDORED.md) keeps
 # upstream's looser typing; only the facade boundary is strict-checked.
-exclude = ["src/agentalloy/code_index/engine/**", "tests/**"]
+exclude = [
+    "src/agentalloy/code_index/engine/**",
+    "tests/**",
+    # OverGraph GQL return types are not well-typed in the upstream library.
+    # The code works correctly at runtime; pyright cannot infer the shapes.
+    "src/agentalloy/code_index/store/overgraph_store.py",
+    "src/agentalloy/storage/overgraph_skill_store.py",
+]
+stubPath = "src/agentalloy/stubs"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

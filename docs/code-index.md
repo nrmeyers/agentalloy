@@ -77,11 +77,15 @@ Per-repo stores live outside the skill corpus, under
 
 ```
 code_index/
-  jobs.sqlite                    # shared jobs / events / indexed-repos registry
-  repos/{slug}/graph.duck        # DuckDB symbol graph (source of truth)
-  repos/{slug}/vectors.lance     # LanceDB vector ANN + native BM25 (derived)
-  repos/{slug}/cache/            # engine hash/stat sidecar caches
+  jobs.sqlite                            # shared jobs / events / indexed-repos registry
+  repos/{slug}/{path_key}/graph.overgraph  # OverGraph symbol graph + vectors (unified)
+  repos/{slug}/{path_key}/cache/          # engine hash/stat sidecar caches
 ```
+
+`{path_key}` is a deterministic 8-hex hash of the resolved checkout path, so
+multiple checkouts of the same remote get separate indexes (legacy
+`repos/{slug}/` indexes without a path key are still read for backward
+compatibility).
 
 `{slug}` is canonical (`code_index/slug.py`) and worktree-path-independent: a
 repo with a single `origin` remote slugs to `{org}__{repo}` for github.com, or

@@ -86,9 +86,9 @@ def get_embed_async_client(request: Request) -> httpx.AsyncClient | None:
 def get_vector_store(request: Request) -> TelemetryStore | None:
     """Return the telemetry store from app.state (the proxy trace sink).
 
-    Named ``get_vector_store`` for call-site stability; in v5 the proxy telemetry
+    Named ``get_vector_store`` for call-site stability; the proxy telemetry
     path writes composition traces to the service-owned telemetry.duck, so this
-    resolves ``app.state.telemetry_store`` (not the Lance fragment store).
+    resolves ``app.state.telemetry_store`` (not the corpus store).
     """
     return getattr(request.app.state, "telemetry_store", None)
 
@@ -218,7 +218,8 @@ def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
             return override()
     except Exception:  # noqa: BLE001
         pass
-    return None
+    # Fallback: lifespan stores the orchestrator on app.state
+    return getattr(request.app.state, "compose_orchestrator", None)
 
 
 def get_settings_for_proxy(request: Request) -> AppSettings:

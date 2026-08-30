@@ -336,9 +336,9 @@ def _build_entrypoint_script(packs: str) -> str:
        recorded — partial bootstrap crashes resume from where they left off.
        A corrupted checkpoint file is treated as "no checkpoints" so the
        script never fails closed on a malformed line.
-    5. Starts ``uvicorn`` **after** pack ingestion completes, avoiding the
-       DuckDB single-writer lock conflict that occurred when uvicorn opened
-       the skill store before pack ingestion finished.
+    5. Starts ``uvicorn`` **after** pack ingestion completes, so the ingest
+       writer (holder of the corpus store writer lock) is never contended
+       with and the service comes up against a complete corpus.
     6. Prebuilt-corpus seed: if the image carries ``/app/corpus-seed``
        (CI bakes a fully ingested + embedded corpus plus
        ``corpus-stamp.json``) and the data volume has no corpus yet, the
@@ -429,7 +429,7 @@ def _build_entrypoint_script(packs: str) -> str:
         "# still refresh.",
         "NEED_SEED=false",
         'if [ -f "$SEED_DIR/corpus-stamp.json" ]; then',
-        '    if [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then',
+        '    if [ ! -d "$APP_DIR/data/agentalloy.overgraph" ]; then',
         "        NEED_SEED=true",
         '    elif [ ! -f "$VOL_STAMP" ]; then',
         "        # Corpus present but unstamped (e.g. a pre-stamp volume, or one",
@@ -448,9 +448,9 @@ def _build_entrypoint_script(packs: str) -> str:
         'if [ "$NEED_SEED" = "true" ]; then',
         '    echo ">> Seeding prebuilt corpus from image (skipping pack ingest + re-embed)"',
         '    mkdir -p "$APP_DIR/data"',
-        '    rm -rf "$APP_DIR/data/agentalloy.duck" "$APP_DIR/data/fragments.lance"',
-        '    cp "$SEED_DIR/agentalloy.duck" "$APP_DIR/data/agentalloy.duck"',
-        '    cp -a "$SEED_DIR/fragments.lance" "$APP_DIR/data/fragments.lance"',
+        '    rm -rf "$APP_DIR/data/agentalloy.overgraph" "$APP_DIR/data/agentalloy.bm25"',
+        '    cp -a "$SEED_DIR/agentalloy.overgraph" "$APP_DIR/data/agentalloy.overgraph"',
+        '    if [ -d "$SEED_DIR/agentalloy.bm25" ]; then cp -a "$SEED_DIR/agentalloy.bm25" "$APP_DIR/data/agentalloy.bm25"; fi',
         '    cp "$SEED_DIR/corpus-stamp.json" "$VOL_STAMP"',
         "    CORPUS_SEEDED=true",
         "    # Surface the seed to host-side readiness polling (same atomic",
@@ -540,11 +540,11 @@ def _build_entrypoint_script(packs: str) -> str:
         ),
         "",
         "# Pack ingest runs only when there is no corpus to start from: not seeded",
-        "# this boot (CORPUS_SEEDED) AND no existing volume corpus (agentalloy.duck). A",
-        "# reused/populated volume is left to the seed logic above, so we never run a",
-        "# partial always-on reconcile over an already-full corpus.",
+        "# this boot (CORPUS_SEEDED) AND no existing volume corpus (agentalloy.overgraph).",
+        "# A reused/populated volume is left to the seed logic above, so we never run",
+        "# a partial always-on reconcile over an already-full corpus.",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ] \\',
-        '   && [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then',
+        '   && [ ! -d "$APP_DIR/data/agentalloy.overgraph" ]; then',
     ]
 
     if has_packs:
@@ -628,7 +628,8 @@ def _build_entrypoint_script(packs: str) -> str:
             '    echo ">> Bootstrap complete"',
             "fi",
             "",
-            "# Start uvicorn AFTER bootstrap completes to avoid DuckDB single-writer lock conflicts.",
+            "# Start uvicorn AFTER bootstrap completes so the ingest writer's corpus",
+            "# store lock is never contended and the service sees a complete corpus.",
             "# Workers: default 2 for capacity, override via AGENTALLOY_WORKERS.",
             "WORKERS=${AGENTALLOY_WORKERS:-2}",
             'echo ">> Starting uvicorn (${WORKERS} worker(s))..."',
@@ -704,7 +705,7 @@ def _run_container(
       ``rw`` at the identical host path, so the proxy can read each repo's
       ``.agentalloy/`` phase state and write phase transitions back.
     * Env vars: the baked container spec (``AGENTALLOY_PACKS``,
-      ``DUCKDB_PATH``, ``FRAGMENTS_LANCE_PATH``, ``TELEMETRY_DB_PATH``,
+      ``CORPUS_STORE_PATH``, ``TELEMETRY_DB_PATH``,
       ``AGENTALLOY_RUNTIME_STATE_DIR``, ``LOG_LEVEL``) plus every *intent*
       key present in the host ``.env``, forwarded through the audited
       allowlist in :mod:`agentalloy.install.env_forwarding`.
@@ -745,8 +746,7 @@ def _run_container(
     assert ingest_secret, "mint_ingest_secret must return a non-empty secret"
     env = {
         "AGENTALLOY_PACKS": packs,
-        "DUCKDB_PATH": "/app/data/agentalloy.duck",
-        "FRAGMENTS_LANCE_PATH": "/app/data/fragments.lance",
+        "CORPUS_STORE_PATH": "/app/data/agentalloy.overgraph",
         "TELEMETRY_DB_PATH": "/app/data/telemetry.duck",
         # Per-turn cadence state (announced/composed/banner-turns) lives on the
         # data volume, keyed by /proj token — writing it into the repo's

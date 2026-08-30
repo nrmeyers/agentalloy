@@ -64,17 +64,59 @@ def test_list_skills_filters_and_provenance(client):
 
 
 def test_versions_endpoint_reads_store(client):
+    from datetime import UTC, datetime
+
+    from agentalloy.storage.protocols import SkillRow, SkillVersionRow
+
     rows = [
-        ("v2", 2, "2026-06-01", "navistone", "second", "active", "prose two"),
-        ("v1", 1, "2026-05-01", "navistone", "first", "superseded", "prose one"),
+        SkillVersionRow(
+            version_id="v2",
+            skill_id="pytest-idioms",
+            version_number=2,
+            authored_at=datetime(2026, 6, 1, tzinfo=UTC),
+            author="navistone",
+            change_summary="second",
+            status="active",
+            raw_prose="prose two",
+        ),
+        SkillVersionRow(
+            version_id="v1",
+            skill_id="pytest-idioms",
+            version_number=1,
+            authored_at=datetime(2026, 5, 1, tzinfo=UTC),
+            author="navistone",
+            change_summary="first",
+            status="superseded",
+            raw_prose="prose one",
+        ),
     ]
 
-    def execute(sql: str, params=None):
-        if "current_version_id" in sql:
-            return [("v2",)]
+    def get_skill(skill_id):
+        if skill_id == "pytest-idioms":
+            return SkillRow(
+                skill_id="pytest-idioms",
+                canonical_name="Pytest Idioms",
+                category="testing",
+                skill_class="domain",
+                domain_tags=["pytest"],
+                deprecated=False,
+                superseded_by=None,
+                always_apply=False,
+                phase_scope=None,
+                category_scope=None,
+                tier=None,
+                description="Pytest best practices",
+                current_version_id="v2",
+            )
+        return None
+
+    def get_versions_by_skill(skill_id):
         return rows
 
-    client.app.state.store = SimpleNamespace(execute=execute)
+    client.app.state.store = SimpleNamespace(
+        get_skill=get_skill,
+        get_versions_by_skill=get_versions_by_skill,
+    )
     body = client.get("/api/skills/pytest-idioms/versions").json()
     assert [v["version_number"] for v in body["versions"]] == [2, 1]
     assert body["versions"][0]["is_active"] is True
@@ -82,7 +124,7 @@ def test_versions_endpoint_reads_store(client):
 
 
 def test_versions_404_unknown_skill(client):
-    client.app.state.store = SimpleNamespace(execute=lambda sql, params=None: [])
+    client.app.state.store = SimpleNamespace(get_skill=lambda skill_id: None)
     assert client.get("/api/skills/nope/versions").status_code == 404
 
 

@@ -24,10 +24,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from agentalloy.api.state_models import (
     ALL_KINDS,
+    AdvanceRequest,
+    AdvanceResponse,
     ArtifactListResponse,
     ArtifactResponse,
     ArtifactSetRequest,
@@ -38,6 +40,8 @@ from agentalloy.api.state_models import (
     ContractSupersedeRequest,
     PhaseAdvanceRequest,
     PhaseAdvanceResponse,
+    PhaseApproveRequest,
+    PhaseApproveResponse,
     PhaseReadResponse,
     ResumeContractInfo,
     ResumeResponse,
@@ -638,14 +642,58 @@ async def list_active_sessions(
 
 
 @router.post(
+    "/sessions/stash",
+    summary="Stash a session (park it, waiting to resume)",
+)
+async def stash_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Stash a session by session_key (active → stashed).
+
+    The session's work-item contracts are stashed with it.  Returns
+    ``{"stashed": bool}``.
+    """
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    stashed = await asyncio.to_thread(store.stash_session, session_key)
+    return {"stashed": stashed}
+
+
+@router.post(
+    "/sessions/cancel",
+    summary="Cancel a session (abandoned, never reached product)",
+)
+async def cancel_session(
+    body: dict[str, Any],
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, bool]:
+    """Cancel a session by session_key (active → cancelled).
+
+    The session's work-item contracts are cancelled with it.  Returns
+    ``{"cancelled": bool}``.
+    """
+    session_key = body.get("session_key")
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key is required")
+    cancelled = await asyncio.to_thread(store.cancel_session, session_key)
+    return {"cancelled": cancelled}
+
+
+@router.post(
     "/sessions/archive",
-    summary="Archive a session by session_key",
+    summary="Archive a session (work item reached product)",
 )
 async def archive_session(
     body: dict[str, Any],
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> dict[str, bool]:
-    """Archive a session by session_key. Returns {"archived": bool}."""
+    """Archive a session by session_key (active → archived).
+
+    The session's work-item contracts are archived with it.  Returns
+    ``{"archived": bool}``.
+    """
     session_key = body.get("session_key")
     if not session_key:
         raise HTTPException(status_code=400, detail="session_key is required")
@@ -655,16 +703,17 @@ async def archive_session(
 
 @router.post(
     "/sessions/resume",
-    summary="Re-activate a session by session_key",
+    summary="Re-activate a stashed session by session_key",
 )
 async def resume_session(
     body: dict[str, Any],
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> dict[str, bool]:
-    """Re-activate a session (archived → active) and refresh last_active_at.
+    """Re-activate a stashed session (stashed → active) and refresh activity.
 
-    Returns ``{"resumed": bool}`` — True when the session is known (active or
-    archived), False when no such session exists for this repo+stream.
+    The session's stashed contracts come back to active with it.  Returns
+    ``{"resumed": bool}`` — True when the session is known, False when no
+    such session exists for this repo+stream.
     """
     session_key = body.get("session_key")
     if not session_key:
@@ -675,17 +724,26 @@ async def resume_session(
 
 @router.post(
     "/archive-all",
-    summary="Archive all active contracts and artifacts",
+    summary="End the work cycle: retire all in-flight contracts and artifacts",
 )
 async def archive_all(
+    body: dict[str, Any] | None = Body(default=None),
     store: DuckDBStateStore = Depends(get_repo_store),
-) -> dict[str, int]:
-    """Archive every active contract and artifact in one transaction.
+) -> dict[str, Any]:
+    """Retire every active contract and artifact in one transaction.
 
-    Returns ``{"contracts_archived": int, "artifacts_archived": int}``.
-    Zero counts is a valid no-op (everything already archived) — not an error.
+    Optional JSON body ``{"outcome": "archived" | "cancelled"}`` sets the
+    terminal status the in-flight contracts receive: ``archived`` when the
+    cycle reached product (reset from ship), ``cancelled`` when abandoned
+    mid-flight.  Defaults to ``archived``.  Stashed contracts are untouched.
+
+    Returns ``{"contracts": int, "artifacts": int, "outcome": str}``.
+    Zero counts is a valid no-op — not an error.
     """
-    return await asyncio.to_thread(store.archive_all)
+    outcome = (body or {}).get("outcome", "archived")
+    if outcome not in ("archived", "cancelled"):
+        raise HTTPException(status_code=422, detail=f"invalid outcome: {outcome!r}")
+    return await asyncio.to_thread(store.archive_all, outcome)
 
 
 @router.get(
@@ -977,6 +1035,217 @@ async def write_phase(
 
 
 # ---------------------------------------------------------------------------
+# POST /state/advance — contract writing + phase advancement in one call
+# ---------------------------------------------------------------------------
+
+
+def _record_phase_approval(
+    store: DuckDBStateStore,
+    project_root: Path | None,
+    phase: str,
+    approver: str,
+) -> dict[str, Any]:
+    """Record approval for *phase* with a server-computed artifact digest.
+
+    Mirrors the store-backed path of ``run_approve`` exactly — same slug
+    resolver, same name_glob — so the recorded digest covers the identical
+    row set the approval gate re-digests (#501/#518).  The digest is never
+    computed client-side: a caller-supplied value could never be trusted to
+    match the gate's recomputation.
+
+    Raises ``ValueError`` when the phase is not store-approval-gated or has
+    no exit artifact yet (nothing to approve).
+    """
+    from agentalloy.signals.gates import _APPROVAL_STORE_NAME_GLOB
+    from agentalloy.signals.predicates import (
+        _artifact_digest,
+        _resolve_workitem_slug_for,
+        approval_required,
+    )
+
+    if not approval_required(phase):
+        raise ValueError(f"phase {phase!r} is not approval-gated")
+    name_glob = _APPROVAL_STORE_NAME_GLOB.get(phase)
+    if name_glob is None:
+        raise ValueError(f"phase {phase!r} has no store-backed approval gate")
+    slug = _resolve_workitem_slug_for(store, project_root or Path.cwd(), phase)
+    rows = store.list_artifacts(phase, slug=slug, name_glob=name_glob)
+    if not rows:
+        raise ValueError(
+            f"no exit artifact recorded for phase {phase!r} to approve — "
+            f"record it with PUT /state/artifact first (the gate reads the "
+            f"store, so a file on disk satisfies nothing)"
+        )
+    digest = _artifact_digest(rows)
+    store.set_approval(phase, digest, approver=approver)
+    return {"phase": phase, "slug": slug, "artifact_digest": digest}
+
+
+@router.post(
+    "/advance",
+    response_model=AdvanceResponse,
+    summary="Write contract and advance phase in one call (agent tool)",
+)
+async def advance_phase(
+    req: AdvanceRequest,
+    request: Request,
+    repo_root: str | None = Query(
+        default=None,
+        description="Absolute path to the repository root.",
+    ),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> AdvanceResponse:
+    """Write the contract for the next phase and advance the phase if gates pass.
+
+    This is the single tool call the agent uses to advance the workflow.
+    It replaces fragile marker extraction and unreliable trigger detection
+    with one explicit, reliable action.
+
+    Flow:
+    1. Determine the target phase (from req.to_phase or next in workflow)
+    2. Write the contract for the target phase
+    3. Evaluate exit gates
+    4. Advance the phase if gates pass
+    5. Return the result
+
+    The contract is written to the store with the slug and body provided.
+    The contract_id is auto-generated as ``{to_phase}/{slug}``.
+    """
+    # Read current phase
+    current_phase_row = store.read_phase()
+    current_phase = current_phase_row.phase if current_phase_row else "intake"
+
+    # Determine target phase
+    from agentalloy.signals.graph import _PHASE_GRAPH
+
+    to_phase = req.to_phase or _PHASE_GRAPH.get(current_phase, current_phase)
+    route = req.route or "full"
+
+    # Record human approval for the current phase when the agent reports the
+    # user approved the presented work.  The service computes the digest over
+    # the phase's exit artifact; refusal (no artifact yet) fails the whole
+    # call before the next-phase contract is written.
+    if req.approved:
+        try:
+            await asyncio.to_thread(
+                _record_phase_approval,
+                store,
+                Path(repo_root) if repo_root else None,
+                current_phase,
+                "agent-on-user-approval",
+            )
+        except ValueError as exc:
+            return AdvanceResponse(
+                success=False,
+                phase=current_phase,
+                to_phase=to_phase,
+                message=str(exc),
+            )
+
+    # Generate contract_id
+    contract_id = f"{to_phase}/{req.slug}"
+
+    # Write the contract
+    try:
+        store.put_contract(
+            contract_id,
+            phase=to_phase,
+            slug=req.slug,
+            route=route,
+            domain_tags=req.domain_tags,
+            scope_touches=req.scope_touches,
+            scope_avoids=req.scope_avoids,
+            body=req.contract_body,
+        )
+    except Exception as exc:
+        logger.error("advance: contract write failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            message=f"Contract write failed: {exc}",
+        )
+
+    # Evaluate exit gates and advance the phase
+    # Reuse the write_phase logic with the contract already written
+    try:
+        verdict = await asyncio.to_thread(
+            _route_phase,
+            store,
+            current_phase,
+            lane=f"sdd-{route}" if route != "full" else "sdd-full",
+            target_phase=to_phase,
+            override=False,
+            project_root=Path(repo_root) if repo_root else None,
+        )
+    except Exception as exc:
+        logger.error("advance: gate evaluation failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            message=f"Gate evaluation failed: {exc}",
+        )
+
+    # Check if gates passed
+    if verdict is not None and not verdict.get("should_transition", False):
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            to_phase=to_phase,
+            gate_verdict=verdict,
+            message=f"Gate blocked transition: {verdict.get('reason', 'unknown')}",
+        )
+
+    # Advance the phase
+    try:
+        result = store.write_phase(to_phase, actor="agent-tool")
+        if result.conflict is not None and result.conflict.owner is not None:
+            return AdvanceResponse(
+                success=False,
+                phase=current_phase,
+                contract_id=contract_id,
+                contract_slug=req.slug,
+                to_phase=to_phase,
+                message=f"Phase write conflict: {result.conflict.owner}",
+            )
+    except Exception as exc:
+        logger.error("advance: phase write failed: %s", exc)
+        return AdvanceResponse(
+            success=False,
+            phase=current_phase,
+            contract_id=contract_id,
+            contract_slug=req.slug,
+            to_phase=to_phase,
+            message=f"Phase write failed: {exc}",
+        )
+
+    # Posture rewrite after successful phase advance
+    if repo_root is not None:
+        await asyncio.to_thread(
+            _rewrite_posture,
+            Path(repo_root),
+            to_phase,
+            None,
+        )
+
+    # Stamp the phase-start HEAD ref
+    _stamp_phase_start_ref(store, Path(repo_root) if repo_root else None)
+
+    return AdvanceResponse(
+        success=True,
+        phase=to_phase,
+        contract_id=contract_id,
+        contract_slug=req.slug,
+        to_phase=to_phase,
+        gate_verdict=verdict,
+        message=f"Advanced from {current_phase} to {to_phase}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /state/cursor
 # ---------------------------------------------------------------------------
 
@@ -1055,6 +1324,55 @@ async def delete_scoped_cursor(
 ) -> StateReadResponse:
     await asyncio.to_thread(store._delete_scoped_cursor, session_key)
     return StateReadResponse(kind="cursor", value=None)
+
+
+# ---------------------------------------------------------------------------
+# POST /state/approve-phase — record approval with server-computed digest
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/approve-phase",
+    response_model=PhaseApproveResponse,
+    summary="Record human approval for a phase (digest computed server-side)",
+)
+async def approve_phase(
+    req: PhaseApproveRequest,
+    repo_root: str | None = Query(
+        default=None,
+        description="Absolute path to the repository root.",
+    ),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> PhaseApproveResponse:
+    """Record approval for a phase so its exit gate can pass.
+
+    The service resolves the active work item the same way the approval gate
+    does, digests the phase's exit artifact, and stores the approval.  The
+    approval binds to exact content: editing the artifact after approval
+    voids it (digest mismatch) and the work must be presented again.
+
+    Use ``POST /state/advance`` with ``approved: true`` to approve and
+    advance in a single call.
+    """
+    phase = req.phase
+    if not phase:
+        current_phase_row = await asyncio.to_thread(store.read_phase)
+        phase = current_phase_row.phase if current_phase_row else "intake"
+    try:
+        result = await asyncio.to_thread(
+            _record_phase_approval,
+            store,
+            Path(repo_root) if repo_root else None,
+            phase,
+            req.approver or "agent-on-user-approval",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PhaseApproveResponse(
+        phase=result["phase"],
+        slug=result["slug"],
+        artifact_digest=result["artifact_digest"],
+    )
 
 
 # ---------------------------------------------------------------------------

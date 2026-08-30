@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from agentalloy.bootstrap import EXIT_OK, EXIT_USAGE, EXIT_VALIDATION, main
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 
 _SAMPLE_MD = textwrap.dedent("""\
     # Sample Governance Rule
@@ -49,20 +49,20 @@ def md_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def seeded_db(tmp_path: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(tmp_path / "agentalloy.duck"))
+def seeded_db(tmp_path: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
 
 
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
-        duckdb_path = db_path
+        corpus_store_path = db_path
 
     return FakeSettings()
 
 
 def test_insert_new_skill(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -70,46 +70,32 @@ def test_insert_new_skill(tmp_path: Path, md_file: Path) -> None:
 
     assert code == EXIT_OK
 
-    store.open()
-    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'sys-sample'")
-    assert name == "Sample Governance Rule"
-
-    version_count = store.scalar(
-        "SELECT count(*) FROM skill_versions WHERE skill_id = 'sys-sample'"
-    )
-    assert version_count == 1
-
-    fragment_count = store.scalar(
-        """
-        SELECT count(*) FROM fragments f
-        JOIN skill_versions v ON v.version_id = f.version_id
-        WHERE v.skill_id = 'sys-sample'
-        """
-    )
-    assert fragment_count == 1
-
-    current = store.scalar("SELECT current_version_id FROM skills WHERE skill_id = 'sys-sample'")
-    assert current == "sys-sample-v1"
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = ro.get_skill("sys-sample")
+    assert skill is not None
+    assert skill.canonical_name == "Sample Governance Rule"
+    assert len(ro.get_versions_by_skill("sys-sample")) == 1
+    assert len(ro.get_active_fragments_for_skill("sys-sample")) == 1
+    assert skill.current_version_id == "sys-sample-v1"
+    ro.close()
 
 
 def test_init_schema_flag(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "agentalloy_new.duck")
-    # DB doesn't exist yet — --init-schema must create schema first
+    db_path = str(tmp_path / "agentalloy_new.overgraph")
+    # Store doesn't exist yet — --init-schema must create it first
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
         code = main([str(md_file), "--init-schema", "--yes"])
 
     assert code == EXIT_OK
 
-    store = open_skill_store(db_path, read_only=True)
-    count = store.scalar("SELECT count(*) FROM skills")
-    assert count == 1
+    store = open_overgraph_skill_store(db_path, read_only=True)
+    assert store.count_skills() == 1
     store.close()
 
 
 def test_duplicate_without_force_fails(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -120,8 +106,8 @@ def test_duplicate_without_force_fails(tmp_path: Path, md_file: Path) -> None:
 
 
 def test_force_overwrites(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -130,10 +116,9 @@ def test_force_overwrites(tmp_path: Path, md_file: Path) -> None:
 
     assert code == EXIT_OK
 
-    store.open()
-    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'sys-sample'")
-    assert count == 1
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    assert ro.get_skill("sys-sample") is not None
+    ro.close()
 
 
 def test_file_not_found_returns_usage_error() -> None:
@@ -149,8 +134,8 @@ def test_invalid_markdown_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_non_sys_prefix_returns_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad_id = tmp_path / "bad_id.md"
@@ -172,8 +157,8 @@ def test_non_sys_prefix_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     md = tmp_path / "phase.md"
@@ -184,20 +169,19 @@ def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
 
     assert code == EXIT_OK
 
-    store.open()
-    row = store.execute(
-        "SELECT always_apply, phase_scope FROM skills WHERE skill_id = 'sys-build-rule'"
-    )
-    assert row[0][0] is False
-    assert "build" in row[0][1]
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = ro.get_skill("sys-build-rule")
+    assert skill is not None
+    assert skill.always_apply is False
+    assert skill.phase_scope is not None and "build" in skill.phase_scope
+    ro.close()
 
 
 def test_sdd_fast_phase_scope_is_valid(tmp_path: Path) -> None:
     """sys skills can scope to the fast-lane phase — `sdd-fast` is in the
     canonical lifecycle vocabulary, not rejected as unknown."""
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     md = tmp_path / "fast.md"
@@ -221,15 +205,16 @@ def test_sdd_fast_phase_scope_is_valid(tmp_path: Path) -> None:
         code = main([str(md), "--yes"])
 
     assert code == EXIT_OK
-    store.open()
-    row = store.execute("SELECT phase_scope FROM skills WHERE skill_id = 'sys-fast-rule'")
-    assert "sdd-fast" in row[0][0]
-    store.close()
+    ro = open_overgraph_skill_store(db_path, read_only=True)
+    skill = ro.get_skill("sys-fast-rule")
+    assert skill is not None and skill.phase_scope is not None
+    assert "sdd-fast" in skill.phase_scope
+    ro.close()
 
 
 def test_always_apply_with_phase_scope_is_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad = tmp_path / "conflict.md"
@@ -253,8 +238,8 @@ def test_always_apply_with_phase_scope_is_validation_error(tmp_path: Path) -> No
 
 
 def test_canonical_name_collision_without_force_fails(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     skill_a = tmp_path / "skill_a.md"
@@ -290,8 +275,8 @@ def test_canonical_name_collision_without_force_fails(tmp_path: Path) -> None:
 
 
 def test_invalid_category_returns_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad = tmp_path / "bad_cat.md"
@@ -314,8 +299,8 @@ def test_invalid_category_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_empty_prose_is_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "agentalloy.duck")
-    store = open_skill_store(db_path)  # opens + migrates
+    db_path = str(tmp_path / "agentalloy.overgraph")
+    store = open_overgraph_skill_store(db_path)  # opens + migrates
     store.close()
 
     empty = tmp_path / "empty.md"

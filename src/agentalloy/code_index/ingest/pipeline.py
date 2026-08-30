@@ -8,8 +8,8 @@ heartbeats, cancellation checks between phases, incremental content-hash skip
 — without the S3/GitHub/actor machinery.
 
 Concurrency model: the job runs as an asyncio task inside the service
-process. CPU-bound work (tree-sitter parse, DuckDB/Lance writes) and the
-synchronous embed calls all run via ``asyncio.to_thread`` so the event loop
+process. CPU-bound work (tree-sitter parse, OverGraph graph/vector writes) and
+the synchronous embed calls all run via ``asyncio.to_thread`` so the event loop
 never blocks; graph + vector write phases hold the per-slug write lock so two
 in-process jobs for one repo cannot interleave.
 

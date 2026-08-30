@@ -645,9 +645,7 @@ def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
     store = process_store()
     if store is None:
         return
-    scoped = store.for_repo(
-        _repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path))
-    )
+    scoped = store.for_repo(_repo_key_for(str(tmp_path)), stream_id=_stream_key_for(str(tmp_path)))
     scoped.put_contract(
         name,
         phase=phase,
@@ -1409,10 +1407,11 @@ class TestOrientationAnnounceCadence:
         assert result.pending_orientation is not None
         assert result.pending_orientation[0] == "spec"
 
-    def test_orientation_does_not_fire_for_anonymous_requests(self, tmp_path: Path) -> None:
-        """Orientation does not fire when there is no session key (anonymous request)."""
+    def test_orientation_fires_for_fingerprint_only_requests(self, tmp_path: Path) -> None:
+        """No session header, but the first user message fingerprints the
+        session — orientation still fires so harnesses that don't send session
+        headers can resume after interruption."""
         _set_phase(tmp_path, "build")
-        # No session_id passed — the request is not a carrier for orientation.
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -1421,6 +1420,24 @@ class TestOrientationAnnounceCadence:
             mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
         ):
             result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+        assert result.announce_orientation is True
+        assert result.pending_orientation is not None
+        assert result.pending_orientation[0] == "build"
+
+    def test_orientation_does_not_fire_for_unidentifiable_requests(self, tmp_path: Path) -> None:
+        """No session header and no fingerprintable user text → no session key
+        → the turn is not an orientation carrier."""
+        _set_phase(tmp_path, "build")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._build_skill(),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            result = asyncio.run(
+                evaluate_signal(ProxyRequest(model="gpt-4", messages=[], tools=None), tmp_path)
+            )
         assert result.announce_orientation is False
         assert result.pending_orientation is None
 

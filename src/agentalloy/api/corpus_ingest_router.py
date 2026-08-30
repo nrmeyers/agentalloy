@@ -117,7 +117,7 @@ def _run_ingest(app: Any, body: IngestPackRequest) -> dict[str, Any]:
     settings = get_settings()
     # root is only used as the ingest subprocess cwd; the corpus path comes from
     # settings/env. The corpus dir is guaranteed to exist (the service opened it).
-    service_root = Path(settings.duckdb_path).parent
+    service_root = Path(settings.corpus_store_path).parent
 
     with tempfile.TemporaryDirectory(prefix="agentalloy-ingest-") as tmp:
         pack_dir = Path(tmp) / "pack"

@@ -185,32 +185,23 @@ async def skill_versions(request: Request, skill_id: str) -> SkillVersionsRespon
         raise HTTPException(status_code=503, detail="skill store unavailable")
 
     def _query() -> SkillVersionsResponse:
-        active_row = store.execute(
-            "SELECT current_version_id FROM skills WHERE skill_id = $sid",
-            {"sid": skill_id},
-        )
-        active_rows = list(active_row)
-        if not active_rows:
+        skill_row = store.get_skill(skill_id)
+        if skill_row is None:
             raise HTTPException(status_code=404, detail=f"unknown skill: {skill_id}")
-        active_version_id = str(active_rows[0][0]) if active_rows[0][0] is not None else None
-        rows = store.execute(
-            "SELECT version_id, version_number, authored_at, author, change_summary, "
-            "status, raw_prose FROM skill_versions WHERE skill_id = $sid "
-            "ORDER BY version_number DESC",
-            {"sid": skill_id},
-        )
+        active_version_id = skill_row.current_version_id
+        version_rows = store.get_versions_by_skill(skill_id)
         versions = [
             SkillVersion(
-                version_id=str(r[0]),
-                version_number=int(r[1]),
-                authored_at=str(r[2]) if r[2] is not None else None,
-                author=str(r[3]),
-                change_summary=str(r[4]),
-                status=str(r[5]) if r[5] is not None else None,
-                raw_prose=str(r[6]),
-                is_active=str(r[0]) == active_version_id,
+                version_id=r.version_id,
+                version_number=r.version_number,
+                authored_at=str(r.authored_at) if r.authored_at is not None else None,
+                author=r.author,
+                change_summary=r.change_summary,
+                status=r.status,
+                raw_prose=r.raw_prose,
+                is_active=r.version_id == active_version_id,
             )
-            for r in rows
+            for r in version_rows
         ]
         return SkillVersionsResponse(skill_id=skill_id, versions=versions)
 

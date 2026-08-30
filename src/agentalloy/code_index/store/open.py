@@ -2,26 +2,27 @@
 
 Layout under ``settings.code_index_data_dir``::
 
-    jobs.sqlite                    # shared jobs / events / indexed-repos registry
-    repos/{slug}/{path_key}/graph.duck   # DuckDB symbol graph (source of truth)
-    repos/{slug}/{path_key}/vectors.lance  # LanceDB vector + BM25 index (derived)
-    repos/{slug}/{path_key}/cache/        # engine hash/stat sidecar caches
+    jobs.sqlite                          # shared jobs / events / indexed-repos registry
+    repos/{slug}/{path_key}/graph.overgraph  # OverGraph symbol graph + vectors
+    repos/{slug}/{path_key}/cache/           # engine hash/stat sidecar caches
 
 ``{path_key}`` is a deterministic 8-hex SHA-256 prefix of the resolved
 ``repo_path``, so multiple checkouts of the same remote get separate indexes.
 See :func:`agentalloy.code_index.store.jobs_store.repo_path_key`.
 
 Locking doctrine (inverse of the skills arrangement): index jobs run INSIDE
-the service process — the service IS the code-index writer. DuckDB is
-single-writer cross-process, so:
+the service process — the service IS the code-index writer.
 
-- ``"service"`` / ``"writer"`` open ``graph.duck`` read-write (and migrate);
+- ``"service"`` / ``"writer"`` open the store read-write (and migrate);
   concurrent writes within the process are serialized per (slug, path_key) via
   :func:`slug_write_lock` (writers take it around write phases).
 - ``"reader"`` opens everything read-only — for one-shot CLI inspection while
   the service is down. Out-of-process readers must prefer the HTTP API when
   the service is up (its RW handle excludes other processes entirely).
-- Lance has no exclusive lock (MVCC); the same open works for every role.
+
+OverGraph is a unified store: one embedded database holds both the symbol
+graph and the dense/BM25 vector indexes, so the same handle serves the
+``graph`` and ``vectors`` slots of :class:`CodeIndexHandles`.
 """
 
 from __future__ import annotations
@@ -32,9 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
 from agentalloy.code_index.store.jobs_store import CodeIndexJobsStore, repo_path_key
-from agentalloy.code_index.store.vector_store import LanceCodeVectorStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.config import Settings, get_settings
 from agentalloy.storage.protocols import CodeIndexHandles
 
@@ -47,8 +47,7 @@ class CodeIndexPaths:
 
     root: Path
     repo_dir: Path
-    graph_path: Path
-    vectors_path: Path
+    graph_path: Path  # the unified OverGraph store (graph + vectors)
     cache_dir: Path
     jobs_path: Path
     repo_key: str  # deterministic path hash for per-checkout isolation
@@ -77,8 +76,7 @@ def code_index_paths(
     return CodeIndexPaths(
         root=root,
         repo_dir=repo_dir,
-        graph_path=repo_dir / "graph.duck",
-        vectors_path=repo_dir / "vectors.lance",
+        graph_path=repo_dir / "graph.overgraph",
         cache_dir=repo_dir / "cache",
         jobs_path=root / "jobs.sqlite",
         repo_key=key,
@@ -96,7 +94,7 @@ def slug_write_lock(slug: str) -> threading.Lock:
 
     Writers take it around write phases so two in-process index jobs for the
     same repo never interleave graph writes. Deliberately simple: no pooling,
-    no cross-process locking (DuckDB's own file lock covers that boundary).
+    no cross-process locking (the jobs store ensures one writer per repo).
     """
     with _slug_locks_guard:
         return _slug_locks.setdefault(slug, threading.Lock())
@@ -112,10 +110,11 @@ def open_code_index(
     role: Role = "service",
     repo_path: str | None = None,
 ) -> CodeIndexHandles:
-    """Open the per-repo graph + vector stores with access modes for ``role``.
+    """Open the per-repo unified graph + vector store for ``role``.
 
-    ``service`` / ``writer`` open the graph read-write and ensure the schema;
-    ``reader`` opens it read-only (the graph file must already exist).
+    ``service`` / ``writer`` ensure the schema (migrate); ``reader`` opens
+    without migrating (the store must already exist). The same OverGraph
+    handle serves both the ``graph`` and ``vectors`` slots.
 
     When ``repo_path`` is provided, the data directory is scoped to that
     specific checkout, so multiple checkouts of the same remote get separate
@@ -126,10 +125,11 @@ def open_code_index(
     if not read_only:
         paths.repo_dir.mkdir(parents=True, exist_ok=True)
         paths.cache_dir.mkdir(parents=True, exist_ok=True)
-    graph = DuckDBCodeGraphStore(paths.graph_path, read_only=read_only)
+
+    graph = OverGraphCodeGraphStore(paths.graph_path)
+    vectors = graph  # unified store: one handle serves graph + vectors
     if not read_only:
         graph.migrate()
-    vectors = LanceCodeVectorStore(paths.vectors_path)
     return CodeIndexHandles(slug=slug, graph=graph, vectors=vectors)
 
 

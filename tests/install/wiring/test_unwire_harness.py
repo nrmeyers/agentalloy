@@ -185,7 +185,7 @@ class TestUnwireSingleHarness:
         mock_store = MagicMock()
         mock_store.delete_repo_rows.return_value = 0
         mock_settings = MagicMock()
-        mock_settings.duckdb_path = str(repo_root / "agentalloy.duck")
+        mock_settings.corpus_store_path = str(repo_root / "agentalloy.overgraph")
 
         with (
             patch("agentalloy.config.get_settings", return_value=mock_settings),

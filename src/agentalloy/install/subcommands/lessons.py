@@ -106,48 +106,35 @@ def _corpus_write_blocker() -> str | None:
     Two conditions make the install rail pointless or impossible, and both used
     to surface only as a buried ingest error (or not at all):
 
-    - **Corpus lock** — DuckDB is single-writer per file and even the service's
-      read-only handle excludes a CLI writer, so ingest can never succeed while
-      a service is holding the store. Detected by briefly opening it read-write.
+    - **Live service holding the corpus** — the service keeps the corpus store
+      open; writing under a live service races its readers, so anything serving
+      the deployment port blocks a host-side write. Detected against the actual
+      port, not configured state — a stopped service blocks nothing.
     - **Serving container** — the live corpus lives inside the container's data
       volume (``agentalloy-data:/app/data``); a host-side promote writes a host
       corpus the serving container never reads.
-
-    Checked in that order, against *reality* rather than configured state: the
-    lock probe catches whatever process actually holds the host corpus (e.g. a
-    from-source native run on a container-configured box), and the container
-    check only fires when a container deployment is configured AND something is
-    actually serving the port — a stopped container blocks nothing.
     """
     from agentalloy.config import get_settings
 
-    db = Path(get_settings().duckdb_path)
-    if db.is_file():
-        try:
-            import duckdb
-
-            duckdb.connect(str(db)).close()
-        except Exception as exc:
-            if "lock" in str(exc).lower():
-                return (
-                    f"the corpus ({db}) is locked by the running AgentAlloy service. "
-                    "Stop it (`agentalloy server-stop`), re-run the promote, then "
-                    "`agentalloy server-start`."
-                )
-            return f"the corpus at {db} could not be opened for writing: {exc}"
-
+    store_path = Path(get_settings().corpus_store_path)
     try:
         from agentalloy.install.server_proc import port_reachable, resolve_deployment
 
         target = resolve_deployment()
-        if target.deployment == "container" and port_reachable(target.port):
+        if port_reachable(target.port):
+            if target.deployment == "container":
+                return (
+                    "the serving AgentAlloy is a container — its live corpus lives inside "
+                    "the container's data volume, which a host-side promote cannot reach "
+                    "(service-mediated ingest is tracked in #390)."
+                )
             return (
-                "the serving AgentAlloy is a container — its live corpus lives inside "
-                "the container's data volume, which a host-side promote cannot reach "
-                "(service-mediated ingest is tracked in #390)."
+                f"the corpus ({store_path}) is held open by the running AgentAlloy "
+                "service. Stop it (`agentalloy server-stop`), re-run the promote, then "
+                "`agentalloy server-start`."
             )
     except Exception:
-        pass  # unreadable install state -> assume native; the lock probe above governs
+        pass  # unreadable install state -> nothing detectable; allow the write
 
     return None
 
@@ -283,9 +270,9 @@ def promote_lesson(
     store_opened_here = False
     if store is None:
         try:
-            from agentalloy.storage.open import open_fragments
+            from agentalloy.storage.open import open_skills
 
-            store = open_fragments(settings)
+            store = open_skills(settings, read_only=True)
             store_opened_here = True
         except Exception:
             # No corpus yet (fresh install) → nothing to duplicate against.

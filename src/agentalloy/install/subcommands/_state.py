@@ -137,6 +137,10 @@ class PhaseAccess(Protocol):
         """The object for session management (list, archive, etc.)."""
         ...
 
+    def artifact_handle(self) -> Any:
+        """The object the CLI artifact verbs record through (``set_artifact``)."""
+        ...
+
 
 @dataclass(frozen=True)
 class _StoreAccess:
@@ -165,6 +169,9 @@ class _StoreAccess:
         return self.store
 
     def session_handle(self) -> Any:
+        return self.store
+
+    def artifact_handle(self) -> Any:
         return self.store
 
 
@@ -224,6 +231,9 @@ class _ServiceAccess:
         return self.client
 
     def session_handle(self) -> Any:
+        return self.client
+
+    def artifact_handle(self) -> Any:
         return self.client
 
 

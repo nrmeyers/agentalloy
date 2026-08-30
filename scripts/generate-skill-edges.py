@@ -6,9 +6,9 @@ For every pack skill (``src/agentalloy/_packs/*/<skill>.yaml``) this script:
 1. Builds a *skill card* (canonical_name + domain_tags + description) from the
    pack YAML — the same trio Stage 0 indexes.
 2. Pulls that skill's top-N embedding neighbors. Card embeddings (one 768-dim
-   vector per skill, ``fragment_type='card'``) live in the DuckDB corpus; we
-   copy the DB file and open the copy ``read_only`` so a running service is
-   never disturbed and no lock is contended.
+   vector per skill, ``fragment_type='card'``) live in the unified OverGraph
+   corpus store; readers never block a running service, so the store opens
+   read-only in place (no copy needed).
 3. Asks an OpenAI-compatible reasoning model (qwen3.6-27b) — **sequentially**,
    one call at a time so layers never spill to CPU — to classify each
    (skill, neighbor) pair as ``requires`` / ``related`` / ``none`` given both
@@ -49,7 +49,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKS_DIR = REPO_ROOT / "src" / "agentalloy" / "_packs"
-CORPUS_LANCE = Path.home() / ".local" / "share" / "agentalloy" / "corpus" / "fragments.lance"
+CORPUS_OVERGRAPH = (
+    Path.home() / ".local" / "share" / "agentalloy" / "corpus" / "agentalloy.overgraph"
+)
 SIDECAR_PATH = REPO_ROOT / "scripts" / "skill-edges-reasons.jsonl"
 
 LM_BASE_URL = "http://192.168.4.26:60000"
@@ -148,36 +150,39 @@ def load_cards() -> dict[str, SkillCard]:
 
 
 # --------------------------------------------------------------------------
-# embedding neighbors (DuckDB card vectors, read from a copy)
+# embedding neighbors (OverGraph card vectors, read read-only in place)
 # --------------------------------------------------------------------------
 
 
 def neighbor_map(skill_ids: set[str]) -> dict[str, list[str]]:
     """Return ``{skill_id: [neighbor_id, ...]}`` (top-N by card-vector cosine).
 
-    Reads card embeddings from the Lance ``fragments`` dataset. Lance is MVCC,
-    so a read never blocks a running service (no copy needed). Only skills with
-    a card embedding participate."""
-    if not CORPUS_LANCE.exists():
-        print(f"error: corpus not found at {CORPUS_LANCE}", file=sys.stderr)
+    Reads card embeddings from the unified OverGraph corpus store. Readers
+    never block a running service, so the store opens read-only in place (no
+    copy needed). Only skills with a card embedding participate."""
+    if not CORPUS_OVERGRAPH.exists():
+        print(f"error: corpus not found at {CORPUS_OVERGRAPH}", file=sys.stderr)
         sys.exit(1)
 
-    from agentalloy.storage.fragment_store import LanceFragmentStore
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
 
-    fs = LanceFragmentStore(str(CORPUS_LANCE))
-    try:
-        rows = fs._table.to_arrow().to_pylist()  # noqa: SLF001 — dev-tool full scan
-    finally:
-        fs.close()
-
+    store = open_overgraph_skill_store(str(CORPUS_OVERGRAPH), read_only=True)
     vectors: dict[str, list[float]] = {}
-    for row in rows:
-        if row.get("fragment_type") != CARD_FRAGMENT_TYPE:
-            continue
-        sid = str(row["skill_id"])
-        emb = row.get("embedding")
-        if sid in skill_ids and emb is not None:
-            vectors[sid] = [float(x) for x in emb]
+    try:
+        rows = store._db.execute_gql(  # noqa: SLF001 — dev-tool full scan
+            "MATCH (f:Fragment) WHERE f.fragment_type = 'card' RETURN id(f) AS fid"
+        )
+        for row in rows.get("rows", []):
+            node = store._db.get_node(int(row["fid"]))
+            if node is None:
+                continue
+            props = dict(node.props)
+            sid = str(props.get("skill_id", ""))
+            emb = node.dense_vector
+            if sid in skill_ids and emb:
+                vectors[sid] = [float(x) for x in emb]
+    finally:
+        store.close()
 
     # Card embeddings are L2-normalized at write time, so dot == cosine.
     ids = list(vectors.keys())

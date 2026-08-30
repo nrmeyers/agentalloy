@@ -417,7 +417,12 @@ class TestPassthroughSurfacePause:
         ):
             client.post(f"/proj/{encode_proj_token(tmp_path)}/v1/messages", json=_anthropic_body())
         forwarded = captured["body"].decode("utf-8")
-        assert "BUILD-ORIENTATION" in forwarded
+        # Without `mode: paused` the workflow path orients: LangGraph-served
+        # build instructions ride the <agentalloy-instructions> leg (the
+        # skill's raw_prose is only the graph-failure fallback now) and the
+        # banner lands. Orientation cadence itself is covered by
+        # TestOrientationAnnounceCadence.
+        assert "agentalloy-instructions phase=" in forwarded
         assert "AGENTALLOY-BANNER" in forwarded
 
 

@@ -32,7 +32,7 @@ Coding agents don't fail for lack of intelligence — they fail for lack of **co
 
 It attaches as a **local proxy**: your harness points its base URL at AgentAlloy and every request flows through with the right instructions composed in — for Claude Code, wiring sets a single env var and your own credentials pass through untouched. Smaller models get leverage they don't have alone; larger models get your actual house rules — and a way to interrogate your actual codebase and its history of decisions — instead of their best guess. **Compound engineering** feeds Knowledge's capture side: the qa phase codifies each task's lesson to `docs/solutions/<slug>.md` behind a deterministic gate, and `agentalloy lessons promote <slug>` turns a recurring lesson into an injected skill, dedup-gated so the corpus stays sharp.
 
-Everything runs on your machine — one small embed model and a 0.6B reranker over embedded LanceDB + DuckDB. No cloud calls, and zero paid-LLM tokens spent deciding what to inject: routing is **deterministic by default**, and the one optional LM stage in the compose path is hardware-gated — on GPU presets it re-ranks fragments (`LM_ASSIST=arbitrate`); on CPU and the container it ships off, where it costs ~2.3x the latency budget for a lift our evals couldn't measure ([numbers here](BENCHMARKS.md)).
+Everything runs on your machine — one small embed model and a 0.6B reranker over an embedded OverGraph store + Tantivy BM25 index. No cloud calls, and zero paid-LLM tokens spent deciding what to inject: routing is **deterministic by default**, and the one optional LM stage in the compose path is hardware-gated — on GPU presets it re-ranks fragments (`LM_ASSIST=arbitrate`); on CPU and the container it ships off, where it costs ~2.3x the latency budget for a lift our evals couldn't measure ([numbers here](BENCHMARKS.md)).
 
 The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `agentalloy add <harness> --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy workflow pause` pauses the workflow anytime without losing your place.
 
@@ -176,7 +176,7 @@ agentalloy code watch enable               # per-repo file-watch enrollment (COD
 agentalloy config status                   # current module toggles from .env
 ```
 
-Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. When the module is enabled, `agentalloy add` writes a small code-index block into the repo's agent instructions and offers to index an unindexed repo on the spot (adding a repo never enables the module itself — that's the service-side `CODE_INDEX_ENABLED` switch); `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (OverGraph symbol graph + vector index) and reuse the same local embed server as the skill corpus. When the module is enabled, `agentalloy add` writes a small code-index block into the repo's agent instructions and offers to index an unindexed repo on the spot (adding a repo never enables the module itself — that's the service-side `CODE_INDEX_ENABLED` switch); `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
 
 ---
 
@@ -295,11 +295,11 @@ AgentAlloy is a multi-layer system served as a single FastAPI process on port `:
 
 1. **Signal layer** (`src/agentalloy/signals/`) — deterministic Python that wakes on phase transitions, contract writes, or tool fires. Pre-filters cheaply, evaluates exit gates, and composes skills only when needed.
 2. **Retrieval pipeline** (`src/agentalloy/retrieval/`) — embed, filter, rank, diversify: the core retrieval path that converts domain tags to candidate fragments.
-3. **Composition engine** (`src/agentalloy/orchestration/`) — hybrid BM25 + dense retrieval over DuckDB (skill graph) and LanceDB (vector + BM25 index), fused via phase-tuned Reciprocal Rank Fusion.
+3. **Composition engine** (`src/agentalloy/orchestration/`) — hybrid BM25 + dense retrieval over the unified OverGraph corpus store (skill graph + fragment vectors, Tantivy BM25 sidecar), fused via phase-tuned Reciprocal Rank Fusion.
 4. **Proxy** (`src/agentalloy/api/`) — OpenAI-compatible, Anthropic Messages, and Responses passthrough endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 5. **Code index** (`src/agentalloy/code_index/`) — optional tree-sitter symbol graph plus hybrid semantic/lexical search over repos, served under `/code/*`.
 6. **Knowledge layer** — decision-graph layer riding the code index, linking decisions to governing code symbols.
-7. **Storage** (`src/agentalloy/storage/`) — DuckDB/LanceDB hybrid store for skills, telemetry, and phase state.
+7. **Storage** (`src/agentalloy/storage/`) — OverGraph store for the skill corpus (graph + vectors + BM25 sidecar), DuckDB for telemetry and phase state.
 8. **Telemetry** (`src/agentalloy/telemetry/`) — structured trace writer and query system.
 9. **Web UI** (`src/agentalloy/web/`) — browser dashboard at http://localhost:47950/ (localhost-only, no auth).
 10. **Providers** (`src/agentalloy/providers/`) — harness provider registry (Claude Code, Copilot, Aider, Continue.dev, etc.).

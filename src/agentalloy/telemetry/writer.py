@@ -1,9 +1,9 @@
 """Telemetry writer protocol, no-op stub, and DuckDB-backed writer.
 
-In v5 composition telemetry lives in its own service-owned DuckDB file
-(``telemetry.duck``, ``composition_traces``), decoupled from the skill graph
-and the Lance fragment index so the reembed writer never contends with runtime
-telemetry writes (decision D4). Writes are inline before the response — no
+Composition telemetry lives in its own service-owned DuckDB file
+(``telemetry.duck``, ``composition_traces``), decoupled from the corpus store
+so the reembed writer never contends with runtime telemetry writes
+(decision D4). Writes are inline before the response — no
 queue, no background thread. Trace-write failures are logged but never
 propagate to the caller of /compose.
 

@@ -489,8 +489,8 @@ class TestInstallLocalPackGatesIntegration:
 
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "agentalloy.duck").touch()
-        (corpus_dir / "fragments.lance").mkdir()
+        (corpus_dir / "agentalloy.overgraph").touch()
+        (corpus_dir / "corpus.overgraph").mkdir()
 
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
@@ -502,8 +502,7 @@ class TestInstallLocalPackGatesIntegration:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
-                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
+                    corpus_store_path=str(corpus_dir / "agentalloy.overgraph"),
                 ),
             ),
         ):
@@ -557,8 +556,8 @@ class TestInstallLocalPackGatesIntegration:
 
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "agentalloy.duck").touch()
-        (corpus_dir / "fragments.lance").mkdir()
+        (corpus_dir / "agentalloy.overgraph").touch()
+        (corpus_dir / "corpus.overgraph").mkdir()
 
         ingest_mock = MagicMock(return_value=fake_ingest)
         invalidate_mock = MagicMock(return_value=3)
@@ -574,8 +573,7 @@ class TestInstallLocalPackGatesIntegration:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
-                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
+                    corpus_store_path=str(corpus_dir / "agentalloy.overgraph"),
                 ),
             ),
             # This run ingests a skill (outcome="ingested"), which triggers the
@@ -696,8 +694,7 @@ class TestInstallLocalPackGatesIntegration:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             # new_count > 0 triggers the post-ingest reembed/dedup wiring —
@@ -820,8 +817,7 @@ class TestDedupGateWiring:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             patch(
@@ -863,8 +859,7 @@ class TestDedupGateWiring:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             patch("agentalloy.reembed.cli.run_bulk_reembed", return_value=0) as reembed_mock,
@@ -926,8 +921,7 @@ class TestDedupGateWiring:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             patch("agentalloy.reembed.cli.run_bulk_reembed", side_effect=fake_run_bulk_reembed),
@@ -967,8 +961,7 @@ class TestDedupGateWiring:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             patch("agentalloy.reembed.cli.run_bulk_reembed") as reembed_mock,
@@ -1007,8 +1000,7 @@ class TestDedupGateWiring:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    corpus_store_path=str(corpus_dir / "skills.duck"),
                 ),
             ),
             patch("agentalloy.reembed.cli.run_bulk_reembed") as reembed_mock,

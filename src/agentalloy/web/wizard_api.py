@@ -209,10 +209,10 @@ async def install(
                     status_code=409,
                     detail={"error": "approve_refused", "detail": approval.get("error")},
                 )
-        # This process holds the skill store read-only for its lifetime, and
-        # install-pack's ingest + reembed need the DuckDB writer — release the
-        # handle for the duration, reconnect after, then reload the cache so
-        # the newly installed skills serve without a restart.
+        # This process holds the corpus store read-only for its lifetime, and
+        # install-pack's ingest + reembed take the store's writer lock —
+        # release the handle for the duration, reconnect after, then reload
+        # the cache so the newly installed skills serve without a restart.
         from agentalloy.web.runtime_refresh import refresh_runtime_cache
 
         store = getattr(request.app.state, "store", None)

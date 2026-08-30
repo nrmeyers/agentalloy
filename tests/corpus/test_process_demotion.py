@@ -353,11 +353,10 @@ def demotion_corpus(corpus_dir: Path) -> Path:
     fragments lexically match the probe task."""
     from agentalloy.ingest import _insert  # pyright: ignore[reportPrivateUsage]
     from agentalloy.install.importer import reembed_corpus
-    from agentalloy.storage.fragment_store import LanceFragmentStore
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
     from tests.support import StubLMClient
 
-    ss = open_skill_store(str(corpus_dir / "agentalloy.duck"))
+    ss = open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"))
     _insert(
         ss,
         _record(
@@ -383,27 +382,23 @@ def demotion_corpus(corpus_dir: Path) -> Path:
         force=False,
     )
     stub = StubLMClient()
-    fs = LanceFragmentStore(corpus_dir / "fragments.lance")
-    reembed_corpus(fs, ss, embed=lambda t: stub.embed(model="stub", texts=t), model="stub")
-    fs.rebuild_fts_index()
-    fs.close()
+    reembed_corpus(ss, ss, embed=lambda t: stub.embed(model="stub", texts=t), model="stub")
+    ss.rebuild_fts_index()
     ss.close()
     return corpus_dir
 
 
 def _retrieve(corpus: Path, k: int) -> list[ActiveFragment]:
     from agentalloy.retrieval.domain import retrieve_domain_candidates
-    from agentalloy.storage.fragment_store import LanceFragmentStore
-    from agentalloy.storage.skill_store import open_skill_store
+    from agentalloy.storage.overgraph_skill_store import open_overgraph_skill_store
     from tests.support import StubLMClient
 
-    ss = open_skill_store(str(corpus / "agentalloy.duck"), read_only=True)
-    fs = LanceFragmentStore(corpus / "fragments.lance")
+    ss = open_overgraph_skill_store(str(corpus / "agentalloy.overgraph"), read_only=True)
     try:
         result = retrieve_domain_candidates(
             ss,
             StubLMClient(),
-            fs,
+            ss,
             task="verify the webhook signature before processing",
             phase="build",
             domain_tags=None,
@@ -412,7 +407,6 @@ def _retrieve(corpus: Path, k: int) -> list[ActiveFragment]:
         )
         return list(result.candidates)
     finally:
-        fs.close()
         ss.close()
 
 

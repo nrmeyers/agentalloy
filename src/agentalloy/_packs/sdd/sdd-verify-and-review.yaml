@@ -23,7 +23,8 @@ applies_to_phases:
 # the prose but must keep both verbatim.
 prose_invariants:
   - "state panel"
-  - "agentalloy:artifact"
+  - "/state/artifact"
+  - "agentalloy artifact put"
   - "the solutions artifact"
 exit_gates:
   all_of:
@@ -105,8 +106,8 @@ raw_prose: |
   - the linter — clean
   - the type checker — clean
 
-  A red anything stops here: fix it (back to **build** if it's a code defect —
-  state that the phase is complete. The phase advances automatically once exit gates pass.) before you review. Green is the floor, not the
+  A red anything stops here: fix it (route back to **build** if it's a code
+  defect) before you review. Green is the floor, not the
   finish line.
 
   ## 2. Check it against spec and design
@@ -146,11 +147,12 @@ raw_prose: |
 
   ## 4. Record the verdict to the qa artifact
 
-  The qa exit gate is store-backed. You MUST record the verdict using an artifact marker,
-  naming it `qa`:
+  The qa exit gate is store-backed. You MUST record the verdict by piping its
+  body to the store: `agentalloy artifact put --phase qa --slug <task-slug>
+  --name qa.artifact` (content on stdin; PUT /state/artifact is the HTTP
+  fallback), body shaped:
 
   ```
-  <!-- agentalloy:artifact name=qa -->
   # <slug>
 
   ## Checks
@@ -171,7 +173,6 @@ raw_prose: |
   - route: <build|design|spec>
   - severity: <Critical|required>
   - description: <what's wrong and what the receiving phase should do>
-  <!-- /agentalloy:artifact -->
   ```
 
   A clean report — green bar,
@@ -179,13 +180,13 @@ raw_prose: |
   A report with routed findings does not advance to ship — the findings are
   the worklist for the phase that owns the fix.
 
-  On a clean report, seed **ship's work-item** before you go, using an artifact marker:
+  On a clean report, seed **ship's work-item** before you go — record it with
+  `agentalloy artifact put --phase qa --slug <task-slug> --name work-item`
+  (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   ```
-  <!-- agentalloy:artifact name=work-item -->
   <delivery surface: release, changelog, migration, rollout — whatever shipping this touches.
   Write it as what to ship and how to make it reversible.>
-  <!-- /agentalloy:artifact -->
   ```
 
   That body is ship's retrieval prompt, so
@@ -199,12 +200,11 @@ raw_prose: |
   decision worth keeping. Keep it concrete and short — a real lesson, not a
   restatement of the diff — so the next task starts smarter instead of from zero.
 
-  Record it using an artifact marker:
+  Record it with `agentalloy artifact put --phase qa --slug <task-slug>
+  --name solution` (content on stdin; PUT /state/artifact is the HTTP fallback):
 
   ```
-  <!-- agentalloy:artifact name=solution -->
   <the problem, the approach that worked, what didn't, and the decision worth keeping>
-  <!-- /agentalloy:artifact -->
   ```
 
   The name is `solution` with no `.artifact` — the qa artifact gate globs `*.artifact` and
@@ -214,7 +214,7 @@ raw_prose: |
 
   ## 6. Advance to ship
 
-  Advance yourself: state that the phase is complete. The phase advances automatically once exit gates pass.
+  Advance via your state panel's advance action (POST /state/advance).
   Go straight into delivery.
   Phase advance ends this session; the next phase begins in a fresh one, and
   the state panel provides context automatically. Don't wait to be told; a clean report

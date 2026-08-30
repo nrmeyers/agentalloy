@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 
@@ -34,14 +34,14 @@ def governs(src: str, dst: str, *, doc: str) -> CodeEdge:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
 
 
-def _seed(store: DuckDBCodeGraphStore) -> None:
+def _seed(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols(
         [
             sym("pkg.a.foo", file_path="pkg/a.py"),
@@ -66,7 +66,7 @@ def _seed(store: DuckDBCodeGraphStore) -> None:
     )
 
 
-def test_decisions_for_files_returns_governing_decisions(store: DuckDBCodeGraphStore) -> None:
+def test_decisions_for_files_returns_governing_decisions(store: OverGraphCodeGraphStore) -> None:
     _seed(store)
     got = store.decisions_for_files(["pkg/a.py"])
     assert [d.qualified_name for d in got] == ["docs/design/x/approach.md::d1"]
@@ -74,7 +74,7 @@ def test_decisions_for_files_returns_governing_decisions(store: DuckDBCodeGraphS
 
 
 def test_decision_governing_multiple_touched_files_appears_once(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     _seed(store)
     # d1 governs symbols in BOTH pkg/a.py and pkg/b.py; querying both must not dup it
@@ -82,7 +82,7 @@ def test_decision_governing_multiple_touched_files_appears_once(
     assert [d.qualified_name for d in got] == ["docs/design/x/approach.md::d1"]
 
 
-def test_ungoverned_and_empty(store: DuckDBCodeGraphStore) -> None:
+def test_ungoverned_and_empty(store: OverGraphCodeGraphStore) -> None:
     _seed(store)
     assert store.decisions_for_files(["pkg/c.py"]) == []  # orphan file, no GOVERNS
     assert store.decisions_for_files(["pkg/missing.py"]) == []

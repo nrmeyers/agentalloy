@@ -1,7 +1,7 @@
 """Tests for agentalloy.install.container_service.
 
-Covers is_in_container, stop_service_in_container,
-restart_service_in_container, and test_corpus_lock_released.
+Covers is_in_container, stop_service_in_container, and
+restart_service_in_container.
 """
 
 from __future__ import annotations
@@ -333,76 +333,9 @@ class TestRestartServiceInContainer:
             assert result is False
 
 
-class TestTestCorpusLockReleased:
-    """test_corpus_lock_released() retry logic for the agentalloy.duck write-lock.
-
-    The v5 probe opens a read-only skill-store connection (success = no writer
-    holds the lock) and closes it; failure = lock still held, retried up to 5s.
-    """
-
-    def test_lock_released_immediately(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When the read-only skill-store open succeeds first try, returns True."""
-        with monkeypatch.context() as m:
-            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
-            m.setattr(time, "sleep", lambda s: None)
-            m.setattr(
-                "agentalloy.storage.skill_store.open_skill_store",
-                lambda *a, **k: MagicMock(),
-            )
-
-            from agentalloy.install.container_service import test_corpus_lock_released
-
-            assert test_corpus_lock_released() is True
-
-    def test_lock_still_held_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When the open fails twice then succeeds, retries and returns True."""
-        call_count = [0]
-
-        def fake_open(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise RuntimeError("conflicting lock on agentalloy.duck")
-            return MagicMock()
-
-        with monkeypatch.context() as m:
-            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
-            m.setattr(time, "sleep", lambda s: None)
-            m.setattr("agentalloy.storage.skill_store.open_skill_store", fake_open)
-
-            from agentalloy.install.container_service import test_corpus_lock_released
-
-            assert test_corpus_lock_released() is True
-            assert call_count[0] == 3  # 2 failures + 1 success
-
-    def test_lock_still_held_after_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When the open keeps failing, returns False after retries exhausted."""
-
-        def fake_open(*args, **kwargs):
-            raise RuntimeError("conflicting lock on agentalloy.duck")
-
-        with monkeypatch.context() as m:
-            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
-            m.setattr(time, "sleep", lambda s: None)
-            m.setattr("agentalloy.storage.skill_store.open_skill_store", fake_open)
-
-            from agentalloy.install.container_service import test_corpus_lock_released
-
-            assert test_corpus_lock_released() is False
-
-    def test_no_corpus_returns_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When no corpus DB exists, the function attempts the open and returns
-        False (can't confirm lock released without successfully opening it).
-
-        The probe must actually attempt to open the database rather than
-        assuming the lock is released.
-        """
-        with monkeypatch.context() as m:
-            m.setenv("DUCKDB_PATH", str(tmp_path / "nonexistent" / "agentalloy.duck"))
-            m.setattr(time, "sleep", lambda s: None)
-
-            from agentalloy.install.container_service import test_corpus_lock_released
-
-            assert test_corpus_lock_released() is False
+# NOTE: the old DuckDB write-lock probe (test_corpus_lock_released) was deleted
+# with the DuckDB skill store — under the OverGraph store, readers never block
+# writers, so a read-only open is not a writer-lock probe.
 
 
 class TestStopServiceNoRestart:

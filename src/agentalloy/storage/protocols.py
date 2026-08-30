@@ -1,12 +1,17 @@
-"""Storage protocols, DTOs, and shared constants for the two-engine backend.
+"""Storage protocols, DTOs, and shared constants.
 
-v5 splits the old monolithic ``VectorStore`` (DuckDB-vss + DuckDB-fts + telemetry
-+ corpus_meta) and the legacy graph store into three focused stores:
+The corpus lives in ONE unified OverGraph store (``agentalloy.overgraph`` +
+its Tantivy BM25 sidecar), exposed through two protocol views:
 
-- ``FragmentStore``  — LanceDB ``fragments`` dataset: vector ANN (retrieval) +
-  exact-cosine (dedup) + native BM25. Derived index, rebuilt from the SQL source.
-- ``SkillStore``     — DuckDB ``agentalloy.duck``: skill metadata (folded out of
-  the legacy graph) + ``corpus_meta`` kv. Source of truth for fragment content/metadata.
+- ``SkillStore``     — skill metadata (folded out of the legacy graph) +
+  ``corpus_meta`` kv. Source of truth for fragment content/metadata.
+- ``FragmentStore``  — vector ANN (retrieval) + exact-cosine (dedup) + BM25
+  over the same store. Derived index, rebuilt from the canonical rows on
+  every reembed.
+
+``OverGraphSkillStore`` implements both, so one read-only handle serves the
+whole app (``open_skills``). Separately:
+
 - ``TelemetryStore`` — DuckDB ``telemetry.duck``: ``composition_traces`` only,
   service-owned so runtime writes never contend with the reembed writer.
 
@@ -22,11 +27,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 EMBEDDING_DIM = 768
 """Vector dimensionality. Tied to ``nomic-embed-text-v1.5`` (768-dim). Fixed:
-the Lance ``embedding`` column is ``FixedSizeList(float32, 768)`` and the gate
+the OverGraph ``embedding`` attribute is a 768-float vector and the gate
 chain (pack manifest, corpus-stamp, doctor, health) enforces it everywhere."""
 
 
@@ -46,6 +51,22 @@ class EmbeddingDimMismatch(VectorStoreError):
     (``embedding_dim`` / ``EmbeddingDimMismatch`` / ``dimension`` /
     ``-dim embeddings``) so the self-heal re-embed path still fires.
     """
+
+
+class LockHeldError(Exception):
+    """Another process holds the corpus store's single writer lock."""
+
+
+def is_lock_held_error(text: str) -> bool:
+    """True if ``text`` looks like a corpus-store writer-lock conflict.
+
+    Matches the OverGraph/Tantivy ``LockBusy`` failure raised when a second
+    writer opens the store (its BM25 sidecar takes an exclusive index lock).
+    """
+    t = text.lower()
+    return (
+        "lockbusy" in t or "failed to acquire lockfile" in t or "failed to acquire index lock" in t
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +96,9 @@ def l2_normalize(vec: Sequence[float]) -> list[float]:
 @dataclass(frozen=True)
 class FragmentEmbedding:
     """A fragment's embedding plus the denormalized columns that make filtered
-    vector search cheap. In v5 these columns are a *derived projection* of the
-    SQL-canonical source (``agentalloy.duck``), rebuilt on every reembed, so
-    they cannot drift (decision D8: always consistent).
+    vector search cheap. These columns are a *derived projection* of the
+    canonical fragment rows, rebuilt on every reembed, so they cannot drift
+    (decision D8: always consistent).
     """
 
     fragment_id: str
@@ -161,7 +182,7 @@ class CompositionTrace:
 
 @dataclass(frozen=True)
 class CodeSymbol:
-    """One code symbol row in the per-repo DuckDB graph.
+    """One code symbol row in the per-repo code graph.
 
     Field names line up with ``code_index.facade.ParsedSymbol`` so ingest is a
     plain field-copy; ``contextual_prefix`` / ``content_hash`` are storage-side
@@ -268,9 +289,10 @@ class CodeSearchHit:
 
 @runtime_checkable
 class FragmentStore(Protocol):
-    """Vector + BM25 index over fragments (LanceDB). Derived from SkillStore."""
+    """Vector + BM25 index over fragments. Derived from SkillStore."""
 
     def insert_embeddings(self, items: Iterable[FragmentEmbedding]) -> int: ...
+    def bulk_replace(self, items: Iterable[FragmentEmbedding]) -> int: ...
     def search_similar(
         self,
         query_vec: Sequence[float],
@@ -296,7 +318,7 @@ class FragmentStore(Protocol):
     def count_embeddings(self) -> int: ...
     def count_cards(self) -> int: ...
     def delete_cards(self, skill_id: str | None = None) -> int: ...
-    def delete_skill(self, skill_id: str) -> int: ...
+    def delete_skill_fragments(self, skill_id: str) -> int: ...
     def delete_all(self) -> int: ...
     def embedding_dim(self) -> int | None: ...
     def fragment_ids_present(self, fragment_ids: Sequence[str]) -> set[str]: ...
@@ -304,30 +326,171 @@ class FragmentStore(Protocol):
     def close(self) -> None: ...
 
 
+# ---------------------------------------------------------------------------
+# SkillStore DTOs
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SkillRow:
+    """A skill metadata row."""
+
+    skill_id: str
+    canonical_name: str
+    category: str
+    skill_class: str  # "domain" | "system" | "workflow"
+    domain_tags: list[str]
+    deprecated: bool
+    superseded_by: str | None
+    always_apply: bool
+    phase_scope: list[str] | None
+    category_scope: list[str] | None
+    tier: str | None
+    description: str | None
+    current_version_id: str
+
+
+@dataclass(frozen=True)
+class SkillVersionRow:
+    """A skill version row."""
+
+    version_id: str
+    skill_id: str
+    version_number: int
+    authored_at: datetime
+    author: str
+    change_summary: str
+    status: str  # "active" | "draft" | "archived"
+    raw_prose: str
+
+
+@dataclass(frozen=True)
+class FragmentRow:
+    """A fragment row (content slice of a skill version)."""
+
+    fragment_id: str
+    version_id: str
+    fragment_type: str  # "setup" | "execution" | "verification" | "example" | "guardrail" | "rationale" | "card"
+    sequence: int
+    content: str
+    # Denormalized from parent skill for retrieval convenience
+    skill_id: str = ""
+    category: str = ""
+    skill_class: str = ""
+    domain_tags: list[str] = field(default_factory=list)
+    phase_scope: list[str] | None = None
+    category_scope: list[str] | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillDependencyRow:
+    """A skill dependency edge."""
+
+    source_skill_id: str
+    target_skill_id: str
+    rel_type: str  # "requires"
+
+
+@dataclass(frozen=True)
+class FragmentDiscoveryRow:
+    """Fragment + parent skill metadata for the re-embed pipeline."""
+
+    fragment_id: str
+    content: str
+    fragment_type: str
+    skill_id: str
+    category: str
+    canonical_name: str
+    domain_tags: tuple[str, ...]
+    description: str | None
+
+
+# ---------------------------------------------------------------------------
+# SkillStore Protocol (higher-level, no raw SQL)
+# ---------------------------------------------------------------------------
+
+
 @runtime_checkable
 class SkillStore(Protocol):
-    """Skill metadata + corpus_meta (DuckDB ``agentalloy.duck``)."""
+    """Skill metadata + fragments + corpus_meta.
 
+    Higher-level interface — no raw SQL. The production implementation is
+    the OverGraph unified store.
+    """
+
+    # --- Lifecycle ---
     def migrate(self) -> None: ...
-    def execute(
-        self,
-        sql: str,
-        params: Sequence[object] | Mapping[str, object] | None = None,
-    ) -> list[tuple[Any, ...]]: ...
-    def scalar(
-        self,
-        sql: str,
-        params: Sequence[object] | Mapping[str, object] | None = None,
-    ) -> Any: ...
+    def close(self) -> None: ...
+
+    # --- Transactions ---
     def begin(self) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
+
+    # --- Skill CRUD ---
+    def get_skill(self, skill_id: str) -> SkillRow | None: ...
+    def get_skill_id_by_name(self, canonical_name: str) -> str | None: ...
+    def insert_skill(self, skill: SkillRow) -> None: ...
     def delete_skill(self, skill_id: str) -> int: ...
     def rollback_skill(self, skill_id: str) -> None: ...
     def rollback_batch(self, skill_ids: Sequence[str]) -> None: ...
+
+    # --- Version CRUD ---
+    def get_version(self, version_id: str) -> SkillVersionRow | None: ...
+    def get_versions_by_skill(self, skill_id: str) -> list[SkillVersionRow]: ...
+    def insert_version(self, version: SkillVersionRow) -> None: ...
+
+    # --- Fragment CRUD ---
+    def get_fragment(self, fragment_id: str) -> FragmentRow | None: ...
+    def insert_fragment(self, fragment: FragmentRow) -> None: ...
+    def count_fragments(self) -> int: ...
+
+    # --- Dependency CRUD ---
+    def get_dependencies(self, skill_id: str) -> list[SkillDependencyRow]: ...
+    def insert_dependency(self, dep: SkillDependencyRow) -> None: ...
+    def delete_dependencies(self, skill_id: str, rel_type: str | None = None) -> int: ...
+
+    # --- Active-version reads (for compose/retrieval) ---
+    def get_active_skills(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> list[SkillRow]: ...
+    def get_active_skill_by_id(self, skill_id: str) -> SkillRow | None: ...
+    def get_deprecated_skill_ids(self) -> list[str]: ...
+    def count_skills(self) -> int: ...
+    def get_active_fragments(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+        categories: list[str] | None = None,
+        phases: list[str] | None = None,
+        domain_tags: list[str] | None = None,
+    ) -> list[FragmentRow]: ...
+    def get_active_fragments_for_skill(self, skill_id: str) -> list[FragmentRow]: ...
+
+    # --- Re-embed pipeline ---
+    def discover_fragments(
+        self,
+        *,
+        skill_id: str | None = None,
+    ) -> list[FragmentDiscoveryRow]: ...
+
+    # --- Consistency guards ---
+    def check_consistency(
+        self,
+        *,
+        skill_class: str | tuple[str, ...] | None = None,
+    ) -> None: ...
+    def check_consistency_for(self, skill_id: str) -> None: ...
+
+    # --- Corpus metadata KV ---
     def set_meta(self, key: str, value: str) -> None: ...
     def get_meta(self, key: str) -> str | None: ...
-    def close(self) -> None: ...
+
+    # --- Bulk operations (for fixtures/tests) ---
+    def clear_all(self) -> None: ...
 
 
 @runtime_checkable
@@ -365,8 +528,8 @@ class TelemetryStore(Protocol):
 
 @runtime_checkable
 class CodeGraphStore(Protocol):
-    """Per-repo symbol graph (DuckDB ``graph.duck``). Source of truth for the
-    code index; the Lance vector dataset is derived from it.
+    """Per-repo symbol graph (``graph.overgraph``). Source of truth for the
+    code index; the vector index is derived from it.
     """
 
     def migrate(self) -> None: ...
@@ -415,7 +578,7 @@ class CodeGraphStore(Protocol):
 
 @runtime_checkable
 class CodeVectorStore(Protocol):
-    """Per-repo vector ANN + BM25 over symbols (LanceDB ``vectors.lance``)."""
+    """Per-repo vector ANN + BM25 over symbols (served by the code graph store)."""
 
     def upsert(self, rows: Iterable[CodeVectorRow]) -> int: ...
     def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int: ...
@@ -505,26 +668,12 @@ class StateStore(Protocol):
     def close(self) -> None: ...
 
 
-@dataclass
-class Stores:
-    """Bundle returned by ``open_stores``. Callers request only what they need."""
-
-    fragments: FragmentStore
-    skills: SkillStore
-    telemetry: TelemetryStore
-
-    def close(self) -> None:
-        import contextlib
-
-        for s in (self.fragments, self.skills, self.telemetry):
-            with contextlib.suppress(Exception):
-                s.close()
-
-
 __all__ = [
     "EMBEDDING_DIM",
     "VectorStoreError",
     "EmbeddingDimMismatch",
+    "LockHeldError",
+    "is_lock_held_error",
     "l2_normalize",
     "FragmentEmbedding",
     "SimilarityHit",
@@ -537,7 +686,6 @@ __all__ = [
     "StateWriteResult",
     "LeaseResult",
     "LeaseConflict",
-    "Stores",
     "CodeSymbol",
     "CodeEdge",
     "CodeVectorRow",

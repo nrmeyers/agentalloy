@@ -86,8 +86,8 @@ class TestVerifiedPresent:
         repo_root: Path,
         user_corpus: Path,
     ) -> None:
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
@@ -120,8 +120,8 @@ class TestUnderMinimumSkillCount:
         ``missing_files`` action — that path detects integrity problems
         in a corpus that DOES have the files but is suspiciously small.
         Distinct from the `initialized_empty` path (no files at all)."""
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         mock_skill.return_value = {
             "skill_count": 10,
             "fragment_count": 50,
@@ -147,8 +147,8 @@ class TestUnderMinimumSkillCount:
         """Issue #84: a schema-less corpus reports skill_count 0; the
         remediation must mention `python -m agentalloy.migrate` because
         `agentalloy install-packs` alone cannot create the graph schema."""
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         mock_skill.return_value = {
             "skill_count": 0,
             "fragment_count": 0,
@@ -176,8 +176,8 @@ class TestNoNetworkCalls:
         user_corpus: Path,
     ) -> None:
         """seed-corpus should make zero network calls."""
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
@@ -224,8 +224,8 @@ class TestDurationTracking:
         repo_root: Path,
         user_corpus: Path,
     ) -> None:
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
@@ -248,8 +248,8 @@ class TestCorpusSkillCount:
         assert corpus_skill_count() == 0
 
     def test_returns_skill_count_when_populated(self, user_corpus: Path) -> None:
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         with patch(
             "agentalloy.install.subcommands.seed_corpus._check_skill_store",
             return_value={"skill_count": 142},
@@ -257,8 +257,8 @@ class TestCorpusSkillCount:
             assert corpus_skill_count() == 142
 
     def test_zero_when_check_raises(self, user_corpus: Path) -> None:
-        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
-        (user_corpus / "fragments.lance").mkdir()
+        (user_corpus / "agentalloy.overgraph").write_bytes(b"fake")
+        (user_corpus / "corpus.overgraph").mkdir()
         with patch(
             "agentalloy.install.subcommands.seed_corpus._check_skill_store",
             side_effect=RuntimeError("corrupt"),

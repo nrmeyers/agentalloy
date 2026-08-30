@@ -1,0 +1,191 @@
+/home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:795:17 - warning: Type of "content_blocks" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:795:34 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:799:25 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "content_blocks" in function "intercept_gated_tool_calls"
+    Argument type is "list[Unknown]" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:817:17 - warning: Type of "content_blocks" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:817:34 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:821:25 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:821:25 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "iterable" in function "join"
+    Argument type is "Generator[Unknown, None, None]" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:822:29 - warning: Type of "b" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:823:52 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:836:33 - warning: Type of "b" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:837:60 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:874:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:875:21 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:876:21 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:876:26 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:894:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:895:21 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:896:21 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:896:26 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:908:38 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:909:17 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:910:17 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_passthrough_router.py:910:22 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+/home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:551:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:552:21 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:553:21 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:553:26 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:571:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:572:21 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:573:21 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:573:26 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:585:38 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:586:17 - warning: Type of "choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:587:17 - warning: Type of "fr" is partially unknown
+    Type of "fr" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:587:22 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1547:17 - warning: Type of "first_choice" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1549:21 - warning: Type of "message" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1549:31 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1551:25 - warning: Type of "tool_calls" is partially unknown
+    Type of "tool_calls" is "Unknown | None" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1551:38 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1556:33 - warning: "_command_advances_phase_without_approval" is private and used outside of the module in which it is declared (reportPrivateUsage)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1557:33 - warning: "_command_writes_to_code" is private and used outside of the module in which it is declared (reportPrivateUsage)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1562:36 - warning: Type of "tc" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1562:52 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "iterable" in function "__new__"
+    Argument type is "list[Unknown]" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1564:37 - warning: Type of "fn" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1564:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1566:41 - warning: Type of "fn_name" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1566:51 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1569:45 - warning: Type of "append" is partially unknown
+    Type of "append" is "(object: Unknown, /) -> None" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1572:45 - warning: Type of "args_str" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1572:56 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1574:49 - warning: Type of "args" is partially unknown
+    Type of "args" is "Any | Unknown" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1575:49 - warning: Type of "command" is partially unknown
+    Type of "command" is "Any | Unknown" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1575:59 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Unknown" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1577:76 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "command" in function "_command_writes_to_code"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1577:129 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "command" in function "_command_advances_phase_without_approval"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1578:53 - warning: Type of "append" is partially unknown
+    Type of "append" is "(object: Unknown, /) -> None" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1584:33 - warning: Type of "content" is partially unknown
+    Type of "content" is "Unknown | Literal['']" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1584:43 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1585:37 - warning: Type of "idx" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1585:42 - warning: Type of "fn_name" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1587:37 - warning: Type of "tc" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1588:37 - warning: Type of "fn" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1588:42 - warning: Type of "get" is unknown (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1589:37 - warning: Type of "args_str" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1589:48 - warning: Type of "get" is unknown (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1592:41 - warning: Type of "args" is partially unknown
+    Type of "args" is "Any | Unknown" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1593:41 - warning: Type of "command" is partially unknown
+    Type of "command" is "Any | Unknown" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1593:51 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Unknown" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1594:101 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "command" in function "_command_advances_phase_without_approval"
+    Argument type is "Any | Unknown" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1609:60 - warning: Argument type is unknown
+    Argument corresponds to parameter "tool_name" in function "build_instructive_denial_message" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1614:41 - warning: Argument type is unknown
+    Argument corresponds to parameter "args" in function "info" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1618:54 - warning: Type of "strip" is partially unknown
+    Type of "strip" is "Unknown | ((chars: str | None = None, /) -> str)" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1621:47 - warning: Type of "tc" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1621:63 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "iterable" in function "__new__"
+    Argument type is "list[Unknown]" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1622:58 - warning: Type of "idx" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/api/proxy_router.py:1622:63 - warning: Type of "_" is unknown (reportUnknownVariableType)
+/home/nmeyers/dev/agentalloy/src/agentalloy/code_index/ingest/entity_extract.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/code_index/ingest/entity_extract.py:339:5 - warning: Type of "entity_counts_by_kind" is partially unknown
+    Type of "entity_counts_by_kind" is "dict[Unknown, Unknown]" (reportUnknownVariableType)
+/home/nmeyers/dev/agentalloy/src/agentalloy/install/subcommands/add.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/install/subcommands/add.py:99:13 - warning: Type of "raw" is partially unknown
+    Type of "raw" is "Any | dict[Unknown, Unknown]" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/install/subcommands/add.py:101:29 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "map" in function "__init__"
+    Argument type is "dict[Unknown, Unknown]" (reportUnknownArgumentType)
+/home/nmeyers/dev/agentalloy/src/agentalloy/providers/base.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/providers/base.py:467:17 - warning: Type of "command" is unknown (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/providers/base.py:467:27 - warning: Type of "get" is partially unknown
+    Type of "get" is "Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/providers/base.py:468:44 - warning: Argument type is unknown
+    Argument corresponds to parameter "command" in function "_command_writes_to_code" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/providers/base.py:480:61 - warning: Argument type is unknown
+    Argument corresponds to parameter "command" in function "_command_advances_phase_without_approval" (reportUnknownArgumentType)
+/home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2140:25 - warning: Type of "contract_id" is partially unknown
+    Type of "contract_id" is "Unknown | Any | Literal['']" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2141:29 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2141:56 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2141:74 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2143:25 - warning: Type of "slug" is partially unknown
+    Type of "slug" is "Unknown | str | Any" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2143:37 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2144:25 - warning: Type of "phase" is partially unknown
+    Type of "phase" is "Unknown | str | Any" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2145:29 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2149:25 - warning: Type of "work_item" is partially unknown
+    Type of "work_item" is "Unknown | Any" (reportUnknownVariableType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2149:42 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2149:67 - warning: Type of "get" is partially unknown
+    Type of "get" is "Any | Overload[(key: Unknown, default: None = None, /) -> (Unknown | None), (key: Unknown, default: Unknown, /) -> Unknown, (key: Unknown, default: _T@get, /) -> (Unknown | _T@get)]" (reportUnknownMemberType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2157:33 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "str | Unknown" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2158:39 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "Unknown | str" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2159:38 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "Unknown | str" (reportUnknownArgumentType)
+  /home/nmeyers/dev/agentalloy/src/agentalloy/storage/state_store.py:2160:43 - warning: Argument type is partially unknown
+    Argument corresponds to parameter "object" in function "__new__"
+    Argument type is "Unknown | str" (reportUnknownArgumentType)
+0 errors, 99 warnings, 0 informations
+WARNING: there is a new pyright version available (v1.1.408 -> v1.1.411).
+Please install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest`
+

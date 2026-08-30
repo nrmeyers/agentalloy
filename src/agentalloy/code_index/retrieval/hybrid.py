@@ -7,10 +7,10 @@ pipeline against the agentalloy stores:
    symbol-like queries).
 2. Embed the query (nomic ``search_query: `` prefix, same client-side length
    cap as the document side).
-3. Dense leg — LanceDB cosine top-N.
+3. Dense leg — OverGraph HNSW cosine top-N.
 4. Centrality fusion — ``0.7 * cosine + 0.3 * normalized_pagerank`` over the
    dense candidates (pagerank min-max normalized within the candidate set).
-5. BM25 leg — Lance native FTS over the embedded text.
+5. BM25 leg — Tantivy BM25 over the embedded text.
 6. Reciprocal Rank Fusion (K=60) of the two ranked lists. Unlike the source
    (which only reordered dense candidates), BM25-only hits ARE admitted —
    the graph store hydrates them just as well.
@@ -29,8 +29,13 @@ from pydantic import BaseModel
 
 from agentalloy.code_index.ingest.embed_text import MAX_EMBED_TEXT_CHARS
 from agentalloy.code_index.store import open_code_index
-from agentalloy.code_index.store.vector_store import _in_list
 from agentalloy.storage.protocols import CodeGraphStore, CodeSearchHit, CodeSymbol
+
+
+def _in_list(qns: list[str]) -> str:
+    """Build a quoted, escaped ``('a', 'b')`` list for the store ``where`` clause."""
+    return "(" + ", ".join("'" + qn.replace("'", "''") + "'" for qn in qns) + ")"
+
 
 if TYPE_CHECKING:
     from agentalloy.code_index.api.state import CodeIndexState

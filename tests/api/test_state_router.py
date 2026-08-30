@@ -728,7 +728,7 @@ class TestContractSupersede:
         assert resp.json()["supersedes"] == "ctr-sup-1"
 
         old = state_store.get_contract("ctr-sup-1")
-        assert old["status"] == "superseded"
+        assert old["status"] == "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -1115,8 +1115,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 2
-        assert body["artifacts_archived"] == 2
+        assert body["contracts"] == 2
+        assert body["artifacts"] == 2
 
         # Verify they are now archived
         all_contracts = state_store.list_contracts(status="active")
@@ -1132,7 +1132,7 @@ class TestArchiveAll:
 
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
-        assert resp.json()["contracts_archived"] == 1
+        assert resp.json()["contracts"] == 1
 
         assert sibling.get_contract("ctr-sibling")["status"] == "active"
         assert state_store.get_contract("ctr-mine")["status"] == "archived"
@@ -1144,8 +1144,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 0
 
     def test_archive_all_only_contracts(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1156,8 +1156,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 1
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 1
+        assert body["artifacts"] == 0
 
     def test_archive_all_only_artifacts(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1168,8 +1168,8 @@ class TestArchiveAll:
         resp = state_client.post("/state/archive-all")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 1
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 1
 
     def test_archive_all_is_idempotent(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -1185,8 +1185,40 @@ class TestArchiveAll:
         resp2 = state_client.post("/state/archive-all")
         assert resp2.status_code == 200
         body = resp2.json()
-        assert body["contracts_archived"] == 0
-        assert body["artifacts_archived"] == 0
+        assert body["contracts"] == 0
+        assert body["artifacts"] == 0
+
+    def test_archive_all_outcome_cancelled(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """outcome=cancelled retires in-flight contracts as abandoned."""
+        state_store.put_contract("ctr-abandoned", phase="build", slug="ab")
+
+        resp = state_client.post("/state/archive-all", json={"outcome": "cancelled"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "cancelled"
+        assert body["contracts"] == 1
+        assert state_store.get_contract("ctr-abandoned")["status"] == "cancelled"
+
+    def test_archive_all_spares_stashed_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Stashed (parked) contracts survive the cycle sweep."""
+        state_store.create_session("sess-parked", task_slug="feat-parked")
+        state_store.put_contract("build/feat-parked", phase="build", slug="feat-parked")
+        state_store.put_contract("build/feat-live", phase="build", slug="feat-live")
+        state_store.stash_session("sess-parked")
+
+        resp = state_client.post("/state/archive-all", json={"outcome": "cancelled"})
+        assert resp.status_code == 200
+        assert resp.json()["contracts"] == 1
+        assert state_store.get_contract("build/feat-parked")["status"] == "stashed"
+        assert state_store.get_contract("build/feat-live")["status"] == "cancelled"
+
+    def test_archive_all_rejects_invalid_outcome(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/archive-all", json={"outcome": "superseded"})
+        assert resp.status_code == 422
 
     # ------------------------------------------------------------------
     # GET /state/artifact/{phase}/{slug}/{name} — single artifact route
@@ -1383,3 +1415,203 @@ class TestSessionEndpoints:
     def test_resume_missing_session_key_is_400(self, state_client: TestClient) -> None:
         resp = state_client.post("/state/sessions/resume", json={})
         assert resp.status_code == 400
+
+    def test_stash_session_parks_session_and_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a", phase="build")
+        state_store.put_contract("build/feat-a", phase="build", slug="feat-a")
+
+        resp = state_client.post("/state/sessions/stash", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"stashed": True}
+        assert state_store.get_session("sess-1")["status"] == "stashed"
+        assert state_store.get_contract("build/feat-a")["status"] == "stashed"
+        assert state_client.get("/state/sessions/active").json() == []
+
+    def test_stash_session_not_found(self, state_client: TestClient) -> None:
+        resp = state_client.post("/state/sessions/stash", json={"session_key": "ghost"})
+        assert resp.status_code == 200
+        assert resp.json() == {"stashed": False}
+
+    def test_resume_stashed_session_restores_contracts(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a")
+        state_store.put_contract("build/feat-a", phase="build", slug="feat-a")
+        state_store.stash_session("sess-1")
+
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
+        assert resp.json() == {"resumed": True}
+        assert state_store.get_session("sess-1")["status"] == "active"
+        assert state_store.get_contract("build/feat-a")["status"] == "active"
+
+    def test_cancel_session_is_terminal(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.create_session("sess-1", task_slug="feat-a")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+
+        resp = state_client.post("/state/sessions/cancel", json={"session_key": "sess-1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"cancelled": True}
+        assert state_store.get_session("sess-1")["status"] == "cancelled"
+        assert state_store.get_contract("spec/feat-a")["status"] == "cancelled"
+
+        # Cancelled is terminal — resume refuses
+        resp = state_client.post("/state/sessions/resume", json={"session_key": "sess-1"})
+        assert resp.json() == {"resumed": False}
+        assert state_store.get_session("sess-1")["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Approval flow — POST /state/advance approved + POST /state/approve-phase
+# ---------------------------------------------------------------------------
+
+
+class TestAdvanceApproval:
+    """Approval-gated advance: the digest is computed server-side and binds
+    the approval to the exact artifact content at sign-off.
+
+    ``repo_root`` must name the fixture's own bucket root
+    (``default_repo_root()``) — the store is seeded under that (repo, stream)
+    pair, and any other path re-scopes the request to an empty bucket.
+    """
+
+    def _setup_spec(self, state_store: DuckDBStateStore) -> None:
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a", body="spec contract")
+        # The packaged spec exit gate requires these sections in the artifact
+        state_store.set_artifact(
+            "spec",
+            "feat-a",
+            "spec.artifact",
+            "# Spec\nContent v1\n\n## Acceptance Criteria\n- AC-1\n\n## Out of Scope\n- none",
+        )
+
+    def _advance_url(self) -> str:
+        return f"/state/advance?repo_root={default_repo_root()}"
+
+    def _approve_url(self) -> str:
+        return f"/state/approve-phase?repo_root={default_repo_root()}"
+
+    def test_advance_without_approval_is_blocked(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        self._setup_spec(state_store)
+        resp = state_client.post(
+            self._advance_url(),
+            json={"slug": "feat-a", "contract_body": "design brief", "to_phase": "design"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["gate_verdict"]["reason"] == "approval"
+
+    def test_advance_approved_flows_to_design(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        from unittest.mock import patch
+
+        self._setup_spec(state_store)
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]):
+            resp = state_client.post(
+                self._advance_url(),
+                json={
+                    "slug": "feat-a",
+                    "contract_body": "design brief",
+                    "to_phase": "design",
+                    "approved": True,
+                },
+            )
+        body = resp.json()
+        assert body["success"] is True, body
+        assert body["phase"] == "design"
+        # Approval recorded server-side
+        approval = state_store.get_approval("spec")
+        assert approval is not None
+        assert approval["approver"] == "agent-on-user-approval"
+        assert approval["artifact_digest"]
+        # The next-phase contract was written
+        assert state_store.get_contract("design/feat-a") is not None
+
+    def test_advance_approved_refused_without_artifact(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Nothing to approve → refuse before writing the next contract."""
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+        resp = state_client.post(
+            self._advance_url(),
+            json={
+                "slug": "feat-a",
+                "contract_body": "design brief",
+                "to_phase": "design",
+                "approved": True,
+            },
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert "no exit artifact" in body["message"]
+        assert state_store.get_approval("spec") is None
+        assert state_store.get_contract("design/feat-a") is None
+
+    def test_approval_goes_stale_when_artifact_changes(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Editing the artifact after approval voids it (digest mismatch)."""
+        from unittest.mock import patch
+
+        self._setup_spec(state_store)
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]):
+            first = state_client.post(
+                self._advance_url(),
+                json={
+                    "slug": "feat-a",
+                    "contract_body": "design brief",
+                    "to_phase": "design",
+                    "approved": True,
+                },
+            )
+        assert first.json()["success"] is True
+
+        # Findings routed back: return to spec and revise the artifact
+        state_store.write_phase("spec")
+        state_store.set_artifact(
+            "spec",
+            "feat-a",
+            "spec.artifact",
+            "# Spec\nContent v2 — edited after approval\n\n"
+            "## Acceptance Criteria\n- AC-1\n\n## Out of Scope\n- none",
+        )
+
+        # Advance without re-approval must re-block
+        resp = state_client.post(
+            self._advance_url(),
+            json={"slug": "feat-a", "contract_body": "design brief v2", "to_phase": "design"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["gate_verdict"]["reason"] == "approval"
+
+    def test_approve_phase_endpoint_records_digest(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        self._setup_spec(state_store)
+        resp = state_client.post(self._approve_url(), json={"phase": "spec"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["phase"] == "spec"
+        assert body["slug"] == "feat-a"
+        assert body["artifact_digest"]
+        assert state_store.get_approval("spec")["artifact_digest"] == body["artifact_digest"]
+
+    def test_approve_phase_refuses_without_artifact(
+        self, state_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.write_phase("spec")
+        state_store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+        resp = state_client.post(self._approve_url(), json={"phase": "spec"})
+        assert resp.status_code == 422
+        assert "no exit artifact" in resp.json()["detail"]

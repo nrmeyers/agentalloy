@@ -22,6 +22,7 @@ from pathlib import Path
 from agentalloy.install.subcommands import (
     add,
     approve,
+    artifact,
     auto_wire_worktree,
     cleanup,
     code,
@@ -104,6 +105,7 @@ _SUBCOMMANDS = [
     resume,
     contract,
     contracts,
+    artifact,
     compose,
     code,
     knowledge,

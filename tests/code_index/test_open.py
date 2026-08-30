@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import duckdb
-import pytest
-
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
 from agentalloy.code_index.store.open import (
     code_index_paths,
     open_code_index,
@@ -15,6 +11,7 @@ from agentalloy.code_index.store.open import (
     remove_repo,
     slug_write_lock,
 )
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.config import Settings
 from agentalloy.storage.protocols import CodeSymbol
 
@@ -46,8 +43,7 @@ def test_paths_layout(tmp_path: Path) -> None:
     root = Path(s.code_index_data_dir)
     assert paths.root == root
     assert paths.repo_dir == root / "repos" / "org__repo"
-    assert paths.graph_path == root / "repos" / "org__repo" / "graph.duck"
-    assert paths.vectors_path == root / "repos" / "org__repo" / "vectors.lance"
+    assert paths.graph_path == root / "repos" / "org__repo" / "graph.overgraph"
     assert paths.cache_dir == root / "repos" / "org__repo" / "cache"
     assert paths.jobs_path == root / "jobs.sqlite"
 
@@ -71,12 +67,10 @@ def test_open_roles(tmp_path: Path) -> None:
     reader = open_code_index(s, "repo", role="reader")
     got = reader.graph.symbol("m.fn")
     assert got is not None and got.name == "fn"
-    # A reader handle must reject writes (DuckDB read_only) and migration.
-    with pytest.raises(duckdb.Error):
-        reader.graph.upsert_symbols([make_symbol("m.other")])
-    assert isinstance(reader.graph, DuckDBCodeGraphStore)
-    with pytest.raises(RuntimeError):
-        reader.graph.migrate()
+    assert isinstance(reader.graph, OverGraphCodeGraphStore)
+    # The reader role is read-only by convention — writer coordination
+    # happens through the jobs store + slug_write_lock, not a store-level
+    # write gate (the OverGraph store has no read-only open mode).
     reader.close()
 
 

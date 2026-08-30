@@ -401,9 +401,13 @@ class StateClient:
         """Archive a contract."""
         return self._post(f"/contracts/{contract_id}/archive", {})
 
-    def archive_all(self) -> dict[str, Any]:
-        """Archive all active contracts and artifacts."""
-        return self._post("/state/archive-all", {})
+    def archive_all(self, outcome: str = "archived") -> dict[str, Any]:
+        """End the work cycle: retire all in-flight contracts and artifacts.
+
+        ``outcome`` is the terminal status for in-flight contracts —
+        ``archived`` (reached product) or ``cancelled`` (abandoned).
+        """
+        return self._post("/state/archive-all", {"outcome": outcome})
 
     def supersede_contract(self, contract_id: str, new_contract: dict[str, Any]) -> dict[str, Any]:
         """Supersede a contract with a new revision."""
@@ -535,6 +539,38 @@ class StateClient:
                 timeout=self._timeout,
             )
             return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def stash_session(self, session_key: str) -> bool:
+        """Stash a session (park it, waiting to resume). Returns True if stashed."""
+        try:
+            result = self._post(
+                "/state/sessions/stash",
+                {"session_key": session_key},
+            )
+            return result.get("stashed", False)
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def cancel_session(self, session_key: str) -> bool:
+        """Cancel a session (abandoned). Returns True if cancelled."""
+        try:
+            result = self._post(
+                "/state/sessions/cancel",
+                {"session_key": session_key},
+            )
+            return result.get("cancelled", False)
         except urllib.error.HTTPError as exc:
             raise StateClientError(
                 f"agentalloy service returned HTTP {exc.code}: {exc.reason}",

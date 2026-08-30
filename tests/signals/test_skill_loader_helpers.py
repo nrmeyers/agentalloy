@@ -558,4 +558,3 @@ class TestRuntimeStateRelocation:
         finally:
             # Restore the original store
             bind_process_store(bound)
-

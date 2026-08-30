@@ -14,7 +14,7 @@ A local **AgentAlloy** service that gives your coding agent (this LLM, or anothe
 
 The runtime is a small FastAPI service backed by:
 - An embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, 768-dim) — served on any hardware by llama-server (llama.cpp)
-- A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `python`, `typescript`, `nodejs`, `fastapi`, `react`, `go`, `rust`, `data-engineering`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (DuckDB + LanceDB) is generated locally on first install.
+- A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `python`, `typescript`, `nodejs`, `fastapi`, `react`, `go`, `rust`, `data-engineering`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (OverGraph + Tantivy BM25) is generated locally on first install.
 - Your handoff harness (Claude Code / Cursor / Continue.dev / etc.) — wired so it can query the API
 
 **AgentAlloy is user-scoped, not per-repo.** You install once; every project the user opens can wire to the same service. State lives at `${XDG_CONFIG_HOME:-~/.config}/agentalloy/`; corpus at `${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`. Repos contain only sentinel-bounded blocks injected into agent config files (`CLAUDE.md`, `.cursor/rules/agentalloy.mdc`, etc.).
@@ -279,7 +279,7 @@ needs a manual step. If so:
 > agentalloy seed-corpus
 > ```
 
-This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/` and initializes empty DuckDB + LanceDB stores. The wheel no longer ships pre-built skills — Step 8 below populates the corpus from packs the user picks.
+This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/` and initializes an empty OverGraph store + Tantivy BM25 sidecar. The wheel no longer ships pre-built skills — Step 8 below populates the corpus from packs the user picks.
 
 ---
 
@@ -713,7 +713,7 @@ For container deployments (`--deployment container`), use these commands to mana
 |-------------------|          |---------------------------|
 |                   |          |                           |
 | agentalloy-data/  | :rw:     | /app/data/                |
-| (named volume)    |--------->| (DuckDB + LanceDB +       |
+| (named volume)    |--------->| (OverGraph + BM25 +       |
 |                   |          |  GGUFs under /models)     |
 |                   |          |                           |
 | localhost:47950   | <----->  | :47950                    |
@@ -722,7 +722,7 @@ For container deployments (`--deployment container`), use these commands to mana
 +-------------------+          +---------------------------+
 ```
 
-A single volume persists across restarts: `agentalloy-data:/app/data` (DuckDB + LanceDB, plus the downloaded GGUFs under `/app/data/models`, a named volume). The two `llama-server` instances (embed on 47951, reranker on 47952) run inside the container and are not exposed — only 47950 is published.
+A single volume persists across restarts: `agentalloy-data:/app/data` (OverGraph + Tantivy BM25, plus the downloaded GGUFs under `/app/data/models`, a named volume). The two `llama-server` instances (embed on 47951, reranker on 47952) run inside the container and are not exposed — only 47950 is published.
 
 ### Health check
 

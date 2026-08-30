@@ -665,7 +665,36 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
     assert result == NOT_MET
     assert evals[0].advisory is not None
     assert "1 build contract" in evals[0].advisory
-    assert "3 task" in evals[0].advisory
+    assert "3 counted task" in evals[0].advisory
+
+
+def test_coverage_advisory_counts_from_store_tasks_artifact(tmp_path: Path):
+    """tasks_from_store branch: counts top-level bullets in the tasks.artifact
+    and explains the counting rule — the block that used to force agents to
+    read engine source now carries the answer."""
+    _seed_design_contract(tmp_path, "feat")
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    store.set_artifact("design", "feat", "tasks.artifact", "# feat\n\n## Tasks\n\n- a\n- b\n- c\n")
+    store.close()
+    _write_build_contract(tmp_path, name="01-a.md", tags=["react"])
+    spec = {
+        "build_contracts_cover_tasks": {
+            "phase": "design",
+            "tasks_from_store": True,
+        }
+    }
+    qwen_calls: list[int] = [0]
+    result, evals = evaluate_node(
+        spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
+    )
+    assert result == NOT_MET
+    assert evals[0].advisory is not None
+    assert "1 build contract(s) recorded for 3 counted task(s)" in evals[0].advisory
+    assert "'## Tasks'" in evals[0].advisory
+    assert "count as zero" in evals[0].advisory
+    assert "tasks.md" not in evals[0].advisory
 
 
 def test_tag_focus_advisory_names_offender(tmp_path: Path):
@@ -791,3 +820,94 @@ def test_evaluate_phase_gate_same_phase_unguarded(tmp_path: Path):
     """A same-phase write is a no-op and never gated."""
     assert evaluate_phase_gate("spec", "spec", tmp_path, override=False) is None
     assert evaluate_phase_gate(None, "build", tmp_path, override=False) is None
+
+
+# ---------------------------------------------------------------------------
+# Artifact gate advisories — a block must say what's missing
+# ---------------------------------------------------------------------------
+
+
+def test_artifact_contains_advisory_names_missing_sections(tmp_path: Path):
+    """Regression (obs-app design→plan): an artifact recorded without its
+    required headings blocked with empty advisories, so the agent had nothing
+    to act on.  The advisory must name the exact missing headings, the
+    re-record endpoint, and the re-approval consequence."""
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    try:
+        store.put_contract("design/feat-a", phase="design", slug="feat-a")
+        store.set_artifact("design", "feat-a", "approach.artifact", "# Doc\n\n## Overview\n...")
+        gate = {
+            "artifact_contains": {
+                "phase": "design",
+                "name": "approach.artifact",
+                "sections": ["Approach"],
+            }
+        }
+        result, evals = evaluate_node(gate, _ctx(tmp_path, "design", store=store), None, [0])
+        assert result == NOT_MET
+        advisory = evals[0].advisory
+        assert advisory is not None
+        assert "'## Approach'" in advisory
+        assert "agentalloy artifact put" in advisory
+        assert "PUT /state/artifact" in advisory
+        assert "re-approval" in advisory
+        assert "<!-- agentalloy:artifact" not in advisory
+    finally:
+        store.close()
+
+
+def test_artifact_exists_advisory_points_at_store_endpoint(tmp_path: Path):
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    try:
+        store.put_contract("spec/feat-a", phase="spec", slug="feat-a")
+        gate = {"artifact_exists": {"phase": "spec", "name": "spec.artifact"}}
+        result, evals = evaluate_node(gate, _ctx(tmp_path, "spec", store=store), None, [0])
+        assert result == NOT_MET
+        advisory = evals[0].advisory
+        assert advisory is not None
+        assert "agentalloy artifact put" in advisory
+        assert "PUT /state/artifact" in advisory
+        assert "spec.artifact" in advisory
+        assert "<!-- agentalloy:artifact" not in advisory
+    finally:
+        store.close()
+
+
+def test_design_exit_gate_block_is_never_silent(tmp_path: Path):
+    """End-to-end regression: design's packaged exit gate must carry an advisory
+    for every blocking shape — missing artifact and missing sections alike."""
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    spec = exit_gates_for_phase("design")
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    try:
+        store.put_contract("design/feat-a", phase="design", slug="feat-a")
+        ctx = _ctx(tmp_path, "design", store=store)
+
+        # Shape 1: no artifact at all
+        result, evals = evaluate_node(spec, ctx, None, [0])
+        assert result == NOT_MET
+        assert any(e.advisory for e in evals), "missing-artifact block produced no advisory"
+
+        # Shape 2: artifact present but without the required heading
+        store.set_artifact("design", "feat-a", "approach.artifact", "# Doc\n## Overview\n...")
+        result, evals = evaluate_node(spec, ctx, None, [0])
+        assert result == NOT_MET
+        assert any(e.advisory for e in evals), "missing-section block produced no advisory"
+    finally:
+        store.close()
+
+
+def test_contract_exists_advisory_points_at_advance_endpoint():
+    """Intake's gate advisory teaches the advance endpoint, not contract markers."""
+    from agentalloy.signals.gates import _build_contract_exists_advisory
+
+    advisory = _build_contract_exists_advisory({"phase": "spec"}, _ctx(Path("."), "intake"))
+    assert "POST /state/advance" in advisory
+    assert "<!-- agentalloy:contract" not in advisory

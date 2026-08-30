@@ -10,6 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,8 +23,8 @@ from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion, get_active_version_by_id
-from agentalloy.storage.protocols import FragmentStore
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
+from agentalloy.storage.protocols import FragmentStore, SkillRow, SkillVersionRow
 from agentalloy.telemetry import NullTelemetryWriter
 from tests.support import StubLMClient
 
@@ -31,59 +32,72 @@ from tests.support import StubLMClient
 
 
 @pytest.fixture
-def empty_store(tmp_path: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(tmp_path / "agentalloy.duck"))
+def empty_store(tmp_path: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
 
 
 @pytest.fixture
-def populated_store(corpus_dir: Path) -> DuckDBSkillStore:
-    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+def populated_store(corpus_dir: Path) -> OverGraphSkillStore:
+    return open_overgraph_skill_store(str(corpus_dir / "agentalloy.overgraph"), read_only=True)
 
 
 # -------- helpers --------
 
 
-def _make_skill(store: DuckDBSkillStore, skill_id: str, skill_class: str = "domain") -> None:
-    store.execute(
-        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, "
-        "domain_tags, deprecated, always_apply, phase_scope, category_scope) "
-        "VALUES (?, ?, 'design', ?, ?, false, false, ?, ?)",
-        [skill_id, skill_id, skill_class, [], [], []],
+def _make_skill(store: OverGraphSkillStore, skill_id: str, skill_class: str = "domain") -> None:
+    store.insert_skill(
+        SkillRow(
+            skill_id=skill_id,
+            canonical_name=skill_id,
+            category="design",
+            skill_class=skill_class,
+            domain_tags=[],
+            deprecated=False,
+            superseded_by=None,
+            always_apply=False,
+            phase_scope=None,
+            category_scope=None,
+            tier=None,
+            description=None,
+            current_version_id="",
+        )
     )
 
 
-def _make_version(store: DuckDBSkillStore, skill_id: str, version_id: str, status: str) -> None:
-    # HAS_VERSION is folded into skill_versions.skill_id.
-    store.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
-        "author, change_summary, status, raw_prose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [version_id, skill_id, 1, datetime.now(UTC), "test", "t", status, "prose"],
+def _make_version(store: OverGraphSkillStore, skill_id: str, version_id: str, status: str) -> None:
+    store.insert_version(
+        SkillVersionRow(
+            version_id=version_id,
+            skill_id=skill_id,
+            version_number=1,
+            authored_at=datetime.now(UTC),
+            author="test",
+            change_summary="t",
+            status=status,
+            raw_prose="prose",
+        )
     )
 
 
-def _link_current(store: DuckDBSkillStore, skill_id: str, version_id: str) -> None:
-    # CURRENT_VERSION is folded into skills.current_version_id.
-    store.execute(
-        "UPDATE skills SET current_version_id = ? WHERE skill_id = ?",
-        [version_id, skill_id],
-    )
+def _link_current(store: OverGraphSkillStore, skill_id: str, version_id: str) -> None:
+    skill = store.get_skill(skill_id)
+    assert skill is not None
+    store.insert_skill(replace(skill, current_version_id=version_id))
 
 
-def _first_active_version_id(store: DuckDBSkillStore) -> str:
-    rows = store.execute(
-        "SELECT v.version_id FROM skills s "
-        "JOIN skill_versions v ON v.version_id = s.current_version_id "
-        "WHERE v.status = 'active' LIMIT 1"
-    )
-    assert rows, "fixture store has no active versions"
-    return str(rows[0][0])
+def _first_active_version_id(store: OverGraphSkillStore) -> str:
+    for skill in store.get_active_skills():
+        version = store.get_version(skill.current_version_id)
+        if version is not None and version.status == "active":
+            return version.version_id
+    raise AssertionError("fixture store has no active versions")
 
 
 # -------- Unit: get_active_version_by_id --------
 
 
 def test_get_active_version_by_id_returns_data_for_active(
-    populated_store: DuckDBSkillStore,
+    populated_store: OverGraphSkillStore,
 ) -> None:
     version_id = _first_active_version_id(populated_store)
     data = get_active_version_by_id(populated_store, version_id)
@@ -92,7 +106,7 @@ def test_get_active_version_by_id_returns_data_for_active(
     assert isinstance(data["raw_prose"], str)
 
 
-def test_get_active_version_by_id_raises_for_superseded(empty_store: DuckDBSkillStore) -> None:
+def test_get_active_version_by_id_raises_for_superseded(empty_store: OverGraphSkillStore) -> None:
     _make_skill(empty_store, "s1")
     _make_version(empty_store, "s1", "s1-v1", "superseded")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -101,7 +115,7 @@ def test_get_active_version_by_id_raises_for_superseded(empty_store: DuckDBSkill
     assert "superseded" in ei.value.reason
 
 
-def test_get_active_version_by_id_raises_for_draft(empty_store: DuckDBSkillStore) -> None:
+def test_get_active_version_by_id_raises_for_draft(empty_store: OverGraphSkillStore) -> None:
     _make_skill(empty_store, "s2")
     _make_version(empty_store, "s2", "s2-v1", "draft")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -109,7 +123,7 @@ def test_get_active_version_by_id_raises_for_draft(empty_store: DuckDBSkillStore
     assert "draft" in ei.value.reason
 
 
-def test_get_active_version_by_id_raises_for_proposed(empty_store: DuckDBSkillStore) -> None:
+def test_get_active_version_by_id_raises_for_proposed(empty_store: OverGraphSkillStore) -> None:
     _make_skill(empty_store, "s3")
     _make_version(empty_store, "s3", "s3-v1", "proposed")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -118,7 +132,7 @@ def test_get_active_version_by_id_raises_for_proposed(empty_store: DuckDBSkillSt
 
 
 def test_get_active_version_by_id_raises_runtime_error_for_missing(
-    empty_store: DuckDBSkillStore,
+    empty_store: OverGraphSkillStore,
 ) -> None:
     with pytest.raises(RuntimeError, match="not found"):
         get_active_version_by_id(empty_store, "no-such-version")
@@ -133,9 +147,9 @@ def test_get_active_version_by_id_raises_runtime_error_for_missing(
 
 
 @pytest.fixture
-def inconsistent_store(tmp_path: Path) -> DuckDBSkillStore:
+def inconsistent_store(tmp_path: Path) -> OverGraphSkillStore:
     """Store where CURRENT_VERSION points at a non-active version (superseded)."""
-    s = open_skill_store(str(tmp_path / "agentalloy.duck"))
+    s = open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
     _make_skill(s, "broken-skill")
     _make_version(s, "broken-skill", "broken-skill-v1", "superseded")
     _link_current(s, "broken-skill", "broken-skill-v1")
@@ -143,7 +157,7 @@ def inconsistent_store(tmp_path: Path) -> DuckDBSkillStore:
 
 
 def test_inconsistent_state_returns_500_on_inspect(
-    app: FastAPI, inconsistent_store: DuckDBSkillStore
+    app: FastAPI, inconsistent_store: OverGraphSkillStore
 ) -> None:
     app.dependency_overrides[get_skill_store] = lambda: inconsistent_store
     with TestClient(app) as c:
@@ -156,7 +170,7 @@ def test_inconsistent_state_returns_500_on_inspect(
 
 
 def test_inconsistent_state_returns_500_on_retrieve_by_id(
-    app: FastAPI, inconsistent_store: DuckDBSkillStore, vector_store: FragmentStore
+    app: FastAPI, inconsistent_store: OverGraphSkillStore, vector_store: FragmentStore
 ) -> None:
     orch = RetrieveOrchestrator(
         inconsistent_store,
@@ -178,7 +192,7 @@ def test_inconsistent_state_returns_500_on_retrieve_by_id(
 
 
 def test_compose_uses_only_active_fragments(
-    app: FastAPI, populated_store: DuckDBSkillStore, vector_store: FragmentStore
+    app: FastAPI, populated_store: OverGraphSkillStore, vector_store: FragmentStore
 ) -> None:
     """Compose retrieval must only surface active-version fragments."""
     from agentalloy.orchestration.compose import ComposeOrchestrator

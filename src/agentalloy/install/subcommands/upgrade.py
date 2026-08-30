@@ -512,7 +512,7 @@ def _drop_legacy_corpus_files() -> list[str]:
     from agentalloy.config import get_settings
 
     try:
-        corpus_dir = Path(get_settings().duckdb_path).parent
+        corpus_dir = Path(get_settings().corpus_store_path).parent
     except Exception:  # noqa: BLE001 — path resolution failure just means no cleanup
         return []
     removed: list[str] = []
@@ -589,12 +589,12 @@ def _upgrade_native(
     from agentalloy.install.subcommands import seed_corpus
 
     # Engine-migration guard: a v4 install recorded its packs (with content
-    # hashes) in install-state, but v5's skill store (agentalloy.duck) starts
-    # empty. install-packs' version gate keys off that record, so it reports every
+    # hashes) in install-state, but v5's corpus store starts empty.
+    # install-packs' version gate keys off that record, so it reports every
     # pack "already installed" and skips ingest — leaving the new engine empty.
-    # When the skill store is empty yet the registry still claims packs, clear the
-    # registry so ingest actually re-populates the new store (install-packs then
-    # rewrites the registry as it goes).
+    # When the corpus store is empty yet the registry still claims packs, clear
+    # the registry so ingest actually re-populates the new store (install-packs
+    # then rewrites the registry as it goes).
     if seed_corpus.corpus_skill_count() == 0 and _reset_pack_registry():
         actions.append("cleared stale pack registry (engine migration) — forcing full re-ingest")
 
@@ -603,21 +603,21 @@ def _upgrade_native(
         ingest = _run_cli(["install-packs", "--packs", packs, "--no-restart"], capture=True)
 
     dim_changed = _is_dim_mismatch(ingest)
-    # A same-dim engine migration (v4 stored vectors in DuckDB, v5 in
-    # fragments.lance) is invisible to the dim-mismatch check: install-packs
-    # writes fragment METADATA to agentalloy.duck but the vector index is built
-    # by reembed, so the Lance dataset lands empty and retrieval silently dies.
-    lance_empty = seed_corpus.corpus_embedding_count() == 0
+    # A same-dim engine migration is invisible to the dim-mismatch check:
+    # install-packs writes the skill/fragment rows into the corpus store but
+    # the vector + BM25 index is built by reembed, so the embeddings land
+    # empty and retrieval silently dies.
+    embeddings_empty = seed_corpus.corpus_embedding_count() == 0
 
-    if dim_changed or lance_empty:
+    if dim_changed or embeddings_empty:
         if dim_changed:
             warnings.append("embedding dimension changed — a full re-embed is required")
         else:
-            actions.append("vector index empty (engine migration) — rebuilding embeddings")
+            actions.append("embedding index empty (engine migration) — rebuilding embeddings")
         # A dim change is long and needs a human OK; an empty index is
         # non-negotiable (the service cannot retrieve without it), so don't gate
         # that case behind a prompt — always rebuild.
-        proceed = lance_empty or _confirm(
+        proceed = embeddings_empty or _confirm(
             "  Re-embed the whole corpus now? This can take 30–40 min on CPU",
             assume_yes=assume_yes,
         )

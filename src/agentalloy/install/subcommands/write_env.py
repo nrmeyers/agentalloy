@@ -44,8 +44,7 @@ VALID_PRESETS = frozenset(
 # Keys the user is allowed to override via --overrides.
 _KNOWN_KEYS = frozenset(
     {
-        "DUCKDB_PATH",
-        "FRAGMENTS_LANCE_PATH",
+        "CORPUS_STORE_PATH",
         "TELEMETRY_DB_PATH",
         "RUNTIME_EMBED_BASE_URL",
         "RUNTIME_EMBEDDING_MODEL",

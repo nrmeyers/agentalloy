@@ -1,8 +1,8 @@
 """DuckDB-backed telemetry store (``telemetry.duck``) — composition traces.
 
 Split into its own file (service-owned, append-only) so runtime trace writes
-never contend with the reembed writer that holds ``agentalloy.duck`` (decision
-D4). The analytics SQL (``aggregate_savings``, ``query_traces``) is preserved
+never contend with the reembed writer that holds the corpus store's writer
+lock (decision D4). The analytics SQL (``aggregate_savings``, ``query_traces``) is preserved
 verbatim — it is a wire contract with external dashboards / hook scripts
 (decision D15).
 

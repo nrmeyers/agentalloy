@@ -1,6 +1,6 @@
 skill_id: sdd-spec-and-scoping
 canonical_name: SDD — Spec and Scoping (sdd-spec)
-description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via artifact marker."
+description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — recorded via the state panel artifact endpoint."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -17,7 +17,8 @@ applies_to_phases:
 # to design. A customization may reword the prose but must keep it verbatim.
 prose_invariants:
   - "state panel"
-  - "agentalloy:artifact"
+  - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -68,7 +69,7 @@ contract_template: |
   ## Spec
 
   Acceptance criteria and out-of-scope live in the spec artifact
-  (recorded via artifact marker: `<!-- agentalloy:artifact name=spec.artifact -->`).
+  (recorded via `agentalloy artifact put` or PUT /state/artifact, name `spec.artifact`).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -85,11 +86,14 @@ raw_prose: |
   with action=`contract_detail` to read the full contract. If it does not exist, you
   skipped intake; STOP and go back.
 
-  You MUST record the spec using an artifact marker:
-  `<!-- agentalloy:artifact name=spec.artifact -->...<!-- /agentalloy:artifact -->`
-  with its **Acceptance Criteria** and **Out of Scope** sections. There is no file to
-  write — this is a store write, not a filesystem document. You MUST NOT design solutions
-  or touch `src/` here — spec settles *what* and *done*, never *how*.
+  You MUST record the spec by piping its body straight to the store:
+  `agentalloy artifact put --phase spec --slug <task-slug> --name spec.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback), carrying its
+  **Acceptance Criteria** and **Out of Scope** sections. There is no file to write —
+  this is a store write, not a filesystem document; a file on disk is not an artifact,
+  and the artifact exists only once the recording succeeds. You MUST NOT design
+  solutions or touch `src/` here — spec settles
+  *what* and *done*, never *how*.
 
   You have one job: turn the intake contract's fuzzy ask into a spec precise enough that
   design and build can't drift from it. Bad specs cascade downstream into bad designs and
@@ -172,22 +176,23 @@ raw_prose: |
   ## 6. Record it + prepare the hand-off
 
   The **spec artifact** is the deliverable and the single source of truth for acceptance —
-  record it using an artifact marker:
-  `<!-- agentalloy:artifact name=spec.artifact -->...<!-- /agentalloy:artifact -->`
+  record it by piping the body to the store: `agentalloy artifact put --phase spec
+  --slug <task-slug> --name spec.artifact` (content on stdin; PUT /state/artifact is
+  the HTTP fallback).
 
   The body MUST include `## Acceptance Criteria` and `## Out of Scope` sections. That
   completes spec.
 
-  Then **prepare the hand-off** to design. A contract is auto-created for the design
-  phase. In the design work-item, fill `domain_tags` with the *design surface* (the tech
-  and patterns design will reason about — `caching`, `async`, `postgres-schema`, not
-  process words) and write the body as what design must produce for this feature. Set
+  Then **prepare the hand-off** to design. The advance call writes the design contract in
+  the same request: fill `domain_tags` with the *design surface* (the tech and patterns
+  design will reason about — `caching`, `async`, `postgres-schema`, not process words)
+  and write the contract body as what design must produce for this feature. Set
   `scope.touches/avoids`. Don't copy acceptance into it — the spec artifact is
   acceptance's one home.
 
   Then **PRESENT the spec in full and STOP** — do not advance yourself. The forward jump
-  to design is a human checkpoint: only once the user explicitly approves do you advance.
-  Present the work for human approval. The phase advances after approval is recorded.
+  to design is a human checkpoint: only once the user explicitly approves do you advance,
+  via your state panel's advance action (POST /state/advance) with `"approved": true`.
   Phase advance ends this session; the next phase begins in a fresh one, and the state
   panel provides context automatically. If anything's still unresolved — an assumption
   the user hasn't confirmed, an acceptance criterion you can't make checkable — **stop

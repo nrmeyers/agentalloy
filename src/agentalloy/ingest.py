@@ -6,7 +6,7 @@ Usage::
     python -m agentalloy.ingest <review.yaml> [--force] [--yes]
 
 The review YAML is produced by the Skill Authoring Agent. It covers both domain
-and system skills. No live embedder is required; the Lance ``fragments`` dataset
+and system skills. No live embedder is required; the fragment embedding index
 is populated by a separate re-embed pass.
 
 Exit codes
@@ -27,7 +27,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import yaml
 
@@ -39,9 +39,13 @@ from agentalloy.install.container_service import (
 )
 from agentalloy.skill_tier import resolve_skill_tier
 from agentalloy.storage.open import open_skills
-
-if TYPE_CHECKING:
-    from agentalloy.storage.skill_store import DuckDBSkillStore
+from agentalloy.storage.protocols import (
+    FragmentRow,
+    SkillDependencyRow,
+    SkillRow,
+    SkillStore,
+    SkillVersionRow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -314,16 +318,14 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
 
     try:
-        existing_name = store.scalar(
-            "SELECT canonical_name FROM skills WHERE skill_id = ?",
-            [record.skill_id],
-        )
+        existing_skill = store.get_skill(record.skill_id)
+        existing_name = existing_skill.canonical_name if existing_skill else None
         if existing_name is not None and not force:
             print(
                 f"skip: skill_id '{record.skill_id}' already exists "
@@ -333,10 +335,7 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
             return EXIT_DUPLICATE
 
         if existing_name is None:
-            existing_id_by_name = store.scalar(
-                "SELECT skill_id FROM skills WHERE canonical_name = ?",
-                [record.canonical_name],
-            )
+            existing_id_by_name = store.get_skill_id_by_name(record.canonical_name)
             if existing_id_by_name is not None and not force:
                 print(
                     f"skip: canonical_name '{record.canonical_name}' is already used by "
@@ -362,11 +361,8 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
 
         # --- check superseded_by reference (needs DB access) ---
         if record.superseded_by:
-            ref_exists = store.scalar(
-                "SELECT skill_id FROM skills WHERE skill_id = ?",
-                [record.superseded_by],
-            )
-            if ref_exists is None:
+            ref_exists = store.get_skill(record.superseded_by) is not None
+            if not ref_exists:
                 print(
                     f"validation error: superseded_by '{record.superseded_by}' "
                     f"references a non-existent skill_id",
@@ -469,7 +465,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
         store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.corpus_store_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
@@ -478,10 +474,8 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
     to_load: list[tuple[Path, ReviewRecord]] = []
 
     for f, record in parsed:
-        existing_name = store.scalar(
-            "SELECT canonical_name FROM skills WHERE skill_id = ?",
-            [record.skill_id],
-        )
+        existing_skill = store.get_skill(record.skill_id)
+        existing_name = existing_skill.canonical_name if existing_skill else None
         if existing_name is not None and not force:
             blocked.append(
                 (f, record, f"skill_id '{record.skill_id}' already exists — use --force"),
@@ -489,10 +483,7 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
             continue
 
         if existing_name is None:
-            existing_id = store.scalar(
-                "SELECT skill_id FROM skills WHERE canonical_name = ?",
-                [record.canonical_name],
-            )
+            existing_id = store.get_skill_id_by_name(record.canonical_name)
             if existing_id is not None and not force:
                 blocked.append(
                     (
@@ -1048,7 +1039,7 @@ def _print_summary(record: ReviewRecord, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: DuckDBSkillStore, record: ReviewRecord, *, force: bool) -> list[DeferredEdge]:
+def _insert(store: SkillStore, record: ReviewRecord, *, force: bool) -> list[DeferredEdge]:
     """Insert a skill (row, active version, fragments) and (re)write its edges.
 
     Produces the same relational graph as ``install.importer.import_skill``: the
@@ -1068,66 +1059,63 @@ def _insert(store: DuckDBSkillStore, record: ReviewRecord, *, force: bool) -> li
         # versions/fragments/deps so a re-ingest is idempotent.
         store.delete_skill(record.skill_id)
 
-    store.execute(
-        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
-        "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
-        "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            record.skill_id,
-            record.canonical_name,
-            record.category,
-            record.skill_class,
-            record.domain_tags or [],
-            record.deprecated,
-            record.superseded_by or None,
-            record.always_apply,
-            record.phase_scope or None,
-            record.category_scope or None,
-            record.tier,
+    store.insert_skill(
+        SkillRow(
+            skill_id=record.skill_id,
+            canonical_name=record.canonical_name,
+            category=record.category,
+            skill_class=record.skill_class,
+            domain_tags=record.domain_tags or [],
+            deprecated=record.deprecated,
+            superseded_by=record.superseded_by or None,
+            always_apply=record.always_apply,
+            phase_scope=record.phase_scope or None,
+            category_scope=record.category_scope or None,
+            tier=record.tier,
             # "" → NULL keeps the column absent-tolerant for blank-description skills.
-            record.description or None,
-            version_id,
-        ],
+            description=record.description or None,
+            current_version_id=version_id,
+        )
     )
 
-    store.execute(
-        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
-        "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
-        [
-            version_id,
-            record.skill_id,
-            1,
-            now,
-            record.author,
-            record.change_summary,
-            "active",
-            record.raw_prose,
-        ],
+    store.insert_version(
+        SkillVersionRow(
+            version_id=version_id,
+            skill_id=record.skill_id,
+            version_number=1,
+            authored_at=now,
+            author=record.author,
+            change_summary=record.change_summary,
+            status="active",
+            raw_prose=record.raw_prose,
+        )
     )
 
     if record.skill_class == "system":
         # System skills decompose to a single guardrail fragment carrying the
         # whole prose; retrieved via the applicability-gated system path.
-        store.execute(
-            "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
-            "VALUES (?,?,?,?,?)",
-            [f"{record.skill_id}-v1-f1", version_id, "guardrail", 1, record.raw_prose],
+        store.insert_fragment(
+            FragmentRow(
+                fragment_id=f"{record.skill_id}-v1-f1",
+                version_id=version_id,
+                fragment_type="guardrail",
+                sequence=1,
+                content=record.raw_prose,
+            )
         )
     elif record.skill_class == "domain":
         # Workflow skills (skill_class == "workflow") intentionally fall through
         # here with no fragment rows: their raw_prose is injected by the SDD
         # phase hook, never retrieved, so they carry zero fragments.
         for frag in record.fragments:
-            store.execute(
-                "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, "
-                "content) VALUES (?,?,?,?,?)",
-                [
-                    f"{record.skill_id}-v1-f{frag.sequence}",
-                    version_id,
-                    frag.fragment_type,
-                    frag.sequence,
-                    frag.content,
-                ],
+            store.insert_fragment(
+                FragmentRow(
+                    fragment_id=f"{record.skill_id}-v1-f{frag.sequence}",
+                    version_id=version_id,
+                    fragment_type=frag.fragment_type,
+                    sequence=frag.sequence,
+                    content=frag.content,
+                )
             )
 
     return _write_edges(store, record)
@@ -1155,7 +1143,7 @@ class DeferredEdge:
     field_name: str
 
 
-def _write_edges(store: DuckDBSkillStore, record: ReviewRecord) -> list[DeferredEdge]:
+def _write_edges(store: SkillStore, record: ReviewRecord) -> list[DeferredEdge]:
     """(Re)write a skill's outgoing ``requires`` edges. Returns deferred (forward-ref) edges.
 
     Idempotent across re-ingest: the skill's existing ``requires`` rows in
@@ -1164,10 +1152,7 @@ def _write_edges(store: DuckDBSkillStore, record: ReviewRecord) -> list[Deferred
     as ``DeferredEdge``s for a batch-end retry pass instead of failing.
     """
     # Delete this skill's existing outgoing edges so re-ingest is idempotent.
-    store.execute(
-        "DELETE FROM skill_dependencies WHERE source_skill_id = ? AND rel_type = ?",
-        [record.skill_id, _REQUIRES_REL],
-    )
+    store.delete_dependencies(record.skill_id, _REQUIRES_REL)
 
     deferred: list[DeferredEdge] = []
     # De-dup while preserving order.
@@ -1179,7 +1164,7 @@ def _write_edges(store: DuckDBSkillStore, record: ReviewRecord) -> list[Deferred
 
 
 def _create_edge_if_target_exists(
-    store: DuckDBSkillStore,
+    store: SkillStore,
     source_id: str,
     target_id: str,
     rel: str,
@@ -1189,22 +1174,20 @@ def _create_edge_if_target_exists(
     Returns True if the edge was written, False if the target is missing (caller
     defers it). Assumes the source skill already exists (just inserted).
     """
-    exists = store.scalar(
-        "SELECT skill_id FROM skills WHERE skill_id = ?",
-        [target_id],
-    )
-    if exists is None:
+    if store.get_skill(target_id) is None:
         return False
-    store.execute(
-        "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) "
-        "VALUES (?,?,?) ON CONFLICT DO NOTHING",
-        [source_id, target_id, rel],
+    store.insert_dependency(
+        SkillDependencyRow(
+            source_skill_id=source_id,
+            target_skill_id=target_id,
+            rel_type=rel,
+        )
     )
     return True
 
 
 def _resolve_deferred_edges(
-    store: DuckDBSkillStore,
+    store: SkillStore,
     deferred: list[DeferredEdge],
 ) -> list[DeferredEdge]:
     """Retry deferred (forward-ref) edges after a full batch insert.

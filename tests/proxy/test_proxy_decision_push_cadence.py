@@ -27,7 +27,7 @@ from agentalloy.api import code_index_gate, proxy_apply
 from agentalloy.api.compose_models import ComposedResult, EmptyResult, LatencyBreakdown
 from agentalloy.api.proxy_apply import _compose_block
 from agentalloy.api.proxy_signal import SignalResult
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 from agentalloy.storage.state_store import DuckDBStateStore
@@ -71,8 +71,8 @@ def _write_contract(path: Path, touches: list[str]) -> Path:
     return path
 
 
-def _seed(tmp_path: Path) -> DuckDBCodeGraphStore:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def _seed(tmp_path: Path) -> OverGraphCodeGraphStore:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     s.upsert_symbols(
         [
@@ -139,7 +139,7 @@ def _seed_state(tmp_path: Path, contract_id: str) -> DuckDBStateStore:
 
 def _wire(
     monkeypatch: pytest.MonkeyPatch,
-    store: DuckDBCodeGraphStore | None,
+    store: OverGraphCodeGraphStore | None,
     *,
     available: bool,
 ) -> dict[str, Any]:

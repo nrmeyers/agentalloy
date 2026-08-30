@@ -75,7 +75,7 @@ COPY README.md ./
 COPY src/ ./src/
 
 # Create an empty data dir so the image is runnable without a bind mount.
-# The corpus (LanceDB fragments.lance + DuckDB agentalloy.duck) is not committed
+# The corpus (OverGraph agentalloy.overgraph + Tantivy BM25 agentalloy.bm25) is not committed
 # to the repo — CI bakes a prebuilt corpus into published images under
 # /app/corpus-seed (see
 # .github/workflows/container-build.yml); the entrypoint copies it into the

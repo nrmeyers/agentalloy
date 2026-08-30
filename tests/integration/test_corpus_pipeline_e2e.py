@@ -1,10 +1,10 @@
-"""End-to-end dual-store pipeline: ingest → reembed → hybrid search → compose trace.
+"""End-to-end corpus pipeline: ingest → reembed → hybrid search → compose trace.
 
-Exercises the corpus pipeline against a live embed runtime + real DuckDB
-and Lance stores at tmp paths (does not touch ``data/``). Covers:
-  - fresh stores are empty
-  - ingest populates the skill store (graph-only)
-  - reembed populates the Lance fragment store with L2-normalized vectors
+Exercises the corpus pipeline against a live embed runtime + the unified
+OverGraph corpus store at a tmp path (does not touch ``data/``). Covers:
+  - fresh store is empty
+  - ingest populates the skill graph (graph-only)
+  - reembed populates the fragment embedding index with L2-normalized vectors
   - self-search round-trip returns the exact match
   - category filter narrows search
   - compose writes a composition trace to telemetry
@@ -43,9 +43,8 @@ from agentalloy.lm_client import (
     OpenAICompatClient,
 )
 from agentalloy.reembed import discover_unembedded_fragments, reembed_fragments
-from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore, open_overgraph_skill_store
 from agentalloy.storage.protocols import EMBEDDING_DIM
-from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from agentalloy.storage.telemetry_store import open_telemetry_store
 
 pytestmark = pytest.mark.integration
@@ -112,9 +111,8 @@ def embedding_model_required(embed_runtime_models: list[str]) -> None:
 
 @pytest.fixture
 def fresh_skills(tmp_path: Path):
-    """A migrated, empty DuckDB skill store at a tmp path."""
-    store = open_skill_store(str(tmp_path / "agentalloy.duck"))
-    store.migrate()
+    """A migrated, empty unified corpus store at a tmp path."""
+    store = open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
     try:
         yield store
     finally:
@@ -122,13 +120,9 @@ def fresh_skills(tmp_path: Path):
 
 
 @pytest.fixture
-def fresh_fragments(tmp_path: Path):
-    """An open, empty Lance fragment store at a tmp path."""
-    fs = LanceFragmentStore(tmp_path / "fragments.lance")
-    try:
-        yield fs
-    finally:
-        fs.close()
+def fresh_fragments(fresh_skills: OverGraphSkillStore):
+    """Unified store: the fragment/vector side is the same store."""
+    return fresh_skills
 
 
 # ---------------------------------------------------------------------------
@@ -137,54 +131,49 @@ def fresh_fragments(tmp_path: Path):
 
 
 def test_step_1_fresh_stores_are_empty(
-    fresh_skills: DuckDBSkillStore, fresh_fragments: LanceFragmentStore
+    fresh_skills: OverGraphSkillStore, fresh_fragments: OverGraphSkillStore
 ) -> None:
-    """Fresh skill store + Lance dataset carry no skills, fragments, or embeddings."""
-    skill_count = fresh_skills.scalar("SELECT count(*) FROM skills")
-    assert skill_count == 0
-    frag_count = fresh_skills.scalar("SELECT count(*) FROM fragments")
-    assert frag_count == 0
+    """A fresh unified store carries no skills, fragments, or embeddings."""
+    assert fresh_skills.count_skills() == 0
+    assert fresh_skills.count_fragments() == 0
     assert fresh_fragments.count_embeddings() == 0
 
 
 # ---------------------------------------------------------------------------
-# Step 2+3: ingest populates the skill store, Lance remains empty
+# Step 2+3: ingest populates the skill graph, embeddings remain empty
 # ---------------------------------------------------------------------------
 
 
 def test_step_2_ingest_populates_skill_store_only(
-    fresh_skills: DuckDBSkillStore, fresh_fragments: LanceFragmentStore
+    fresh_skills: OverGraphSkillStore, fresh_fragments: OverGraphSkillStore
 ) -> None:
-    """Ingest writes graph data to the skill store. The Lance fragments dataset
-    stays empty (the v1.5 model separates ingest from embedding)."""
+    """Ingest writes the skill graph. The fragment embedding index stays empty
+    (the v1.5 model separates ingest from embedding)."""
     record = _load_yaml(FIXTURE_SKILL)
     assert _validate(record) == []
     _insert(fresh_skills, record, force=False)
 
-    assert (
-        fresh_skills.scalar("SELECT count(*) FROM skills WHERE skill_id = ?", [record.skill_id])
-        == 1
-    )
-    assert fresh_skills.scalar("SELECT count(*) FROM skill_versions") == 1
-    fragment_count = fresh_skills.scalar("SELECT count(*) FROM fragments")
+    assert fresh_skills.get_skill(record.skill_id) is not None
+    assert len(fresh_skills.get_versions_by_skill(record.skill_id)) == 1
+    fragment_count = fresh_skills.count_fragments()
     assert fragment_count == len(record.fragments) > 0
 
-    # Critically: Lance has nothing yet — ingest is graph-only in the v1.5 model.
+    # Critically: nothing embedded yet — ingest is graph-only in the v1.5 model.
     assert fresh_fragments.count_embeddings() == 0
 
 
 # ---------------------------------------------------------------------------
-# Step 4+5: reembed populates the Lance dataset with L2-normalized vectors
+# Step 4+5: reembed populates the fragment embedding index with L2-normalized vectors
 # ---------------------------------------------------------------------------
 
 
 def test_step_4_reembed_populates_lance(
-    fresh_skills: DuckDBSkillStore,
-    fresh_fragments: LanceFragmentStore,
+    fresh_skills: OverGraphSkillStore,
+    fresh_fragments: OverGraphSkillStore,
     embed_runtime_required: None,
     embedding_model_required: None,
 ) -> None:
-    """After reembed: Lance has one row per Fragment, the embedding dim matches the
+    """After reembed: the index has one row per Fragment, the embedding dim matches the
     runtime contract, denormalized columns are populated correctly."""
     record = _load_yaml(FIXTURE_SKILL)
     _insert(fresh_skills, record, force=False)
@@ -209,17 +198,15 @@ def test_step_4_reembed_populates_lance(
     assert stats.embedded == len(fragments)
     assert fresh_fragments.count_embeddings() == len(fragments)
 
-    # v5: vectors are L2-normalized on insert inside LanceFragmentStore. The old
-    # raw ``SELECT embedding FROM fragment_embeddings`` peek is gone — Lance stores
-    # a FixedSizeList(float32, EMBEDDING_DIM), not a DuckDB array. The stored dim is
+    # Vectors are L2-normalized on insert inside the corpus store. The stored dim is
     # the contract; the normalized vectors' coherence is proven end-to-end by the
     # self-search round-trip in test_step_5 (near-zero cosine distance).
     assert fresh_fragments.embedding_dim() == EMBEDDING_DIM
 
 
 def test_step_5_search_roundtrip_returns_exact_match(
-    fresh_skills: DuckDBSkillStore,
-    fresh_fragments: LanceFragmentStore,
+    fresh_skills: OverGraphSkillStore,
+    fresh_fragments: OverGraphSkillStore,
     embed_runtime_required: None,
     embedding_model_required: None,
 ) -> None:
@@ -254,8 +241,8 @@ def test_step_5_search_roundtrip_returns_exact_match(
 
 
 def test_step_5b_category_filter_narrows_search(
-    fresh_skills: DuckDBSkillStore,
-    fresh_fragments: LanceFragmentStore,
+    fresh_skills: OverGraphSkillStore,
+    fresh_fragments: OverGraphSkillStore,
     embed_runtime_required: None,
     embedding_model_required: None,
 ) -> None:
@@ -300,7 +287,7 @@ def test_step_6_compose_writes_composition_trace(tmp_path: Path) -> None:
     from agentalloy.telemetry import DuckDBTelemetryWriter
     from tests.support import StubLMClient, fake_fragment
 
-    fragment_store = LanceFragmentStore(tmp_path / "fragments.lance")
+    fragment_store = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     telemetry_store = open_telemetry_store(tmp_path / "telemetry.duck")
     telemetry = DuckDBTelemetryWriter(telemetry_store)
 
@@ -353,12 +340,12 @@ def test_step_7_embedding_model_not_loaded_returns_structured_503(tmp_path: Path
     from agentalloy.telemetry.writer import NullTelemetryWriter
     from tests.support import StubLMClient
 
-    fragment_store = LanceFragmentStore(tmp_path / "fragments.lance")
+    fragment_store = open_overgraph_skill_store(str(tmp_path / "corpus.overgraph"))
     # An empty (migrated) skill store as the retrieval source: the domain leg reads
     # deprecated skill ids from it before building the query embedding, so the
     # missing-model failure surfaces from the embed call (the path under test), not
     # from a None source.
-    skill_store = open_skill_store(str(tmp_path / "agentalloy.duck"))
+    skill_store = open_overgraph_skill_store(str(tmp_path / "agentalloy.overgraph"))
 
     class _UnloadedEmbedLM(StubLMClient):
         def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:  # noqa: ARG002

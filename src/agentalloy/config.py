@@ -49,16 +49,15 @@ class Settings(BaseSettings):
     # imported (or in test environments that monkeypatch the env var)
     # gets the correct path. With a plain `default=...` the path would
     # be frozen at module import.
-    # v5 two-engine storage. ``agentalloy.duck`` holds skill metadata (folded
-    # out of the retired graph engine) + corpus_meta kv; the serving process opens
-    # it READ-ONLY so ingest/reembed can hold its single writer lock without
-    # stopping the service. ``fragments.lance`` is the Lance dataset (vector ANN
-    # + exact-cosine dedup + native BM25). Telemetry lives in its own
-    # service-owned ``telemetry.duck`` so runtime trace writes never contend with
-    # the reembed writer. Env: DUCKDB_PATH, FRAGMENTS_LANCE_PATH, TELEMETRY_DB_PATH.
-    duckdb_path: str = Field(default_factory=lambda: str(_user_corpus_dir() / "agentalloy.duck"))
-    fragments_lance_path: str = Field(
-        default_factory=lambda: str(_user_corpus_dir() / "fragments.lance"),
+    # OverGraph unified corpus store: skills, versions, fragments, dependencies,
+    # and fragment embeddings (HNSW) in one embedded graph DB, plus a Tantivy
+    # BM25 sidecar for keyword search. The serving process opens it READ-ONLY
+    # so reembed can hold its single writer lock without stopping the service.
+    # Telemetry lives in its own service-owned ``telemetry.duck`` so runtime
+    # trace writes never contend with the reembed writer.
+    # Env: CORPUS_STORE_PATH, TELEMETRY_DB_PATH.
+    corpus_store_path: str = Field(
+        default_factory=lambda: str(_user_corpus_dir() / "agentalloy.overgraph")
     )
     telemetry_db_path: str = Field(
         default_factory=lambda: str(_user_corpus_dir() / "telemetry.duck"),
@@ -112,9 +111,9 @@ class Settings(BaseSettings):
     # COMPOSE_ENABLED, CODE_INDEX_ENABLED.
     compose_enabled: bool = True
     code_index_enabled: bool = False
-    # Per-repo index data (graph.duck + vectors.lance per slug, jobs.sqlite)
-    # lives outside corpus/ — corpus is the global skill store, code_index is
-    # per-repo derived data that is rebuilt, never migrated. Env: CODE_INDEX_DATA_DIR.
+    # Per-repo index data (graph.overgraph per slug, jobs.sqlite) lives outside
+    # corpus/ — corpus is the global skill store, code_index is per-repo derived
+    # data that is rebuilt, never migrated. Env: CODE_INDEX_DATA_DIR.
     code_index_data_dir: str = Field(default_factory=lambda: str(_user_code_index_dir()))
     # Watchdog-driven incremental reindex (off by default). Env: CODE_INDEX_WATCH.
     code_index_watch: bool = False
@@ -163,35 +162,15 @@ class Settings(BaseSettings):
         """
         return bool(self.upstream_url and self.upstream_model)
 
-    def active_datastore_path(self, cwd: Path | None = None) -> Path:
-        """Return the skills.duck for the active profile.
-
-        Falls back to the legacy ``duckdb_path`` when the active profile has
-        no datastore yet (first-run grace).
-        """
-        try:
-            from agentalloy.profiles import detect_profile, profile_datastore_path
-
-            if self.forced_profile:
-                return profile_datastore_path(self.forced_profile)
-            profile = detect_profile(cwd)
-            candidate = profile.datastore_path
-            if candidate.exists():
-                return candidate
-        except Exception:
-            pass
-        return Path(self.duckdb_path)
-
     def ensure_data_dirs(self) -> None:
-        """Create the corpus directory holding both storage engines if missing.
+        """Create the corpus directory if missing.
 
-        Lance creates its own dataset directory on first write; we only ensure
-        its parent corpus dir exists. The two DuckDB files need their parent
-        present before open.
+        OverGraph creates its own store directory on first open; we only
+        ensure the parent corpus dir exists (the telemetry DuckDB file needs
+        its parent present before open).
         """
-        Path(self.duckdb_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.corpus_store_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.telemetry_db_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.fragments_lance_path).parent.mkdir(parents=True, exist_ok=True)
         # Only materialize the code-index root when the module is on — a
         # disabled module should leave no trace on disk.
         if self.code_index_enabled:

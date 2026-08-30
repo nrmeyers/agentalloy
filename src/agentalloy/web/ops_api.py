@@ -494,9 +494,8 @@ async def reembed(
         from agentalloy.web.runtime_refresh import refresh_runtime_cache
 
         sink: dict[str, Any] = {}
-        # This process holds the skill store read-only for its lifetime, and
-        # DuckDB grants the reembed writer only while nothing else has the
-        # file open — release the handle for the duration, reconnect after,
+        # This process holds the corpus store read-only for its lifetime —
+        # release the handle for the reembed write window, reconnect after,
         # then reload the cache so the new corpus serves without a restart.
         store = getattr(request.app.state, "store", None)
         release = store.released() if store is not None else nullcontext()

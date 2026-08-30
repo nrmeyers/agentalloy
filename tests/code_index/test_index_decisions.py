@@ -18,7 +18,7 @@ from agentalloy.code_index.ingest.pipeline import (
     _is_code_shaped,
     _is_decision_source,
 )
-from agentalloy.code_index.store.graph_store import DuckDBCodeGraphStore
+from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
 from agentalloy.storage.protocols import CodeSymbol
 
 
@@ -51,8 +51,8 @@ def chunk(qn: str, body: str, *, heading: str = "Why") -> MarkdownChunk:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[DuckDBCodeGraphStore]:
-    s = DuckDBCodeGraphStore(tmp_path / "graph.duck")
+def store(tmp_path: Path) -> Iterator[OverGraphCodeGraphStore]:
+    s = OverGraphCodeGraphStore(tmp_path / "graph.overgraph")
     s.migrate()
     yield s
     s.close()
@@ -103,7 +103,7 @@ def test_is_code_shaped(span: str, expected: bool) -> None:
 # -- DK2: linkage resolution ---------------------------------------------------
 
 
-def test_extract_exact_fqn_and_unambiguous_name(store: DuckDBCodeGraphStore) -> None:
+def test_extract_exact_fqn_and_unambiguous_name(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols(
         [
             sym("pkg.mod.foo"),  # exact-fqn target
@@ -122,7 +122,7 @@ def test_extract_exact_fqn_and_unambiguous_name(store: DuckDBCodeGraphStore) -> 
     assert result.unresolved == []
 
 
-def test_extract_drops_ambiguous_word_and_markdown(store: DuckDBCodeGraphStore) -> None:
+def test_extract_drops_ambiguous_word_and_markdown(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols(
         [
             sym("pkg.a._dup", name="_dup"),
@@ -141,7 +141,7 @@ def test_extract_drops_ambiguous_word_and_markdown(store: DuckDBCodeGraphStore) 
 
 
 def test_extract_ambiguity_flip_reports_unresolved_not_silent_drop(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """A span that resolves cleanly (tier 2) must flip to reported-unresolved
     the moment a second same-named symbol appears — never a silent drop."""
@@ -161,7 +161,7 @@ def test_extract_ambiguity_flip_reports_unresolved_not_silent_drop(
 # -- DK6: doc-granular re-derive, incl. AC 3 sibling survival ------------------
 
 
-def test_index_decisions_links_and_survives_sibling_removal(store: DuckDBCodeGraphStore) -> None:
+def test_index_decisions_links_and_survives_sibling_removal(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo"), sym("pkg._bar", name="_bar")])
     doc = "docs/design/x/approach.md"
     a = chunk(f"{doc}::a", "We chose `pkg.foo`.")
@@ -173,14 +173,10 @@ def test_index_decisions_links_and_survives_sibling_removal(store: DuckDBCodeGra
     assert {d.qualified_name for d in store.governing_decisions("pkg._bar")} == {f"{doc}::b"}
     # Provenance (#527 C) round-trips: tier-1 exact fqn vs tier-2 short-name,
     # and the SPAN stored is the fenced text, not the resolved fqn.
-    row_a = store.conn.execute(
-        "SELECT span, resolution_tier FROM edges WHERE kind='GOVERNS' AND dst='pkg.foo'"
-    ).fetchone()
-    assert row_a == ("pkg.foo", 1)
-    row_b = store.conn.execute(
-        "SELECT span, resolution_tier FROM edges WHERE kind='GOVERNS' AND dst='pkg._bar'"
-    ).fetchone()
-    assert row_b == ("_bar", 2)
+    edges_a = store.governs_edges_for_symbol("pkg.foo")
+    assert [(e.span, e.resolution_tier) for e in edges_a] == [("pkg.foo", 1)]
+    edges_b = store.governs_edges_for_symbol("pkg._bar")
+    assert [(e.span, e.resolution_tier) for e in edges_b] == [("_bar", 2)]
 
     # chunk a is removed from the same doc; b is unchanged. The doc-granular
     # re-derive must restore b's link, not drop it (the AC 3 fix).
@@ -189,7 +185,7 @@ def test_index_decisions_links_and_survives_sibling_removal(store: DuckDBCodeGra
     assert {d.qualified_name for d in store.governing_decisions("pkg._bar")} == {f"{doc}::b"}
 
 
-def test_index_decisions_ignores_non_source_docs(store: DuckDBCodeGraphStore) -> None:
+def test_index_decisions_ignores_non_source_docs(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo")])
     c = chunk("docs/notes/random.md::x", "Mentions `pkg.foo`.")
     _index_decisions(store, changed=[c], removed=[], chunks=[c])
@@ -200,7 +196,7 @@ def test_index_decisions_ignores_non_source_docs(store: DuckDBCodeGraphStore) ->
 
 
 def test_zero_derived_edges_where_edges_existed_keeps_them_and_reports_suspicious(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """A doc that still has current chunks but whose re-derivation collapses
     to zero edges (e.g. the governed symbol itself vanished) must not
@@ -225,7 +221,7 @@ def test_zero_derived_edges_where_edges_existed_keeps_them_and_reports_suspiciou
     assert {d.qualified_name for d in store.governing_decisions("pkg.foo")} == {f"{doc}::a"}
 
 
-def test_delta_reporting_written_and_dropped_counts(store: DuckDBCodeGraphStore) -> None:
+def test_delta_reporting_written_and_dropped_counts(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo"), sym("pkg.bar")])
     doc = "docs/design/x/approach.md"
     a = chunk(f"{doc}::a", "We chose `pkg.foo`.")
@@ -246,7 +242,7 @@ def test_delta_reporting_written_and_dropped_counts(store: DuckDBCodeGraphStore)
 
 
 def test_wholesale_removed_doc_retains_edges_without_prune_flag(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     store.upsert_symbols([sym("pkg.foo")])
     doc = "docs/design/x/approach.md"
@@ -263,7 +259,7 @@ def test_wholesale_removed_doc_retains_edges_without_prune_flag(
     assert store.governing_decisions("pkg.foo") != []  # retained
 
 
-def test_wholesale_removed_doc_dropped_with_prune_flag(store: DuckDBCodeGraphStore) -> None:
+def test_wholesale_removed_doc_dropped_with_prune_flag(store: OverGraphCodeGraphStore) -> None:
     store.upsert_symbols([sym("pkg.foo")])
     doc = "docs/design/x/approach.md"
     a = chunk(f"{doc}::a", "We chose `pkg.foo`.")
@@ -282,7 +278,7 @@ def test_wholesale_removed_doc_dropped_with_prune_flag(store: DuckDBCodeGraphSto
 
 
 def test_rename_of_governed_symbol_re_derives_untouched_doc(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """The deferred-loss mode (#527 failure mode 2), detected at the rename.
 
@@ -321,7 +317,7 @@ def test_rename_of_governed_symbol_re_derives_untouched_doc(
 
 
 def test_rename_drops_only_the_stale_edge_when_others_resolve(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """Partial loss: the case #527 A's zero-edge guard cannot see.
 
@@ -348,7 +344,7 @@ def test_rename_drops_only_the_stale_edge_when_others_resolve(
     assert {d.qualified_name for d in store.governing_decisions("pkg.kept")} == {f"{doc}::a"}
 
 
-def test_rename_relinks_when_the_span_still_resolves(store: DuckDBCodeGraphStore) -> None:
+def test_rename_relinks_when_the_span_still_resolves(store: OverGraphCodeGraphStore) -> None:
     """A tier-2 short-name span follows a move instead of being lost.
 
     The span text is unchanged prose; only the symbol's module moved. Tier 2
@@ -379,7 +375,7 @@ def test_rename_relinks_when_the_span_still_resolves(store: DuckDBCodeGraphStore
 
 
 def test_unrelated_code_change_does_not_touch_decision_docs(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """Only docs that actually govern the changed symbols are re-derived."""
     store.upsert_symbols([sym("pkg.foo"), sym("pkg.unrelated")])
@@ -397,7 +393,7 @@ def test_unrelated_code_change_does_not_touch_decision_docs(
 
 
 def test_symbol_affected_doc_with_no_chunks_is_not_re_derived(
-    store: DuckDBCodeGraphStore,
+    store: OverGraphCodeGraphStore,
 ) -> None:
     """A doc with no current chunks must not be dragged in by a code change.
 
@@ -417,7 +413,7 @@ def test_symbol_affected_doc_with_no_chunks_is_not_re_derived(
     assert {d.qualified_name for d in store.governing_decisions("pkg.foo")} == {f"{doc}::a"}
 
 
-def test_decision_docs_governing_finds_renamed_away_fqn(store: DuckDBCodeGraphStore) -> None:
+def test_decision_docs_governing_finds_renamed_away_fqn(store: OverGraphCodeGraphStore) -> None:
     """The store query must not join through `symbols`.
 
     `decisions_for_files` and `governing_decisions` both join `symbols` on the
@@ -435,5 +431,5 @@ def test_decision_docs_governing_finds_renamed_away_fqn(store: DuckDBCodeGraphSt
     assert store.decision_docs_governing(["pkg.gone"]) == [doc]
 
 
-def test_decision_docs_governing_empty_input(store: DuckDBCodeGraphStore) -> None:
+def test_decision_docs_governing_empty_input(store: OverGraphCodeGraphStore) -> None:
     assert store.decision_docs_governing([]) == []

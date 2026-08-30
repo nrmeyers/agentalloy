@@ -1,6 +1,6 @@
 skill_id: sdd-design-and-architecture
 canonical_name: SDD — Design (sdd-design)
-description: "Turn the spec into a technical approach with decisions and rationale — recorded as approach.artifact via an artifact marker. Task decomposition, test cases, and build contracts are plan's job."
+description: "Turn the spec into a technical approach with decisions and rationale — recorded as approach.artifact via the state panel artifact endpoint. Task decomposition, test cases, and build contracts are plan's job."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -17,6 +17,8 @@ applies_to_phases:
 # keep these verbatim.
 prose_invariants:
   - "state panel"
+  - "/state/artifact"
+  - "agentalloy artifact put"
 exit_gates:
   all_of:
     - artifact_exists:
@@ -59,8 +61,7 @@ contract_template: |
   ## Design
 
   The approach is recorded as a design artifact
-  (approach.artifact) via an artifact marker:
-  `<!-- agentalloy:artifact name=approach.artifact -->...<!-- /agentalloy:artifact -->`.
+  (approach.artifact) via `agentalloy artifact put` or PUT /state/artifact.
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
@@ -74,9 +75,12 @@ raw_prose: |
   **Checkpoint first.** Check your state panel and confirm the spec artifact
   exists and carries **Acceptance Criteria**. If it does not, you skipped spec;
   STOP and record it. You MUST NOT write any `src/` code in this phase: design
-  produces artifacts only, recorded via an artifact marker:
-  `<!-- agentalloy:artifact name=approach.artifact -->...<!-- /agentalloy:artifact -->`.
-  There is no file to write — if you are editing source, you are in the wrong phase.
+  produces artifacts only, recorded by piping the body straight to the store:
+  `agentalloy artifact put --phase design --slug <task-slug> --name approach.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback).
+  There is no file to write — a file on disk is not an artifact, and the
+  artifact exists only once the recording succeeds. If you are editing source, you
+  are in the wrong phase.
 
   Spec settled *what* and *done*. Design settles *how* — the approach, the
   decisions you're committing to, and the rationale for each. Skipping straight
@@ -110,19 +114,20 @@ raw_prose: |
   ## 3. Record it
 
   The **design artifact** is the deliverable and the single source of truth
-  for approach — record it using an artifact marker:
+  for approach — record it by piping the body to the store:
+  `agentalloy artifact put --phase design --slug <task-slug> --name approach.artifact`
+  (content on stdin; PUT /state/artifact is the HTTP fallback), body starting:
 
-      <!-- agentalloy:artifact name=approach.artifact -->
       ## Approach
       ...
-      <!-- /agentalloy:artifact -->
 
   The body MUST include `## Approach`. That completes design.
 
   Then **PRESENT the design in full and STOP** — do not advance yourself. The
-  forward jump to plan is a human checkpoint: present the work for human
-  approval. The phase advances automatically once exit gates pass and approval
-  is recorded. If anything's still unresolved — an approach you haven't
+  forward jump to plan is a human checkpoint: only once the user explicitly
+  approves do you advance, via your state panel's advance action
+  (POST /state/advance) with `"approved": true`. If anything's still
+  unresolved — an approach you haven't
   committed to, an alternative you can't evaluate — **stop and surface it**
   instead of presenting it as done. The phase guard refuses the jump until
   `approach.artifact` exists with its required section AND a human approval is

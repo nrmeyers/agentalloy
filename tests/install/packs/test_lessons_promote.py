@@ -158,7 +158,7 @@ def test_unknown_slug_reported(tmp_path: Path):
 
 
 def test_no_corpus_skips_probe_and_installs(tmp_path: Path, monkeypatch):
-    """When the fragment store cannot be opened (fresh install, no corpus), the
+    """When the corpus store cannot be opened (fresh install, no corpus), the
     probe is skipped — there is nothing to duplicate against — and install runs."""
     _write_lesson(tmp_path, "fresh-lesson")
     installed: list[Path] = []
@@ -166,12 +166,12 @@ def test_no_corpus_skips_probe_and_installs(tmp_path: Path, monkeypatch):
     def _boom(*_a, **_k):
         raise RuntimeError("no corpus")
 
-    monkeypatch.setattr("agentalloy.storage.open.open_fragments", _boom)
+    monkeypatch.setattr("agentalloy.storage.open.open_skills", _boom)
     res = promote_lesson(
         "fresh-lesson",
         root=tmp_path,
         embed=_embed,
-        vector_store=None,  # None -> tries open_fragments (patched to fail) -> skip
+        vector_store=None,  # None -> tries open_skills (patched to fail) -> skip
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
         route_fn=_WRITE_HOST,
     )
@@ -336,45 +336,30 @@ def test_via_service_http_failure_maps_to_install_failed(tmp_path: Path):
     assert "ingest service" in res["error"]
 
 
-def test_default_blocker_detects_duck_lock(tmp_path: Path, monkeypatch):
-    """_corpus_write_blocker: a held write connection on the store -> lock message.
-
-    DuckDB's lock conflict is process-level (same-process connects share the
-    instance), so the "running service" is a real child process holding an rw
-    connection, readiness-signaled via a marker file."""
-    import subprocess
-    import sys
-    import time
-
+def test_default_blocker_detects_running_native_service(tmp_path: Path, monkeypatch):
+    """_corpus_write_blocker: a reachable service port on a native deployment ->
+    lock message naming server-stop; unreachable port -> no block."""
     from agentalloy.install.subcommands import lessons
 
-    db = tmp_path / "agentalloy.duck"
-    ready = tmp_path / "ready"
-    holder = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import duckdb, pathlib, time, sys; "
-            f"c = duckdb.connect({str(db)!r}); "
-            f"pathlib.Path({str(ready)!r}).touch(); "
-            "time.sleep(30)",
-        ]
+    db = tmp_path / "agentalloy.overgraph"
+    monkeypatch.setattr(
+        "agentalloy.config.get_settings",
+        lambda: type("S", (), {"corpus_store_path": str(db)})(),
     )
-    try:
-        deadline = time.monotonic() + 15
-        while not ready.exists():
-            assert time.monotonic() < deadline, "lock-holder child never became ready"
-            assert holder.poll() is None, "lock-holder child exited early"
-            time.sleep(0.05)
-        monkeypatch.setattr(
-            "agentalloy.config.get_settings",
-            lambda: type("S", (), {"duckdb_path": str(db)})(),
-        )
-        reason = lessons._corpus_write_blocker()
-        assert reason is not None and "locked" in reason and "server-stop" in reason
-    finally:
-        holder.kill()
-        holder.wait(timeout=10)
+
+    class _Target:
+        deployment = "native"
+        port = 47950
+
+    monkeypatch.setattr(
+        "agentalloy.install.server_proc.resolve_deployment", lambda *a, **k: _Target()
+    )
+    monkeypatch.setattr("agentalloy.install.server_proc.port_reachable", lambda *a, **k: True)
+    reason = lessons._corpus_write_blocker()
+    assert reason is not None and "held open" in reason and "server-stop" in reason
+
+    monkeypatch.setattr("agentalloy.install.server_proc.port_reachable", lambda *a, **k: False)
+    assert lessons._corpus_write_blocker() is None
 
 
 def test_default_blocker_flags_serving_container(tmp_path: Path, monkeypatch):
@@ -382,10 +367,10 @@ def test_default_blocker_flags_serving_container(tmp_path: Path, monkeypatch):
     (the live corpus is in the container volume); unreachable port -> no block."""
     from agentalloy.install.subcommands import lessons
 
-    db = tmp_path / "agentalloy.duck"  # absent -> lock probe passes
+    db = tmp_path / "agentalloy.overgraph"
     monkeypatch.setattr(
         "agentalloy.config.get_settings",
-        lambda: type("S", (), {"duckdb_path": str(db)})(),
+        lambda: type("S", (), {"corpus_store_path": str(db)})(),
     )
 
     class _Target:
