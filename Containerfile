@@ -114,9 +114,11 @@ RUN uv sync --frozen --no-dev
 # artifact, not the varied-fragment production path.) GPU *native* installs enable
 # it via their hardware preset (nvidia / radeon / apple-silicon), where it fits.
 # The forwarded preset (`.env`) now also ships off on CPU, so image ≡ deployment.
+# CORPUS_STORE_PATH points at the unified OverGraph corpus store (agentalloy.overgraph
+# + agentalloy.bm25 sidecar) that the entrypoint seeds into /app/data — the same
+# path container_runtime bakes for podman deploys.
 ENV AGENTALLOY_WEB_DIST=/app/web-dist \
-    DUCKDB_PATH=/app/data/agentalloy.duck \
-    FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \
+    CORPUS_STORE_PATH=/app/data/agentalloy.overgraph \
     TELEMETRY_DB_PATH=/app/data/telemetry.duck \
     CODE_INDEX_DATA_DIR=/app/data/code_index \
     LOG_LEVEL=INFO \
