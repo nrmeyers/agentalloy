@@ -23,7 +23,7 @@ jobs:
   # Build the corpus once per pack-content change (cache-keyed) so published
   # images ship a prebuilt corpus and users skip the ~100-min CPU embed.
   # Mirrors corpus-nightly.yml's build steps; see that file for timing notes.
-  # NOTE: the corpus is built on amd64 and baked into both arches — DuckDB's
+  # NOTE: the corpus is built on amd64 and baked into both arches — OverGraph's
   # storage format is platform-independent and both targets are little-endian;
   # verify the arm64 image on first dispatch per repo convention.
   build-corpus:
@@ -56,8 +56,12 @@ jobs:
           # replacing ladybug + skills.duck): the storage FORMAT changed with no
           # pack-content change, so v3 would have served the old-format seed (which
           # it did — v5.0.0's build cache-hit baked ladybug+skills.duck, and the
-          # entrypoint crash-looped on the missing agentalloy.duck).
-          key: corpus-seed-v5-${{ hashFiles('src/agentalloy/_packs/**') }}
+          # entrypoint crash-looped on the missing agentalloy.duck). v6 = the v10.0.0
+          # OverGraph unified store (agentalloy.overgraph + agentalloy.bm25, replacing
+          # the two-engine pair): the storage FORMAT changed again with no pack-content
+          # change, so v5 would have served the old-format seed and the entrypoint
+          # (which now seeds agentalloy.overgraph) would find nothing to copy.
+          key: corpus-seed-v6-${{ hashFiles('src/agentalloy/_packs/**') }}
 
       - name: Install uv
         if: steps.corpus-cache.outputs.cache-hit != 'true'
@@ -108,15 +112,19 @@ jobs:
           # otherwise a dim-mismatch / embed failure would silently ship an
           # empty-embeddings image that 503s on /compose.
           uv run python - <<'PY'
-          import os
+          from agentalloy.config import get_settings
+          from agentalloy.storage.open import open_skills
 
-          from agentalloy.storage.fragment_store import LanceFragmentStore
-
-          p = f"{os.environ['XDG_DATA_HOME']}/agentalloy/corpus/fragments.lance"
-          fs = LanceFragmentStore(p)
-          n = fs.count_embeddings()
-          dim = fs.embedding_dim()
-          fs.close()
+          # open_skills resolves the store via Settings.corpus_store_path
+          # (CORPUS_STORE_PATH, default $XDG_DATA_HOME/agentalloy/corpus/agentalloy.overgraph)
+          # and opens it READ-ONLY, so the open never runs the schema migration.
+          s = get_settings()
+          store = open_skills(s, read_only=True)
+          try:
+              n = store.count_embeddings()
+              dim = store.embedding_dim()
+          finally:
+              store.close()
           print(f"embeddings={n} dim={dim}")
           assert n and n > 1000, f"too few embeddings ({n}) — reembed likely failed"
           assert dim == 768, f"embedding dim {dim} != 768"
@@ -127,8 +135,12 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p corpus-seed
-          cp "${XDG_DATA_HOME}/agentalloy/corpus/agentalloy.duck" corpus-seed/agentalloy.duck
-          cp -a "${XDG_DATA_HOME}/agentalloy/corpus/fragments.lance" corpus-seed/fragments.lance
+          # The entrypoint seeds /app/data/agentalloy.overgraph (+ agentalloy.bm25,
+          # the BM25 sidecar) from these seed files — see container/entrypoint.sh.
+          cp -a "${XDG_DATA_HOME}/agentalloy/corpus/agentalloy.overgraph" corpus-seed/
+          if [ -d "${XDG_DATA_HOME}/agentalloy/corpus/agentalloy.bm25" ]; then
+            cp -a "${XDG_DATA_HOME}/agentalloy/corpus/agentalloy.bm25" corpus-seed/
+          fi
           cat > corpus-seed/corpus-stamp.json <<EOF
           {
             "embedding_model": "nomic-embed-text-v1.5.Q8_0.gguf",

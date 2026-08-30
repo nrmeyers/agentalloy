@@ -672,8 +672,8 @@ The setup wizard's container path:
 │  ├── Touch .bootstrap-complete                   │
 │  ├── exec uvicorn (main service, :47950)         │
 │                                                  │
-│  ENV: AGENTALLOY_PACKS, FRAGMENTS_LANCE_PATH          │
-│      DUCKDB_PATH, LOG_LEVEL                       │
+│  ENV: AGENTALLOY_PACKS, CORPUS_STORE_PATH           │
+│      LOG_LEVEL, LM_ASSIST, embed/rerank URLs        │
 └───────────┬──────────────────────────────────────┘
             │ -p 47950:47950
             ▼
