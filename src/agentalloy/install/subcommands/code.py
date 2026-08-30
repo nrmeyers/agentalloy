@@ -1083,7 +1083,9 @@ def add_parser(
         "prune",
         help=(
             "Prune the index of a repo whose checkout is gone from disk "
-            "(or every such orphan with --all). For a live checkout use `code remove`."
+            "(or every such orphan with --all). `code remove` deletes the index "
+            "of a live checkout; prune only deletes orphan rows and refuses "
+            "live checkouts."
         ),
     )
     prune_p.add_argument(

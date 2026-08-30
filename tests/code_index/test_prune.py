@@ -116,6 +116,28 @@ def test_single_ripe_orphan_is_pruned(
     assert not store_dir.exists()
 
 
+def test_single_store_dir_already_gone_is_reported_honestly(
+    client: tuple[TestClient, CodeIndexState], tmp_path: Path
+) -> None:
+    # Partial state: the row is orphaned and past grace, but the store dir no
+    # longer exists on disk. The row must be deleted and reported honestly —
+    # nothing removed, not claimed removed.
+    c, state = client
+    repo_path = tmp_path / "worktrees" / "demo"
+    _seed_deleted(state, "demo", repo_path, days_gone=8)  # no store dir created
+
+    status, body = _post(c, slug="demo")
+
+    assert status == 200
+    entry = body["entries"][0]
+    assert entry["verdict"] == "pruned"
+    assert entry["row_deleted"] is True
+    assert entry["store_dir"] is None
+    assert entry["store_dir_removed"] is False
+    assert body["pruned"] == 1
+    assert state.jobs.get_repo("demo", repo_path=str(repo_path)) is None
+
+
 def test_single_live_checkout_is_refused_400(
     client: tuple[TestClient, CodeIndexState], tmp_path: Path
 ) -> None:
