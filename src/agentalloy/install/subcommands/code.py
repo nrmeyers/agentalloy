@@ -12,6 +12,8 @@ Thin HTTP clients against the local agentalloy service:
     agentalloy code callees <fqn> [--repo]
     agentalloy code bundle <task> [--repo] [--budget N]
     agentalloy code remove [path] [--yes]
+    agentalloy code prune [path] [--all] [--dry-run] [--force] [--yes]
+                                                          Prune an index whose checkout is gone
     agentalloy code migrate-layout [--dry-run] [--wait]  Store-layout migration (all repos)
     agentalloy code enable|disable                      CODE_INDEX_ENABLED master switch
     agentalloy code watch enable|disable [path]         Per-repo watch enrollment
@@ -163,6 +165,31 @@ def _resolve_repo_slug(repo_arg: str | None, port: int) -> str:
         return repo_arg  # already a slug — no network
     root = Path(repo_arg).expanduser().resolve() if repo_arg else Path.cwd().resolve()
     return _slug_from_registry(port, root) or repo_slug(root)
+
+
+def _resolve_prune_slug(repo_arg: str | None, port: int) -> tuple[str, str | None]:
+    """``(slug, repo_path)`` for ``code prune [path]`` — where the path may be GONE.
+
+    ``_resolve_repo_slug`` can't serve prune: its "is this a slug?" shortcut
+    is ``is_dir()``, and a pruned checkout is a path that no longer exists, so
+    it would hand the raw path to the server as a slug (404). Here the
+    heuristic is shape, not existence: an argument containing a path separator
+    (or starting with ``./``/``~/``) is a path and is resolved against the
+    registry (``_slug_from_registry`` compares resolved paths — the registry
+    row outlives the checkout); anything else is taken as a bare slug.
+
+    The resolved path is returned alongside the slug so the request can carry
+    ``repo_path``: a slug may have several checkouts, and a bare-slug prune
+    must not silently pick one — the server 404s an ambiguous target.
+    """
+    if repo_arg and (Path(repo_arg).expanduser().is_dir() or "/" not in repo_arg):
+        # Live path, or a bare slug like ``org__repo`` (slugs never contain a
+        # separator): the shared resolver is correct for both.
+        if repo_arg and Path(repo_arg).expanduser().is_dir():
+            return _resolve_repo_slug(repo_arg, port), str(Path(repo_arg).expanduser().resolve())
+        return _resolve_repo_slug(repo_arg, port), None
+    root = Path(repo_arg).expanduser().resolve() if repo_arg else Path.cwd().resolve()
+    return _slug_from_registry(port, root) or repo_slug(root), str(root)
 
 
 def _not_indexed_error(slug: str, detail: str) -> int:
@@ -660,6 +687,108 @@ def _run_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_prune(args: argparse.Namespace) -> int:
+    """Prune the index of a repo whose checkout is gone from disk.
+
+    Distinct from ``remove`` (which deletes whatever index a path holds, live
+    or not): prune is the orphan path, so it refuses live checkouts and
+    uncorroborated absences, and it honors the 7-day grace gate unless
+    ``--force``. ``--all`` is a dry run unless ``--yes``: a bare
+    ``agentalloy code prune --all`` only previews, and ``--force`` bypasses
+    the grace gate but never the execution consent.
+    """
+    all_mode = bool(args.all)
+    dry_run = bool(args.dry_run) or (all_mode and not args.yes)
+    port = _resolve_port(args)
+
+    slug: str | None = None
+    target_path: str | None = None
+    if not all_mode:
+        # Prune-specific: the path may already be gone (is_dir() can't say).
+        # repo_path disambiguates a slug that has several checkouts.
+        slug, target_path = _resolve_prune_slug(args.path, port)
+
+    if not dry_run and not args.yes:
+        if not sys.stdin.isatty():
+            print(
+                f"ERROR: Refusing to prune the index of {slug!r} without confirmation.",
+                file=sys.stderr,
+            )
+            print("CAUSE: Non-interactive run and --yes was not passed.", file=sys.stderr)
+            print(
+                "FIX:   Re-run with `agentalloy code prune --yes` (or --dry-run to preview).",
+                file=sys.stderr,
+            )
+            return 1
+        answer = input(f"Prune the code index for {slug!r}? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled.")
+            return 0
+
+    body: dict[str, Any] = {
+        "slug": None if all_mode else slug,
+        "repo_path": None if all_mode else target_path,
+        "dry_run": dry_run,
+        "force": args.force,
+    }
+    try:
+        with _make_client(port) as client:
+            rc = _guard_module(client)
+            if rc is not None:
+                return rc
+            resp = client.post("/code/prune", json=body, timeout=120.0)
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        return _http_error(exc, slug=slug)
+    except httpx.HTTPError as exc:
+        return _service_down_error(port, exc)
+
+    if args.json:
+        _print_json(data)
+    else:
+        _print_prune_summary(data, all_mode=all_mode)
+    return 0
+
+
+def _print_prune_summary(data: dict[str, Any], *, all_mode: bool) -> None:
+    entries_raw = data.get("entries")
+    entries: list[dict[str, Any]] = entries_raw if isinstance(entries_raw, list) else []
+    if not all_mode:
+        entry = entries[0] if entries else {}
+        slug = entry.get("slug")
+        if entry.get("verdict") == "stamped":
+            print(
+                f"Stamped {slug}: first sighting of the missing checkout — "
+                "will prune once the grace period has elapsed."
+            )
+        else:
+            if data.get("dry_run"):
+                removed = (
+                    "store dir would be removed"
+                    if entry.get("store_dir")
+                    else "store dir preserved (shared or absent)"
+                )
+            else:
+                removed = (
+                    "store dir removed"
+                    if entry.get("store_dir_removed")
+                    else "store dir preserved (shared or absent)"
+                )
+            prefix = "Would prune" if data.get("dry_run") else "Pruned"
+            print(f"{prefix} {slug} ({removed}).")
+        return
+    prefix = "Would prune" if data.get("dry_run") else "Pruned"
+    print(
+        f"{prefix} summary: {data.get('pruned', 0)} pruned, {data.get('stamped', 0)} "
+        f"stamped, {data.get('skipped', 0)} skipped of {data.get('total', 0)} registered repos."
+    )
+    for entry in entries:
+        if entry.get("verdict") in ("live",):
+            continue
+        print(f"  {entry.get('verdict'):10} {entry.get('slug')}")
+
+
 # ---------------------------------------------------------------------------
 # enable/disable — the CODE_INDEX_ENABLED master switch as a single command.
 #
@@ -950,6 +1079,39 @@ def add_parser(
     _add_common(remove_p)
     remove_p.set_defaults(func=_run_remove)
 
+    prune_p = sub.add_parser(
+        "prune",
+        help=(
+            "Prune the index of a repo whose checkout is gone from disk "
+            "(or every such orphan with --all). For a live checkout use `code remove`."
+        ),
+    )
+    prune_p.add_argument(
+        "path", nargs="?", default=None, help="Repo path (default: cwd). Implied slug."
+    )
+    prune_p.add_argument(
+        "--all",
+        action="store_true",
+        help="Classify every registered repo and prune every ripe orphan (dry run unless --yes).",
+    )
+    prune_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report dispositions but change nothing (the default for --all).",
+    )
+    prune_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass the 7-day grace gate (still requires --yes or a confirmation prompt).",
+    )
+    prune_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt; with --all, also opts out of the dry-run default.",
+    )
+    _add_common(prune_p)
+    prune_p.set_defaults(func=_run_prune)
+
     migrate_p = sub.add_parser(
         "migrate-layout",
         help="Migrate all registered repos to the per-checkout store layout (upgrade runs this).",
@@ -1026,7 +1188,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     if getattr(args, "code_cmd", None) is None:
         print(
             "Usage: agentalloy code "
-            "{index,status,search,symbol,callers,callees,bundle,remove,watch} ...",
+            "{index,status,search,symbol,callers,callees,bundle,remove,prune,migrate-layout,watch} ...",
             file=sys.stderr,
         )
         return 1
