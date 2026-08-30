@@ -43,8 +43,12 @@ FROM python:3.12-slim AS base
 # that llama-server links against (the rest of its libs come from the llamacpp
 # stage below). git is required by the code-index staleness/auto-refresh path
 # (it shells out to `git` for HEAD/rev-list on the mounted repos).
+# build-essential supplies the C linker for `uv sync`: overgraph (the corpus +
+# code-index store) publishes prebuilt wheels for x86_64/macos/win but NO
+# aarch64 Linux wheel, so on arm64 builds uv compiles it from the Rust sdist
+# (uv auto-provisions the Rust toolchain; only `cc` is missing on slim).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl git zstd libgomp1 \
+    && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git zstd libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv is the project's package manager (matches host conventions)
