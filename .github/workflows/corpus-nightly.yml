@@ -32,6 +32,11 @@ jobs:
     # would be the real speedup (future work). 180 covers the prebuilt
     # llama-server download (~15 MB, seconds) + GGUF download + full embed.
     timeout-minutes: 180
+    permissions:
+      # Only for the "Open or update failure issue" step below (reports are
+      # filed from the schedule event; write is scoped to issues only).
+      contents: read
+      issues: write
     env:
       # User-scoped AgentAlloy state lives under XDG dirs; point them at the
       # workspace so nothing touches the runner's home defaults.
@@ -39,10 +44,10 @@ jobs:
       XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
       AGENTALLOY_URL: http://127.0.0.1:47950
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -161,7 +166,7 @@ jobs:
 
       - name: Upload run artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: corpus-nightly-runs
           path: |
@@ -170,6 +175,27 @@ jobs:
             ${{ env.XDG_DATA_HOME }}/agentalloy/logs/rerank-server.log
             service.log
           retention-days: 14
+
+      - name: Open or update failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Idempotent: gh label create fails if the label exists; never let a
+          # missing label swallow the failure report (mirrors harness-e2e).
+          gh label create nightly-corpus-regression \
+            --description "Nightly corpus build + regression probe failures" --color D93F0B || true
+          EXISTING=$(gh issue list --label nightly-corpus-regression --state open --json number -q '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Nightly corpus regression run failed again: $RUN_URL"
+          else
+            gh issue create \
+              --title "Nightly corpus regression failing" \
+              --label nightly-corpus-regression \
+              --body "The nightly corpus build (seed + install-packs + re-embed), retrieval self-audit, domain gold-hit probe, or baseline check failed. Run: $RUN_URL — \`corpus-nightly-runs\` artifact attached (eval/runs, embed/rerank logs, service.log). Auto-closes are manual: close this once the suite is green again."
+          fi
 
   # Runs the `-m integration` suite (real embed server, no mocked seams) —
   # the tests the PR pipeline can never run because they need llama-server.
@@ -185,10 +211,10 @@ jobs:
       XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
       XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -233,6 +259,16 @@ jobs:
           set -euxo pipefail
           uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
 
+      - name: Start reranker server (llama-server, :47952)
+        # The cpu preset's write-env sets SIGNAL_INTENT_BACKEND=reranker; serve
+        # it like the corpus job does so phase-gate intent uses the real
+        # reranker instead of silently failing open to cosine.
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          uv run agentalloy start-rerank-server --models recommend-models.json \
+            --hardware-target cpu --timeout 120
+
       - name: Integration tests
         timeout-minutes: 20
         # "and not container": several container tests carry BOTH markers, and
@@ -243,7 +279,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: integration-nightly-logs
           path: ${{ env.XDG_DATA_HOME }}/agentalloy/logs/embed-server.log
@@ -285,10 +321,10 @@ jobs:
       ANTHROPIC_API_KEY: agentalloy-e2e
       OPENAI_API_KEY: agentalloy-e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
