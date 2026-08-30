@@ -228,11 +228,9 @@ def test_retrieve_by_id_returns_active_skill(
     golden_app: FastAPI, seeded_store: OverGraphSkillStore
 ) -> None:
     """GET /retrieve/{skill_id} must return active skill content."""
-    rows = seeded_store.execute(
-        "SELECT skill_id FROM skills WHERE current_version_id IS NOT NULL LIMIT 1"
-    )
-    assert rows, "seeded store must have at least one active skill"
-    skill_id = str(rows[0][0])
+    active = seeded_store.get_active_skills()
+    assert active, "seeded store must have at least one active skill"
+    skill_id = active[0].skill_id
 
     with TestClient(golden_app) as c:
         resp = c.get(f"/retrieve/{skill_id}")
@@ -263,10 +261,9 @@ def test_skill_inspection_returns_full_detail(
     golden_app: FastAPI, seeded_store: OverGraphSkillStore
 ) -> None:
     """GET /skills/{skill_id} must return active version detail and fragments."""
-    rows = seeded_store.execute(
-        "SELECT skill_id FROM skills WHERE current_version_id IS NOT NULL LIMIT 1"
-    )
-    skill_id = str(rows[0][0])
+    active = seeded_store.get_active_skills()
+    assert active, "seeded store must have at least one active skill"
+    skill_id = active[0].skill_id
 
     with TestClient(golden_app) as c:
         resp = c.get(f"/skills/{skill_id}")
