@@ -799,6 +799,103 @@ class TestReadWrite:
 
 
 # ---------------------------------------------------------------------------
+# Phase-transition hooks (on_phase_transition)
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseTransitionHook:
+    """Post-commit hooks that fire only on a REAL phase transition."""
+
+    def _store(self, tmp_path: Path) -> DuckDBStateStore:
+        db = tmp_path / "test.duck"
+        store = DuckDBStateStore(db).open()
+        store.migrate()
+        return store
+
+    def test_first_write_fires_hook_with_prev_none(self, tmp_path: Path) -> None:
+        store = self._store(tmp_path)
+        seen: list[tuple[str | None, str, str | None, str]] = []
+        store.on_phase_transition(
+            lambda prev, phase, actor, repo: seen.append((prev, phase, actor, repo))
+        )
+
+        store.write_phase("spec", actor="sess-a")
+
+        assert seen == [(None, "spec", "sess-a", store._repo())]  # noqa: SLF001
+
+    def test_phase_change_fires_hook_with_prev_phase(self, tmp_path: Path) -> None:
+        store = self._store(tmp_path)
+        seen: list[tuple[str | None, str, str | None, str]] = []
+        store.on_phase_transition(
+            lambda prev, phase, actor, repo: seen.append((prev, phase, actor, repo))
+        )
+
+        store.write_phase("spec", actor="sess-a")
+        store.write_phase("design", actor="sess-b")
+
+        assert seen == [
+            (None, "spec", "sess-a", store._repo()),  # noqa: SLF001
+            ("spec", "design", "sess-b", store._repo()),  # noqa: SLF001
+        ]
+
+    def test_idempotent_same_phase_rewrite_does_not_fire(self, tmp_path: Path) -> None:
+        """A same-phase rewrite is not a transition — the hook must not fire."""
+        store = self._store(tmp_path)
+        seen: list[tuple[str | None, str, str | None, str]] = []
+        store.on_phase_transition(
+            lambda prev, phase, actor, repo: seen.append((prev, phase, actor, repo))
+        )
+
+        store.write_phase("design", actor="sess-a")
+        store.write_phase("design", actor="sess-b")  # idempotent
+
+        assert len(seen) == 1
+        assert seen[0] == (None, "design", "sess-a", store._repo())  # noqa: SLF001
+
+    def test_raising_hook_does_not_break_write_or_next_hook(self, tmp_path: Path) -> None:
+        store = self._store(tmp_path)
+        seen: list[str] = []
+
+        def _bad(_prev, _phase, _actor, _repo) -> None:
+            raise RuntimeError("hook boom")
+
+        store.on_phase_transition(_bad)
+        store.on_phase_transition(lambda prev, phase, actor, repo: seen.append(phase))
+
+        # The write must still commit even though the first hook raises.
+        store.write_phase("build")
+        assert store.read_phase() is not None
+        assert seen == ["build"]
+        store.off_phase_transition(_bad)
+
+    def test_off_phase_transition_unregisters(self, tmp_path: Path) -> None:
+        store = self._store(tmp_path)
+        seen: list[str] = []
+        fn = lambda prev, phase, actor, repo: seen.append(phase)  # noqa: E731
+        store.on_phase_transition(fn)
+
+        store.write_phase("spec")
+        store.off_phase_transition(fn)
+        store.write_phase("design")
+
+        assert seen == ["spec"]
+
+    def test_hook_sees_for_repo_view_repo(self, tmp_path: Path) -> None:
+        """Hooks registered on the base store fire with the VIEW's repo key —
+        the shared list object must survive copy.copy() in for_repo()."""
+        store = self._store(tmp_path)
+        seen: list[tuple[str | None, str, str | None, str]] = []
+        store.on_phase_transition(
+            lambda prev, phase, actor, repo: seen.append((prev, phase, actor, repo))
+        )
+
+        view = store.for_repo("/home/user/other-repo")
+        view.write_phase("qa", actor="sess-x")
+
+        assert seen == [(None, "qa", "sess-x", "/home/user/other-repo")]
+
+
+# ---------------------------------------------------------------------------
 # Lease management
 # ---------------------------------------------------------------------------
 

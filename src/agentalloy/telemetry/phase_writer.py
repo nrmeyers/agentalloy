@@ -42,6 +42,8 @@ class PhaseEvent:
     direction: str | None = None
     repo: str | None = None
     workflow_delivered: bool | None = None
+    prev_phase: str | None = None
+    transitioned_by: str | None = None
 
 
 class TelemetryStore(Protocol):
@@ -55,8 +57,8 @@ INSERT INTO phase_events (
     trace_id, correlation_id, request_ts, phase, event_type,
     model, tokens_in, tokens_out, latency_ms, success,
     error_message, workflow_skill_id, system_prompt_sha, direction, repo,
-    workflow_delivered
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    workflow_delivered, prev_phase, transitioned_by
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _CREATE_DDL = """\
@@ -76,7 +78,9 @@ CREATE TABLE IF NOT EXISTS phase_events (
     system_prompt_sha VARCHAR,
     direction VARCHAR,
     repo VARCHAR,
-    workflow_delivered BOOLEAN
+    workflow_delivered BOOLEAN,
+    prev_phase VARCHAR,
+    transitioned_by VARCHAR
 );
 CREATE INDEX IF NOT EXISTS idx_phase_events_ts ON phase_events(request_ts);
 CREATE INDEX IF NOT EXISTS idx_phase_events_phase ON phase_events(phase);
@@ -88,6 +92,10 @@ _ADD_REPO_COLUMN_SQL = "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS repo V
 _CREATE_REPO_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_phase_events_repo ON phase_events(repo)"
 _ADD_WORKFLOW_DELIVERED_COLUMN_SQL = (
     "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS workflow_delivered BOOLEAN DEFAULT NULL"
+)
+_ADD_PREV_PHASE_COLUMN_SQL = "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS prev_phase VARCHAR"
+_ADD_TRANSITIONED_BY_COLUMN_SQL = (
+    "ALTER TABLE phase_events ADD COLUMN IF NOT EXISTS transitioned_by VARCHAR"
 )
 
 
@@ -122,6 +130,15 @@ class PhaseTelemetryWriter:
     def llm_error(self, trace_id: str, phase: str, **kwargs: Any) -> None:
         self._write(trace_id, phase, event_type="llm_error", **kwargs)
 
+    def phase_transition(self, trace_id: str, phase: str, **kwargs: Any) -> None:
+        """Record a real state-machine move (``prev_phase`` -> *phase*).
+
+        No LLM traffic rides this row, so model/tokens/latency stay empty;
+        ``prev_phase`` and ``transitioned_by`` carry where the phase came
+        from and who moved it.
+        """
+        self._write(trace_id, phase, event_type="phase_transition", **kwargs)
+
     # -- internal -----------------------------------------------------------
 
     def _write(
@@ -142,6 +159,8 @@ class PhaseTelemetryWriter:
         correlation_id: str | None = None,
         repo: str | None = None,
         workflow_delivered: bool | None = None,
+        prev_phase: str | None = None,
+        transitioned_by: str | None = None,
     ) -> None:
         try:
             self._ensure_schema()
@@ -161,6 +180,8 @@ class PhaseTelemetryWriter:
                 direction=direction,
                 repo=repo,
                 workflow_delivered=workflow_delivered,
+                prev_phase=prev_phase,
+                transitioned_by=transitioned_by,
             )
             params: tuple[Any, ...] = (
                 event.trace_id,
@@ -179,6 +200,8 @@ class PhaseTelemetryWriter:
                 event.direction,
                 event.repo,
                 event.workflow_delivered,
+                event.prev_phase,
+                event.transitioned_by,
             )
             self._store.execute(_INSERT_SQL, params)
         except Exception:  # noqa: BLE001 — soft-fail by design
@@ -206,6 +229,16 @@ class PhaseTelemetryWriter:
                 self._store.execute(_ADD_WORKFLOW_DELIVERED_COLUMN_SQL)
             except Exception:  # noqa: BLE001
                 logger.debug("phase_events workflow_delivered migration failed", exc_info=True)
+            try:
+                # Self-healing migration: prev_phase / transitioned_by land
+                # with the phase_transition event.
+                self._store.execute(_ADD_PREV_PHASE_COLUMN_SQL)
+            except Exception:  # noqa: BLE001
+                logger.debug("phase_events prev_phase migration failed", exc_info=True)
+            try:
+                self._store.execute(_ADD_TRANSITIONED_BY_COLUMN_SQL)
+            except Exception:  # noqa: BLE001
+                logger.debug("phase_events transitioned_by migration failed", exc_info=True)
             try:
                 # Index creation must follow the column migration — on an old
                 # DB the column (and thus the index target) doesn't exist

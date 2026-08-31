@@ -44,8 +44,8 @@ class TestPhaseStart:
         writer.phase_start(trace_id, phase, model="gpt-4", tokens_in=100, tokens_out=50)
 
         assert (
-            len(store.calls) == 5
-        )  # DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + CREATE INDEX + INSERT
+            len(store.calls) == 7
+        )  # DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + ADD PREV_PHASE + ADD TRANSITIONED_BY + CREATE INDEX + INSERT
         sql, params = store.calls[-1]
         assert "INSERT INTO phase_events" in sql
         assert params[0] == trace_id  # trace_id
@@ -145,6 +145,39 @@ class TestLlmError:
 
 
 # ---------------------------------------------------------------------------
+# T5b — phase_transition writes correct row
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseTransition:
+    def test_writes_correct_row(self) -> None:
+        store = _MockStore()
+        writer = PhaseTelemetryWriter(store)
+        writer.phase_transition(
+            "t1", "add-skill", prev_phase="intake", transitioned_by="f2ctl", repo="/home/nate/proj"
+        )
+        sql, params = store.calls[-1]
+        assert "INSERT INTO phase_events" in sql
+        assert params[0] == "t1"  # trace_id
+        assert params[3] == "add-skill"  # phase
+        assert params[4] == "phase_transition"  # event_type
+        assert params[16] == "intake"  # prev_phase
+        assert params[17] == "f2ctl"  # transitioned_by
+        # No LLM traffic on this row:
+        assert params[5] is None  # model
+        assert params[8] is None  # latency_ms
+
+    def test_first_transition_has_prev_phase_none(self) -> None:
+        store = _MockStore()
+        writer = PhaseTelemetryWriter(store)
+        writer.phase_transition("t1", "intake", transitioned_by="cli")
+        sql, params = store.calls[-1]
+        assert params[4] == "phase_transition"
+        assert params[16] is None  # prev_phase
+        assert params[17] == "cli"  # transitioned_by
+
+
+# ---------------------------------------------------------------------------
 # T6 — soft-fail: if telemetry_store.execute() raises, method returns silently
 # ---------------------------------------------------------------------------
 
@@ -167,8 +200,9 @@ class TestSoftFail:
         writer = PhaseTelemetryWriter(store)
 
         writer.phase_complete("t1", "p1")
-        # Called 5x: DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + CREATE INDEX + INSERT, all fail silently
-        assert store.execute.call_count == 5
+        # Called 7x: DDL + ADD COLUMN + ADD_WORKFLOW_DELIVERED + ADD PREV_PHASE
+        # + ADD TRANSITIONED_BY + CREATE INDEX + INSERT, all fail silently
+        assert store.execute.call_count == 7
 
     def test_llm_error_soft_fails(self) -> None:
         writer = PhaseTelemetryWriter(MagicMock(side_effect=OSError("disk full")))
@@ -198,6 +232,8 @@ class TestPhaseEventDataclass:
         assert event.system_prompt_sha is None
         assert event.direction is None
         assert event.repo is None
+        assert event.prev_phase is None
+        assert event.transitioned_by is None
 
     def test_frozen(self) -> None:
         event = PhaseEvent(
@@ -262,13 +298,13 @@ class TestSchema:
 
         assert "repo VARCHAR" in _CREATE_DDL
 
-    def test_insert_sql_has_sixteen_placeholders(self) -> None:
-        """Regression: the table has 16 columns (15 + workflow_delivered, D3); the
-        INSERT must match exactly or every write raises (silently, under the
-        soft-fail except block)."""
+    def test_insert_sql_has_eighteen_placeholders(self) -> None:
+        """Regression: the table has 18 columns (16 + prev_phase +
+        transitioned_by); the INSERT must match exactly or every write raises
+        (silently, under the soft-fail except block)."""
         from agentalloy.telemetry.phase_writer import _INSERT_SQL
 
-        assert _INSERT_SQL.count("?") == 16
+        assert _INSERT_SQL.count("?") == 18
 
     def test_insert_sql_names_columns_explicitly(self) -> None:
         """INSERT INTO phase_events (col, col, ...) VALUES (...) — not a bare
@@ -339,6 +375,39 @@ class TestRealDuckDBRoundTrip:
             )
             assert row is not None
             assert row[0] == "/home/nate/proj-a"
+        finally:
+            store.close()
+
+    def test_phase_transition_is_stored_and_read_back(self, tmp_path: Path) -> None:
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "telemetry_trans.duck"
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_transition(
+                "trace-trans",
+                "add-skill",
+                prev_phase="intake",
+                transitioned_by="f2ctl",
+                repo="/home/nate/proj",
+            )
+            row = (
+                store._c()
+                .execute(  # noqa: SLF001 — direct read for the regression assertion
+                    "SELECT trace_id, phase, event_type, prev_phase, transitioned_by, repo "
+                    "FROM phase_events WHERE trace_id = ?",
+                    ["trace-trans"],
+                )
+                .fetchone()
+            )
+            assert row is not None
+            assert row[0] == "trace-trans"
+            assert row[1] == "add-skill"
+            assert row[2] == "phase_transition"
+            assert row[3] == "intake"
+            assert row[4] == "f2ctl"
+            assert row[5] == "/home/nate/proj"
         finally:
             store.close()
 
@@ -497,5 +566,91 @@ class TestOldSchemaMigration:
                 .fetchall()
             }
             assert "idx_phase_events_repo" in names
+        finally:
+            store.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration: a DB built after the repo/workflow_delivered columns landed but
+# before the phase_transition event has a 16-column phase_events table
+# (no prev_phase / transitioned_by).  _ensure_schema must self-heal those
+# too, or phase_transition writes on those databases are silently swallowed.
+# ---------------------------------------------------------------------------
+
+
+class TestIntermediateSchemaMigration:
+    def _create_intermediate_schema(self, db_path: Path) -> None:
+        """Build the 16-column schema exactly: 14 original + repo +
+        workflow_delivered, but no prev_phase / transitioned_by."""
+        import duckdb
+
+        con = duckdb.connect(str(db_path))
+        try:
+            con.execute(
+                """
+                CREATE TABLE phase_events (
+                    trace_id VARCHAR,
+                    correlation_id VARCHAR,
+                    request_ts BIGINT NOT NULL,
+                    phase VARCHAR NOT NULL,
+                    event_type VARCHAR NOT NULL,
+                    model VARCHAR,
+                    tokens_in INTEGER,
+                    tokens_out INTEGER,
+                    latency_ms INTEGER,
+                    success BOOLEAN,
+                    error_message VARCHAR,
+                    workflow_skill_id VARCHAR,
+                    system_prompt_sha VARCHAR,
+                    direction VARCHAR,
+                    repo VARCHAR,
+                    workflow_delivered BOOLEAN
+                )
+                """
+            )
+            cols = [r[0] for r in con.execute("DESCRIBE phase_events").fetchall()]
+            assert len(cols) == 16, f"fixture drifted from the 16-column schema: {cols}"
+            assert "prev_phase" not in cols
+            assert "transitioned_by" not in cols
+        finally:
+            con.close()
+
+    def test_phase_transition_succeeds_against_16_column_schema(self, tmp_path: Path) -> None:
+        from agentalloy.storage.telemetry_store import open_telemetry_store
+
+        db_path = tmp_path / "intermediate_schema.duck"
+        self._create_intermediate_schema(db_path)
+
+        store = open_telemetry_store(db_path)
+        try:
+            writer = PhaseTelemetryWriter(store)
+            writer.phase_transition(
+                "trace-mig",
+                "build",
+                prev_phase="spec",
+                transitioned_by="sess-a",
+                repo="/home/nate/mig",
+            )
+
+            row = (
+                store._c()
+                .execute(  # noqa: SLF001 — direct read for the regression assertion
+                    "SELECT trace_id, phase, event_type, prev_phase, transitioned_by "
+                    "FROM phase_events WHERE trace_id = ?",
+                    ["trace-mig"],
+                )
+                .fetchone()
+            )
+            assert row is not None, (
+                "phase_transition write against the 16-column schema was "
+                "silently swallowed by the soft-fail except block"
+            )
+            assert row[2] == "phase_transition"
+            assert row[3] == "spec"
+            assert row[4] == "sess-a"
+
+            cols = [r[0] for r in store._c().execute("DESCRIBE phase_events").fetchall()]  # noqa: SLF001
+            assert "prev_phase" in cols
+            assert "transitioned_by" in cols
         finally:
             store.close()

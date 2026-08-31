@@ -177,6 +177,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("watcher hook registration failed — continuing", exc_info=True)
 
+    # Phase-transition telemetry: every REAL phase move (state router, advance
+    # endpoint, in-process CLI, proxy auto-advance) writes a phase_transition
+    # row.  The proxy's own phase_start/complete rows track LLM traffic within
+    # a phase; this tracks the state machine moving.
+    try:
+        from uuid import uuid4  # noqa: PLC0415
+
+        def _on_phase_transition(
+            prev_phase: str | None, phase: str, actor: str | None, repo: str
+        ) -> None:
+            phase_telemetry.phase_transition(
+                uuid4().hex,
+                phase,
+                prev_phase=prev_phase,
+                transitioned_by=actor,
+                repo=repo,
+            )
+
+        state_store.on_phase_transition(_on_phase_transition)
+    except Exception:
+        logger.warning("phase transition hook registration failed — continuing", exc_info=True)
+
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None
     runtime_load_error: str | None = None

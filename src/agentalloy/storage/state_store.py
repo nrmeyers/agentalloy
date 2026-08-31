@@ -387,6 +387,11 @@ class DuckDBStateStore:
         # Fired after every write to the store (outside the lease).
         # Harness-agnostic — knows only kinds and callables.
         self._on_write_callbacks: dict[str, list[Callable[[str, Any, str, str], None]]] = {}
+        # Post-commit hooks fired only on a REAL phase transition (an
+        # idempotent same-phase rewrite does not fire them).  A plain list
+        # object, shared by reference across for_repo views like
+        # _on_write_callbacks.
+        self._on_phase_transition: list[Callable[[str | None, str, str | None, str], None]] = []
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -918,6 +923,34 @@ class DuckDBStateStore:
             except Exception:
                 logger.exception("on_write callback for %r raised", kind)
 
+    def on_phase_transition(self, fn: Callable[[str | None, str, str | None, str], None]) -> None:
+        """Register *fn* to be called after a REAL phase transition commits.
+
+        The callback receives ``(prev_phase, new_phase, actor, repo)`` —
+        *prev_phase* is ``None`` on the first write, *actor* is the caller the
+        row records, and *repo* is the key of the handle that wrote (``self``
+        may be a :meth:`for_repo` view).  The firing predicate is the same one
+        :meth:`write_phase` uses — ``prev is None or prev.phase != phase`` —
+        so an idempotent same-phase rewrite never fires the hook.  Like
+        :meth:`on_write`, hooks fire **outside** the lease (the write is
+        already durable), and a hook that raises is logged, not propagated.
+        """
+        self._on_phase_transition.append(fn)
+
+    def off_phase_transition(self, fn: Callable[[str | None, str, str | None, str], None]) -> None:
+        """Unregister a previously registered transition hook."""
+        with suppress(ValueError):
+            self._on_phase_transition.remove(fn)
+
+    def _fire_phase_transition_hooks(
+        self, prev_phase: str | None, phase: str, actor: str | None
+    ) -> None:
+        for fn in list(self._on_phase_transition):
+            try:
+                fn(prev_phase, phase, actor, self._repo())
+            except Exception:
+                logger.exception("phase transition hook raised")
+
     # -- transaction ---------------------------------------------------------
 
     @contextmanager
@@ -1098,6 +1131,10 @@ class DuckDBStateStore:
             # already durable.  Callbacks that raise are logged but do not
             # roll back or kill the writer.
             self._fire_callbacks("phase", payload)
+            if is_transition:
+                self._fire_phase_transition_hooks(
+                    prev.phase if prev is not None else None, phase, resolved_actor
+                )
             return result
 
     # -- file mirror ---------------------------------------------------------
