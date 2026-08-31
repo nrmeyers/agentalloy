@@ -142,6 +142,16 @@ class OverGraphSkillStore:
             self._txn = None
             self._db.flush()
 
+    def flush(self) -> None:
+        """Synchronously flush pending OverGraph WAL writes to segments.
+
+        Batch writers (reembed) call this periodically so the WAL stays
+        small; the close-time background flush of a large WAL is what
+        crashes with ``segment rename failed: Directory not empty`` and
+        silently drops the unflushed writes.
+        """
+        self._db.flush()
+
     def rollback(self) -> None:
         """Rollback the current transaction."""
         if hasattr(self, "_txn") and self._txn is not None:
@@ -1096,7 +1106,11 @@ class OverGraphSkillStore:
                 label_filter={"labels": ["Fragment"]},
             )
         except Exception:
-            logger.debug("vector_search failed", exc_info=True)
+            logger.warning(
+                "vector_search failed — returning no vector hits "
+                "(corrupt or missing index? run `agentalloy reembed --force`)",
+                exc_info=True,
+            )
             return []
 
         deprecated_set = set(deprecated_skill_ids or [])
@@ -1313,8 +1327,18 @@ class OverGraphSkillStore:
         return self._vector_dimension
 
     def fragment_ids_present(self, fragment_ids: Sequence[str]) -> set[str]:
-        """Check which fragment_ids already have embeddings."""
+        """Check which fragment_ids already have embeddings.
+
+        The ``embedded_at`` marker only proves the marker was written, not
+        that the vector is searchable: a corrupt HNSW segment makes
+        ``vector_search`` raise, and a marker check that trusts the marker
+        then skips every fragment while retrieval silently returns nothing.
+        Probe the index once; on probe failure report nothing present so
+        the caller re-embeds and self-heals.
+        """
         if not fragment_ids:
+            return set()
+        if not self._vector_index_healthy():
             return set()
         # ``f.key`` projection/WHERE is broken in GQL — resolve each id via a
         # direct node lookup instead.
@@ -1324,6 +1348,29 @@ class OverGraphSkillStore:
             if node is not None and dict(node.props).get("embedded_at") is not None:
                 present.add(fid)
         return present
+
+    def _vector_index_healthy(self) -> bool:
+        """Probe the HNSW index with a trivial dense search.
+
+        An empty-but-healthy index returns no hits; a corrupt one raises
+        (CorruptRecordException). Gates marker trust in
+        :meth:`fragment_ids_present`.
+        """
+        try:
+            self._db.vector_search(
+                mode="dense",
+                k=1,
+                dense_query=[1.0] + [0.0] * (self._vector_dimension - 1),
+                label_filter={"labels": ["Fragment"]},
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "vector index probe failed — treating no fragments as embedded "
+                "so re-embed can self-heal",
+                exc_info=True,
+            )
+            return False
 
     def rebuild_fts_index(self) -> None:
         """Rebuild the Tantivy BM25 index from OverGraph fragment nodes."""

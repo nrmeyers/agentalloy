@@ -1664,7 +1664,11 @@ class OverGraphCodeGraphStore:
 
             return results
         except Exception:
-            logger.debug("failed to perform vector search", exc_info=True)
+            logger.warning(
+                "vector search failed — returning no hits "
+                "(corrupt or missing index? run `agentalloy code index` to rebuild)",
+                exc_info=True,
+            )
             return []
 
     def search_bm25(

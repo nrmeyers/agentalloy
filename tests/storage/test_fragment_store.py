@@ -138,3 +138,48 @@ def test_bulk_replace_and_delete_all(store):
     assert store.count_embeddings() == 4  # atomic full replace
     assert store.delete_all() == 4
     assert store.count_embeddings() == 0
+
+
+def test_fragment_ids_present_healthy_empty_index(store):
+    """The probe must pass on an empty (zero-vector) index — no false negatives."""
+    assert store.fragment_ids_present(["f0", "nope"]) == set()
+
+
+class _CorruptVectorDB:
+    """Delegates to the real OverGraph db but makes vector_search raise,
+    simulating a corrupt HNSW segment (CorruptRecordException)."""
+
+    _MSG = "CorruptRecordException: dense_vector: record has unknown length 0"
+
+    def __init__(self, db):
+        self._db = db
+
+    def vector_search(self, *a, **kw):
+        raise RuntimeError(self._MSG)
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+
+def test_fragment_ids_present_probe_failure_returns_empty(store, monkeypatch, caplog):
+    """A corrupt HNSW index (probe raises) must not be trusted: markers exist
+    but vectors are unsearchable, so report nothing present and re-embed
+    everything (self-heal)."""
+    store.insert_embeddings([_frag(i) for i in range(3)])
+    assert store.fragment_ids_present(["f0", "f1", "f2"]) == {"f0", "f1", "f2"}
+
+    monkeypatch.setattr(store, "_db", _CorruptVectorDB(store._db))
+    with caplog.at_level("WARNING", logger="agentalloy.storage.overgraph_skill_store"):
+        assert store.fragment_ids_present(["f0", "f1", "f2"]) == set()
+    assert "vector index probe failed" in caplog.text
+
+
+def test_search_similar_warns_on_vector_search_failure(store, monkeypatch, caplog):
+    """A vector_search failure must surface as a warning, not a silent debug
+    line — the corrupt-index incident hid for days at debug level."""
+    store.insert_embeddings([_frag(i) for i in range(3)])
+
+    monkeypatch.setattr(store, "_db", _CorruptVectorDB(store._db))
+    with caplog.at_level("WARNING", logger="agentalloy.storage.overgraph_skill_store"):
+        assert store.search_similar(_vec(0.0)) == []
+    assert "vector_search failed" in caplog.text
