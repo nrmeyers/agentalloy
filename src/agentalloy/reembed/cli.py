@@ -737,6 +737,11 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
 
                     embedded_vecs[frag.fragment_id] = (frag.skill_id, vec)
                     stats.embedded += 1
+                    # Keep the OverGraph WAL small: a large unflushed WAL is
+                    # what crashes the close-time background flush (segment
+                    # rename ENOTEMPTY) and drops the whole batch.
+                    if stats.embedded % 128 == 0:
+                        vs.flush()
                     if progress_tty:
                         print(
                             f"\r  embedded {stats.embedded}/{stats.discovered}",
@@ -794,6 +799,7 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                         n_cards,
                         card_mode.value,
                     )
+                    vs.flush()
             finally:
                 embed_client.close()
         else:
@@ -885,10 +891,23 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
         return EXIT_DB
     finally:
-        if store is not None:
-            store.close()
-        if vs is not None:
-            vs.close()
+        # store and vs are the same unified store; close it once, best-effort.
+        # A close-time flush crash (OverGraph bg-flush bug) must not skip the
+        # service restart below — that left the API down with a torn WAL.
+        for s in dict.fromkeys(x for x in (store, vs) if x is not None):
+            try:
+                if getattr(s, "_db", None) is not None:
+                    s.flush()
+            except Exception as exc:  # noqa: BLE001 — pre-close flush is best-effort
+                logger.warning("pre-close flush failed: %s", exc)
+            try:
+                s.close()
+            except Exception as exc:  # noqa: BLE001 — close must not block restart
+                logger.error(
+                    "store close failed (unflushed writes may be lost — "
+                    "re-run `agentalloy reembed` to self-heal): %s",
+                    exc,
+                )
         if service_mode is not None:
             _start_main_service(service_mode)
 
