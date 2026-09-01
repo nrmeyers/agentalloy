@@ -50,11 +50,12 @@ def _active_phase(root: Path) -> str | None:
 
 
 def _store_cursor(cid: str, root: Path) -> None:
-    """Record the cursor — through the service when it is up, else the file.
+    """Record the cursor — through the service when it is up, else in-process.
 
-    The cursor is still file-backed (``.agentalloy/cursor``, plus the
-    session-scoped variants); only *phase* moved into the store.  This keeps the
-    existing either/or routing rather than dual-writing two sources of truth.
+    The cursor lives in the state store, and the store handle belongs to the
+    service process (DuckDB is single-writer).  An out-of-process CLI routes
+    the write over HTTP; in-process (the service itself, or the test suite)
+    nothing is up to loop back to, so the bound store is written directly.
     """
     client = StateClient()
     if client.is_running():
@@ -66,11 +67,48 @@ def _store_cursor(cid: str, root: Path) -> None:
     _write_cursor_atomic(root, cid, cli_session_key())
 
 
+def _current_cursor(root: Path) -> str | None:
+    """The cursor the proxy would resolve for this CLI session right now.
+
+    Mirrors the proxy's resolution order — the session-scoped row first, then
+    the shared cursor (``_resolve_current_contract``) — so ``task next``
+    advances from exactly where the proxy is composing.
+
+    The CLI process holds no state store (only the service binds one), so the
+    out-of-process read goes over HTTP — the same transport the cursor write
+    uses.  An in-process-only read returns ``None`` in the CLI, and treating
+    that as "no cursor" is exactly how ``task next`` reset to task 1 on every
+    call.  Callers reach this after ``_active_phase`` has established a bound
+    store or a running service, so finding neither is a real failure, not an
+    empty cursor.
+    """
+    from agentalloy.storage.state_store import process_store
+
+    session_key = cli_session_key()
+    if process_store() is not None:
+        # In-process (service/tests): the bound store is the truth — an HTTP
+        # loopback would be the service calling itself.
+        cursor = _read_cursor(root, session_key) if session_key else None
+        if not cursor:
+            cursor = _read_cursor(root, None)
+        return cursor
+
+    client = StateClient()
+    if not client.is_running():
+        fail_on_state_error(StateClientError("cursor read: agentalloy service is not running"))
+    cursor = client.get_scoped_cursor(session_key) if session_key else None
+    if not cursor:
+        cursor = client.get_state("cursor")
+    return cursor.strip() if cursor else None
+
+
 def _ordered_contracts(root: Path, phase: str) -> list[dict[str, Any]]:
     """All active contracts for *phase*, ordered by filename (contract_id).
 
     Delegates to the state store.  Returns a list of dicts with at least
-    ``contract_id`` (the filename stem without ``.md``).
+    ``contract_id`` — a contracts-relative path that already carries the
+    phase subdirectory (e.g. ``build/01-cache``), so it is not the bare
+    filename stem.
     """
     access = phase_access(root)
     try:
@@ -101,11 +139,14 @@ def run_task_next(root: Path) -> dict[str, object]:
     if not contracts:
         return {"ok": False, "message": f"No contracts under .agentalloy/contracts/{phase}/."}
 
-    names = [f"{c['contract_id']}.md" for c in contracts]
-    cursor = _read_cursor(root, cli_session_key())
-    current_name = cursor.rsplit("/", 1)[-1] if cursor else None
+    # The cursor is stored as a full ``_cursor_id`` (``active/<phase>/<id>.md``),
+    # so compare it against the same ids the worklist is built from. Matching on
+    # the bare filename would never find the current task (contract_id is a
+    # phase-prefixed path) and reset the cursor to task 1 on every call.
+    ids = [_cursor_id(phase, c) for c in contracts]
+    cursor = _current_cursor(root)
     # No/unknown cursor → start at the first task.
-    nxt = names.index(current_name) + 1 if current_name in names else 0
+    nxt = ids.index(cursor) + 1 if cursor in ids else 0
 
     if nxt >= len(contracts):
         return {"ok": True, "done": True, "message": f"All {len(contracts)} tasks composed."}
@@ -123,7 +164,10 @@ def run_task_start(slug: str, root: Path) -> dict[str, object]:
     contracts = _ordered_contracts(root, phase)
     for c in contracts:
         cid_val = c["contract_id"]
-        if slug in (cid_val, f"{cid_val}.md"):
+        # Contract ids are phase-prefixed paths (build/01-cache); the slug may
+        # be the bare filename stem (01-cache) or either form with ``.md``.
+        stem = cid_val.rsplit("/", 1)[-1]
+        if slug in (cid_val, stem, f"{cid_val}.md", f"{stem}.md"):
             cid = _cursor_id(phase, c)
             _store_cursor(cid, root)
             return {"ok": True, "cursor": cid}
@@ -142,13 +186,10 @@ def run_task_status(root: Path) -> dict[str, object]:
     if phase is None:
         return {"ok": False, "message": "No active phase."}
 
-    cursor: str | None = None
-    client = StateClient()
-    if client.is_running():
-        raw = client.get_state("cursor")
-        cursor = raw.strip() if raw else None
-    if cursor is None:
-        cursor = _read_cursor(root, cli_session_key())
+    # Same read as ``task next`` — the two surfaces must agree on what the
+    # cursor currently points at, or ``status`` lies about what ``next`` will
+    # do.
+    cursor: str | None = _current_cursor(root)
 
     contracts = _ordered_contracts(root, phase)
     return {
