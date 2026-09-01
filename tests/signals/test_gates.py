@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from agentalloy.signals.gates import (
     _is_forward_skip,
@@ -820,6 +823,140 @@ def test_evaluate_phase_gate_same_phase_unguarded(tmp_path: Path):
     """A same-phase write is a no-op and never gated."""
     assert evaluate_phase_gate("spec", "spec", tmp_path, override=False) is None
     assert evaluate_phase_gate(None, "build", tmp_path, override=False) is None
+
+
+# ---------------------------------------------------------------------------
+# Denied-phase write check (#651b) — a DENIED phase exits clean: if src/** or
+# tests/** changed during the phase (vs the phase_start_ref), the advance is
+# refused with reason "denied_phase_writes". The Tier A deny rules + proxy
+# tool filter are prevention; this is the backstop (issue #536's hole).
+# ---------------------------------------------------------------------------
+
+
+def _git(repo: Path, *argv: str) -> str:
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    return subprocess.run(
+        ["git", *argv], cwd=repo, check=True, capture_output=True, text=True, env=env
+    ).stdout.strip()
+
+
+@pytest.fixture()
+def phase_repo(tmp_path: Path):
+    """A git repo (one initial commit, clean tree) plus a store whose row is
+    "spec" stamped with that commit's sha as ``phase_start_ref``."""
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "app.py").write_text("x = 1\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    sha = _git(repo, "rev-parse", "HEAD")
+    store = DuckDBStateStore(tmp_path / "test_state.db")
+    store.open()
+    store.migrate()
+    store.write_phase("spec", phase_start_ref=sha)
+    try:
+        yield repo, store, sha
+    finally:
+        store.close()
+
+
+def test_denied_phase_exit_clean_passes_write_check(phase_repo: tuple[Path, DuckDBStateStore, str]):
+    """A denied phase that exited with no src/tests changes falls through to
+    the approval gate — the write check is not the blocker."""
+    repo, store, _sha = phase_repo
+    verdict = evaluate_phase_gate("spec", "design", repo, override=False, store=store)
+    assert verdict is not None
+    assert verdict["reason"] == "approval"  # not "denied_phase_writes"
+
+
+def test_denied_phase_exit_with_untracked_src_refused(
+    phase_repo: tuple[Path, DuckDBStateStore, str],
+):
+    """An untracked src file appearing during a denied phase blocks the exit."""
+    repo, store, _sha = phase_repo
+    (repo / "src" / "evil.py").write_text("print('should not exist')\n")
+    verdict = evaluate_phase_gate("spec", "design", repo, override=False, store=store)
+    assert verdict is not None
+    assert verdict["reason"] == "denied_phase_writes"
+    assert any("src/evil.py" in a for a in verdict["advisories"])
+    assert "Refusing to advance" in verdict["advisories"][0]
+
+
+def test_denied_phase_exit_with_committed_src_refused(
+    phase_repo: tuple[Path, DuckDBStateStore, str],
+):
+    """The check covers the commit-per-concern workflow, not just dirty trees."""
+    repo, store, _sha = phase_repo
+    (repo / "src" / "app.py").write_text("x = 2  # snuck in during spec\n")
+    _git(repo, "commit", "-qam", "feature")
+    verdict = evaluate_phase_gate("spec", "design", repo, override=False, store=store)
+    assert verdict is not None
+    assert verdict["reason"] == "denied_phase_writes"
+    assert any("src/app.py" in a for a in verdict["advisories"])
+
+
+def test_denied_phase_write_check_waived_by_override(
+    phase_repo: tuple[Path, DuckDBStateStore, str],
+):
+    """`--force`/override skips the write check (documented escape hatch)."""
+    repo, store, _sha = phase_repo
+    (repo / "src" / "evil.py").write_text("print('waived')\n")
+    verdict = evaluate_phase_gate("spec", "design", repo, override=True, store=store)
+    assert verdict is None or verdict["reason"] != "denied_phase_writes"
+
+
+def test_denied_phase_docs_only_change_allowed(phase_repo: tuple[Path, DuckDBStateStore, str]):
+    """docs/** is writable in denied phases — a docs-only change must not trip
+    the write check."""
+    repo, store, _sha = phase_repo
+    (repo / "docs").mkdir()
+    (repo / "docs" / "notes.md").write_text("# spec work\n")
+    _git(repo, "add", "docs")
+    _git(repo, "commit", "-qm", "docs")
+    verdict = evaluate_phase_gate("spec", "design", repo, override=False, store=store)
+    assert verdict is None or verdict["reason"] != "denied_phase_writes"
+
+
+def test_non_denied_phase_dirty_src_ignored(phase_repo: tuple[Path, DuckDBStateStore, str]):
+    """The check only applies to DENIED phases — build's src work is expected."""
+    repo, store, sha = phase_repo
+    store.write_phase("build", phase_start_ref=sha)
+    (repo / "src" / "feature.py").write_text("y = 2\n")
+    verdict = evaluate_phase_gate("build", "qa", repo, override=False, store=store)
+    assert verdict is None or verdict["reason"] != "denied_phase_writes"
+
+
+def test_denied_phase_write_check_fails_open_without_git(tmp_path: Path):
+    """No .git → no diff possible → the check must fail open, not crash."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "whatever.py").write_text("dirty, but no git\n")
+    verdict = evaluate_phase_gate("spec", "design", tmp_path, override=False)
+    assert verdict is None or verdict["reason"] != "denied_phase_writes"
+
+
+def test_denied_phase_write_check_missing_ref_falls_back_to_head(
+    phase_repo: tuple[Path, DuckDBStateStore, str],
+):
+    """A row without phase_start_ref (pre-#651b row) falls back to the
+    coarser HEAD diff — a pre-existing dirty src still gets caught, which is
+    the conservative direction."""
+    repo, store, _sha = phase_repo
+    # A genuine transition lets the caller overwrite the ref; two ref-less
+    # transitions clear the fixture's stamp (a same-phase write would just
+    # carry the old one forward).
+    store.write_phase("build")
+    store.write_phase("spec")
+    (repo / "src" / "app.py").write_text("x = 99\n")  # uncommitted working-tree dirt
+    verdict = evaluate_phase_gate("spec", "design", repo, override=False, store=store)
+    assert verdict is not None
+    assert verdict["reason"] == "denied_phase_writes"
 
 
 # ---------------------------------------------------------------------------

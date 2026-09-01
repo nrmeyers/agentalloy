@@ -15,8 +15,10 @@ from agentalloy.signals.predicates import (
     PREDICATES,
     PredicateContext,
     PredicateResult,
+    _changed_paths_since,
     _glob_files,
     _read_file,
+    _read_phase_start_ref,
     evaluate_predicate,
 )
 
@@ -657,6 +659,45 @@ def _is_forward_skip(current_phase: str, target_phase: str) -> bool:
     return tgt > cur + 1
 
 
+def _denied_phase_set() -> frozenset[str]:
+    """The phases that owe no src/tests writes, from the provider config.
+
+    Lazy import — mirrors this module's ``_get_next`` pattern (gates.py is
+    imported early in the provider/signal wiring, and a module-level import
+    from ``providers.base`` here would tie the two directions together).
+    """
+    from agentalloy.providers.base import DENIED_PHASES  # noqa: PLC0415
+
+    return DENIED_PHASES
+
+
+def _denied_phase_write_violations(
+    project_root: Path,
+    store: Any,
+) -> list[str]:
+    """Paths under ``src/`` or ``tests/`` changed during the current phase.
+
+    The window starts at the phase's ``phase_start_ref`` (stamped on every
+    real transition by the CLI, the HTTP endpoints, and the proxy
+    auto-advance).  A missing ref — legacy rows, non-git repos, a failed
+    stamp — falls back to ``HEAD``, which is coarser (it also covers dirt
+    that predates the phase); a visible false positive is preferable to a
+    silent bypass.  A git failure returns ``[]`` — the gate's fail-open
+    policy for infrastructure hiccups (an unusable git must not wedge a
+    legitimate advance), mirroring ``scope_touched_in_diff``'s UNKNOWN.
+
+    Reuses the same diff plumbing as ``scope_touched_in_diff``: committed
+    changes since the ref plus the working tree (staged, uncommitted, and
+    untracked — the shape a shell-bypass write usually takes, a brand-new
+    ``src/foo.py``).
+    """
+    ref = _read_phase_start_ref(project_root, store)
+    paths = _changed_paths_since(project_root, ref or "HEAD")
+    if paths is None:
+        return []
+    return sorted(p for p in paths if p.startswith("src/") or p.startswith("tests/"))
+
+
 def evaluate_phase_gate(
     current_phase: str | None,
     target_phase: str,
@@ -672,6 +713,12 @@ def evaluate_phase_gate(
     operator-facing guidance without re-evaluating the gate.
 
     Rules:
+    - Denied-phase write check (#651): any transition out of a denied phase
+      (intake/spec/design/sdd-flow) is refused when src/** or tests/**
+      changed during the phase (diffed against the phase-start ref). Catches
+      shell-bypass writes the Tier A deny rules and the proxy tool filter
+      let through. Waivable by ``override`` (human --force); the proxy
+      auto-advance path never sets override.
     - Forward-skip guard: a transition that jumps forward over one or more
       main-chain phases (e.g. spec → build) is refused — the flow advances one
       phase at a time. Not waivable by ``override`` (unlike the completeness
@@ -701,6 +748,34 @@ def evaluate_phase_gate(
     # Same-phase write — no gate needed
     if current_phase is None or current_phase == target_phase:
         return None
+
+    # Denied-phase write check (#651): intake/spec/design/sdd-flow owe no
+    # writes to src/**/tests/**.  Tier A denies the declared write tools and
+    # the common shell shapes, and the proxy strips the tools — but the shell
+    # is never airtight, so the phase must prove itself clean at exit: diff
+    # the phase window (phase_start_ref, stamped on entry) and fail loudly
+    # when src/** or tests/** changed during it.  A human may waive with
+    # --force (override); the proxy auto-advance path never sets override,
+    # so it cannot be waived there.  Infrastructure failure (git unusable)
+    # fails open, per the gate's UNKNOWN policy.
+    if current_phase in _denied_phase_set() and project_root is not None and not override:
+        violations = _denied_phase_write_violations(project_root, store)
+        if violations:
+            shown = ", ".join(violations[:10])
+            more = f" (+{len(violations) - 10} more)" if len(violations) > 10 else ""
+            return {
+                "result": "denied_phase_writes",
+                "reason": "denied_phase_writes",
+                "advisories": [
+                    f"Refusing to advance from '{current_phase}': that phase "
+                    f"owed no code writes, but src/** or tests/** changed "
+                    f"during it — {shown}{more}. Tier A denied the write "
+                    "tools and the common shell forms, so this change took "
+                    "another route. Revert the changes or fold them into "
+                    "the next phase's scope, then advance again. A human "
+                    "may waive with --force."
+                ],
+            }
 
     # Forward-skip guard: the SDD flow is a linear pipeline — you advance one
     # phase at a time. A transition that jumps forward over one or more main-chain

@@ -17,7 +17,10 @@ from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
 from agentalloy.install.subcommands import workflow as flow_mod
 from agentalloy.providers.base import (
+    DENIED_PHASE_DENY_PATTERNS,
     DENIED_PHASES,
+    DENY_PATTERNS,
+    SHELL_WRITE_DENY_PATTERNS,
     build_claude_code_permissions,
     build_codex_workspace_write,
     build_denial_message,
@@ -38,12 +41,27 @@ class TestTD1TD2DenyRulesPreBuild:
     def test_src_and_tests_denied(self, phase: str) -> None:
         deny = build_claude_code_permissions(phase)["deny"]
         assert isinstance(deny, list)
-        assert set(deny) == {
+        # The file-tool denies are always present; #651 adds the shell write
+        # shapes on top (exact composition is pinned by the test below).
+        assert set(deny) >= {
             "Write(src/**)",
             "Edit(src/**)",
             "Write(tests/**)",
             "Edit(tests/**)",
         }
+
+    @pytest.mark.parametrize("phase", PRE_BUILD)
+    def test_shell_write_shapes_denied(self, phase: str) -> None:
+        """#651 — the deny list is the file-tool denies plus the shell forms."""
+        deny = build_claude_code_permissions(phase)["deny"]
+        assert isinstance(deny, list)
+        assert set(deny) == set(DENIED_PHASE_DENY_PATTERNS)
+        # Composition invariant: the file-tool denies are a subset, and the
+        # shell shapes are pure ``Bash(...)`` rules on top of them.
+        assert set(DENY_PATTERNS) | set(SHELL_WRITE_DENY_PATTERNS) == set(
+            DENIED_PHASE_DENY_PATTERNS
+        )
+        assert all(rule.startswith("Bash(") for rule in SHELL_WRITE_DENY_PATTERNS)
 
     def test_denied_phase_set_is_an_explicit_allowlist(self) -> None:
         """Not 'deny unless build' — qa/ship must not be swept in."""
@@ -80,7 +98,7 @@ class TestTD3DenialMessage:
 
 # ---------------------------------------------------------------------------
 # TD4 — docs/** writable in all pre-build phases
-# TD5 — no Bash deny rule
+# TD5 — shell write shapes denied (#651); still phase discipline, not a sandbox
 # ---------------------------------------------------------------------------
 
 
@@ -98,11 +116,19 @@ class TestTD4TD5NonGoals:
         assert "docs/" in roots
 
     @pytest.mark.parametrize("phase", PRE_BUILD)
-    def test_no_bash_deny_rule(self, phase: str) -> None:
-        """A shell defeats deny rules; this is phase discipline, not a sandbox."""
+    def test_obvious_shell_writes_denied(self, phase: str) -> None:
+        """#651 — the common shell write shapes are denied in pre-build phases.
+
+        The old TD5 (no Bash deny at all) is superseded: prevention of shell
+        bypass is a losing arms race, so the patterns cover only the *obvious*
+        shapes to raise the cost of an accidental bypass. Exotic forms are
+        caught post-hoc by the ``denied_phase_writes`` phase-exit gate — this
+        is still phase discipline, not a sandbox.
+        """
         deny = build_claude_code_permissions(phase)["deny"]
         assert isinstance(deny, list)
-        assert not any("Bash" in rule for rule in deny)
+        bash_rules = [rule for rule in deny if rule.startswith("Bash(")]
+        assert bash_rules == list(SHELL_WRITE_DENY_PATTERNS)
 
 
 # ---------------------------------------------------------------------------
