@@ -366,7 +366,11 @@ class TestTaskRouting:
         assert store is not None, "no state store bound — is _bound_state_store active?"
         scoped = scoped_state_store(store, root)
         for n in names:
-            scoped.put_contract(n, phase=phase, slug=n, body=f"# {n}\n", status="active")
+            # Contract ids carry the phase subpath (build/01-cache) — the same
+            # shape the production CLI writes (contract_id = f"{phase}/{slug}").
+            scoped.put_contract(
+                f"{phase}/{n}", phase=phase, slug=n, body=f"# {n}\n", status="active"
+            )
 
     def test_task_next_writes_the_cursor_file_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.api.state_router import scoped_state_store
@@ -376,12 +380,12 @@ class TestTaskRouting:
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
         result = run_task_next(tmp_path)
         assert result["ok"] is True
-        assert result["cursor"] == "active/build/01-cache.md"
+        assert result["cursor"] == "active/build/build/01-cache.md"
         # Cursor is now stored in the DuckDB store (scoped to tmp_path), not disk.
         store = process_store()
         assert store is not None
         view = scoped_state_store(store, tmp_path)
-        assert view.read("cursor") == "active/build/01-cache.md"
+        assert view.read("cursor") == "active/build/build/01-cache.md"
 
     def test_task_next_returns_service_result_when_up(self, tmp_path: Path) -> None:
         """When the service is up, task next routes cursor write through HTTP."""
@@ -394,11 +398,11 @@ class TestTaskRouting:
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
         # _read_cursor now reads from the store (not disk), so seed both.
         cursor_file = tmp_path / ".agentalloy" / "cursor"
-        cursor_file.write_text("active/build/01-cache.md", encoding="utf-8")
+        cursor_file.write_text("active/build/build/01-cache.md", encoding="utf-8")
         store = process_store()
         assert store is not None
         view = scoped_state_store(store, tmp_path)
-        view.write("cursor", "active/build/01-cache.md")
+        view.write("cursor", "active/build/build/01-cache.md")
 
         with patch.object(StateClient, "is_running", return_value=True):
             with patch.object(StateClient, "set_cursor") as mock_set_cursor:
@@ -406,16 +410,110 @@ class TestTaskRouting:
                 result = run_task_next(tmp_path)
                 assert result["ok"] is True
                 # run_task_next returns the computed cursor, not the service result.
-                assert result["cursor"] == "active/build/02-api.md"
-                mock_set_cursor.assert_called_once_with("active/build/02-api.md")
+                assert result["cursor"] == "active/build/build/02-api.md"
+                mock_set_cursor.assert_called_once_with("active/build/build/02-api.md")
+
+    def test_task_next_reads_the_cursor_over_http_when_unbound(self, tmp_path: Path) -> None:
+        """Regression: an unbound CLI process must read the cursor over HTTP.
+
+        The store handle belongs to the service process; the CLI binds none.
+        When ``task next`` read the cursor in-process only, it saw ``None``
+        and reset the cursor to task 1 on every call — even though
+        ``_store_cursor`` had just written the advance through HTTP.
+        """
+        from agentalloy.install.subcommands.task import run_task_next
+        from agentalloy.storage.state_store import bind_process_store, process_store
+
+        TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
+        saved = process_store()
+        bind_process_store(None)  # the CLI process holds no store
+        try:
+            with (
+                patch.object(StateClient, "is_running", return_value=True),
+                patch.object(StateClient, "get_phase", return_value={"value": "build"}),
+                patch.object(
+                    StateClient,
+                    "list_contracts",
+                    return_value=[
+                        {"contract_id": "build/01-cache"},
+                        {"contract_id": "build/02-api"},
+                    ],
+                ),
+                patch.object(StateClient, "get_scoped_cursor", return_value=None),
+                # The cursor a prior `task next` wrote through HTTP.
+                patch.object(
+                    StateClient, "get_state", return_value="active/build/build/01-cache.md"
+                ),
+                patch.object(StateClient, "set_cursor") as mock_set_cursor,
+            ):
+                result = run_task_next(tmp_path)
+            assert result["ok"] is True
+            # Advanced from the HTTP-read cursor — not reset to the first task.
+            assert result["cursor"] == "active/build/build/02-api.md"
+            mock_set_cursor.assert_called_once_with("active/build/build/02-api.md")
+        finally:
+            bind_process_store(saved)
+
+    def test_task_next_prefers_the_scoped_cursor_when_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Out-of-process, the read mirrors the proxy: the scoped row wins.
+
+        A session-scoped cursor written for this CLI session's key must be
+        what ``task next`` advances from, not the shared cursor the proxy
+        falls back to for keyless sessions.
+        """
+        from agentalloy.install.subcommands.task import run_task_next
+        from agentalloy.storage.state_store import bind_process_store, process_store
+
+        TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api", "03-log"])
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-scoped")
+        saved = process_store()
+        bind_process_store(None)
+        try:
+            with (
+                patch.object(StateClient, "is_running", return_value=True),
+                patch.object(StateClient, "get_phase", return_value={"value": "build"}),
+                patch.object(
+                    StateClient,
+                    "list_contracts",
+                    return_value=[
+                        {"contract_id": "build/01-cache"},
+                        {"contract_id": "build/02-api"},
+                        {"contract_id": "build/03-log"},
+                    ],
+                ),
+                patch.object(
+                    StateClient,
+                    "get_scoped_cursor",
+                    return_value="active/build/build/02-api.md",
+                ),
+                patch.object(
+                    StateClient,
+                    "get_state",
+                    return_value="active/build/build/01-cache.md",
+                ) as mock_shared,
+                patch.object(StateClient, "set_cursor"),
+            ):
+                result = run_task_next(tmp_path)
+            assert result["ok"] is True
+            assert result["cursor"] == "active/build/build/03-log.md"
+            mock_shared.assert_not_called()
+        finally:
+            bind_process_store(saved)
 
     def test_task_start_resolves_a_named_contract(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.task import run_task_start
 
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
+        # The bare filename stem works even though contract_id is phase-prefixed.
         result = run_task_start("02-api", tmp_path)
         assert result["ok"] is True
-        assert result["cursor"] == "active/build/02-api.md"
+        assert result["cursor"] == "active/build/build/02-api.md"
+        # The full contract id is accepted too.
+        result = run_task_start("build/01-cache", tmp_path)
+        assert result["ok"] is True
+        assert result["cursor"] == "active/build/build/01-cache.md"
 
     def test_task_status_reports_the_started_contract(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.task import run_task_start, run_task_status
@@ -424,7 +522,66 @@ class TestTaskRouting:
         run_task_start("01-cache", tmp_path)
         result = run_task_status(tmp_path)
         assert result["ok"] is True
-        assert result["cursor"] == "active/build/01-cache.md"
+        assert result["cursor"] == "active/build/build/01-cache.md"
+
+    def test_task_next_never_resets_across_consecutive_calls(self, tmp_path: Path) -> None:
+        """Regression: back-to-back `task next` calls advance 1 → 2 → done.
+
+        The reported bug: every call reset the cursor to task 1.  It had two
+        causes, each independently sufficient — the CLI read the cursor
+        in-process only (always ``None`` out-of-process), and it matched the
+        cursor's bare filename against phase-prefixed contract ids.  The
+        mocked HTTP read here reflects what the previous call wrote, exactly
+        like the real service.
+        """
+        from agentalloy.install.subcommands.task import run_task_next
+        from agentalloy.storage.state_store import bind_process_store, process_store
+
+        TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
+        saved = process_store()
+        bind_process_store(None)  # the CLI process holds no store
+        written: dict[str, str | None] = {"cursor": None}
+        try:
+            with (
+                patch.object(StateClient, "is_running", return_value=True),
+                patch.object(StateClient, "get_phase", return_value={"value": "build"}),
+                patch.object(
+                    StateClient,
+                    "list_contracts",
+                    return_value=[
+                        {"contract_id": "build/01-cache"},
+                        {"contract_id": "build/02-api"},
+                    ],
+                ),
+                patch.object(StateClient, "get_scoped_cursor", return_value=None),
+                patch.object(
+                    StateClient,
+                    "get_state",
+                    side_effect=lambda kind: written["cursor"] if kind == "cursor" else None,
+                ),
+                patch.object(
+                    StateClient,
+                    "set_cursor",
+                    side_effect=lambda value: written.__setitem__("cursor", value),
+                ),
+            ):
+                first = run_task_next(tmp_path)
+                assert first["ok"] is True
+                assert first["cursor"] == "active/build/build/01-cache.md"
+                assert first["index"] == 1
+
+                # The second call reads the first call's write — pre-fix it
+                # saw no cursor and rewrote task 1.
+                second = run_task_next(tmp_path)
+                assert second["ok"] is True
+                assert second["cursor"] == "active/build/build/02-api.md"
+                assert second["index"] == 2
+
+                third = run_task_next(tmp_path)
+                assert third["ok"] is True
+                assert third["done"] is True
+        finally:
+            bind_process_store(saved)
 
 
 # ---------------------------------------------------------------------------
