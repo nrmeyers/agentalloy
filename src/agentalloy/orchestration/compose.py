@@ -447,7 +447,11 @@ def _format_group(title: str, fragments: list[ActiveFragment]) -> str:
     for skill_id in order:
         chunks.append(f"\n## skill: {skill_id}\n")
         for f in by_skill[skill_id]:
-            chunks.append(f"### {f.fragment_type} — {f.fragment_id}\n")
+            # fragment_id is {skill_id}-v1-f{n} — the skill part duplicates the
+            # ## header and the sequence number carries no inference signal, so
+            # the header is the fragment type only (token waste removed, 2026-09
+            # retrieval audit slice 1).
+            chunks.append(f"### {f.fragment_type}\n")
             chunks.append(f.content.strip())
             chunks.append("")
     return "\n".join(chunks).strip()
