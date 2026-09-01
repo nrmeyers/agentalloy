@@ -294,13 +294,21 @@ class TestClaudeCodeUnwireCleanup:
     def test_unwire_removes_posture_blocks(self, tmp_path: Path) -> None:
         """Unwire removes the enforcement-posture permissions block AgentAlloy wrote.
 
-        Both shapes — the denied-phase deny list and the unlocked ``[]`` — are
-        recognized; a posture left behind would keep denying writes after unwire.
+        All shapes — the current denied-phase deny list, the pre-#651 file-tool
+        list, and the unlocked ``[]`` — are recognized; a posture left behind
+        would keep denying writes after unwire.
         """
         from agentalloy.install.subcommands import uninstall_proxy
-        from agentalloy.providers.base import DENY_PATTERNS
+        from agentalloy.providers.base import (
+            DENIED_PHASE_DENY_PATTERNS,
+            DENY_PATTERNS,
+        )
 
-        for posture in ({"deny": list(DENY_PATTERNS)}, {"deny": []}):
+        for posture in (
+            {"deny": list(DENIED_PHASE_DENY_PATTERNS)},
+            {"deny": list(DENY_PATTERNS)},
+            {"deny": []},
+        ):
             claude = tmp_path / ".claude"
             claude.mkdir(exist_ok=True)
             settings = claude / "settings.local.json"
@@ -313,13 +321,13 @@ class TestClaudeCodeUnwireCleanup:
         """Full wire→posture→unwire flow leaves no settings.local.json behind."""
         from agentalloy.install.subcommands import uninstall_proxy
         from agentalloy.install.subcommands.wire_harness import _apply_claude_code_posture
-        from agentalloy.providers.base import DENY_PATTERNS
+        from agentalloy.providers.base import DENIED_PHASE_DENY_PATTERNS
 
         wire_compat("claude-code", port=7070, root=tmp_path)
         _apply_claude_code_posture(tmp_path, "spec")  # denied phase → deny list
         settings = tmp_path / ".claude" / "settings.local.json"
         data = json.loads(settings.read_text())
-        assert data["permissions"] == {"deny": list(DENY_PATTERNS)}  # precondition
+        assert data["permissions"] == {"deny": list(DENIED_PHASE_DENY_PATTERNS)}  # precondition
 
         uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
         assert not settings.exists()  # both AgentAlloy blocks gone → file removed

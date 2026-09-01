@@ -11,7 +11,10 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from agentalloy.providers.base import DENY_PATTERNS
+from agentalloy.providers.base import (
+    DENIED_PHASE_DENY_PATTERNS,
+    DENY_PATTERNS,
+)
 
 
 def _remove_sentinel_block(content: str) -> str:
@@ -190,8 +193,12 @@ def _is_posture_permissions(value: Any) -> bool:
     """True iff *value* is exactly an AgentAlloy enforcement-posture block.
 
     ``_apply_claude_code_posture`` writes ``data["permissions"]`` as either
-    ``{"deny": []}`` (unlocked) or ``{"deny": list(DENY_PATTERNS)}`` (denied
-    phase) — a single ``deny`` key holding one of those two values. Anything
+    ``{"deny": []}`` (unlocked) or ``{"deny": list(DENIED_PHASE_DENY_PATTERNS)}``
+    (denied phase — file-tool denies plus the ``Bash(...)`` shell write
+    shapes) — a single ``deny`` key holding one of those two values. The
+    pre-#651 posture (``{"deny": list(DENY_PATTERNS)}`` — file-tool denies
+    only) is also recognized so installs wired by an older AgentAlloy are
+    cleanly unwired instead of leaving a stale deny list behind. Anything
     else (allow lists, custom patterns, extra keys) is user-owned.
     """
     if not isinstance(value, dict):
@@ -199,7 +206,11 @@ def _is_posture_permissions(value: Any) -> bool:
     perms = cast("dict[str, Any]", value)
     if set(perms) != {"deny"}:
         return False
-    return perms["deny"] == [] or perms["deny"] == list(DENY_PATTERNS)
+    return (
+        perms["deny"] == []
+        or perms["deny"] == list(DENIED_PHASE_DENY_PATTERNS)
+        or perms["deny"] == list(DENY_PATTERNS)
+    )
 
 
 def _unwire_proxy_claude_code_settings(root: Path) -> list[Path]:

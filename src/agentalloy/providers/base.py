@@ -259,6 +259,28 @@ DENY_PATTERNS: tuple[str, ...] = (
     "Edit(tests/**)",
 )
 
+# Shell write shapes denied via ``Bash(...)`` during pre-build phases (#651).
+# The declared write tools are denied above, but the shell left the same
+# capability reachable (``cat >``, ``sed -i``, ``tee``, ``python -c``).  This
+# is a deliberate non-goals boundary: prevention is a losing arms race — these
+# patterns cover the obvious shapes to raise the cost of *accidental* bypass,
+# and the phase-advance post-hoc check (gates.py) is the backstop for the
+# uncommon ones.
+SHELL_WRITE_DENY_PATTERNS: tuple[str, ...] = (
+    "Bash(cat >*)",
+    "Bash(cat >>*)",
+    "Bash(tee *)",
+    "Bash(sed -i*)",
+    "Bash(echo *>*)",
+    "Bash(echo *>>*)",
+    "Bash(printf *>*)",
+    "Bash(python -c*)",
+    "Bash(python3 -c*)",
+)
+
+# Full denied-phase posture: file-tool denies plus the shell write shapes.
+DENIED_PHASE_DENY_PATTERNS: tuple[str, ...] = DENY_PATTERNS + SHELL_WRITE_DENY_PATTERNS
+
 # Codex writable_roots during pre-build phases (docs stay writable).
 CODEX_ALLOWED_ROOTS: tuple[str, ...] = ("docs/", ".agentalloy/")
 
@@ -337,15 +359,18 @@ def build_claude_code_permissions(
 ) -> dict[str, object]:
     """Build the ``permissions`` block for ``.claude/settings.local.json``.
 
-    During denied phases returns ``{"deny": [...patterns]}``; during all other
-    phases returns ``{"deny": []}`` (posture present but unlocked).
+    During denied phases returns ``{"deny": [...patterns]}`` — the file-tool
+    denies (``Write``/``Edit`` on src/tests) plus the ``Bash(...)`` shell
+    write shapes (#651); during all other phases returns ``{"deny": []}``
+    (posture present but unlocked).
 
     When *pause_mode* is ``True`` (repo is in pause mode), deny rules are
-    skipped entirely so the LLM retains full write access regardless of phase.
+    skipped entirely so the LLM retains full write access regardless of
+    phase.
     """
     if pause_mode or phase not in DENIED_PHASES:
         return {"deny": []}
-    return {"deny": list(DENY_PATTERNS)}
+    return {"deny": list(DENIED_PHASE_DENY_PATTERNS)}
 
 
 def build_codex_workspace_write(
