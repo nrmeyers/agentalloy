@@ -11,8 +11,11 @@ from agentalloy.lm_client import LMModelNotLoaded
 from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
     _apply_card_boost,  # pyright: ignore[reportPrivateUsage]
+    _reserved_head,  # pyright: ignore[reportPrivateUsage]
     _rrf_fuse,  # pyright: ignore[reportPrivateUsage]
+    _top_skill_depth,  # pyright: ignore[reportPrivateUsage]
     diversity_select,
+    phase_type_priority,
     retrieve_domain_candidates,
     skill_granular_select,
 )
@@ -218,8 +221,13 @@ def test_skill_granular_sibling_cannibalization_regression() -> None:
     assert len(selected) == 4
 
 
-def test_skill_granular_round_robin_allocation() -> None:
-    # 2 skills × 3 fragments each, k=4 → each skill contributes exactly 2 fragments.
+def test_skill_granular_round_robin_allocation_legacy_depth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Legacy depth (LM_ASSIST_TOP_SKILL_DEPTH=0 → k // 2 = 2): 2 skills × 3
+    # fragments each, k=4 → each skill contributes exactly 2 fragments. Pins
+    # the kill-switch behavior the env knob restores.
+    monkeypatch.setenv("LM_ASSIST_TOP_SKILL_DEPTH", "0")
     pool = [
         _fake_skill("S1-e", "execution", "skill-one"),
         _fake_skill("S2-e", "execution", "skill-two"),
@@ -240,10 +248,11 @@ def test_skill_granular_round_robin_allocation() -> None:
 
 
 def test_skill_granular_top_skill_depth_guarantee() -> None:
-    # 4 skills × 3 fragments each, k=4 → the top-ranked skill gets k//2 = 2
-    # slots (depth guarantee); the next two skills get 1 each (breadth);
-    # the 4th skill is squeezed out. Strict 1-per-skill round-robin starved
-    # the gold skill of its convention-bearing fragments.
+    # 4 skills × 3 fragments each, k=4 → the top-ranked skill gets
+    # _top_skill_depth(k) = min(3, k-1) = 3 slots (depth guarantee); the next
+    # skill gets 1 (breadth); the 3rd and 4th skills are squeezed out.
+    # Strict 1-per-skill round-robin (and the legacy k//2) starved the gold
+    # skill of its convention-bearing fragments.
     pool = []
     for sid in ["gold", "sib-a", "sib-b", "sib-c"]:
         for i, ftype in enumerate(["execution", "setup", "verification"]):
@@ -255,9 +264,9 @@ def test_skill_granular_top_skill_depth_guarantee() -> None:
     from collections import Counter
 
     counts = Counter(f.skill_id for f in selected)
-    assert counts["gold"] == 2
+    assert counts["gold"] == 3
     assert counts["sib-a"] == 1
-    assert counts["sib-b"] == 1
+    assert "sib-b" not in counts
     assert "sib-c" not in counts
     assert skills_ranked[0] == "gold"
 
@@ -325,6 +334,162 @@ def test_skill_granular_empty_input() -> None:
     selected, skills_ranked = skill_granular_select([], k=5)
     assert selected == []
     assert skills_ranked == []
+
+
+# -------- top-skill depth knob (slice 1-E) --------
+
+
+def test_top_skill_depth_default_and_cap() -> None:
+    # Default depth 3, capped at k - 1 so breadth always keeps a slot while a
+    # second skill exists. Odd k rounds up vs legacy (5 // 2 == 2 → 3).
+    assert _top_skill_depth(1) == 0
+    assert _top_skill_depth(2) == 1
+    assert _top_skill_depth(4) == 3
+    assert _top_skill_depth(5) == 3
+    assert _top_skill_depth(8) == 3  # capped, not 8 // 2 == 4
+
+
+def test_top_skill_depth_env_zero_restores_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LM_ASSIST_TOP_SKILL_DEPTH", "0")
+    assert _top_skill_depth(4) == 2
+    assert _top_skill_depth(5) == 2
+    assert _top_skill_depth(1) == 0
+
+
+def test_top_skill_depth_env_override_and_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LM_ASSIST_TOP_SKILL_DEPTH", "1")
+    assert _top_skill_depth(4) == 1
+    monkeypatch.setenv("LM_ASSIST_TOP_SKILL_DEPTH", "99")
+    assert _top_skill_depth(4) == 3  # capped at k - 1
+    monkeypatch.setenv("LM_ASSIST_TOP_SKILL_DEPTH", "not-an-int")
+    assert _top_skill_depth(4) == 3  # malformed → default
+
+
+# -------- phase-aware type priorities (slice 1-C) --------
+
+
+def test_phase_type_priority_map_and_fallbacks() -> None:
+    assert phase_type_priority("intake") == ("rationale", "setup", "verification")
+    assert phase_type_priority("spec") == ("rationale", "setup", "verification")
+    assert phase_type_priority("design") == ("setup", "rationale", "execution")
+    assert phase_type_priority("build") == ("setup", "execution", "verification")
+    assert phase_type_priority("qa") == ("verification", "execution", "setup")
+    assert phase_type_priority("ship") == ("verification", "guardrail", "setup")
+    # None and unlisted phases fall back to the default build triple.
+    assert phase_type_priority(None) == ("setup", "execution", "verification")
+    assert phase_type_priority("sdd-flow") == ("setup", "execution", "verification")
+
+
+def test_skill_granular_priority_parameter_orders_within_skill() -> None:
+    # qa-style priority: verification outranks the skill's own rank order, so
+    # a setup-headed queue yields its verification fragment first.
+    pool = [
+        _fake_skill("g-0", "setup", "gold"),
+        _fake_skill("g-1", "execution", "gold"),
+        _fake_skill("g-2", "verification", "gold"),
+        _fake_skill("s-0", "setup", "sib"),
+    ]
+    selected, _ = skill_granular_select(
+        pool, k=3, priority=("verification", "execution", "setup")
+    )
+    # depth = min(3, k-1) = 2 → both depth slots from gold, verification first.
+    assert [f.fragment_type for f in selected[:2]] == ["verification", "execution"]
+    # The default build triple takes setup first on this queue.
+    selected_default, _ = skill_granular_select(pool, k=3)
+    assert selected_default[0].fragment_type == "setup"
+
+
+def test_retrieve_wires_phase_priority_to_selection(
+    populated: OverGraphSkillStore,
+    populated_vectors: FragmentStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The BM25 fallback routes through skill_granular_select with the
+    # phase-keyed priority, not the build triple.
+    monkeypatch.setattr(domain_module.embedding_breaker, "allow_request", lambda: False)
+    captured: dict[str, object] = {}
+
+    def _capture(ranked: object, k: int, **kwargs: object) -> tuple[list, list[str]]:
+        captured.update(kwargs)
+        out = ranked[:k]  # type: ignore[index]
+        return out, []
+
+    monkeypatch.setattr(domain_module, "skill_granular_select", _capture)
+
+    retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="qa",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+    assert captured["priority"] == ("verification", "execution", "setup")
+    assert captured["demoted_skill_ids"] == frozenset()
+
+
+# -------- top-skill head reservation (slice 1-E) --------
+
+
+def test_reserved_head_pulls_top_skill_from_past_cap() -> None:
+    # Fused pool interleaves near-tied siblings: the top skill holds only 1 of
+    # the top 4 positionally; reserve=3 pulls its next-highest fragments in,
+    # evicting the lowest-positioned non-top fragments, result in rank order.
+    ranked = [
+        _fake_skill("g-0", "setup", "gold"),
+        _fake_skill("s1-0", "setup", "sib-1"),
+        _fake_skill("s2-0", "setup", "sib-2"),
+        _fake_skill("s3-0", "setup", "sib-3"),
+        _fake_skill("g-1", "execution", "gold"),
+        _fake_skill("s4-0", "setup", "sib-4"),
+        _fake_skill("g-2", "verification", "gold"),
+    ]
+    head = _reserved_head(ranked, cap=4, reserve=3)
+    assert [f.fragment_id for f in head] == ["g-0", "s1-0", "g-1", "g-2"]
+
+
+def test_reserved_head_zero_is_legacy_slice() -> None:
+    ranked = [
+        _fake_skill("g-0", "setup", "gold"),
+        _fake_skill("s1-0", "setup", "sib-1"),
+        _fake_skill("s2-0", "setup", "sib-2"),
+        _fake_skill("s3-0", "setup", "sib-3"),
+        _fake_skill("g-1", "execution", "gold"),
+    ]
+    assert [f.fragment_id for f in _reserved_head(ranked, cap=4, reserve=0)] == [
+        "g-0",
+        "s1-0",
+        "s2-0",
+        "s3-0",
+    ]
+    # Pool no longer than cap → positional slice regardless of reserve.
+    assert [f.fragment_id for f in _reserved_head(ranked[:3], cap=4, reserve=3)] == [
+        "g-0",
+        "s1-0",
+        "s2-0",
+    ]
+
+
+def test_reserved_head_noop_when_reserve_met() -> None:
+    ranked = [
+        _fake_skill("g-0", "setup", "gold"),
+        _fake_skill("g-1", "execution", "gold"),
+        _fake_skill("g-2", "verification", "gold"),
+        _fake_skill("s1-0", "setup", "sib-1"),
+        _fake_skill("s2-0", "setup", "sib-2"),
+    ]
+    assert [f.fragment_id for f in _reserved_head(ranked, cap=4, reserve=3)] == [
+        "g-0",
+        "g-1",
+        "g-2",
+        "s1-0",
+    ]
 
 
 def test_skill_granular_skills_ranked_populated_on_retrieval(

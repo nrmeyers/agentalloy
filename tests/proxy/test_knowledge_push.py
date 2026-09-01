@@ -163,9 +163,7 @@ def test_defers_only_when_promoted_fragment_in_composed_text(
     # a solutions-sourced decision -> slug "foo" -> skill_id "foo-lesson"
     _seed_one(store, "docs/solutions/foo.md::d")
     # promoted skill present in this turn's composed text -> defer -> None
-    composed = (
-        "# Domain fragments\n\n## skill: foo-lesson\n\n### rationale — foo-lesson-v1-f1\nwhy\n"
-    )
+    composed = "# Domain fragments\n\n## skill: foo-lesson\n\n### rationale\nwhy\n"
     assert build_decision_block(contract(["pkg/a.py"]), composed, store) is None
     # skill absent from composed text -> pushed (the D1 no-silent-gap case)
     push = build_decision_block(contract(["pkg/a.py"]), "## skill: something-else\n", store)

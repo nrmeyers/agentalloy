@@ -145,6 +145,28 @@ def _deepen_band() -> float:
         return _DEEPEN_BAND_DEFAULT
 
 
+_TOP_SKILL_DEPTH_DEFAULT = 3
+
+
+def _top_skill_depth(k: int) -> int:
+    """Stage 1 depth for the top-ranked skill (``skill_granular_select``).
+
+    Default 3, capped at ``k - 1`` so breadth always keeps at least one slot
+    while a second skill exists (k=1 → 0, k=2 → 1, k=4 → 3). The legacy value
+    was ``k // 2`` — at k=4 the gold skill's convention-bearing setup/execution
+    fragments sat at ranks 2–3 and never reached the prompt (2026-08 retrieval
+    audit: gold skill won 1 of 4 slots on the leak tasks).
+    ``LM_ASSIST_TOP_SKILL_DEPTH=0`` (or malformed) restores the legacy ``k // 2``.
+    """
+    try:
+        desired = int(_os.environ.get("LM_ASSIST_TOP_SKILL_DEPTH", _TOP_SKILL_DEPTH_DEFAULT))
+    except ValueError:
+        desired = _TOP_SKILL_DEPTH_DEFAULT
+    if desired <= 0:
+        return k // 2
+    return min(desired, k - 1)
+
+
 # E5 — contract_tags as a soft domain filter (ships on; empty-fallback safe).
 def _contract_tag_filter_enabled() -> bool:
     return _os.environ.get("AGENTALLOY_CONTRACT_TAG_FILTER", "on").strip().lower() != "off"
@@ -367,6 +389,33 @@ class FragmentSource(Protocol):
 # Order of preference for structural diversity during reshuffle.
 _DIVERSITY_PRIORITY: tuple[str, ...] = ("setup", "execution", "verification")
 
+# Phase-aware diversity priorities (retrieval audit 2026-08, slice 1-C): the
+# build-shaped triple above biases the wrong fragment classes in the other
+# phases — qa/ship want verification/guardrail first (that is the work), intake
+# and spec want rationale (decision context) before code, design wants setup
+# (skeleton) before execution detail. Phase values outside the map (plan,
+# sdd-fast, add-skill, sdd-flow) fall back to the default triple.
+_PHASE_TYPE_PRIORITY: dict[str, tuple[str, ...]] = {
+    "intake": ("rationale", "setup", "verification"),
+    "spec": ("rationale", "setup", "verification"),
+    "design": ("setup", "rationale", "execution"),
+    "build": ("setup", "execution", "verification"),
+    "qa": ("verification", "execution", "setup"),
+    "ship": ("verification", "guardrail", "setup"),
+}
+
+
+def phase_type_priority(phase: str | None) -> tuple[str, ...]:
+    """Diversity-priority tuple for a compose phase (default: the build triple).
+
+    ``None`` and unknown phase names fall back to ``_DIVERSITY_PRIORITY`` so a
+    caller that drops the phase (e.g. the BM25-only fallback before the phase
+    is known) degrades to today's behavior rather than guessing.
+    """
+    if phase is None:
+        return _DIVERSITY_PRIORITY
+    return _PHASE_TYPE_PRIORITY.get(phase, _DIVERSITY_PRIORITY)
+
 
 @dataclass(frozen=True)
 class RetrievalResult:
@@ -572,6 +621,7 @@ def _bm25_fallback_result(
             scores_by_id=scores_by_id,
             deepen_band=_deepen_band(),
             demoted_skill_ids=demoted_skill_ids,
+            priority=phase_type_priority(phase),
         )
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
     return EmbeddingErrorResult(
@@ -893,6 +943,7 @@ def retrieve_domain_candidates(
                 scores_by_id=(lm_detail.scores if lm_detail else None),
                 deepen_band=_deepen_band(),
                 demoted_skill_ids=demoted_skill_ids,
+                priority=phase_type_priority(phase),
             )
         else:
             selected, skills_ranked = skill_granular_select(
@@ -901,6 +952,7 @@ def retrieve_domain_candidates(
                 scores_by_id=scores_by_id,
                 deepen_band=_deepen_band(),
                 demoted_skill_ids=demoted_skill_ids,
+                priority=phase_type_priority(phase),
             )
 
         # Additive tail: re-append graph neighbors dropped by the k-cap so they
@@ -1052,6 +1104,65 @@ class _LMArbitrationDetail:
     scores: dict[str, float]
 
 
+_TOP_SKILL_HEAD_RESERVE_DEFAULT = 3
+
+
+def _top_skill_head_reserve() -> int:
+    """How many top-skill fragments the Stage B scored head must contain.
+
+    ``LM_ASSIST_TOP_SKILL_HEAD_RESERVE`` (default 3; 0 restores the legacy
+    positional slice). Malformed falls back to the default.
+    """
+    try:
+        return max(
+            0,
+            int(
+                _os.environ.get("LM_ASSIST_TOP_SKILL_HEAD_RESERVE", _TOP_SKILL_HEAD_RESERVE_DEFAULT)
+            ),
+        )
+    except ValueError:
+        return _TOP_SKILL_HEAD_RESERVE_DEFAULT
+
+
+def _reserved_head(ranked: list[ActiveFragment], cap: int, reserve: int) -> list[ActiveFragment]:
+    """Positional top-``cap`` head with a top-skill reservation.
+
+    The fused pool interleaves fragments of near-tied sibling skills, so a plain
+    ``ranked[:cap]`` can hold only one fragment of the #1 skill — its #2/#3
+    (often the convention-bearing setup/execution fragments) never get scored
+    and the downstream depth guarantee has nothing to deepen (measured: gold
+    skill won 1 of 4 slots at k=4). This keeps the positional slice but, when the
+    top-ranked skill holds fewer than ``reserve`` fragments in it, pulls its
+    next-highest fused fragments in from past the cap, displacing the
+    lowest-positioned non-top-skill fragments. The returned head stays in fused
+    rank order. ``reserve <= 0`` (or a pool no longer than ``cap``) reproduces
+    the legacy positional slice exactly.
+    """
+    if not ranked or len(ranked) <= cap or reserve <= 0:
+        return list(ranked[:cap])
+    top_skill = ranked[0].skill_id
+    base = list(ranked[:cap])
+    have = sum(1 for f in base if f.skill_id == top_skill)
+    if have >= reserve:
+        return base
+    need = reserve - have
+    missing = [f for f in ranked[cap:] if f.skill_id == top_skill][:need]
+    if not missing:
+        return base
+    # Evict from the tail (lowest fused positions), never the top skill's own.
+    evicted = 0
+    while evicted < len(missing):
+        frag = base.pop()
+        if frag.skill_id == top_skill:
+            base.append(frag)
+            break
+        evicted += 1
+    base.extend(missing[:evicted])
+    pos = {f.fragment_id: i for i, f in enumerate(ranked)}
+    base.sort(key=lambda f: pos[f.fragment_id])
+    return base
+
+
 def _maybe_lm_arbitrate(
     ranked: list[ActiveFragment],
     query: str,
@@ -1097,7 +1208,10 @@ def _maybe_lm_arbitrate(
         # Nothing to arbitrate; let the (also-empty) deterministic path run.
         return None, LMAssistOutcome.DISABLED, None
 
-    head = ranked[: max_candidates()]
+    # Reserved head: the top-ranked skill keeps up to ``reserve`` of its
+    # highest fused fragments in the scored set even when siblings interleave
+    # them past the positional cap (reserve=0 → legacy positional slice).
+    head = _reserved_head(ranked, max_candidates(), _top_skill_head_reserve())
     # Document = skill identity + fragment body, same framing as Stage A: bare
     # fragment prose often omits the skill's topic, which short tasks carry.
     documents = [f"{f.skill_id.replace('-', ' ')}: {f.content}" for f in head]
@@ -1132,13 +1246,18 @@ def _maybe_lm_arbitrate(
     return survivors, LMAssistOutcome.HIT, detail
 
 
-def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]:
+def diversity_select(
+    pool: list[ActiveFragment],
+    k: int,
+    *,
+    priority: tuple[str, ...] = _DIVERSITY_PRIORITY,
+) -> list[ActiveFragment]:
     """Greedy selection that favors unseen fragment_types from the priority set.
 
-    When a priority type (setup, execution, verification) is not yet represented
-    in ``selected``, prefer the highest-scoring candidate of that type. Otherwise
-    fall back to the next highest-scoring candidate regardless of type. Already-
-    selected fragments are never re-picked.
+    When a ``priority`` type (default: setup, execution, verification) is not yet
+    represented in ``selected``, prefer the highest-scoring candidate of that
+    type. Otherwise fall back to the next highest-scoring candidate regardless
+    of type. Already-selected fragments are never re-picked.
     """
     selected: list[ActiveFragment] = []
     selected_types: set[str] = set()
@@ -1148,7 +1267,7 @@ def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]
     while len(selected) < k and remaining:
         chosen_index: int | None = None
         # First pass: pick a priority type not yet selected.
-        for ptype in _DIVERSITY_PRIORITY:
+        for ptype in priority:
             if ptype in selected_types:
                 continue
             for i, frag in enumerate(remaining):
@@ -1174,6 +1293,7 @@ def skill_granular_select(
     scores_by_id: dict[str, float] | None = None,
     deepen_band: float = 0.0,
     demoted_skill_ids: frozenset[str] | set[str] | None = None,
+    priority: tuple[str, ...] = _DIVERSITY_PRIORITY,
 ) -> tuple[list[ActiveFragment], list[str]]:
     """Depth-guaranteed round-robin selection across skills.
 
@@ -1181,13 +1301,15 @@ def skill_granular_select(
     for free — each skill's rank = its first fragment's position in ``ranked``).
 
     Stage 1 — top-skill depth guarantee: the top-ranked skill is granted up to
-    ``k // 2`` slots before any other skill is considered. Strict 1-per-skill
+    ``_top_skill_depth(k)`` slots (default 3, capped at ``k - 1``; legacy was
+    ``k // 2``) before any other skill is considered. Strict 1-per-skill
     round-robin starved the best-matching skill of its convention-bearing
     fragments: with k=4 the gold skill contributed a single (often overview)
     fragment while three sibling skills filled the rest, so the specific
     headers/durations/API names the skill exists to teach never reached the
     prompt (measured: 2026-06 campaign, composed-vs-oracle gap concentrated in
-    exactly those criteria).
+    exactly those criteria; deepened 2026-08 after the gold skill's rank-2/3
+    fragments were still missing from k=4 selections).
 
     Stage 2 — round-robin over the NEAR sibling skills (including the top skill,
     if it has fragments left) fills the remaining slots, preventing sibling-skill
@@ -1203,10 +1325,10 @@ def skill_granular_select(
     NEAR is all siblings → byte-for-byte identical to the legacy breadth-first
     behavior.
 
-    Within each skill's queue, prefer a ``fragment_type`` from
-    ``_DIVERSITY_PRIORITY`` not yet represented in the globally selected set
-    (same logic as ``diversity_select``); otherwise take the skill's next
-    highest-ranked fragment.
+    Within each skill's queue, prefer a ``fragment_type`` from ``priority`` not
+    yet represented in the globally selected set (same logic as
+    ``diversity_select``); otherwise take the skill's next highest-ranked
+    fragment.
 
     Args:
         scores_by_id: per-fragment fused-rank scores (1 - i/n) for the lead-score
@@ -1217,6 +1339,11 @@ def skill_granular_select(
             FAR last-resort tier regardless of band — they win slots only after
             NEAR siblings are drained and the top skill is fully deepened.
             ``None``/empty == legacy.
+        priority: fragment-type preference order for the within-skill diversity
+            pick (default ``_DIVERSITY_PRIORITY``, the build triple). Callers key
+            this off the compose phase via ``phase_type_priority`` so qa/ship
+            surface verification/guardrail first and intake/spec surface
+            rationale first.
 
     Returns:
         (selected, skills_ranked) where ``skills_ranked`` is the ordered list
@@ -1224,7 +1351,7 @@ def skill_granular_select(
 
     Degenerate cases:
     - Empty input → ([], []).
-    - k <= 1 → depth stage is a no-op (k // 2 == 0); pure round-robin.
+    - k <= 1 → depth stage is a no-op (_top_skill_depth(k) == 0); pure round-robin.
     - Fewer distinct skills than k → later passes fill remaining slots from
       whichever skills still have fragments.
 
@@ -1250,12 +1377,12 @@ def skill_granular_select(
     selected_types: set[str] = set()
 
     # Stage 1: depth guarantee for the top-ranked skill (type-diverse within it).
-    depth = k // 2
+    depth = _top_skill_depth(k)
     top_queue = queues[skills_ranked[0]]
     for _ in range(depth):
         if not top_queue:
             break
-        chosen_index = _pick_diverse_index(top_queue, selected_types)
+        chosen_index = _pick_diverse_index(top_queue, selected_types, priority)
         frag = top_queue.pop(chosen_index)
         selected.append(frag)
         selected_types.add(frag.fragment_type)
@@ -1301,7 +1428,7 @@ def skill_granular_select(
             queue = queues[sid]
             if not queue:
                 continue
-            chosen_index = _pick_diverse_index(queue, selected_types)
+            chosen_index = _pick_diverse_index(queue, selected_types, priority)
             frag = queue.pop(chosen_index)
             selected.append(frag)
             selected_types.add(frag.fragment_type)
@@ -1314,7 +1441,7 @@ def skill_granular_select(
     # top skill's leftover fragments (deepen the best match).
     top_queue = queues[skills_ranked[0]]
     while len(selected) < k and top_queue:
-        chosen_index = _pick_diverse_index(top_queue, selected_types)
+        chosen_index = _pick_diverse_index(top_queue, selected_types, priority)
         frag = top_queue.pop(chosen_index)
         selected.append(frag)
         selected_types.add(frag.fragment_type)
@@ -1331,7 +1458,7 @@ def skill_granular_select(
             queue = queues[sid]
             if not queue:
                 continue
-            chosen_index = _pick_diverse_index(queue, selected_types)
+            chosen_index = _pick_diverse_index(queue, selected_types, priority)
             frag = queue.pop(chosen_index)
             selected.append(frag)
             selected_types.add(frag.fragment_type)
@@ -1342,14 +1469,18 @@ def skill_granular_select(
     return selected, skills_ranked
 
 
-def _pick_diverse_index(queue: list[ActiveFragment], selected_types: set[str]) -> int:
+def _pick_diverse_index(
+    queue: list[ActiveFragment],
+    selected_types: set[str],
+    priority: tuple[str, ...] = _DIVERSITY_PRIORITY,
+) -> int:
     """Index of the queue's best fragment under the diversity preference.
 
     Prefer the highest-ranked fragment whose ``fragment_type`` is a
-    ``_DIVERSITY_PRIORITY`` type not yet present in the globally selected set;
+    ``priority`` type not yet present in the globally selected set;
     fall back to the queue head.
     """
-    for ptype in _DIVERSITY_PRIORITY:
+    for ptype in priority:
         if ptype in selected_types:
             continue
         for i, frag in enumerate(queue):

@@ -1539,11 +1539,16 @@ class TestTransitionTriggerOffEventLoop:
         )
 
         # The loop stayed responsive while the trigger blocked a worker thread:
-        # the heartbeat kept ticking, so no single gap approaches the block.
+        # the heartbeat kept ticking. The on-loop regression signature is a gap
+        # of AT LEAST the full block (the heartbeat cannot tick while the loop
+        # is blocked, so the gap straddling the block is >= block_seconds).
+        # CI runners under load produce harmless tick jitter — a 0.19s gap was
+        # observed on a 3x-slow runner with the trigger correctly offloaded —
+        # so the threshold is the full block, not half of it.
         assert len(stops) >= 3, "heartbeat did not sample long enough"
         gaps = [b - a for a, b in zip(stops, stops[1:], strict=False)]
         max_gap = max(gaps)
-        assert max_gap < block_seconds / 2, (
+        assert max_gap < block_seconds, (
             f"event loop stalled for {max_gap:.3f}s while the trigger blocked a "
             f"worker thread for {block_seconds:.2f}s — the trigger is still "
             f"running on the event loop (max heartbeat gap {max_gap:.3f}s)"
