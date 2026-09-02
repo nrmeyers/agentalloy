@@ -9,8 +9,8 @@ and which commands/endpoints to use:
     ...
     <!-- END agentalloy code-index -->
 
-Written by ``wire``/``add`` only when the code-index module is enabled AND the
-local service reports ``modules.code_index == "enabled"``. Also migrates the
+Written by ``wire``/``add``/``wrap`` only when the code-index module is enabled
+AND the local service reports ``modules.code_index == "enabled"``. Also migrates the
 OLD standalone codebase-indexer block (``<!-- BEGIN codebase-indexer -->``)
 in place: replaced by the new block when the module is enabled, removed when
 it is not. ``unwire`` / ``uninstall`` sweep both marker pairs.
@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -106,11 +107,6 @@ def build_block(slug: str, port: int) -> str:
 _PROXY_ONLY_NO_MARKDOWN: frozenset[str] = frozenset(
     {"claude-code", "qwen-code", "codex"},
 )
-
-# When True, maybe_wire() is a no-op. Set by `add --no-index` so the
-# provider install_writer's internal maybe_wire call is also suppressed
-# (both call sites check the same flag).
-skip_injection: bool = False
 
 _HARNESS_CARRIERS: dict[str, str] = {
     "cursor": ".cursor/rules/agentalloy.mdc",
@@ -226,6 +222,31 @@ def registry_slugs(port: int) -> list[str] | None:
     return [str(r["slug"]) for r in raw if isinstance(r, dict) and "slug" in r]
 
 
+def active_job_for(slug: str, port: int) -> dict[str, Any] | None:
+    """Newest queued/running index job for *slug*, or None (none/unreachable).
+
+    The registry row lands only once the ingest pipeline starts, so a freshly
+    submitted job is invisible to :func:`registry_slugs` for a moment. The job
+    list is visible immediately — this closes that window so a second wiring
+    run does not prompt for a repo whose index is already in flight.
+    """
+    url = (
+        f"{service_base_url(port)}/code/index/jobs?slug={urllib.parse.quote(slug, safe='')}&limit=5"
+    )
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
+            raw = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, list):
+        return None
+    for job in raw:  # newest first
+        if isinstance(job, dict) and job.get("state") in ("queued", "running"):
+            return {"id": job.get("id"), "slug": job.get("slug")}
+    return None
+
+
 def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
     """POST /code/index for *repo_path*; the job snapshot, or None on failure.
 
@@ -272,6 +293,10 @@ def offer_index(root: Path, port: int, *, assume_yes: bool = False) -> dict[str,
     submit without prompting. Fire-and-forget — the job id is printed with an
     ``agentalloy code status`` pointer, never awaited. Best-effort: an
     unreachable service prints a hint and wiring proceeds untouched.
+
+    If an index job for the repo is already active (submitted moments ago —
+    the registry row lags the job list), no prompt: the user already opted in
+    when that job was started, so the in-flight job is simply pointed at.
     """
     slug = repo_slug(root)
     slugs = registry_slugs(port)
@@ -283,6 +308,14 @@ def offer_index(root: Path, port: int, *, assume_yes: bool = False) -> dict[str,
         return None
     if slug in slugs:
         return None
+    active = active_job_for(slug, port)
+    if active is not None:
+        print(
+            f"  code-index: an index job is already active (id={active.get('id')}); "
+            "follow it with `agentalloy code status`",
+            file=sys.stderr,
+        )
+        return {"already_active": True, "job_id": active.get("id")}
     if not (assume_yes or not sys.stdin.isatty()):
         try:
             answer = input("Index this repo now? [Y/n]: ").strip().lower()
@@ -444,9 +477,10 @@ def maybe_wire(
     Best-effort: wiring already succeeded when this runs, so failures are
     reported as warnings, never raised.
 
+    The subcommand layer (``add``/``wire``/``wrap``) is the single owner of
+    this step — provider install writers do not call it, so a wiring run
+    prompts and submits at most once.
     """
-    if skip_injection:
-        return []
     try:
         status = service_module_status(port)
         if status == "enabled":

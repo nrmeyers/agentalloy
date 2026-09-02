@@ -491,6 +491,28 @@ class TestOfferIndex:
         ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
         assert submitted == []
 
+    def test_in_flight_job_skips_prompt_and_submit(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An index job already in flight → no prompt, no new job: the user
+        already opted in when that job started (the registry row lags the
+        job list, so the pre-check closes that window)."""
+        submitted = self._seams(monkeypatch, slugs=[])
+        monkeypatch.setattr(
+            ciw, "active_job_for", lambda slug, port: {"id": "j7", "slug": "org__repo"}
+        )
+        self._tty(monkeypatch, [])  # any input() call would raise StopIteration
+        job = ciw.offer_index(tmp_path, 47950)
+        assert job is not None and job["already_active"] is True
+        assert job["job_id"] == "j7"
+        assert submitted == []
+        err = capsys.readouterr().err
+        assert "already active (id=j7)" in err
+        assert "agentalloy code status" in err
+
     def test_already_active_job_points_at_status_not_failure(
         self,
         tmp_path: Path,

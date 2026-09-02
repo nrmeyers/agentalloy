@@ -129,15 +129,6 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         file=sys.stderr,
     )
 
-    # Wire the code-index block (runtime-gated: only when service is enabled).
-    # OpenClaw is user-scoped, so we use the repo root for wiring.
-    try:
-        from agentalloy.install.code_index_wiring import maybe_wire
-
-        maybe_wire(root, port, harness="openclaw")
-    except (OSError, ValueError) as exc:  # noqa: BLE001
-        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
-
     return [
         WireRecord(
             path=str(config_path),

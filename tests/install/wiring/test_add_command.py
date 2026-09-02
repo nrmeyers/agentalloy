@@ -252,8 +252,38 @@ class TestAddRun:
 
         assert rc == 0
         mock_maybe_wire.assert_not_called()
-        # The skip flag must be reset after the call (not leaked).
-        assert code_index_wiring.skip_injection is False
+
+    def test_add_code_index_wired_exactly_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The subcommand layer owns the code-index step: exactly one
+        maybe_wire per add — provider install writers no longer call it, so a
+        wiring run cannot double-write the block or prompt twice."""
+        home = tmp_path / "home"
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+        monkeypatch.chdir(repo)
+
+        from unittest.mock import patch
+
+        from agentalloy.install import code_index_wiring
+
+        with patch.object(code_index_wiring, "maybe_wire") as mock_maybe_wire:
+            args = argparse.Namespace(
+                harness="qwen-code",
+                port=47950,
+                upstream_url="http://local:1/v1",
+                upstream_model="m1",
+                key_env=None,
+                lifecycle_mode="off",
+                no_index=False,
+            )
+            rc = add._run(args)
+
+        assert rc == 0
+        mock_maybe_wire.assert_called_once()
+        assert mock_maybe_wire.call_args.kwargs["harness"] == "qwen-code"
 
 
 # ---------------------------------------------------------------------------

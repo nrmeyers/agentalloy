@@ -37,6 +37,17 @@ from agentalloy.install.subcommands.wrap import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Run every wrap test from a scratch dir.
+
+    ``_run`` calls ``code_index_wiring.maybe_wire(cwd, ...)``, and its
+    not-enabled path sweeps sentinel blocks out of whatever repo it is given
+    — the sweep must never point at the real working tree.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def tmp_state_dir(tmp_path: Path):
     """Set up a temporary XDG state directory for wrap tests."""
@@ -361,6 +372,41 @@ class TestRun:
             rc = _run(args)
             assert rc == 0
             mock_start.assert_not_called()
+
+    def test_code_index_wire_called_exactly_once(self, tmp_state_dir: tuple[Path, Path]):
+        """The subcommand layer owns the code-index step: wrap triggers
+        maybe_wire exactly once (provider install writers no longer call it)."""
+        from agentalloy.install import code_index_wiring
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+        mock_proc.wait.return_value = 0
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.wrap.server_proc.find_listening_pid",
+                return_value=9999,
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
+                return_value={"files_written": [], "harness": "claude-code"},
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap.subprocess.Popen",
+                return_value=mock_proc,
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap.server_proc.stop",
+            ),
+            patch.object(code_index_wiring, "maybe_wire") as mock_maybe_wire,
+        ):
+            args = self._make_args(child_args=["echo", "hello"])
+            rc = _run(args)
+        assert rc == 0
+        mock_maybe_wire.assert_called_once()
+        root = mock_maybe_wire.call_args[0][0]
+        assert root == Path.cwd()
+        assert mock_maybe_wire.call_args.kwargs["harness"] == "claude-code"
 
     def test_proxy_wiring_applied(self, tmp_state_dir: tuple[Path, Path]):
         """--via proxy should call wire_harness without legacy=True."""
