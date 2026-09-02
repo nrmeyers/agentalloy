@@ -7,7 +7,6 @@ Writes .windsurf/rules/agentalloy.md (modern, dedicated file) or
 from __future__ import annotations
 
 import hashlib
-import sys
 from pathlib import Path
 
 from agentalloy.install.sentinel_utils import replace_marked_block
@@ -104,13 +103,5 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
                 marker_key="windsurf.rules.sentinel",
             ),
         ]
-
-    # Wire the code-index block (runtime-gated: only when service is enabled).
-    try:
-        from agentalloy.install.code_index_wiring import maybe_wire
-
-        maybe_wire(root, port, harness="windsurf")
-    except (OSError, ValueError) as exc:  # noqa: BLE001
-        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
 
     return records

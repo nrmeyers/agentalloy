@@ -16,7 +16,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -140,14 +139,6 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     # malformed settings file is left untouched — the shell carrier still works.
     with contextlib.suppress(json.JSONDecodeError):
         apply_claude_settings_env(root, proxy_url)
-
-    # Wire the code-index block (runtime-gated: only when service is enabled).
-    try:
-        from agentalloy.install.code_index_wiring import maybe_wire
-
-        maybe_wire(root, port, harness="claude-code")
-    except (OSError, ValueError) as exc:  # noqa: BLE001
-        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
 
     return [
         WireRecord(

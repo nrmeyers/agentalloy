@@ -249,16 +249,7 @@ def adopt_and_wire(
 
     from agentalloy.install import code_index_wiring
 
-    # --no-index: suppress code-index block injection from both the provider
-    # install_writer (called inside _wire_harness_core) and the explicit
-    # maybe_wire call below.
-    if no_index:
-        code_index_wiring.skip_injection = True
-    try:
-        result = _wire_harness_core(harness, port=port, root=root, scope="repo")
-    finally:
-        if no_index:
-            code_index_wiring.skip_injection = False
+    result = _wire_harness_core(harness, port=port, root=root, scope="repo")
     result["lifecycle_mode"] = mode
     _seed_repo_metadata(root)  # README + git-exclude; keeps .agentalloy/ uncommitted
 

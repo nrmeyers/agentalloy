@@ -10,7 +10,6 @@ registry and the live wiring can never diverge.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from agentalloy.providers.base import WireRecord
@@ -47,13 +46,5 @@ def apply_persistent_config(
     _ = force
     records = _wire_proxy_continue(harness, port, root)
     records = [WireRecord.from_dict(r) for r in records]
-
-    # Wire the code-index block (runtime-gated: only when service is enabled).
-    try:
-        from agentalloy.install.code_index_wiring import maybe_wire
-
-        maybe_wire(root, port, harness=harness)
-    except (OSError, ValueError) as exc:  # noqa: BLE001
-        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
 
     return records

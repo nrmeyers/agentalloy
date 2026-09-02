@@ -231,6 +231,13 @@ def _run(args: argparse.Namespace) -> int:
         scope="repo",
     )
 
+    # Code-index harness block (second sentinel pair) — the subcommand layer
+    # owns this step (provider install writers no longer call it). Best-effort:
+    # an unreachable service prints a hint; the child still launches.
+    from agentalloy.install import code_index_wiring
+
+    code_index_wiring.maybe_wire(cwd, port, harness=harness)
+
     files_written = result.get("files_written", [])
     _out(f"  Wired {len(files_written)} file(s)")
 

@@ -154,12 +154,4 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     ]
     records.extend(apply_byok_config(port))
 
-    # Wire the code-index block (runtime-gated: only when service is enabled).
-    try:
-        from agentalloy.install.code_index_wiring import maybe_wire
-
-        maybe_wire(root, port, harness="github-copilot")
-    except (OSError, ValueError) as exc:  # noqa: BLE001
-        print(f"  code-index: wiring skipped ({exc})", file=sys.stderr)
-
     return records
