@@ -273,6 +273,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # every single request. No separate close(): it holds no resource of its
     # own beyond telemetry_store, which is already closed below.
     app.state.phase_telemetry = phase_telemetry
+    # Local-agent trace writer (M1d) — one row per /local-agent/ask, in the
+    # same telemetry.duck. Constructed here (not per request) so its schema
+    # DDL runs at most once per process; soft-failing by design, and holds no
+    # resource of its own beyond telemetry_store.
+    from agentalloy.local_agent.config import get_config as _local_agent_get_config
+    from agentalloy.local_agent.telemetry import LocalAgentTraceWriter
+
+    if _local_agent_get_config().enabled:
+        app.state.local_agent_trace_writer = LocalAgentTraceWriter(telemetry_store)
     # Expose the live read-only SkillStore so diagnostics (e.g. corpus skill
     # counts) can reuse the open handle instead of opening another one.
     app.state.store = store
@@ -553,6 +562,18 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
             modules["code_index"] = "unavailable"
     else:
         modules["code_index"] = "disabled"
+
+    from agentalloy.local_agent.config import get_config as _local_agent_get_config
+
+    if _local_agent_get_config().enabled:
+        # Lazy import so a disabled service never imports the local-agent
+        # stack (same convention as the code-index module above).
+        from agentalloy.local_agent.router import router as local_agent_router
+
+        app.include_router(local_agent_router)
+        modules["local_agent"] = "enabled"
+    else:
+        modules["local_agent"] = "disabled"
 
     app.state.module_status = modules
 

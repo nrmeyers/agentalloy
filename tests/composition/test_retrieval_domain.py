@@ -393,9 +393,7 @@ def test_skill_granular_priority_parameter_orders_within_skill() -> None:
         _fake_skill("g-2", "verification", "gold"),
         _fake_skill("s-0", "setup", "sib"),
     ]
-    selected, _ = skill_granular_select(
-        pool, k=3, priority=("verification", "execution", "setup")
-    )
+    selected, _ = skill_granular_select(pool, k=3, priority=("verification", "execution", "setup"))
     # depth = min(3, k-1) = 2 → both depth slots from gold, verification first.
     assert [f.fragment_type for f in selected[:2]] == ["verification", "execution"]
     # The default build triple takes setup first on this queue.

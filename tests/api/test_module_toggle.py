@@ -27,7 +27,11 @@ def test_defaults_compose_on_code_index_off(client_env: None) -> None:
         assert "/compose" in paths
         assert not any(p.startswith("/code/") for p in paths)
         body = client.get("/health").json()
-        assert body["modules"] == {"compose": "enabled", "code_index": "disabled"}
+        assert body["modules"] == {
+            "compose": "enabled",
+            "code_index": "disabled",
+            "local_agent": "disabled",
+        }
 
 
 def test_compose_disabled_unregisters_routers(
@@ -89,5 +93,5 @@ def client_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Keep any ambient toggles out of the picture and steer default data
     # paths away from the real user dirs.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
-    for var in ("COMPOSE_ENABLED", "CODE_INDEX_ENABLED", "CODE_INDEX_WATCH"):
+    for var in ("COMPOSE_ENABLED", "CODE_INDEX_ENABLED", "CODE_INDEX_WATCH", "LOCAL_AGENT"):
         monkeypatch.delenv(var, raising=False)
