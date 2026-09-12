@@ -1,0 +1,4 @@
+# <!-- BEGIN agentalloy install -->
+[env]
+QWEN_HOME = "{{config_root}}/.qwen"
+# <!-- END agentalloy install -->
