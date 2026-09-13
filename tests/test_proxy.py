@@ -11,6 +11,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import agentalloy.proxy as proxy_module
+from agentalloy.api.proxy_router import (
+    _emit_llm_received,
+    _extract_tokens_in,
+    _extract_tokens_out,
+    _SseUsageScanner,
+)
 from agentalloy.config import Config
 from agentalloy.proxy import (
     _build_steering_context,
@@ -87,6 +93,97 @@ def test_rewrite_usage_missing_fields() -> None:
     assert rewritten["prompt_tokens"] == 10
     assert rewritten["total_tokens"] == 10
     assert rewritten["agentalloy_injected_tokens"] == 10
+
+
+def test_extract_tokens_in_pulls_prompt_tokens() -> None:
+    """``usage.prompt_tokens`` is the delivered prompt size — the triage number
+    for "was the prompt near the context limit"."""
+    body = {"usage": {"prompt_tokens": 42_000, "completion_tokens": 100, "total_tokens": 42_100}}
+    assert _extract_tokens_in(body) == 42_000
+    assert _extract_tokens_out(body) == 100
+
+
+def test_extract_tokens_in_absent_usage() -> None:
+    assert _extract_tokens_in({}) is None
+    assert _extract_tokens_in({"usage": {}}) is None
+    assert _extract_tokens_in({"usage": {"completion_tokens": 5}}) is None
+    assert _extract_tokens_in({"usage": "nope"}) is None
+
+
+def test_sse_usage_scanner_captures_prompt_tokens() -> None:
+    scanner = _SseUsageScanner()
+    scanner.feed('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')
+    assert scanner.latest is None and scanner.latest_in is None
+    scanner.feed(
+        'data: {"choices":[],"usage":{"prompt_tokens":900,"completion_tokens":42,"total_tokens":942}}\n\n'
+    )
+    assert scanner.latest == 42
+    assert scanner.latest_in == 900
+    scanner.feed("data: [DONE]\n\n")
+    assert scanner.latest == 42 and scanner.latest_in == 900
+
+
+def test_sse_usage_scanner_prompt_only_usage() -> None:
+    """A usage block with only prompt_tokens (no completion_tokens) still
+    records the input size — the output count stays None, not invented."""
+    scanner = _SseUsageScanner()
+    scanner.feed('data: {"usage":{"prompt_tokens":777}}\n\n')
+    assert scanner.latest is None
+    assert scanner.latest_in == 777
+
+
+def test_sse_usage_scanner_fragmented_usage_line() -> None:
+    """A usage line split across byte-boundary chunks is still captured:
+    the first half arrives unterminated, the second completes it."""
+    line = 'data: {"usage":{"prompt_tokens":1234,"completion_tokens":56}}'
+    mid = len(line) // 2
+    scanner = _SseUsageScanner()
+    scanner.feed(line[:mid])  # no trailing newline — line still open
+    assert scanner.latest_in is None  # partial line not parsed yet
+    scanner.feed(line[mid:] + "\n")
+    assert scanner.latest_in == 1234
+    assert scanner.latest == 56
+
+
+class _RecordingWriter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def llm_received(self, trace_id: str, phase: str, **kwargs: Any) -> None:
+        self.calls.append((trace_id, phase, kwargs))
+
+
+def test_emit_llm_received_forwards_tokens_in() -> None:
+    """The received-row emitter carries the model-reported input size."""
+    writer = _RecordingWriter()
+    _emit_llm_received(
+        writer,
+        "t1",
+        "specced",
+        "m",
+        tokens_out=100,
+        tokens_in=42_000,
+        latency_ms=55,
+        repo="r",
+    )
+    assert writer.calls == [
+        (
+            "t1",
+            "specced",
+            {
+                "model": "m",
+                "tokens_in": 42_000,
+                "tokens_out": 100,
+                "latency_ms": 55,
+                "success": True,
+                "repo": "r",
+            },
+        )
+    ]
+    # Default stays None — a call site without usage must not invent a count.
+    writer = _RecordingWriter()
+    _emit_llm_received(writer, "t1", "specced", "m", tokens_out=None, latency_ms=5)
+    assert writer.calls[0][2]["tokens_in"] is None
 
 
 def test_rewrite_sse_line_with_usage() -> None:
