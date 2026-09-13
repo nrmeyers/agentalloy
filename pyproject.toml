@@ -165,9 +165,17 @@ reportMissingTypeStubs = false
 reportUnusedFunction = false
 reportPrivateUsage = "warning"
 reportUnknownLambdaType = "warning"
-reportUnknownVariableType = "warning"
-reportUnknownMemberType = "warning"
-reportUnknownArgumentType = "warning"
+# External data boundaries (upstream LLM/SSE chat-completion JSON, corpus
+# import JSON, GQL query results) are typed as `dict[str, Any]` / `list[Any]`
+# by design — the payload is genuinely arbitrary JSON being relayed or
+# inspected, and `Any` is the honest value type for it. In strict mode pyright
+# treats `Any` as "unknown", so these three rules fire on every downstream
+# access to such data. They are relaxed here (not the rules that catch real
+# mistakes): genuine type mismatches are still enforced by reportArgumentType,
+# reportGeneralTypeIssues, reportOptionalMemberAccess, etc.
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
 reportReturnType = "warning"
 reportOperatorIssue = "warning"
 reportOptionalMemberAccess = "warning"

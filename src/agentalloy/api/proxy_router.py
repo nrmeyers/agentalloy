@@ -605,6 +605,18 @@ def _emit_llm_error(
 # ---------------------------------------------------------------------------
 
 
+def _sse_obj_has_finish_reason(obj: object) -> bool:
+    """True if a parsed SSE JSON object carries a non-null ``finish_reason`` in any choice."""
+    if isinstance(obj, dict):
+        data: dict[str, Any] = obj
+        choices = data.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if isinstance(choice, dict) and choice.get("finish_reason") is not None:
+                    return True
+    return False
+
+
 def _sse_chunk_has_finish_reason(text: str) -> bool:
     """Scan an SSE text chunk for a ``finish_reason`` field in choices.
 
@@ -623,12 +635,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
     stripped = text.strip()
     if stripped.startswith("data: "):
         try:
-            obj = json.loads(stripped[6:])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
+            if _sse_obj_has_finish_reason(json.loads(stripped[6:])):
+                return True
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -643,12 +651,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
         if brace_end == -1:
             brace_end = len(text)
         try:
-            obj = json.loads(text[idx + 6 : brace_end])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
+            if _sse_obj_has_finish_reason(json.loads(text[idx + 6 : brace_end])):
+                return True
         except (json.JSONDecodeError, ValueError):
             pass
         search_start = idx + 1
@@ -657,12 +661,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
     # This handles raw JSON fragments that may have been relayed without the
     # ``data: `` prefix.
     try:
-        obj = json.loads(stripped)
-        if isinstance(obj, dict) and obj.get("choices"):
-            for choice in obj["choices"]:
-                fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                if fr is not None:
-                    return True
+        if _sse_obj_has_finish_reason(json.loads(stripped)):
+            return True
     except (json.JSONDecodeError, ValueError):
         pass
 
