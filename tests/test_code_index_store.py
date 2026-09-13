@@ -87,8 +87,15 @@ def store(tmp_path):
 def test_symbol_round_trip(store):
     store.upsert_symbols(
         [
-            _sym("repo.mod.hello", docstring="Say hi.", source_code="def hello(): ...",
-                 file_path="/repo/mod.py", start=10, end=12, content_hash="h1"),
+            _sym(
+                "repo.mod.hello",
+                docstring="Say hi.",
+                source_code="def hello(): ...",
+                file_path="/repo/mod.py",
+                start=10,
+                end=12,
+                content_hash="h1",
+            ),
             _sym("repo.mod.world", kind="Class", file_path="/repo/mod.py", content_hash="h2"),
         ]
     )
@@ -108,9 +115,7 @@ def test_symbol_round_trip(store):
 
 
 def test_edges_callers_callees(store):
-    store.upsert_symbols(
-        [_sym(f"mod.{n}", file_path=f"/repo/{n}.py") for n in ("a", "b", "c")]
-    )
+    store.upsert_symbols([_sym(f"mod.{n}", file_path=f"/repo/{n}.py") for n in ("a", "b", "c")])
     store.upsert_edges(
         [
             CodeEdge("mod.a", "mod.b", "CALLS", file_path="/repo/a.py"),
@@ -400,9 +405,7 @@ def test_subgraph_shapes_and_filters(store):
 
 
 def test_centrality_round_trip(store):
-    store.upsert_symbols(
-        [_sym(f"mod.{n}", file_path=f"/r/{n}.py") for n in ("a", "b", "c")]
-    )
+    store.upsert_symbols([_sym(f"mod.{n}", file_path=f"/r/{n}.py") for n in ("a", "b", "c")])
     assert store.write_centrality({"mod.a": 0.5, "mod.b": 0.3}) == 2
     assert store.read_centrality(["mod.a", "mod.b", "mod.c"]) == {
         "mod.a": 0.5,
@@ -427,13 +430,16 @@ def test_vector_upsert_search_delete(store):
     assert {qn for qn, _ in store.fts_docs()} == {s1, s2, s3}
     assert all("def" in text for _, text in store.fts_docs())
 
-    assert store.upsert(
-        [
-            _row(s1, _vec(0), "pagerank over the call graph"),
-            _row(s2, _vec(1), "hybrid search fusion"),
-            _row(s3, _vec(2), "tantivy lexical side index"),
-        ]
-    ) == 3
+    assert (
+        store.upsert(
+            [
+                _row(s1, _vec(0), "pagerank over the call graph"),
+                _row(s2, _vec(1), "hybrid search fusion"),
+                _row(s3, _vec(2), "tantivy lexical side index"),
+            ]
+        )
+        == 3
+    )
     assert store.count() == 3
     assert store.embedding_dim() == VEC_DIM
     assert {qn for qn, _ in store.fts_docs()} == {s1, s2, s3}

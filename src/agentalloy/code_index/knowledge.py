@@ -56,6 +56,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import yaml
 
@@ -147,7 +148,7 @@ def _discover_decision_docs(repo_root: Path) -> list[Path]:
     return found
 
 
-def _split_front_matter(content: str) -> tuple[dict, str, int]:
+def _split_front_matter(content: str) -> tuple[dict[str, object], str, int]:
     """Split a leading ``---`` YAML block: ``(meta, body, consumed_lines)``.
 
     No leading block, no closing delimiter, invalid YAML, or a non-mapping
@@ -302,7 +303,7 @@ def _resolve_target(item: str, store: CodeGraphStore) -> tuple[str, int]:
 
 
 def _declared_edges(
-    meta: dict,
+    meta: dict[str, object],
     first_qn: str,
     file_path: str,
     repo: str,
@@ -346,7 +347,7 @@ def _declared_edges(
 # ---------------------------------------------------------------------------
 
 
-def _doc_fingerprint(meta: dict, chunks: Sequence[MarkdownChunk]) -> str:
+def _doc_fingerprint(meta: dict[str, object], chunks: Sequence[MarkdownChunk]) -> str:
     """sha1 over the front matter + every chunk's embedded text — a
     front-matter-only edit changes it (re-derive edges) and an unchanged
     doc does not (skip the doc entirely)."""
@@ -400,7 +401,7 @@ def _embed_chunks(
             text=_embed_text(c),
             indexed_at=int(time.time()),
         )
-        for c, vec in zip(chunks, vectors)
+        for c, vec in zip(chunks, vectors, strict=True)
     ]
     return store.upsert(rows)
 
@@ -583,7 +584,7 @@ def ingest_repo_knowledge(
 # ---------------------------------------------------------------------------
 
 
-def _contract_body(contract: dict) -> str:
+def _contract_body(contract: dict[str, Any]) -> str:
     tags = contract.get("domain_tags") or []
     lines = [f"# Contract: {contract['slug']}", ""]
     if tags:
@@ -595,7 +596,7 @@ def _contract_body(contract: dict) -> str:
     return "\n".join(lines)
 
 
-def _contract_touch_edges(contract: dict, qn: str, store: CodeGraphStore) -> list[CodeEdge]:
+def _contract_touch_edges(contract: dict[str, Any], qn: str, store: CodeGraphStore) -> list[CodeEdge]:
     """Declared TOUCHES edges from a contract's free-text touches — one per
     unique resolved target, comma-split."""
     items = [t.strip() for t in (contract.get("touches") or "").split(",") if t.strip()]

@@ -9,8 +9,9 @@ endpoint uses.
 
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
+
+import pytest
 
 from agentalloy.code_index.fts import FtsIndex
 from agentalloy.code_index.knowledge import (

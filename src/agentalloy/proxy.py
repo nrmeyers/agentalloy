@@ -19,10 +19,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 from collections import OrderedDict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Any
 
@@ -38,7 +40,19 @@ from agentalloy.state_store import StateStore
 from agentalloy.token_counter import TokenCounter
 from agentalloy.usage_tracker import UsageTracker
 
-proxy_app = FastAPI(title="AgentAlloy Steering Proxy", version="0.3.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup()
+    yield
+    shutdown()
+
+
+proxy_app = FastAPI(
+    title="AgentAlloy Steering Proxy",
+    version="0.3.0",
+    lifespan=lifespan,
+)
 
 _config: Config | None = None
 _state_store: StateStore | None = None
@@ -68,12 +82,11 @@ _COMPOSE_CACHE_MAX = 32
 # loop). Measured ~20s for a 4-step loop on the 2.6B sidecar — a timeout
 # below that silently degrades EVERY turn to static steering, so the LFM's
 # contract/skill work never reaches the main model.
-import os as _os
 
 # Activation turns with discovery (6-step budget) measured ~42s worst case
 # even with the DSpark drafter; 45 left no margin and a timeout silently
 # discards the whole compose.
-_COMPOSE_TIMEOUT_S = float(_os.environ.get("AGENTALLOY_COMPOSE_TIMEOUT_S", "75"))
+_COMPOSE_TIMEOUT_S = float(os.environ.get("AGENTALLOY_COMPOSE_TIMEOUT_S", "75"))
 _compose_cache: dict[str, tuple[str, int, float]] = {}
 
 # Conversation tracking for session-start detection.
@@ -111,7 +124,6 @@ class _ServicePhaseReader:
         return "spec"
 
 
-@proxy_app.on_event("startup")
 def startup() -> None:
     """Initialize proxy state."""
     global _config, _state_store, _skill_engine, _phase_steering
@@ -135,7 +147,6 @@ def startup() -> None:
     _upstream_key = _config.upstream_key
 
 
-@proxy_app.on_event("shutdown")
 def shutdown() -> None:
     """Cleanup. (_state_store is always None by design — the service owns
     the only RW handle to state.duck — so only the usage tracker closes.)"""
@@ -178,17 +189,13 @@ def _first_user_hash(messages: list[dict[str, Any]]) -> str:
     if messages and messages[0].get("role") == "system":
         sys_content = messages[0].get("content", "")
         if isinstance(sys_content, list):
-            sys_content = " ".join(
-                p.get("text", "") for p in sys_content if isinstance(p, dict)
-            )
+            sys_content = " ".join(p.get("text", "") for p in sys_content if isinstance(p, dict))
         system = str(sys_content)
     for msg in messages:
         if msg.get("role") == "user":
             content = msg.get("content", "")
             if isinstance(content, list):
-                content = " ".join(
-                    p.get("text", "") for p in content if isinstance(p, dict)
-                )
+                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
             return hashlib.sha256(f"{system}\x00{content}".encode()).hexdigest()
     return ""
 
@@ -262,9 +269,7 @@ def _compose_verdict_sync(
     return _phase_steering.build_context(prompt=prompt, is_activation=new_session)
 
 
-async def _build_turn_context(
-    messages: list[dict[str, Any]], project: str = ""
-) -> tuple[str, int]:
+async def _build_turn_context(messages: list[dict[str, Any]], project: str = "") -> tuple[str, int]:
     """Build steering context for this turn.
 
     The compose verdict is cached per (user prompt, session-start flag)
@@ -478,7 +483,7 @@ async def list_models(project: str = "") -> Response:
                 headers={"authorization": f"Bearer {_upstream_key}"} if _upstream_key else {},
                 timeout=10.0,
             )
-            data = resp.json()
+            data: dict[str, Any] = resp.json()
         except Exception:
             data = {"object": "list", "data": []}
 
@@ -579,9 +584,7 @@ async def set_upstream(request: UpstreamRequest) -> JSONResponse:
     _upstream_url = url
     _upstream_key = key
     if _config is not None:
-        _config = replace(
-            _config, model=request.model, upstream_url=url, upstream_key=key
-        )
+        _config = replace(_config, model=request.model, upstream_url=url, upstream_key=key)
     if _token_counter is not None:
         _token_counter.model_url = url
         _token_counter.api_key = key

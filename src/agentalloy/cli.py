@@ -427,7 +427,7 @@ def main() -> int:
     elif args.command == "add":
         import json
         import subprocess
-        from pathlib import Path
+        import urllib.request
 
         repo_path = Path(args.repo).resolve()
         if not repo_path.is_dir():
@@ -583,18 +583,20 @@ def main() -> int:
                 openai_providers = providers.setdefault("openai", [])
                 # Remove any existing agentalloy provider entry
                 openai_providers = [
-                    p for p in openai_providers
-                    if p.get("id") != "agentalloy-proxy"
+                    p for p in openai_providers if p.get("id") != "agentalloy-proxy"
                 ]
-                openai_providers.insert(0, {
-                    "id": "agentalloy-proxy",
-                    "name": "AgentAlloy (steering proxy)",
-                    "baseUrl": proxy_url,
-                    "envKey": "OPENAI_API_KEY",
-                    "generationConfig": {
-                        "contextWindowSize": 131072,
+                openai_providers.insert(
+                    0,
+                    {
+                        "id": "agentalloy-proxy",
+                        "name": "AgentAlloy (steering proxy)",
+                        "baseUrl": proxy_url,
+                        "envKey": "OPENAI_API_KEY",
+                        "generationConfig": {
+                            "contextWindowSize": 131072,
+                        },
                     },
-                })
+                )
                 providers["openai"] = openai_providers
 
                 # Select the proxy as the active model
@@ -696,9 +698,7 @@ def main() -> int:
             from agentalloy.harness import _build_cursor_rules
 
             rules_path = rules_dir / "agentalloy.mdc"
-            rules_path.write_text(
-                _build_cursor_rules(config.service_port, config.proxy_port)
-            )
+            rules_path.write_text(_build_cursor_rules(config.service_port, config.proxy_port))
             print(f"  Wrote {rules_path}")
 
         else:
@@ -733,9 +733,7 @@ def main() -> int:
                 print("usage: agentalloy upstream set URL --model MODEL [--key KEY]")
                 return 1
 
-            payload = json.dumps(
-                {"url": args.url, "model": args.model, "key": args.key}
-            ).encode()
+            payload = json.dumps({"url": args.url, "model": args.model, "key": args.key}).encode()
             req = urllib.request.Request(
                 f"{proxy_url}/upstream",
                 data=payload,
@@ -759,12 +757,13 @@ def main() -> int:
                 if args.key:
                     updates["AGENTALLOY_UPSTREAM_KEY"] = args.key
                 if update_env_vars(instance_env_path(config.state_duck), updates):
-                    print(f"  Proxy not running — persisted to env.sh "
-                          f"({args.url}, {args.model})")
+                    print(f"  Proxy not running — persisted to env.sh ({args.url}, {args.model})")
                     print("  Takes effect on the next proxy start.")
                 else:
-                    print("  Proxy not running and no env.sh to persist to "
-                          f"(expected next to {config.state_duck}).")
+                    print(
+                        "  Proxy not running and no env.sh to persist to "
+                        f"(expected next to {config.state_duck})."
+                    )
                 return 0
 
             if upstream_info.get("status") == "ok":

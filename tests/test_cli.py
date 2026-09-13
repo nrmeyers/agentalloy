@@ -17,14 +17,11 @@ def _free_port() -> int:
 
 
 @pytest.fixture
-def upstream_cli_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def upstream_cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """env.sh next to a tmp state.duck + a proxy port with nothing on it."""
     env_sh = tmp_path / "env.sh"
     env_sh.write_text(
-        "export AGENTALLOY_UPSTREAM_URL=http://old:8000\n"
-        "export AGENTALLOY_MODEL=old-model\n"
+        "export AGENTALLOY_UPSTREAM_URL=http://old:8000\nexport AGENTALLOY_MODEL=old-model\n"
     )
     monkeypatch.setenv("AGENTALLOY_PROXY_PORT", str(_free_port()))
     monkeypatch.setenv("AGENTALLOY_STATE_DUCK", str(tmp_path / "state.duck"))

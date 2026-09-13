@@ -180,8 +180,14 @@ def ingest_repo(
     hashes_after = _hash_cache_map(cache_dir)
     touched_rel = {rel for rel, sha in hashes_after.items() if hashes_before.get(rel) != sha}
     changed_files = sorted(
-        {p for p in ({_abs(repo_root, ps.file_path) for ps in parsed.symbols if ps.file_path}
-                     | {_abs(repo_root, rel) for rel in touched_rel}) if p}
+        {
+            p
+            for p in (
+                {_abs(repo_root, ps.file_path) for ps in parsed.symbols if ps.file_path}
+                | {_abs(repo_root, rel) for rel in touched_rel}
+            )
+            if p
+        }
     )
     if not force_full and changed_files:
         deleted += store.delete_for_files(changed_files)
@@ -227,7 +233,7 @@ def ingest_repo(
 
     # -- embed (hash-gated; graceful lexical-only fallback) ------------------
     embedded = 0
-    if embed_available:
+    if embed_available and embed_client is not None:
         to_embed: list[tuple[ParsedSymbol, str]] = []
         skipped_unchanged: list[str] = []
         for ps in parsed.symbols:
@@ -256,7 +262,7 @@ def ingest_repo(
                     text=text,
                     indexed_at=int(time.time()),
                 )
-                for (ps, text), vec in zip(to_embed, vectors)
+                for (ps, text), vec in zip(to_embed, vectors, strict=True)
             ]
             embedded = store.upsert(rows)
             progress(f"embedded {embedded} vector(s)")

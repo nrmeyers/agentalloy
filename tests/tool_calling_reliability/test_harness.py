@@ -102,7 +102,7 @@ def evaluate_multi_turn(result: dict[str, Any], expected: dict[str, Any]) -> boo
     if len(actual_calls) != len(expected_sequence):
         return False
 
-    for actual, expected_call in zip(actual_calls, expected_sequence):
+    for actual, expected_call in zip(actual_calls, expected_sequence, strict=True):
         if actual["tool"] != expected_call["tool"]:
             return False
         # Args check (partial match for multi-turn)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agentalloy.config import Config
 from agentalloy.state_store import StateStore
-from agentalloy.telemetry import TelemetryStore
+from agentalloy.telemetry_store import TelemetryStore
 from agentalloy.tools import ALL_TOOLS
 
 

@@ -148,12 +148,7 @@ class TelemetryStore:
             GROUP BY phase
             ORDER BY count DESC
         """).fetchall()
-        return {
-            "phases": [
-                {"phase": r[0], "traces": r[1], "sessions": r[2]}
-                for r in rows
-            ]
-        }
+        return {"phases": [{"phase": r[0], "traces": r[1], "sessions": r[2]} for r in rows]}
 
     def stop_reason_distribution(self) -> dict[str, Any]:
         """Distribution of stop reasons."""
@@ -164,9 +159,7 @@ class TelemetryStore:
             GROUP BY stop_reason
             ORDER BY count DESC
         """).fetchall()
-        return {
-            "reasons": [{"reason": r[0], "count": r[1]} for r in rows]
-        }
+        return {"reasons": [{"reason": r[0], "count": r[1]} for r in rows]}
 
     def session_summary(self, session_id: str) -> dict[str, Any]:
         """Detailed summary for a specific session."""

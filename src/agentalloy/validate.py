@@ -53,9 +53,7 @@ def validate_tool_call(tool_name: str, args: str) -> tuple[bool, str | None]:
         expected_type = properties[field].get("type")
         if expected_type == "string" and not isinstance(value, str):
             return False, f"Field {field} must be string"
-        elif expected_type == "integer" and (
-            isinstance(value, bool) or not isinstance(value, int)
-        ):
+        elif expected_type == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
             # bool is an int subclass — True must not pass an integer check.
             return False, f"Field {field} must be integer"
         elif expected_type == "boolean" and not isinstance(value, bool):

@@ -93,28 +93,18 @@ def _generate_qwen_code(
         }
         settings_path = str(Path(project_dir) / ".qwen" / "settings.json")
         files[settings_path] = json.dumps(mcp_config, indent=2)
-        instructions.append(
-            f"1. MCP config written to {settings_path}"
-        )
-        instructions.append(
-            "2. Restart Qwen Code to pick up the new MCP server"
-        )
+        instructions.append(f"1. MCP config written to {settings_path}")
+        instructions.append("2. Restart Qwen Code to pick up the new MCP server")
 
     if mode in ("proxy", "dual"):
-        instructions.append(
-            f"3. Start the steering proxy: agentalloy proxy --port {proxy_port}"
-        )
+        instructions.append(f"3. Start the steering proxy: agentalloy proxy --port {proxy_port}")
         instructions.append(
             f"4. Configure your model server URL to http://localhost:{proxy_port}/v1"
         )
-        instructions.append(
-            "   (in Qwen Code settings or environment variable)"
-        )
+        instructions.append("   (in Qwen Code settings or environment variable)")
 
     if mode == "dual":
-        instructions.append(
-            "5. AgentAlloy provides both MCP tools AND proxy steering"
-        )
+        instructions.append("5. AgentAlloy provides both MCP tools AND proxy steering")
 
     return HarnessConfig(
         harness_type="qwen-code",
@@ -156,17 +146,12 @@ def _generate_cursor(
         instructions.append(f"2. MCP config written to {mcp_path}")
 
     if mode in ("proxy", "dual"):
+        instructions.append(f"3. Start the steering proxy: agentalloy proxy --port {proxy_port}")
         instructions.append(
-            f"3. Start the steering proxy: agentalloy proxy --port {proxy_port}"
-        )
-        instructions.append(
-            "4. In Cursor settings, set API Base URL to "
-            f"http://localhost:{proxy_port}/v1"
+            f"4. In Cursor settings, set API Base URL to http://localhost:{proxy_port}/v1"
         )
 
-    instructions.append(
-        "5. Restart Cursor to apply configuration changes"
-    )
+    instructions.append("5. Restart Cursor to apply configuration changes")
 
     return HarnessConfig(
         harness_type="cursor",
@@ -199,24 +184,14 @@ def _generate_generic_mcp(
     config_path = str(Path(project_dir) / ".agentalloy" / "mcp-config.json")
     files[config_path] = json.dumps(mcp_config, indent=2)
     instructions.append(f"1. MCP config written to {config_path}")
-    instructions.append(
-        f"2. Start MCP server: agentalloy mcp --transport sse --port {mcp_port}"
-    )
+    instructions.append(f"2. Start MCP server: agentalloy mcp --transport sse --port {mcp_port}")
 
     if mode in ("proxy", "dual"):
-        instructions.append(
-            f"3. Start steering proxy: agentalloy proxy --port {proxy_port}"
-        )
-        instructions.append(
-            f"4. Point your model API base to http://localhost:{proxy_port}/v1"
-        )
+        instructions.append(f"3. Start steering proxy: agentalloy proxy --port {proxy_port}")
+        instructions.append(f"4. Point your model API base to http://localhost:{proxy_port}/v1")
 
-    instructions.append(
-        f"5. AgentAlloy service running at http://localhost:{service_port}"
-    )
-    instructions.append(
-        f"   Dashboard: http://localhost:{service_port}/dashboard"
-    )
+    instructions.append(f"5. AgentAlloy service running at http://localhost:{service_port}")
+    instructions.append(f"   Dashboard: http://localhost:{service_port}/dashboard")
 
     return HarnessConfig(
         harness_type="generic-mcp",
@@ -307,9 +282,7 @@ def harness_status(service_port: int = 48950) -> dict[str, Any]:
     }
 
     try:
-        req = urllib.request.Request(
-            f"http://localhost:{service_port}/status", method="GET"
-        )
+        req = urllib.request.Request(f"http://localhost:{service_port}/status", method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             result["service"] = "running"
@@ -319,9 +292,7 @@ def harness_status(service_port: int = 48950) -> dict[str, Any]:
         result["service"] = "not running"
 
     try:
-        req = urllib.request.Request(
-            f"http://localhost:{service_port}/gates", method="GET"
-        )
+        req = urllib.request.Request(f"http://localhost:{service_port}/gates", method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             result["gates"] = data.get("gates", [])

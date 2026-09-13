@@ -1,0 +1,608 @@
+"""Shared inject+commit seam for both proxy surfaces.
+
+Both live proxy surfaces — the native Anthropic passthrough
+(``/proj/<token>/v1/messages``) and the OpenAI-compatible chat-completions
+endpoint — run an identical ``compose → inject → commit_markers`` cycle. The
+*decision* logic (``evaluate_signal`` in :mod:`agentalloy.api.proxy_signal`) is
+already shared; this module unifies the *inject + commit* wiring so both
+surfaces share one cadence-marker implementation.
+
+:func:`apply_signal` composes the 3-tier block once, hands the text to a
+surface-specific ``inject`` callable, and returns an :class:`InjectOutcome`
+carrying the injected payload plus the per-tier emit flags — but it no longer
+commits the cadence markers itself. Committing is deferred to
+:func:`commit_outcome`, which the surface calls *after the upstream forward* and
+only on a 2xx response: composing text the request then drops (no user message,
+malformed content) must NOT burn the marker, and neither must a turn the model
+never processed because upstream was overloaded (529) or errored. The compose
+helper (:func:`_compose_block`) and its result (:class:`_ComposedBlock`) live
+here too, imported back by the passthrough router.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from agentalloy.api import code_index_gate
+from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyResult, Phase
+from agentalloy.api.proxy_signal import CONFIRM_LABEL, SignalResult, commit_markers
+from agentalloy.storage.state_store import DuckDBStateStore
+
+if TYPE_CHECKING:
+    from agentalloy.contracts import Contract
+    from agentalloy.orchestration.compose import ComposeOrchestrator
+
+logger = logging.getLogger(__name__)
+
+_VALID_PHASES = (
+    "intake",
+    "spec",
+    "design",
+    "plan",
+    "build",
+    "qa",
+    "ship",
+    "sdd-fast",
+    "add-skill",
+    "sdd-flow",
+)
+
+# Hardcoded orientation prose — fires BEFORE the workflow block, once per session.
+# This is the pre-script that orients the agent on its first request in a session:
+# it confirms current phase, checks mode (pause vs workflow), and presents
+# three choices (continue / enable or resume workflow / start fresh).
+# The intake skill's raw_prose is trimmed of duplicate phase-get + resume logic
+# since this orientation handles that upfront.
+_COMPOSE_ORIENTATION = """[agentalloy-orientation]
+You are running inside AgentAlloy, an agentic orchestrator for the Software Design
+and Delivery (SDD) workflow. This is your **session orientation** — it fires once
+at the start of every session and then disappears.
+
+**Current mode:** {mode}
+**Current phase:** {phase}
+
+{options_text}
+
+---
+[/agentalloy-orientation]
+"""
+
+# Options text templates, dynamically selected based on mode.
+_OPTIONS_TEXT_PAUSED = (
+    "We're in pause mode — workflow instructions are paused. "
+    "Run ``agentalloy workflow resume`` to turn workflow instructions back on."
+)
+_OPTIONS_TEXT_WORKFLOW = "Workflow instructions are active."
+
+
+def _tier2_k() -> int | None:
+    """Explicit per-work-item k for the Tier-2 domain leg.
+
+    ``AGENTALLOY_TIER2_K`` overrides (clamped to ``[1, 50]``); ``None`` defers to
+    the phase default (post-E1, build=4). Lets the Tier-2 per-work-item leg be
+    tuned independently of direct ``/compose`` calls. A malformed or empty value
+    falls back to ``None`` (phase default).
+    """
+    raw = os.environ.get("AGENTALLOY_TIER2_K")
+    if raw:
+        try:
+            return max(1, min(50, int(raw)))
+        except ValueError:
+            return None
+    return None
+
+
+def _empty_str_list() -> list[str]:
+    return []
+
+
+@dataclass
+class ProxyComposeTelemetry:
+    """Skill/fragment provenance for one proxy request, merged across both compose
+    tiers, so the surface can write a single consolidated trace row instead of
+    losing it to the orchestrator's (now-suppressed) per-leg writes.
+
+    - ``workflow_skill_ids`` / ``header_fragment_ids``: the Tier 1 orientation
+      "header" — the phase's workflow skill plus its system-prose fragments.
+    - ``returned_skill_ids``: the Tier 2 domain skills actually injected.
+    - ``selected_fragment_ids``: every fragment injected (Tier 1 system + Tier 2 domain).
+    - ``tokens_returned`` / ``tokens_flat_equivalent``: summed across both tiers.
+    - ``lm_assist_*``: Stage B detail from the Tier 2 domain leg (Stage B never runs
+      on the system leg).
+    - ``contract_id`` / ``contract_tags``: Tier-2 contract provenance, carried
+      from the ``compose_request_from_contract`` request so production rows are
+      auditable for contract-scoped vs free-text injection. Null/empty on every
+      free-text path by construction (those never build a contract request).
+    """
+
+    workflow_skill_ids: list[str]
+    header_fragment_ids: list[str]
+    returned_skill_ids: list[str]
+    selected_fragment_ids: list[str]
+    tokens_returned: int
+    tokens_flat_equivalent: int
+    reranked: bool
+    dense_leg_degraded: bool
+    lm_assist_outcome: str
+    lm_assist_model: str | None
+    lm_assist_kept_ids: list[str]
+    lm_assist_dropped_ids: list[str]
+    lm_assist_scores: dict[str, float]
+    # Compose latency (ms), summed across both tiers, from the orchestrator's per-leg
+    # LatencyBreakdown. ``None`` when neither leg composed (passthrough). assembly is
+    # omitted — it's structurally 0 since generative assembly was removed.
+    retrieval_latency_ms: int | None = None
+    total_latency_ms: int | None = None
+    contract_id: str | None = None
+    contract_tags: list[str] = field(default_factory=_empty_str_list)
+
+
+@dataclass
+class _ComposedBlock:
+    """Result of :func:`_compose_block`: the text plus per-tier commit signals.
+
+    These report what was *composed*. The caller pairs them with whether the block
+    was actually injected (delivery) before committing a marker — composing text the
+    request then drops (no user message, malformed content) must NOT burn the marker.
+
+    - ``tier1_text``: the Tier 1 orientation block carried real text — its marker may
+      be committed once that text is delivered.
+    - ``cursor_terminal``: the Tier 2 domain leg reached a *terminal* state (delivered
+      skills OR composed to a clean empty result, NOT a transient compose error). A
+      cleanly-empty Tier 2 has nothing to deliver, so its cursor commits even without
+      an injection — that is what stops a contract with genuinely no domain skills
+      from re-firing every turn.
+    - ``cursor_text``: the Tier 2 leg produced non-empty domain text — when True the
+      cursor marker additionally requires delivery, so an undelivered domain block
+      re-fires next turn instead of being silently lost.
+    """
+
+    text: str
+    tier1_text: bool
+    cursor_terminal: bool
+    cursor_text: bool
+    telemetry: ProxyComposeTelemetry
+
+
+def _compose_decision_push(
+    signal: SignalResult,
+    phase: str,
+    contract: Contract,
+    composed_domain_text: str,
+    orchestrator: ComposeOrchestrator,
+) -> str:
+    """Knowledge slice 2 — the just-in-time decision push (AC 6).
+
+    The governing-decision block for a design/build work-item, or ``""`` when it
+    does not apply. Fully gated and fail-closed: the code index is lazy-imported
+    only **after** the availability probe (which itself checks the module toggle),
+    so a disabled or unindexed repo composes byte-identically to before. Reads only
+    the code-index store; never touches the prompt-cached system block (the caller
+    folds this into the user-message text like the other tiers).
+    """
+    if phase not in ("design", "build"):
+        return ""
+    if not (contract.scope and contract.scope.touches):
+        return ""
+    if not code_index_gate.code_index_available(signal.repo):
+        return ""
+    if not signal.repo:
+        return ""
+
+    from agentalloy.api.knowledge_push import build_decision_block
+    from agentalloy.code_index.slug import repo_slug
+    from agentalloy.code_index.store import open_code_index
+
+    settings = orchestrator.settings
+    state = orchestrator.state
+    slug = repo_slug(Path(signal.repo))
+
+    handles = open_code_index(settings, slug, role="reader")
+    try:
+        task_title = (
+            (contract.body or contract.task_slug).strip().split("\n")[0].lstrip("# ").strip()
+        )
+        # Phase 2 flag: skip related_decisions when disabled
+        related_enabled = settings.knowledge_related_enabled if settings else True
+        push = build_decision_block(
+            contract,
+            composed_domain_text,
+            handles.graph,
+            state=state if related_enabled else None,
+            slug=slug if related_enabled else None,
+            task_title=task_title if related_enabled else None,
+        )
+    finally:
+        handles.close()
+    if push is None:
+        return ""
+    if push.truncated:
+        logger.info("knowledge decision push truncated to %d decisions", push.count)
+    return push.text
+
+
+async def _compose_block(
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
+    store: DuckDBStateStore | None = None,
+) -> _ComposedBlock:
+    """Compose the prose block to inject.
+
+    Three independent parts, each gated separately:
+
+    - **Eval advisory** — emitted whenever the gate eval produced advisories
+      (a transition trigger fired). Light; may recur across turns; carries no marker.
+    - **Tier 1 (phase-entry announce)** — the workflow skill's operating prose for
+      the phase + its phase-scoped system prose. Emitted once per phase entry
+      (``signal.announce``). How to operate here; never carries domain skills.
+    - **Tier 2 (per work-item)** — the domain skills for the current work-item
+      contract (``signal.current_contract``), keyed off its task, not the phase.
+      Emitted once per work-item (``signal.announce_cursor``): phase entry, or an
+      ``agentalloy task next``.
+
+    When *store* is provided, the contract is loaded from the DuckDB state store
+    using the contract_id. Falls back to filesystem parsing for backward
+    compatibility with repos that haven't migrated their contracts.
+
+    Returns a :class:`_ComposedBlock` whose ``text`` is the parts joined (``""``
+    when none has content) and whose flags tell the caller which cadence markers
+    are safe to commit post-injection.
+
+    Pause (``signal.paused_mode``) takes the compose-only branch instead: no
+    advisory / Tier 1 / Tier 2, just the task-keyed domain leg plus the daily
+    reminder line (see :func:`_compose_pause_block`).
+    """
+    if signal.paused_mode:
+        return await _compose_pause_block(signal, orchestrator)
+
+    phase = signal.phase
+    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+
+    advisory_block = ""
+    if signal.advisories:
+        advisory_block = (
+            "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
+        )
+
+    # Phase-boundary confirm directives (phase-boundary-confirmation). Same
+    # injection seam as the gate advisories, but a distinct [agentalloy-confirm]
+    # label so the two don't muddy each other in telemetry. Persist-until-reset:
+    # re-emitted every qualifying turn since ship never self-advances.
+    confirm_block = ""
+    if signal.confirm_directives:
+        confirm_block = (
+            f"[{CONFIRM_LABEL}]\n" + "\n".join(signal.confirm_directives) + f"\n[/{CONFIRM_LABEL}]"
+        )
+
+    # Tier 1: system-only compose (domain fragments, advisories, confirm directives).
+    # Workflow prose is delivered via the system-message leg (leg 3) and must NOT
+    # appear here — that would be double-injection.
+    # ``record_trace=False`` suppresses the orchestrator's own per-leg write — this
+    # surface folds both legs into one consolidated trace row below.
+    tier1 = ""
+    tier1_result: ComposedResult | EmptyResult | None = None
+    if signal.announce:
+        try:
+            system_req = ComposeRequest(
+                task=signal.task or f"Entering {compose_phase}.",
+                phase=compose_phase,
+                legs="system",
+            )
+            tier1_result = await orchestrator.compose(
+                system_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+                record_trace=False,
+                # Availability gate: sys-code-index is dropped unless this repo
+                # actually has a completed code index (fail-closed on any doubt).
+                exclude_system_skill_ids=code_index_gate.system_skill_exclusions(signal.repo),
+            )
+            tier1 = (
+                tier1_result.output
+                if (not isinstance(tier1_result, EmptyResult) and tier1_result.output)
+                else ""
+            )
+        except Exception:
+            logger.warning("Tier 1 system compose failed", exc_info=True)
+
+    # Tier 2: domain skills for the current work-item contract. `tier2_terminal`
+    # distinguishes "composed to a clean result" (delivered text OR a legitimate
+    # empty — the cursor is done) from "the compose leg threw" (transient — leave
+    # the cursor unmarked so it re-fires next turn).
+    tier2 = ""
+    tier2_terminal = False
+    tier2_result: ComposedResult | EmptyResult | None = None
+    domain_req: ComposeRequest | None = None
+    decision_block = ""
+    # Gate: never inject domain skills during intake — intake only needs
+    # workflow prose (Tier 1). Domain skills fire once intake exits and
+    # the agent is actually working in a downstream phase.
+    if signal.announce_cursor and signal.current_contract and signal.phase != "intake":
+        contract: Contract | None = None
+        try:
+            if store is not None:
+                from agentalloy.contracts import contract_from_row
+
+                row = store.get_contract(signal.current_contract)
+                if row is not None:
+                    contract = contract_from_row(row)
+                else:
+                    logger.debug(
+                        "Contract %r not in store",
+                        signal.current_contract,
+                    )
+        except Exception:
+            logger.warning("Tier 2 contract parse failed -- passing through", exc_info=True)
+
+        if contract is not None:
+            try:
+                from agentalloy.api.compose_models import compose_request_from_contract
+
+                domain_req = compose_request_from_contract(contract, legs="domain", k=_tier2_k())
+                tier2_result = await orchestrator.compose(
+                    domain_req,
+                    repo=signal.repo,
+                    session_key=signal.session_key,
+                    session_source=signal.session_source,
+                    record_trace=False,
+                )
+                tier2 = "" if isinstance(tier2_result, EmptyResult) else tier2_result.output
+                tier2_terminal = True
+            except Exception:
+                logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
+                tier2 = ""
+                tier2_terminal = False
+
+            # Knowledge slice 2: the JIT decision push, in its own guard so neither
+            # it nor the domain leg can suppress the other. Dedups against the
+            # domain text just composed; additive (any gate miss -> "").
+            try:
+                decision_block = _compose_decision_push(
+                    signal,
+                    compose_phase,
+                    contract,
+                    tier2,
+                    orchestrator,
+                )
+            except Exception:
+                logger.warning("decision push failed -- passing through", exc_info=True)
+                decision_block = ""
+
+    text = "\n\n".join(
+        p for p in (advisory_block, confirm_block, tier1, tier2, decision_block) if p
+    )
+
+    # Orientation block: prepended BEFORE the workflow block when the orientation
+    # cadence fires (first request in this session for the current phase). Fires
+    # once per session, then disappears.
+    orientation_block = ""
+    if signal.announce_orientation:
+        mode = "paused" if signal.paused_mode else "workflow"
+        options_text = _OPTIONS_TEXT_PAUSED if signal.paused_mode else _OPTIONS_TEXT_WORKFLOW
+        orientation_block = _COMPOSE_ORIENTATION.format(
+            phase=signal.phase,
+            mode=mode,
+            options_text=options_text,
+        )
+
+    return _ComposedBlock(
+        text=orientation_block + ("\n" + text if text else orientation_block),
+        tier1_text=bool(tier1),
+        cursor_terminal=tier2_terminal,
+        cursor_text=bool(tier2),
+        telemetry=_merge_compose_telemetry(signal, tier1_result, tier2_result, domain_req),
+    )
+
+
+async def _compose_pause_block(
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
+) -> _ComposedBlock:
+    """Compose the pause (compose-only) block.
+
+    Two parts, both riding the standard injection block:
+
+    - **Domain leg** — the domain skills retrieved for the request's task text
+      (``signal.task``), gated on ``signal.announce`` (once per session, on the
+      pause sentinel cadence). No workflow prose, no system leg, no banner.
+    - **Reminder** — the once-per-24h "workflow paused" line (already
+      cadence-stamped by the signal layer).
+
+    Marker semantics: ``tier1_text`` is True on a *terminal* domain compose
+    (delivered skills OR a clean empty result — mirrors the workflow-mode cursor
+    semantics), so the per-session pause marker commits once the block is
+    delivered and a transient compose error re-fires next turn. The Tier 2
+    cursor channel is never used in pause mode.
+    """
+    phase = signal.phase
+    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+
+    domain = ""
+    domain_terminal = False
+    domain_result: ComposedResult | EmptyResult | None = None
+    if signal.announce and signal.task:
+        try:
+            domain_req = ComposeRequest(
+                task=signal.task,
+                phase=compose_phase,
+                legs="domain",
+                k=_tier2_k(),
+            )
+            domain_result = await orchestrator.compose(
+                domain_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+                record_trace=False,
+            )
+            domain = "" if isinstance(domain_result, EmptyResult) else domain_result.output
+            domain_terminal = True
+        except Exception:
+            logger.warning("pause domain compose failed -- passing through", exc_info=True)
+
+    text = domain
+    return _ComposedBlock(
+        text=text,
+        tier1_text=domain_terminal,
+        cursor_terminal=False,
+        cursor_text=False,
+        telemetry=_merge_compose_telemetry(signal, None, domain_result),
+    )
+
+
+def _merge_compose_telemetry(
+    signal: SignalResult,
+    tier1: ComposedResult | EmptyResult | None,
+    tier2: ComposedResult | EmptyResult | None,
+    tier2_request: ComposeRequest | None = None,
+) -> ProxyComposeTelemetry:
+    """Fold the Tier 1 (system/header) and Tier 2 (domain) compose results into one
+    provenance record. Stage B fields come from Tier 2 only — it never runs on the
+    system leg. Missing legs (passthrough) contribute nothing.
+
+    ``tier2_request`` carries the contract provenance (``contract_id`` /
+    ``contract_tags``) the request objects already hold but the results do not;
+    it is recorded only when the Tier-2 leg actually composed (``tier2`` set),
+    so a thrown compose never stamps contract fields on a row without skills.
+    """
+    t1 = tier1.telemetry if tier1 is not None else None
+    t2 = tier2.telemetry if tier2 is not None else None
+    workflow_ids = list(t1.workflow_skill_ids) if t1 else []
+    if signal.workflow_skill_id and signal.workflow_skill_id not in workflow_ids:
+        workflow_ids.append(signal.workflow_skill_id)
+    header_fragment_ids = list(tier1.system_fragments) if tier1 is not None else []
+    returned_skill_ids = list(tier2.source_skills) if tier2 is not None else []
+    selected_fragment_ids = header_fragment_ids + (
+        list(tier2.domain_fragments) if tier2 is not None else []
+    )
+    # Latency lives on the result (ComposedResult.latency_ms), not on .telemetry, and
+    # only ComposedResult carries it — an EmptyResult / missing leg contributes nothing.
+    lat1 = tier1.latency_ms if isinstance(tier1, ComposedResult) else None
+    lat2 = tier2.latency_ms if isinstance(tier2, ComposedResult) else None
+    if lat1 is None and lat2 is None:
+        retrieval_latency_ms = total_latency_ms = None  # untimed (distinct from 0ms)
+    else:
+        retrieval_latency_ms = (lat1.retrieval_ms if lat1 else 0) + (
+            lat2.retrieval_ms if lat2 else 0
+        )
+        total_latency_ms = (lat1.total_ms if lat1 else 0) + (lat2.total_ms if lat2 else 0)
+    return ProxyComposeTelemetry(
+        workflow_skill_ids=workflow_ids,
+        header_fragment_ids=header_fragment_ids,
+        returned_skill_ids=returned_skill_ids,
+        selected_fragment_ids=selected_fragment_ids,
+        tokens_returned=(t1.tokens_returned if t1 else 0) + (t2.tokens_returned if t2 else 0),
+        tokens_flat_equivalent=(
+            (t1.tokens_flat_equivalent if t1 else 0) + (t2.tokens_flat_equivalent if t2 else 0)
+        ),
+        reranked=bool(t2.reranked) if t2 else False,
+        dense_leg_degraded=bool(t2 and t2.dense_leg_degraded) or bool(t1 and t1.dense_leg_degraded),
+        lm_assist_outcome=t2.lm_assist_outcome if t2 else "disabled",
+        lm_assist_model=t2.lm_assist_model if t2 else None,
+        lm_assist_kept_ids=list(t2.lm_assist_kept_ids) if t2 else [],
+        lm_assist_dropped_ids=list(t2.lm_assist_dropped_ids) if t2 else [],
+        lm_assist_scores=dict(t2.lm_assist_scores) if t2 else {},
+        retrieval_latency_ms=retrieval_latency_ms,
+        total_latency_ms=total_latency_ms,
+        contract_id=(
+            tier2_request.contract_id if tier2_request is not None and tier2 is not None else None
+        ),
+        contract_tags=(
+            list(tier2_request.contract_tags or [])
+            if tier2_request is not None and tier2 is not None
+            else []
+        ),
+    )
+
+
+@dataclass
+class InjectOutcome[T]:
+    """Result of :func:`apply_signal`: the injected payload + deferred commit facts.
+
+    The surface threads this across the upstream forward and hands it to
+    :func:`commit_outcome` once the response status is known, so a marker is
+    written only when the model actually received the block (a 2xx response). The
+    emit flags already fold in *delivery* (the block reached the request body); the
+    2xx gate is applied later, by :func:`commit_outcome`.
+
+    - ``injected``: whatever ``inject`` returned — the new request/payload, or None
+      on a no-op (nothing composed, or the block could not be injected).
+    - ``announce_emitted`` / ``cursor_emitted``: candidate Tier 1 / Tier 2 commits,
+      pending a 2xx forward.
+    - ``orientation_emitted``: candidate orientation commit, pending a 2xx forward.
+      The orientation marker fires BEFORE the workflow block, once per session.
+    """
+
+    injected: T | None
+    signal: SignalResult
+    announce_emitted: bool
+    cursor_emitted: bool
+    # Merged skill/fragment provenance for the consolidated proxy trace row.
+    telemetry: ProxyComposeTelemetry
+    orientation_emitted: bool = False
+
+
+async def apply_signal[T](
+    *,
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
+    inject: Callable[[str], T | None],
+    delivered: Callable[[T], bool],
+    store: DuckDBStateStore | None = None,
+) -> InjectOutcome[T]:
+    """Shared inject seam for both proxy surfaces (commit is deferred).
+
+    Composes the 3-tier block, injects it via the surface-specific ``inject``
+    (which returns the new request/payload, or None on a no-op), and returns an
+    :class:`InjectOutcome` with the per-tier emit flags folded against delivery.
+    It does NOT write the cadence markers — the surface calls :func:`commit_outcome`
+    after the upstream forward, gated on a 2xx response, so a turn the model never
+    processed (overloaded/errored upstream) leaves the cadence intact and re-fires
+    on the harness retry.
+    """
+    composed = await _compose_block(signal, orchestrator, store=store)
+    if not composed.text:
+        return InjectOutcome(
+            injected=None,
+            signal=signal,
+            announce_emitted=False,
+            cursor_emitted=False,
+            orientation_emitted=False,
+            telemetry=composed.telemetry,
+        )
+    injected = inject(composed.text) if composed.text else None
+    was_delivered = injected is not None and delivered(injected)
+    return InjectOutcome(
+        injected=injected,
+        signal=signal,
+        announce_emitted=composed.tier1_text and (was_delivered or not composed.text),
+        cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
+        orientation_emitted=signal.announce_orientation and (was_delivered or not composed.text),
+        telemetry=composed.telemetry,
+    )
+
+
+def commit_outcome(project_root: Path, outcome: InjectOutcome[Any], *, upstream_ok: bool) -> None:
+    """Commit the deferred cadence markers — only after a confirmed 2xx forward.
+
+    ``upstream_ok`` is the surface's verdict that upstream returned 2xx (the model
+    processed the injected block). A non-2xx (529 overloaded, 5xx, connection error)
+    leaves ``.agentalloy/{announced,composed}`` untouched, so ``evaluate_signal``
+    re-announces on the harness's retry instead of silently dropping orientation.
+    No-op when nothing was injected (all emit flags False).
+    """
+    if not upstream_ok:
+        return
+    commit_markers(
+        project_root,
+        outcome.signal,
+        announce_emitted=outcome.announce_emitted,
+        cursor_emitted=outcome.cursor_emitted,
+        orientation_emitted=outcome.orientation_emitted,
+    )

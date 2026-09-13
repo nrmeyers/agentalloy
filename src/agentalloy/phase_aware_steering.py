@@ -25,6 +25,7 @@ class PhaseReader(Protocol):
 
     def get_current_phase(self) -> str: ...
 
+
 # Phase personas: long-form instructions for each SDD phase
 # These are injected only on phase activation (first turn of the phase)
 PHASE_PERSONAS: dict[str, str] = {

@@ -16,6 +16,7 @@ Key features:
 
 from __future__ import annotations
 
+import itertools
 import sqlite3
 from collections.abc import Hashable
 from dataclasses import dataclass, field
@@ -38,7 +39,7 @@ Phase = Literal["intake", "spec", "design", "plan", "build", "qa", "ship"]
 APPROVAL_GATES: set[str] = {"spec→design", "design→plan", "plan→build"}
 
 # Adjacent (current, target) pairs along the lifecycle.
-_TRANSITIONS = list(zip(PHASE_ORDER, PHASE_ORDER[1:]))
+_TRANSITIONS = list(itertools.pairwise(PHASE_ORDER))
 
 
 @dataclass
@@ -103,8 +104,7 @@ class PhaseMachine:
         # Gate checker decides: advance, interrupt, or end. Maps are derived
         # from PHASE_ORDER so the topology tracks the lifecycle.
         gate_map: dict[Hashable, str] = {
-            f"advance_{phase}": PHASE_ORDER[i + 1]
-            for i, phase in enumerate(PHASE_ORDER[:-1])
+            f"advance_{phase}": PHASE_ORDER[i + 1] for i, phase in enumerate(PHASE_ORDER[:-1])
         }
         gate_map.update(
             {
@@ -274,9 +274,7 @@ class PhaseMachine:
     def resume(self, thread_id: str, approval: dict[str, Any]) -> dict[str, Any]:
         """Resume a paused graph with an approval decision."""
         config = {"configurable": {"thread_id": thread_id}}
-        result: dict[str, Any] = self.graph.invoke(
-            Command(resume=approval), config=config
-        )
+        result: dict[str, Any] = self.graph.invoke(Command(resume=approval), config=config)
         return result
 
     def check_gate(self, phase: str) -> dict[str, Any]:

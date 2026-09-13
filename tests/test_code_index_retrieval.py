@@ -23,8 +23,15 @@ from agentalloy.code_index.retrieval.hybrid import (
 VEC_DIM = 768
 
 
-def _sym(qn: str, *, docstring: str | None = None, file_path: str, start: int = 1,
-         end: int = 2, repo: str = "smoke") -> CodeSymbol:
+def _sym(
+    qn: str,
+    *,
+    docstring: str | None = None,
+    file_path: str,
+    start: int = 1,
+    end: int = 2,
+    repo: str = "smoke",
+) -> CodeSymbol:
     return CodeSymbol(
         qualified_name=qn,
         kind="Function",
@@ -138,8 +145,9 @@ def test_finalize_query_text():
 def test_searcher_lexical_only(store, tmp_path):
     store.upsert_symbols(
         [
-            _sym("mod.hello", docstring="Greet the named party.", file_path="/s/a.py",
-                 start=5, end=7),
+            _sym(
+                "mod.hello", docstring="Greet the named party.", file_path="/s/a.py", start=5, end=7
+            ),
             _sym("mod.world", docstring="World reference.", file_path="/s/b.py"),
         ]
     )
@@ -176,14 +184,24 @@ def test_searcher_hybrid_with_stub_embedder(store, tmp_path):
     store.upsert(
         [
             CodeVectorRow(
-                qualified_name=s1, embedding=_vec(0), symbol_type="Function",
-                file_path="/s/1.py", start_line=1, end_line=2,
-                text="one text", indexed_at=1,
+                qualified_name=s1,
+                embedding=_vec(0),
+                symbol_type="Function",
+                file_path="/s/1.py",
+                start_line=1,
+                end_line=2,
+                text="one text",
+                indexed_at=1,
             ),
             CodeVectorRow(
-                qualified_name=s2, embedding=_vec(1), symbol_type="Function",
-                file_path="/s/2.py", start_line=1, end_line=2,
-                text="two text", indexed_at=1,
+                qualified_name=s2,
+                embedding=_vec(1),
+                symbol_type="Function",
+                file_path="/s/2.py",
+                start_line=1,
+                end_line=2,
+                text="two text",
+                indexed_at=1,
             ),
         ]
     )

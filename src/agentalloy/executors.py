@@ -358,8 +358,14 @@ def _telemetry(args: dict[str, Any]) -> str:
 # Technology vocabulary for catalog filtering: a skill/pack whose name
 # names one of these but the repo doesn't use it is dropped from the
 # catalog the orchestrator sees. Rows without a technology name pass.
-_TECH_ALIASES: dict[str, str] = {"ts": "typescript", "js": "javascript", "py": "python",
-                                 "golang": "go", "node": "javascript", "nodejs": "javascript"}
+_TECH_ALIASES: dict[str, str] = {
+    "ts": "typescript",
+    "js": "javascript",
+    "py": "python",
+    "golang": "go",
+    "node": "javascript",
+    "nodejs": "javascript",
+}
 
 # Detected-tags cache per project (repos don't change stack mid-session).
 _repo_tags_cache: dict[str, set[str] | None] = {}
@@ -565,16 +571,15 @@ def _phase_advance(args: dict[str, Any]) -> str:
         from agentalloy.phase_machine import APPROVAL_GATES
 
         transition = f"{current}→{target}"
-        if transition in APPROVAL_GATES:
-            if not store.is_approved(transition, exit_digest):
-                return json.dumps(
-                    {
-                        "status": "rejected",
-                        "target": target,
-                        "reason": f"transition '{transition}' requires approval",
-                        "digest": exit_digest,
-                    }
-                )
+        if transition in APPROVAL_GATES and not store.is_approved(transition, exit_digest):
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "target": target,
+                    "reason": f"transition '{transition}' requires approval",
+                    "digest": exit_digest,
+                }
+            )
 
     if approved:
         if store:

@@ -1,0 +1,500 @@
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
+"""Stage B — LM fragment re-ranker (sub-1B intent layer).
+
+Stage B shows a small instruct-tuned reranker (qwen3-reranker-0.6b) the task
+plus the top fused fragments and asks, per fragment, "does this document meet
+the query's requirements?" The yes-probability becomes a relevance score; the
+pipeline keeps the fragments above a calibrated threshold and drops the rest.
+This is the fragment-level arbiter the 2026-06-12 design settled on (see
+``docs/lm-assist-design.md`` — "Stage B — fragment re-rank").
+
+Why a sibling module to ``rerank.py`` (Stage A) rather than a new backend:
+
+* Stage A scores *skills* by reordering; its ``Reranker`` protocol returns a
+  flat ``list[float]`` from one synchronous call. Stage B scores *fragments*
+  concurrently (up to 12 documents under a 300 ms budget — sequential was
+  ~470 ms) and needs its own prompt template + softmax-over-logprobs scoring.
+* It DOES reuse Stage A's fail-open machinery: ``_FailureLatch`` (the
+  process-local circuit breaker) is imported, not re-implemented.
+
+llama.cpp's ``/v1/rerank`` endpoint does NOT work for this GGUF (it skips the
+instruction template and returns ~0 for everything), so we score via
+``/v1/completions`` with the official Qwen3-Reranker chat template, asking for
+one token with ``n_probs`` logprobs, and take ``softmax(yes, no)``.
+
+Fail-open is the contract: every failure path — disabled flag, connection
+refused, timeout, malformed logprobs, length mismatch — yields a disabled
+result that the caller treats as "Stage B did not run", falling through to the
+deterministic selection byte-for-byte. This module never raises to its caller.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import math
+import os
+import threading
+import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any, cast
+
+from agentalloy.retrieval.rerank import _FailureLatch
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Config (env-driven). Read once per build; reset_lm_assist_cache() for tests.
+# ---------------------------------------------------------------------------
+
+# AgentAlloy's reranker (llama-server) listens on 47952; the old 60001 default
+# pointed at an unrelated local service. Stage B is off by default (LM_ASSIST),
+# but when enabled it shares the same reranker as the signal intent scorer.
+_DEFAULT_URL = "http://127.0.0.1:47952"
+
+# Shared concurrency semaphore — bounds TOTAL in-flight requests across BOTH
+# scorer singletons (compose Stage B + signal intent classifier) to a safe
+# value that the reranker server can handle without queuing.
+#
+# The reranker llama-server is launched with --parallel 1 (CPU/container) or
+# --parallel 2 (GPU).  With --parallel 1, any concurrency > 1 forces serial
+# queuing; with --parallel 2, concurrency > 2 queues.  A cap of 4 means:
+#   * GPU (2 slots): at most 2 requests queued — well within the 600 ms budget
+#     on fast hardware.
+#   * CPU (1 slot): at most 3 requests queued — each adds ~1.2–1.8 s, but the
+#     batch deadline reaps the rest before they start, so wall-clock stays
+#     bounded.
+#
+# This knob is independent of max_candidates() (which controls how many
+# fragments are scored, not how many HTTP requests are in-flight simultaneously).
+_rerank_semaphore = threading.Semaphore(4)
+# 600ms budget before Stage B times out and falls through to deterministic
+# retrieval. Raised from 300ms: a cold/loaded reranker (CPU llama-server, longer
+# fragments) routinely crossed 300ms and passed through, so the stage rarely ran.
+# Override with LM_ASSIST_TIMEOUT_MS.
+_DEFAULT_TIMEOUT_MS = 600
+# Keep threshold is the relevance floor below which Stage B drops a fragment. The
+# default ships TRULY INERT (0.0) and gated-off: the keep test is ``score >= threshold``
+# (domain.py), and the reranker yes-probabilities are in [0, 1], so 0.0 keeps EVERY
+# scored fragment — including ones the reranker scores exactly 0.0 for a task with no
+# relevant corpus coverage. (0.05 is NOT inert: a task whose candidates all score 0.0
+# would be emptied, which contradicts the "gated-off until measured" posture — live
+# test, calendar build → 8×0.0 → empty.) So the win at the default is purely the
+# restored skill_granular_select routing/reordering on the HIT path, never a drop.
+# The real prod value is a deferred decision gate pending a P(yes) distribution
+# measurement — do NOT bake a measured value into any preset until then; only the env
+# knob LM_ASSIST_KEEP_THRESHOLD ships.
+_DEFAULT_KEEP_THRESHOLD = 0.0
+_DEFAULT_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
+# Cap on fragments scored per composition (env LM_ASSIST_MAX_CANDIDATES).
+# Default is 8 — a reasonable starting point that balances breadth vs latency.
+# This knob only limits the number of fragments sent to the scorer; concurrency
+# to the reranker server is independently bounded by the shared semaphore
+# (``_rerank_semaphore``), so the two consumers can never oversubscribe the
+# server's KV slots regardless of max_candidates() value.
+_DEFAULT_MAX_CANDIDATES = 8
+# Per-fragment runtime char cap applied before prompt assembly (env
+# LM_ASSIST_DOC_CAP_CHARS). 2400 chars (~600 tok) is a prefill bound, not an
+# anti-truncation guard: it slashes prefill on fat-corpus outliers (1,300+ tok
+# fragments) so the batch fits the budget. Distinct from — and deliberately above —
+# the ~400-tok *authoring* fragment budget, so a well-sliced fragment never truncates
+# here. Locked value (A/B closed); see docs/lm-assist-design.md.
+_DEFAULT_DOC_CAP_CHARS = 2400
+
+# Official Qwen3-Reranker template. The model was trained to answer "yes"/"no"
+# to whether the Document meets the Query's requirements. Verified against the
+# live /v1/completions endpoint before being hardcoded (see PR notes).
+_SYSTEM = (
+    "Judge whether the Document meets the requirements based on the Query and "
+    'the Instruct provided. Note that the answer can only be "yes" or "no".'
+)
+_PREFIX = f"<|im_start|>system\n{_SYSTEM}<|im_end|>\n<|im_start|>user\n"
+_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+_DEFAULT_INSTRUCT = (
+    "Given a software engineering task, judge whether the skill instruction "
+    "fragment provides guidance the task needs."
+)
+
+
+class LMAssistMode(StrEnum):
+    OFF = "off"
+    ARBITRATE = "arbitrate"
+
+
+class LMAssistOutcome(StrEnum):
+    """Per-composition Stage B outcome recorded in telemetry."""
+
+    DISABLED = "disabled"
+    HIT = "hit"
+    # The judge scored every candidate <= keep_threshold: selection falls back
+    # to the deterministic path rather than composing empty. Distinguishable
+    # from HIT so empty-verdict rates are auditable in telemetry.
+    HIT_EMPTY_FALLBACK = "hit-empty-fallback"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class LMAssistConfig:
+    mode: LMAssistMode
+    url: str
+    timeout_ms: int
+    keep_threshold: float
+    model: str
+    # Instruct line shown to the reranker. Defaults to the Stage-B fragment
+    # instruct; the signal-layer intent classifier overrides it (see
+    # ``signals/classifier.py``) so the same FragmentScorer can pair-score
+    # utterances against intent task descriptions.
+    instruct: str = _DEFAULT_INSTRUCT
+    # Per-fragment char cap applied before prompt assembly (see
+    # _DEFAULT_DOC_CAP_CHARS). Defaulted so the signal-intent scorer — which scores
+    # short utterances where the cap never bites — inherits it without plumbing.
+    doc_cap_chars: int = _DEFAULT_DOC_CAP_CHARS
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode is LMAssistMode.ARBITRATE
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("invalid %s=%r; using default %d", name, raw, default)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("invalid %s=%r; using default %s", name, raw, default)
+        return default
+
+
+def load_config() -> LMAssistConfig:
+    """Resolve the Stage B config from the environment.
+
+    Unknown ``LM_ASSIST`` values fall back to ``off`` with one warning — the
+    stage must never raise at import or request time.
+    """
+    raw_mode = os.environ.get("LM_ASSIST", "off").strip().lower()
+    try:
+        mode = LMAssistMode(raw_mode)
+    except ValueError:
+        logger.warning("unknown LM_ASSIST=%r; treating as off", raw_mode)
+        mode = LMAssistMode.OFF
+    return LMAssistConfig(
+        mode=mode,
+        url=os.environ.get("LM_ASSIST_RERANK_URL", _DEFAULT_URL).strip().rstrip("/")
+        or _DEFAULT_URL,
+        timeout_ms=_env_int("LM_ASSIST_TIMEOUT_MS", _DEFAULT_TIMEOUT_MS),
+        keep_threshold=_env_float("LM_ASSIST_KEEP_THRESHOLD", _DEFAULT_KEEP_THRESHOLD),
+        model=os.environ.get("LM_ASSIST_MODEL", _DEFAULT_MODEL).strip() or _DEFAULT_MODEL,
+        doc_cap_chars=_env_int("LM_ASSIST_DOC_CAP_CHARS", _DEFAULT_DOC_CAP_CHARS),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prompt + scoring math
+# ---------------------------------------------------------------------------
+
+
+def build_prompt(task: str, document: str, *, instruct: str = _DEFAULT_INSTRUCT) -> str:
+    """Render the Qwen3-Reranker completion prompt for one (task, document) pair."""
+    body = f"<Instruct>: {instruct}\n<Query>: {task}\n<Document>: {document}"
+    return f"{_PREFIX}{body}{_SUFFIX}"
+
+
+def score_from_logprobs(top_logprobs: dict[str, float]) -> float:
+    """softmax over the yes/no token logprobs → P(yes) in [0, 1].
+
+    ``top_logprobs`` maps a generated token (already stripped of leading
+    whitespace by the caller) to its logprob. We sum the probability mass of
+    yes-class and no-class tokens (case-insensitive, tolerating the leading
+    space llama.cpp emits) and return yes / (yes + no). A pair with neither
+    token present is treated as score 0.0 — the model did not commit to "yes".
+    """
+    yes_mass = 0.0
+    no_mass = 0.0
+    for token, logprob in top_logprobs.items():
+        norm = token.strip().lower()
+        if norm == "yes":
+            yes_mass += math.exp(logprob)
+        elif norm == "no":
+            no_mass += math.exp(logprob)
+    total = yes_mass + no_mass
+    if total <= 0.0:
+        return 0.0
+    return yes_mass / total
+
+
+def _parse_completion_logprobs(data: Any) -> dict[str, float]:
+    """Extract the first generated token's {token: logprob} map from a
+    llama.cpp /v1/completions response. Raises ValueError on any shape it does
+    not recognise — the caller converts that into a fail-open score.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(f"completion response not an object: {data!r}")
+    choices: Any = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError(f"completion response missing choices: {data!r}")
+    first: dict[str, Any] = choices[0]
+    if not isinstance(first, dict):
+        raise ValueError(f"completion choice not an object: {first!r}")
+    logprobs = cast("dict[str, Any]", first).get("logprobs")
+    if not isinstance(logprobs, dict):
+        raise ValueError(f"completion choice missing logprobs: {first!r}")
+    # llama.cpp emits content[0].top_logprobs: [{token, logprob}, ...].
+    content = cast("dict[str, Any]", logprobs).get("content")
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        top = cast("dict[str, Any]", content[0]).get("top_logprobs")
+        if isinstance(top, list):
+            out: dict[str, float] = {}
+            for entry in cast("list[Any]", top):
+                if isinstance(entry, dict):
+                    tok = cast("dict[str, Any]", entry).get("token")
+                    lp = cast("dict[str, Any]", entry).get("logprob")
+                    if isinstance(tok, str) and isinstance(lp, int | float):
+                        out[tok] = float(lp)
+            if out:
+                return out
+    raise ValueError(f"no top_logprobs in completion response: {logprobs!r}")
+
+
+# ---------------------------------------------------------------------------
+# Scorer client
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    """Outcome of scoring a candidate batch. ``scores`` aligns 1:1 with the
+    input documents when ``outcome is HIT``; otherwise it is empty and the
+    caller falls through to deterministic selection.
+    """
+
+    outcome: LMAssistOutcome
+    scores: list[float]
+
+
+class FragmentScorer:
+    """Concurrent pair-scorer over a llama.cpp /v1/completions endpoint.
+
+    One HTTP call per document, fanned out across a thread pool so up to
+    ``max_candidates()`` docs fit the configured ``timeout_ms`` budget. The
+    per-batch wall-clock is bounded by ``timeout_ms``; exceeding it returns a
+    TIMEOUT outcome (fail-open). A process-local failure latch (shared philosophy
+    with Stage A) disables the stage for a cooldown after repeated failures so a
+    dead backend never adds latency.
+    """
+
+    def __init__(self, config: LMAssistConfig) -> None:
+        import httpx
+
+        self._config = config
+        self._latch = _FailureLatch()
+        # Per-request timeout strictly UNDER the batch budget (0.9x) so a single
+        # hung request can't consume the whole budget before the batch deadline
+        # loop reaps it; the batch-level wall-clock guard below is the hard ceiling.
+        per_req_s = config.timeout_ms / 1000.0 * 0.9
+        self._client = httpx.Client(
+            base_url=config.url,
+            timeout=httpx.Timeout(per_req_s),
+            headers={"Authorization": "Bearer not-needed"},
+        )
+        # Pool width keyed to max_candidates() so the thread pool can serve all
+        # documents in a single batch.  Actual concurrency to the reranker server
+        # is independently bounded by the shared semaphore (_rerank_semaphore).
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_candidates(),
+            thread_name_prefix="lm-assist",
+        )
+
+    def _score_one(self, task: str, document: str) -> float:
+        # Gate through the shared semaphore so BOTH scorers never exceed the
+        # server's KV-slot capacity.  The context-manager form blocks until a
+        # slot is available (bounded by the batch deadline below).
+        with _rerank_semaphore:
+            payload: dict[str, Any] = {
+                "model": self._config.model,
+                # Truncate to the runtime doc cap before prompt assembly — a prefill
+                # bound that keeps fat-corpus outliers inside the budget.
+                "prompt": build_prompt(
+                    task,
+                    document[: self._config.doc_cap_chars],
+                    instruct=self._config.instruct,
+                ),
+                "max_tokens": 1,
+                "temperature": 0.0,
+                "n_probs": 20,
+                "logprobs": 20,
+            }
+            resp = self._client.post("/v1/completions", json=payload)
+            resp.raise_for_status()
+            top = _parse_completion_logprobs(resp.json())
+            return score_from_logprobs(top)
+
+    def score(self, task: str, documents: list[str]) -> ScoreResult:
+        """Score every document; never raises. Empty input → HIT with []."""
+        if not documents:
+            return ScoreResult(LMAssistOutcome.HIT, [])
+        if not self._latch.allow():
+            # Latch open == the backend failed repeatedly and is in cooldown; the
+            # /health probe counts this as an unhealthy signal alongside TIMEOUT/ERROR.
+            _record_outcome(LMAssistOutcome.DISABLED)
+            return ScoreResult(LMAssistOutcome.DISABLED, [])
+
+        batch_budget_s = self._config.timeout_ms / 1000.0
+        # Single deadline for the whole batch — decrement the per-future timeout
+        # against it so total wall-clock is bounded by timeout_ms regardless of
+        # future ordering (a fixed per-future timeout let a late hang push total
+        # toward ~2x the documented ceiling).
+        deadline = time.monotonic() + batch_budget_s
+        futures = [self._pool.submit(self._score_one, task, doc) for doc in documents]
+        scores: list[float] = []
+        try:
+            for fut in futures:
+                scores.append(fut.result(timeout=max(0.0, deadline - time.monotonic())))
+        except FuturesTimeout:
+            for fut in futures:
+                fut.cancel()
+            self._latch.record_failure()
+            logger.warning("lm-assist Stage B timed out after %d ms", self._config.timeout_ms)
+            _record_outcome(LMAssistOutcome.TIMEOUT)
+            return ScoreResult(LMAssistOutcome.TIMEOUT, [])
+        except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+            for fut in futures:
+                fut.cancel()
+            self._latch.record_failure()
+            logger.warning("lm-assist Stage B scorer failed: %s", exc)
+            _record_outcome(LMAssistOutcome.ERROR)
+            return ScoreResult(LMAssistOutcome.ERROR, [])
+
+        if len(scores) != len(documents):
+            self._latch.record_failure()
+            _record_outcome(LMAssistOutcome.ERROR)
+            return ScoreResult(LMAssistOutcome.ERROR, [])
+        self._latch.record_success()
+        _record_outcome(LMAssistOutcome.HIT)
+        return ScoreResult(LMAssistOutcome.HIT, scores)
+
+    def close(self) -> None:
+        self._client.close()
+        self._pool.shutdown(wait=False)
+
+
+# ---------------------------------------------------------------------------
+# Rolling Stage-B outcome window (process-local) — drives the /health reranker
+# probe without a synchronous live call. The scorer records each real attempt's
+# outcome here; the probe reads the timeout/error ratio. Read-only on the /health
+# path, so it adds no latency.
+# ---------------------------------------------------------------------------
+
+_OUTCOME_WINDOW = 20
+_outcomes_lock = threading.Lock()
+_recent_outcomes: deque[LMAssistOutcome] = deque(maxlen=_OUTCOME_WINDOW)
+# Outcomes that signal an unhealthy reranker: a timeout, a hard error, or a
+# latch-open DISABLED (the breaker tripped after repeated failures).
+_BAD_OUTCOMES = frozenset(
+    {LMAssistOutcome.TIMEOUT, LMAssistOutcome.ERROR, LMAssistOutcome.DISABLED},
+)
+
+
+def _record_outcome(outcome: LMAssistOutcome) -> None:
+    with _outcomes_lock:
+        _recent_outcomes.append(outcome)
+
+
+def reset_outcome_window() -> None:
+    """Clear the rolling outcome window (tests / probe reset)."""
+    with _outcomes_lock:
+        _recent_outcomes.clear()
+
+
+def reranker_status() -> str | None:
+    """Detail string when the recent Stage B window is timeout/error-dominant,
+    else None. Returns None when Stage B is disabled (no real attempts ever run)
+    or the window is empty. Read-only — never makes a live reranker call.
+    """
+    if not load_config().enabled:
+        return None
+    with _outcomes_lock:
+        window = list(_recent_outcomes)
+    if not window:
+        return None
+    bad = sum(1 for o in window if o in _BAD_OUTCOMES)
+    if bad * 2 > len(window):  # strict majority of the window failed
+        return (
+            f"Stage B reranker unhealthy: {bad}/{len(window)} recent outcomes timed out or errored"
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Factory + process-wide cache (mirrors rerank.py)
+# ---------------------------------------------------------------------------
+
+_cache_lock = threading.Lock()
+_cached: FragmentScorer | None = None
+_cache_built = False
+
+
+def _build_scorer_from_env() -> FragmentScorer | None:
+    """Construct the scorer, or None when Stage B is disabled / mis-configured.
+    Never raises — a build failure logs one warning and disables the stage.
+    """
+    config = load_config()
+    if not config.enabled:
+        return None
+    try:
+        return FragmentScorer(config)
+    except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+        logger.warning("lm-assist Stage B disabled — scorer build failed: %s", exc)
+        return None
+
+
+def build_scorer_from_env() -> FragmentScorer | None:
+    """Return the process-wide Stage B scorer, building it once. None = disabled."""
+    global _cached, _cache_built
+    with _cache_lock:
+        if not _cache_built:
+            _cached = _build_scorer_from_env()
+            _cache_built = True
+        return _cached
+
+
+def reset_lm_assist_cache() -> None:
+    """Drop the cached scorer so the next call rebuilds from env (tests)."""
+    global _cached, _cache_built
+    with _cache_lock:
+        if _cached is not None:
+            with contextlib.suppress(Exception):
+                _cached.close()
+        _cached = None
+        _cache_built = False
+    reset_outcome_window()
+
+
+def max_candidates() -> int:
+    """Cap on fragments sent to the scorer per composition (env
+    LM_ASSIST_MAX_CANDIDATES, default ``_DEFAULT_MAX_CANDIDATES``).
+
+    Resolved at call time so the env override is honored, and clamped to >= 1 so a
+    misconfigured value can never crash the ThreadPoolExecutor.  This knob
+    controls *how many* fragments are scored, not *how many HTTP requests fire
+    simultaneously* — that is independently bounded by the shared semaphore
+    (``_rerank_semaphore``) so the two scorer singletons can never oversubscribe
+    the reranker server's KV slots.
+    """
+    return max(1, _env_int("LM_ASSIST_MAX_CANDIDATES", _DEFAULT_MAX_CANDIDATES))

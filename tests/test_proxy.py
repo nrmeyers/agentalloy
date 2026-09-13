@@ -140,9 +140,7 @@ def test_compose_verdict_cached_per_prompt(compose_spy: list[SpyCall]) -> None:
 def test_compose_different_prompt_recomposes(compose_spy: list[SpyCall]) -> None:
     """A new user prompt (new turn) pays the compose again."""
     first = asyncio.run(_build_turn_context([{"role": "user", "content": "hi"}]))
-    second = asyncio.run(
-        _build_turn_context([{"role": "user", "content": "do the intake"}])
-    )
+    second = asyncio.run(_build_turn_context([{"role": "user", "content": "do the intake"}]))
 
     assert first == ("brief", 1)
     assert second == ("brief", 1)
@@ -155,9 +153,7 @@ def test_compose_cache_expiry(compose_spy: list[SpyCall]) -> None:
     asyncio.run(_build_turn_context(messages))
 
     # First request of a 1-message conversation detects as a session start.
-    key = proxy_module._compose_cache_key(
-        "hi", True, proxy_module._first_user_hash(messages), ""
-    )
+    key = proxy_module._compose_cache_key("hi", True, proxy_module._first_user_hash(messages), "")
     context, context_type, _ = proxy_module._compose_cache[key]
     proxy_module._compose_cache[key] = (context, context_type, 0.0)
 
@@ -503,9 +499,7 @@ def test_upstream_set_rejects_unknown_model(
     assert "new:8000" not in upstream_env.read_text()
 
 
-def test_upstream_set_rejects_bad_key(
-    upstream_env: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_upstream_set_rejects_bad_key(upstream_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """401 from the upstream → 400, config untouched."""
     _patch_models(monkeypatch, status_code=401)
 

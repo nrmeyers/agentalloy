@@ -156,9 +156,7 @@ def test_ac9_property_4_force_never_bypasses() -> None:
         store.record_artifact("spec", "spec-exit", "done")
 
         # Try to advance with approved=True (simulating --force)
-        result = json.loads(
-            _phase_advance({"target": "design", "approved": True})
-        )
+        result = json.loads(_phase_advance({"target": "design", "approved": True}))
 
         # Should be rejected — no approval recorded
         assert result["status"] == "rejected"

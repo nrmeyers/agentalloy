@@ -1,7 +1,25 @@
+# AgentAlloy — merged build config (v11.0.0 merge).
+#
+# Product direction: the current (v10) user experience is the framework;
+# the agentalloy-v2 stack is the execution part (LM client, graph runner,
+# context builder, dashboard, MCP server, LFM2.5 stack, Rust core crate).
+#
+# [project]  : the v10 runtime surface (fastapi/tantivy/tree-sitter/
+#             langgraph) plus the v2-only deps that landed with the port
+#             (mcp, openai, tiktoken).
+# [tool.*]   : v10 quality gates (ruff, pyright, pytest+xdist) — these
+#             are what scripts/local-ci.sh drives.
+# [dependency-groups] dev: PEP 735 so a bare `uv sync` installs the dev
+#             tools (v2 convention, keeps local-ci.sh unchanged).
+# [build-system]: maturin builds the rust/agentalloy-core crate. The
+#             Python layer does not import agentalloy._core yet — that
+#             wiring lands in a later milestone; the crate must still
+#             build as part of every package build.
+
 [project]
 name = "agentalloy"
 version = "10.0.8"
-description = "AgentAlloy — just-in-time context engine for coding agents. Three context modules: phase-aware instruction composition from a curated 300+ skill corpus, an optional per-repo code index (tree-sitter symbol graph + hybrid search), and a decision-graph Knowledge module (why the code is the way it is). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
+description = "AgentAlloy — the Agent Operating System: a single, self-contained, stateless, multi-harness agent runtime (v10 runtime surface + v2 execution stack)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,81 +32,88 @@ dependencies = [
     "pydantic-settings>=2.6",
     "httpx>=0.27",
     "pyyaml>=6.0",
-    "rich>=13.0",
+    "rich>=13.7",
     "duckdb>=1.5.4",
     "overgraph>=0.17.0",
     "tantivy>=0.26",
     "watchdog>=6.0.0",
-    # codex provider writes .codex/config.toml (reads use stdlib tomllib).
     "tomli-w>=1.0",
-    # tree-sitter parsing engine (src/agentalloy/code_index/engine/).
-    # Grammar list + pins mirror the upstream codebase-indexer pyproject.
     "tree-sitter==0.25.2",
     "tree-sitter-python>=0.23.6",
     "tree-sitter-javascript>=0.23.1",
     "tree-sitter-typescript>=0.23.2",
-    "tree-sitter-c-sharp>=0.23.5",
-    "tree-sitter-go>=0.23.4",
+    "tree-sitter-c-sharp>=0.23.1",
+    "tree-sitter-go>=0.23.0",
     "tree-sitter-java>=0.23.5",
     "tree-sitter-rust>=0.24.0",
-    # dependency_parser.py reads pyproject/csproj manifests.
     "toml>=0.10.2",
     "defusedxml>=0.7.1",
-    # docstring_format.py structured-docstring extraction.
     "docstring-parser>=0.16",
-    # LangGraph reactive phase graph (#552/#553). LangGraph is the *topology &
-    # routing* engine (StateGraph + conditional edges + checkpointer), not an
-    # execution engine — AgentAlloy never originates a model call. It pulls
-    # langchain-core + langgraph-checkpoint. It is a core (request-path)
-    # dependency; the rerank optional-extra precedent does NOT apply here
-    # (see docs/design/langgraph-graph-core/approach.md §6).
+    # Graph runner: the request path only touches langgraph when a
+    # task is in an active phase.
     "langgraph>=1.2",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    # v2 execution stack (ported 2026-09-12):
+    "mcp>=1.24",
+    "openai>=2.34",
+    "tiktoken>=0.13",
 ]
 
 [project.optional-dependencies]
-# In-process cross-encoder rerank stage (RUNTIME_RERANK_MODE=onnx). Kept out
-# of core deps so the bare wheel (pipx-smoke CI) stays lean; the http mode and
-# disabled default need nothing here.
+# ONNX re-ranker — installed on demand by `agentalloy install --with rerank`.
 rerank = [
     "onnxruntime>=1.18",
     "tokenizers>=0.20",
 ]
+
+[dependency-groups]
 dev = [
     "pyjwt>=2.12.1",
     "pyright>=1.1.408",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.12.9",
     "pre-commit>=4.0",
-    "httpx>=0.27",  # TestClient transport
     "types-pyyaml>=6.0",
 ]
 
 [project.scripts]
-agentalloy = "agentalloy.install.__main__:main"
+agentalloy = "agentalloy.cli:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.sdist]
-exclude = ["pytest-of-*/", "*.backup.*", "_check_*.py", "_verify_*.py"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/agentalloy"]
-# Pack source YAMLs live INSIDE the package at src/agentalloy/_packs/ so
-# hatchling ships them with the wheel automatically. Binary corpus
-# (OverGraph + Tantivy BM25) is no longer shipped; it's generated locally on
-# first install when users pick packs via `agentalloy install-packs`.
-artifacts = [
-    "src/agentalloy/_corpus/.gitkeep",
-]
+[tool.maturin]
+# The crate lives in a workspace (rust/Cargo.toml); point maturin at the
+# member manifest directly or it parses the workspace root and fails.
+manifest-path = "rust/agentalloy-core/Cargo.toml"
+python-source = "src"
+module-name = "agentalloy._core"
+# The extension is only importable once cargo has built it with the
+# pyo3 extension-module feature (see justfile `build`).
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
-exclude = ["skill-source/", "fixtures/", "agents/", "agency-agents/", "vercel-labs-agent-skills/", "agent-skills/"]
+exclude = [
+    "skill-source/",
+    "fixtures/",
+    "agents/",
+    "agency-agents/",
+    "vercel-labs-agent-skills/",
+    "agent-skills/",
+    "spike/",
+    "tasks/",
+    "results/",
+    "build/",
+    # Vendored engine (see code_index/engine/VENDORED.md): keep
+    # upstream's style to minimize the re-vendoring diff.
+    "src/agentalloy/code_index/engine/",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM"]
@@ -121,10 +146,10 @@ indent-style = "space"
 
 [tool.pyright]
 include = ["src"]
-# The retired authoring subpackage was removed (see agentalloy-authoring for
-# corpus authoring); the semantic install-pack gate is its runtime successor.
-# The vendored tree-sitter engine (see code_index/engine/VENDORED.md) keeps
-# upstream's looser typing; only the facade boundary is strict-checked.
+# The retired authoring subpackage was removed (see agentalloy-authoring
+# for corpus authoring); the semantic install-pack gate is its runtime
+# successor. The vendored tree-sitter engine (see code_index/engine/VENDORED.md)
+# keeps upstream's looser typing; only the facade boundary is strict-checked.
 exclude = [
     "src/agentalloy/code_index/engine/**",
     "tests/**",
@@ -147,8 +172,6 @@ reportReturnType = "warning"
 reportOperatorIssue = "warning"
 reportOptionalMemberAccess = "warning"
 reportUnnecessaryIsInstance = "warning"
-venvPath = "."
-venv = ".venv"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -162,16 +185,3 @@ markers = [
     "xdist_group: pin a group of tests onto a single xdist worker (e.g. real :47950 binders)",
 ]
 asyncio_mode = "auto"
-
-[dependency-groups]
-dev = [
-    "pyjwt>=2.12.1",
-    "pyright>=1.1.408",
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
-    "ruff>=0.12.9",
-    "pre-commit>=4.0",
-    "httpx>=0.27",
-    "types-pyyaml>=6.0",
-    "pytest-xdist>=3.8.0",
-]

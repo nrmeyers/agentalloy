@@ -1814,8 +1814,7 @@ class OverGraphCodeGraphStore:
         try:
             rows = self._fetch_all_rows(
                 "MATCH (n:Symbol)",
-                "RETURN n.qualified_name, n.text, n.indexed_at, n.kind, "
-                "n.docstring, n.source_code",
+                "RETURN n.qualified_name, n.text, n.indexed_at, n.kind, n.docstring, n.source_code",
                 "n.qualified_name",
             )
             for row in rows:

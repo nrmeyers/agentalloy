@@ -143,9 +143,7 @@ class CompoundEngine:
         self.skill_engine.add_skill(skill)
 
         # Mark as promoted
-        self.store.conn.execute(
-            "UPDATE lessons SET promoted = 1 WHERE slug = ?", [slug]
-        )
+        self.store.conn.execute("UPDATE lessons SET promoted = 1 WHERE slug = ?", [slug])
         return skill
 
     def list_lessons(self) -> list[Lesson]:

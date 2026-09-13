@@ -8,10 +8,12 @@ Exposes:
 - GET /dashboard — web UI
 """
 
+import contextlib
 import json
 import os
 import threading
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +28,17 @@ from agentalloy.executors import set_graph_index, set_skill_engine, set_store, s
 from agentalloy.interpreter import Interpreter
 from agentalloy.skill_engine import SkillEngine
 from agentalloy.state_store import StateStore
-from agentalloy.telemetry import TelemetryStore
+from agentalloy.telemetry_store import TelemetryStore
 
-app = FastAPI(title="AgentAlloy v2.0", version="0.3.0")
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup()
+    yield
+    shutdown()
+
+
+app = FastAPI(title="AgentAlloy v2.0", version="0.3.0", lifespan=lifespan)
 
 # API contract version advertised in GET /status (AgentAlloy v2 major.minor).
 # Bump on breaking /status or /tool shape changes, not on tool additions.
@@ -151,7 +161,6 @@ _COMPOSE_STATE_MAX = 64
 _compose_state: dict[str, str] = {}
 
 
-@app.on_event("startup")
 def startup() -> None:
     """Initialize global state: stores, code index, interpreter."""
     global config, state_store, telemetry_store, skill_engine, interpreter
@@ -236,10 +245,8 @@ def startup() -> None:
         # down so every consumer sees the same "no index" state.
         print(f"Graph index init skipped: {e}")
         if graph_store is not None:
-            try:
+            with contextlib.suppress(Exception):
                 graph_store.close()
-            except Exception:
-                pass
         graph_store = None
         graph_searcher = None
         fts_index = None
@@ -266,23 +273,18 @@ def startup() -> None:
         print(f"Interpreter init skipped: {e}")
 
 
-@app.on_event("shutdown")
 def shutdown() -> None:
     """Cleanup."""
     if interpreter:
-        try:
+        with contextlib.suppress(Exception):
             interpreter.client.close()
-        except Exception:
-            pass
     if state_store:
         state_store.close()
     if telemetry_store:
         telemetry_store.close()
     if graph_store:
-        try:
+        with contextlib.suppress(Exception):
             graph_store.close()
-        except Exception:
-            pass
     if embed_client:
         embed_client.close()
 
@@ -543,7 +545,7 @@ async def chat_stream(request: ChatRequest) -> Any:
 
     if not interpreter or not state_store:
 
-        async def error_stream() -> Any:
+        async def error_stream() -> AsyncIterator[str]:
             err = json_mod.dumps({"type": "error", "message": "not initialized"})
             yield f"data: {err}\n\n"
 
@@ -641,6 +643,8 @@ def reindex(request: ReindexRequest) -> dict[str, Any]:
 
     if graph_store is None:
         return {"status": "error", "message": "code index unavailable", "repos": repos}
+    if state_store is None:
+        return {"status": "error", "message": "state store unavailable", "repos": repos}
 
     try:
         from agentalloy.code_index.pipeline import ingest_repo

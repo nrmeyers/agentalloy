@@ -1,18 +1,46 @@
-"""Storage for the code index.
+"""Code-index storage — unified OverGraph store + registry/jobs + PageRank.
 
-One shared OverGraph database (``graph.overgraph``) for all registered
-repos — symbols, edges, centrality, decision docs, dense vectors. The
-v1 job store / per-repo open helpers are intentionally NOT vendored:
-v2 ingest is synchronous per the frozen ``POST /reindex`` contract.
+The v10 facade surface (open_code_index / CodeIndexJob(s)Store / paths /
+locks) is the contract the rest of the shell imports; the underlying store
+is the v2 unified OverGraph handle (graph + vectors in one DB).
 """
 
-from __future__ import annotations
-
-from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
-from agentalloy.code_index.store.pagerank import compute_pagerank, refresh_centrality
+from agentalloy.code_index.store.jobs_store import (
+    CodeIndexJob,
+    CodeIndexJobsStore,
+    IndexedRepo,
+)
+from agentalloy.code_index.store.open import (
+    CodeIndexHandles,
+    CodeIndexPaths,
+    code_index_paths,
+    open_code_index,
+    open_jobs,
+    remove_repo,
+    slug_write_lock,
+)
+from agentalloy.code_index.store.overgraph_store import (
+    CodeSearchHit,
+    OverGraphCodeGraphStore,
+)
+from agentalloy.code_index.store.pagerank import (
+    compute_pagerank,
+    refresh_centrality,
+)
 
 __all__ = [
+    "CodeIndexHandles",
+    "CodeIndexJob",
+    "CodeIndexJobsStore",
+    "CodeIndexPaths",
+    "CodeSearchHit",
+    "IndexedRepo",
     "OverGraphCodeGraphStore",
+    "code_index_paths",
     "compute_pagerank",
+    "open_code_index",
+    "open_jobs",
     "refresh_centrality",
+    "remove_repo",
+    "slug_write_lock",
 ]

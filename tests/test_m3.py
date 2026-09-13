@@ -6,7 +6,7 @@ from pathlib import Path
 from agentalloy.compound import CompoundEngine
 from agentalloy.skill_engine import SkillEngine
 from agentalloy.state_store import StateStore
-from agentalloy.telemetry import TelemetryStore
+from agentalloy.telemetry_store import TelemetryStore
 
 
 def _make_store(tmpdir: str) -> StateStore:
@@ -78,9 +78,7 @@ def test_promotion_dedup_gate() -> None:
         # Manually add the skill first
         from agentalloy.skill_engine import Skill
 
-        engine.add_skill(
-            Skill(id="lesson-dup-lesson", name="Existing", body="Already exists")
-        )
+        engine.add_skill(Skill(id="lesson-dup-lesson", name="Existing", body="Already exists"))
 
         # Promote should return None (dedup)
         result = compound.promote_lesson("dup-lesson")

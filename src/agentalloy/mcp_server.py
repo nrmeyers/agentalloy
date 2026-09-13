@@ -215,7 +215,7 @@ def mcp_phase_advance(target: str, approved: bool = False) -> str:
 @_tool(
     name="phase_reset",
     description="Reset the lifecycle to intake and clear approvals (operator-only). "
-                "Contracts and artifacts are kept.",
+    "Contracts and artifacts are kept.",
 )
 def mcp_phase_reset() -> str:
     """Reset phase to intake."""

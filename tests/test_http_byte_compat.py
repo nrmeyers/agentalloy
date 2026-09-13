@@ -258,7 +258,7 @@ def test_reindex_graph_path_ok(client, tmp_path):
     (repo / "pkg").mkdir(parents=True)
     (repo / "pkg" / "__init__.py").write_text("")
     (repo / "pkg" / "app.py").write_text(
-        'def greet(name):\n'
+        "def greet(name):\n"
         '    """Say hello to the named party."""\n'
         '    return "hello " + name\n'
         "\n"

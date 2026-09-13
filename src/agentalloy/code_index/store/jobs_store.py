@@ -1,0 +1,936 @@
+"""SQLite jobs store for the code-index module (``jobs.sqlite``).
+
+Adopted from codebase-indexer's ``app/services/jobs_store.py`` DAO, rewritten
+for agentalloy: class-based instead of module-global state, actor/S3/GitHub
+concerns dropped, ``indexed_repos`` keyed by ``(slug, repo_path)`` so multiple
+checkouts of the same remote coexist (for unwire cleanup). Keeps the design
+that made the original robust:
+
+- WAL mode + ``busy_timeout`` so readers never block on the single writer.
+- One long-lived connection (``check_same_thread=False``) guarded by an
+  instance ``threading.Lock`` — workload is far below anything justifying a
+  pool.
+- ``CodeIndexJob`` is a frozen snapshot; mutate through DAO methods only.
+- ``worker_token`` set per-process at create time; :meth:`sweep_interrupted`
+  retires active rows owned by a previous (now-dead) process at startup.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, cast
+
+logger = logging.getLogger(__name__)
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS jobs (
+  job_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('index','embed','watch_partial')),
+  slug TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  status TEXT NOT NULL
+    CHECK (status IN ('queued','running','done','failed','cancelled','interrupted')),
+  phase TEXT,
+  progress_pct REAL NOT NULL DEFAULT 0.0,
+  files_total INTEGER NOT NULL DEFAULT 0,
+  files_done INTEGER NOT NULL DEFAULT 0,
+  current_file TEXT,
+  symbol_count INTEGER NOT NULL DEFAULT 0,
+  edge_count INTEGER NOT NULL DEFAULT 0,
+  embedding_count INTEGER NOT NULL DEFAULT 0,
+  force_reindex INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  worker_token TEXT,
+  started_at REAL NOT NULL,
+  updated_at REAL NOT NULL,
+  finished_at REAL,
+  governs_written INTEGER NOT NULL DEFAULT 0,
+  governs_dropped INTEGER NOT NULL DEFAULT 0,
+  governs_unresolved_spans TEXT,
+  governs_suspicious_docs TEXT,
+  entities_written INTEGER NOT NULL DEFAULT 0,
+  entities_dropped INTEGER NOT NULL DEFAULT 0,
+  entity_counts_by_kind TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_started_at ON jobs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_slug_active
+  ON jobs(slug) WHERE status IN ('queued','running');
+
+CREATE TABLE IF NOT EXISTS job_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  level TEXT NOT NULL CHECK (level IN ('info','warn','error')),
+  message TEXT NOT NULL,
+  FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
+
+CREATE TABLE IF NOT EXISTS indexed_repos (
+  slug TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  data_dir TEXT NOT NULL,
+  last_indexed_at INTEGER,
+  head_sha TEXT,
+  watch_enabled INTEGER NOT NULL DEFAULT 0,
+  missing_since INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (slug, repo_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_indexed_repos_slug ON indexed_repos(slug);
+"""
+
+# Additive column migrations for databases created before the column existed
+# in _DDL (CREATE TABLE IF NOT EXISTS never alters an existing table).
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "indexed_repos",
+        "watch_enabled",
+        "ALTER TABLE indexed_repos ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "indexed_repos",
+        "missing_since",
+        "ALTER TABLE indexed_repos ADD COLUMN missing_since INTEGER",
+    ),
+    # #527 B: GOVERNS-edge delta reporting from the decision phase, surfaced
+    # on the job row rather than new plumbing (see jobs_store.py:551-576's
+    # existing job_events/JobView pattern).
+    (
+        "jobs",
+        "governs_written",
+        "ALTER TABLE jobs ADD COLUMN governs_written INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "governs_dropped",
+        "ALTER TABLE jobs ADD COLUMN governs_dropped INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "governs_unresolved_spans",
+        "ALTER TABLE jobs ADD COLUMN governs_unresolved_spans TEXT",
+    ),
+    (
+        "jobs",
+        "governs_suspicious_docs",
+        "ALTER TABLE jobs ADD COLUMN governs_suspicious_docs TEXT",
+    ),
+    # Entity-extraction delta reporting (mirror of the governs_* columns): the
+    # entity phase's written/dropped counts + per-kind breakdown, surfaced on
+    # the job row so /code/jobs reflects what the entity pass actually wrote.
+    (
+        "jobs",
+        "entities_written",
+        "ALTER TABLE jobs ADD COLUMN entities_written INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "entities_dropped",
+        "ALTER TABLE jobs ADD COLUMN entities_dropped INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "jobs",
+        "entity_counts_by_kind",
+        "ALTER TABLE jobs ADD COLUMN entity_counts_by_kind TEXT",
+    ),
+)
+
+# Structural migrations that require table recreation (primary key changes).
+# Each entry is (table_name, migration_id, ddl_for_new_table).
+# migration_id is stored in corpus_meta so we never re-run.
+_STRUCTURAL_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "indexed_repos",
+        "indexed_repos_composite_key",
+        """
+        CREATE TABLE indexed_repos (
+          slug TEXT NOT NULL,
+          repo_path TEXT NOT NULL,
+          data_dir TEXT NOT NULL,
+          last_indexed_at INTEGER,
+          head_sha TEXT,
+          watch_enabled INTEGER NOT NULL DEFAULT 0,
+          missing_since INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (slug, repo_path)
+        );
+        """,
+    ),
+)
+
+_TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "failed", "cancelled", "interrupted"})
+_ACTIVE_STATUSES: frozenset[str] = frozenset({"queued", "running"})
+
+
+class _StructuralMigration:
+    """One-shot table-recreation migrations tracked by a meta key."""
+
+    _META_TABLE = "jobs_meta"
+    _META_DDL = """
+    CREATE TABLE IF NOT EXISTS jobs_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    """
+
+    @classmethod
+    def apply(
+        cls,
+        conn: sqlite3.Connection,
+        migrations: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        conn.execute(cls._META_DDL)
+        for table_name, migration_id, new_ddl in migrations:
+            if cls._is_applied(conn, migration_id):
+                continue
+            cols = {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")}
+            pk_cols = {
+                str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})") if r["pk"]
+            }
+            new_pk_cols = {
+                c.strip().split()[0]
+                for c in new_ddl.split("PRIMARY KEY")[1].split(")")[0].strip("(").split(",")
+            }
+            if pk_cols == new_pk_cols:
+                continue  # already has the right PK
+            old_name = f"{table_name}_old"
+            conn.execute(f"ALTER TABLE {table_name} RENAME TO {old_name}")
+            conn.execute(new_ddl)
+            col_list = sorted(
+                cols & {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")},
+            )
+            if col_list:
+                conn.execute(
+                    f"INSERT INTO {table_name} ({', '.join(col_list)}) "
+                    f"SELECT {', '.join(col_list)} FROM {old_name}",
+                )
+            conn.execute(f"DROP TABLE {old_name}")
+            # Recreate indexes from _DDL (they reference the new table name)
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_slug ON {table_name}(slug)")
+            cls._mark_applied(conn, migration_id)
+            logger.info("structural migration %s applied for %s", migration_id, table_name)
+
+    @classmethod
+    def _is_applied(cls, conn: sqlite3.Connection, key: str) -> bool:
+        row = conn.execute(f"SELECT value FROM {cls._META_TABLE} WHERE key = ?", (key,)).fetchone()
+        return row is not None
+
+    @classmethod
+    def _mark_applied(cls, conn: sqlite3.Connection, key: str) -> None:
+        conn.execute(
+            f"INSERT OR REPLACE INTO {cls._META_TABLE} (key, value) VALUES (?, ?)",
+            (key, "1"),
+        )
+
+
+@dataclass(frozen=True)
+class CodeIndexJob:
+    """Immutable snapshot of one ``jobs`` row."""
+
+    job_id: str
+    kind: str
+    slug: str
+    repo_path: str
+    status: str
+    phase: str | None
+    progress_pct: float
+    files_total: int
+    files_done: int
+    current_file: str | None
+    symbol_count: int
+    edge_count: int
+    embedding_count: int
+    force_reindex: bool
+    error: str | None
+    cancel_requested: bool
+    worker_token: str | None
+    started_at: float
+    updated_at: float
+    finished_at: float | None
+    governs_written: int = 0
+    governs_dropped: int = 0
+    governs_unresolved_spans: list[str] = field(default_factory=lambda: [])
+    governs_suspicious_docs: list[str] = field(default_factory=lambda: [])
+    entities_written: int = 0
+    entities_dropped: int = 0
+    entity_counts_by_kind: str = ""
+
+
+@dataclass(frozen=True)
+class IndexedRepo:
+    """One row in the ``indexed_repos`` registry.
+
+    Keyed by ``(slug, repo_path)`` so multiple checkouts of the same remote
+    coexist. ``repo_key`` is a deterministic path hash used to derive the
+    per-checkout data directory under ``repos/{slug}/{repo_key}/``.
+
+    ``data_dir`` records the per-checkout storage directory so ``unwire`` can
+    remove exactly what an index run created.
+    """
+
+    slug: str
+    repo_path: str
+    data_dir: str
+    last_indexed_at: int | None
+    head_sha: str | None
+    watch_enabled: bool
+    missing_since: int | None
+    created_at: int
+    updated_at: int
+
+
+def repo_path_key(repo_path: str) -> str:
+    """Deterministic 8-hex hash of a resolved repo path (for data-dir naming)."""
+    return hashlib.sha256(repo_path.encode()).hexdigest()[:8]
+
+
+def _json_list(raw: object) -> list[str]:
+    """Decode a ``governs_*`` JSON-text column; tolerant of NULL/garbage."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(x) for x in cast(list[object], data)]
+
+
+def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
+    return CodeIndexJob(
+        job_id=str(row["job_id"]),
+        kind=str(row["kind"]),
+        slug=str(row["slug"]),
+        repo_path=str(row["repo_path"]),
+        status=str(row["status"]),
+        phase=None if row["phase"] is None else str(row["phase"]),
+        progress_pct=float(row["progress_pct"]),
+        files_total=int(row["files_total"]),
+        files_done=int(row["files_done"]),
+        current_file=None if row["current_file"] is None else str(row["current_file"]),
+        symbol_count=int(row["symbol_count"]),
+        edge_count=int(row["edge_count"]),
+        embedding_count=int(row["embedding_count"]),
+        force_reindex=bool(row["force_reindex"]),
+        error=None if row["error"] is None else str(row["error"]),
+        cancel_requested=bool(row["cancel_requested"]),
+        worker_token=None if row["worker_token"] is None else str(row["worker_token"]),
+        started_at=float(row["started_at"]),
+        updated_at=float(row["updated_at"]),
+        finished_at=None if row["finished_at"] is None else float(row["finished_at"]),
+        governs_written=int(row["governs_written"] or 0),
+        governs_dropped=int(row["governs_dropped"] or 0),
+        governs_unresolved_spans=_json_list(row["governs_unresolved_spans"]),
+        governs_suspicious_docs=_json_list(row["governs_suspicious_docs"]),
+        entities_written=int(row["entities_written"] or 0),
+        entities_dropped=int(row["entities_dropped"] or 0),
+        entity_counts_by_kind=(
+            "" if row["entity_counts_by_kind"] is None else str(row["entity_counts_by_kind"])
+        ),
+    )
+
+
+def _row_to_repo(row: sqlite3.Row) -> IndexedRepo:
+    return IndexedRepo(
+        slug=str(row["slug"]),
+        repo_path=str(row["repo_path"]),
+        data_dir=str(row["data_dir"]),
+        last_indexed_at=(None if row["last_indexed_at"] is None else int(row["last_indexed_at"])),
+        head_sha=None if row["head_sha"] is None else str(row["head_sha"]),
+        watch_enabled=bool(row["watch_enabled"]),
+        missing_since=(None if row["missing_since"] is None else int(row["missing_since"])),
+        created_at=int(row["created_at"]),
+        updated_at=int(row["updated_at"]),
+    )
+
+
+class CodeIndexJobsStore:
+    """Thin DAO over one WAL-mode SQLite database shared by all repos."""
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._db_path = str(db_path)
+        if self._db_path != ":memory:":
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        conn = sqlite3.connect(self._db_path, check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.executescript(_DDL)
+        self._apply_migrations(conn)
+        self._conn: sqlite3.Connection | None = conn
+
+    @staticmethod
+    def _apply_migrations(conn: sqlite3.Connection) -> None:
+        """Apply additive and structural schema migrations for existing DBs."""
+        # Additive column migrations
+        for table, column, ddl in _MIGRATIONS:
+            cols = {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                conn.execute(ddl)
+
+        # Structural migrations (table recreation for PK changes)
+        _StructuralMigration.apply(conn, _STRUCTURAL_MIGRATIONS)
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise RuntimeError("CodeIndexJobsStore is closed")
+        return self._conn
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("failed to close jobs sqlite connection", exc_info=True)
+            self._conn = None
+
+    # -- jobs: create / read ---------------------------------------------------
+
+    def create_job(
+        self,
+        *,
+        slug: str,
+        repo_path: str,
+        kind: str = "index",
+        force_reindex: bool = False,
+        worker_token: str | None = None,
+        job_id: str | None = None,
+        initial_status: str = "running",
+        initial_phase: str = "queued",
+    ) -> CodeIndexJob:
+        """Insert a new job row and return its snapshot."""
+        job_id = job_id or str(uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO jobs (
+                  job_id, kind, slug, repo_path, status, phase,
+                  force_reindex, worker_token, started_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    kind,
+                    slug,
+                    repo_path,
+                    initial_status,
+                    initial_phase,
+                    1 if force_reindex else 0,
+                    worker_token,
+                    now,
+                    now,
+                ),
+            )
+            row = self.conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert row is not None  # just inserted
+        return _row_to_job(row)
+
+    def get_job(self, job_id: str) -> CodeIndexJob | None:
+        row = self.conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        return _row_to_job(row) if row is not None else None
+
+    def list_jobs(
+        self,
+        *,
+        slug: str | None = None,
+        status: set[str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[CodeIndexJob]:
+        """Newest-first paged history; filters compose with AND."""
+        where: list[str] = []
+        params: list[object] = []
+        if slug is not None:
+            where.append("slug = ?")
+            params.append(slug)
+        if status:
+            placeholders = ",".join("?" for _ in status)
+            where.append(f"status IN ({placeholders})")
+            params.extend(sorted(status))
+        sql = "SELECT * FROM jobs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+        rows = self.conn.execute(sql, params).fetchall()
+        return [_row_to_job(r) for r in rows]
+
+    def find_active(self, slug: str) -> CodeIndexJob | None:
+        """The most recent queued/running job for ``slug``, if any (used to
+        fail-fast on duplicate concurrent index requests).
+        """
+        row = self.conn.execute(
+            """
+            SELECT * FROM jobs
+            WHERE slug = ? AND status IN ('queued','running')
+            ORDER BY started_at DESC LIMIT 1
+            """,
+            (slug,),
+        ).fetchone()
+        return _row_to_job(row) if row is not None else None
+
+    # -- jobs: progress ----------------------------------------------------------
+
+    def update_progress(
+        self,
+        job_id: str,
+        *,
+        phase: str | None = None,
+        progress_pct: float | None = None,
+        files_total: int | None = None,
+        files_done: int | None = None,
+        current_file: str | None = None,
+        symbol_count: int | None = None,
+        edge_count: int | None = None,
+        embedding_count: int | None = None,
+    ) -> None:
+        """Partial-update progress fields; unset args are left unchanged."""
+        fields: list[str] = []
+        params: list[object] = []
+        for col, val in (
+            ("phase", phase),
+            ("progress_pct", progress_pct),
+            ("files_total", files_total),
+            ("files_done", files_done),
+            ("current_file", current_file),
+            ("symbol_count", symbol_count),
+            ("edge_count", edge_count),
+            ("embedding_count", embedding_count),
+        ):
+            if val is not None:
+                fields.append(f"{col} = ?")
+                params.append(val)
+        if not fields:
+            return
+        fields.append("updated_at = ?")
+        params.append(time.time())
+        params.append(job_id)
+        sql = f"UPDATE jobs SET {', '.join(fields)} WHERE job_id = ?"
+        with self._lock:
+            self.conn.execute(sql, params)
+
+    def touch_heartbeat(self, job_id: str) -> None:
+        """Advance only the ``updated_at`` liveness clock of a running job —
+        proves a long, callback-silent write phase is still alive without
+        mutating phase/progress. No-op for terminal/absent rows.
+        """
+        with self._lock:
+            self.conn.execute(
+                "UPDATE jobs SET updated_at = ? WHERE job_id = ? AND status = 'running'",
+                (time.time(), job_id),
+            )
+
+    # -- jobs: terminal transitions -------------------------------------------------
+
+    def mark_done(
+        self,
+        job_id: str,
+        *,
+        symbol_count: int,
+        edge_count: int,
+        embedding_count: int,
+    ) -> None:
+        """Idempotent transition to ``status='done'``, ``progress_pct=100``."""
+        now = time.time()
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  status = 'done', phase = 'done', progress_pct = 100.0,
+                  symbol_count = ?, edge_count = ?, embedding_count = ?,
+                  error = NULL, updated_at = ?,
+                  finished_at = COALESCE(finished_at, ?)
+                WHERE job_id = ?
+                """,
+                (int(symbol_count), int(edge_count), int(embedding_count), now, now, job_id),
+            )
+        self._record_event_quiet(
+            job_id,
+            "info",
+            f"done: symbols={int(symbol_count)} edges={int(edge_count)} "
+            f"embeddings={int(embedding_count)}",
+        )
+
+    def mark_failed(self, job_id: str, *, error: str, terminal_status: str = "failed") -> None:
+        """Idempotent transition to a terminal failure status
+        (``failed`` | ``cancelled`` | ``interrupted``).
+        """
+        now = time.time()
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  status = ?, error = ?, updated_at = ?,
+                  finished_at = COALESCE(finished_at, ?)
+                WHERE job_id = ?
+                """,
+                (terminal_status, error, now, now, job_id),
+            )
+        level = "error" if terminal_status == "failed" else "warn"
+        self._record_event_quiet(job_id, level, f"{terminal_status}: {error[:500]}")
+
+    def request_cancel(self, job_id: str) -> bool:
+        """Set ``cancel_requested=1``. True iff the row exists and was active."""
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                UPDATE jobs SET cancel_requested = 1, updated_at = ?
+                WHERE job_id = ? AND status IN ('queued','running')
+                """,
+                (time.time(), job_id),
+            )
+            return cur.rowcount > 0
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        """Lock-free read used by the worker between phases."""
+        row = self.conn.execute(
+            "SELECT cancel_requested FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        return bool(row[0]) if row is not None else False
+
+    def sweep_interrupted(self, worker_token: str) -> int:
+        """Flag active rows from a previous process as ``interrupted``.
+
+        Called at service startup with a fresh per-process token; rows whose
+        stored token differs (or is NULL) are owned by a now-dead process.
+        """
+        now = time.time()
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                UPDATE jobs SET
+                  status = 'interrupted',
+                  error = COALESCE(error, 'service restart'),
+                  updated_at = ?, finished_at = COALESCE(finished_at, ?)
+                WHERE status IN ('queued','running')
+                  AND (worker_token IS NULL OR worker_token != ?)
+                """,
+                (now, now, worker_token),
+            )
+            return int(cur.rowcount)
+
+    def update_governs_result(
+        self,
+        job_id: str,
+        *,
+        written: int,
+        dropped: int,
+        unresolved_spans: list[str],
+        suspicious_docs: list[str],
+    ) -> None:
+        """Record the decision phase's GOVERNS-edge delta (#527 B) on the job
+        row. Also appends a warn-level event when the result looks bad
+        (dropped > written, or anything reported suspicious) so
+        ``list_job_events``/CLI surfaces it without a separate poll.
+        """
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  governs_written = ?, governs_dropped = ?,
+                  governs_unresolved_spans = ?, governs_suspicious_docs = ?,
+                  updated_at = ?
+                WHERE job_id = ?
+                """,
+                (
+                    int(written),
+                    int(dropped),
+                    json.dumps(unresolved_spans),
+                    json.dumps(suspicious_docs),
+                    time.time(),
+                    job_id,
+                ),
+            )
+        if dropped > written or suspicious_docs:
+            self._record_event_quiet(
+                job_id,
+                "warn",
+                f"GOVERNS delta looks suspicious: written={written} dropped={dropped} "
+                f"suspicious_docs={suspicious_docs} unresolved_spans={unresolved_spans}",
+            )
+
+    def update_entity_result(
+        self,
+        job_id: str,
+        *,
+        written: int,
+        dropped: int,
+        counts_by_kind: dict[str, int],
+    ) -> None:
+        """Record the entity-extraction phase's delta on the job row (mirror of
+        :meth:`update_governs_result`). ``counts_by_kind`` is stored as JSON
+        text (the column is TEXT; the job row's field is a ``str``).
+        """
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE jobs SET
+                  entities_written = ?, entities_dropped = ?,
+                  entity_counts_by_kind = ?, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (
+                    int(written),
+                    int(dropped),
+                    json.dumps(counts_by_kind),
+                    time.time(),
+                    job_id,
+                ),
+            )
+
+    # -- job events --------------------------------------------------------------
+
+    def record_event(self, job_id: str, level: str, message: str) -> int:
+        """Append a row to ``job_events``. Returns the new event id."""
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO job_events (job_id, ts, level, message) VALUES (?, ?, ?, ?)",
+                (job_id, int(time.time()), level, message),
+            )
+            return int(cur.lastrowid or 0)
+
+    def list_job_events(self, job_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        capped = max(1, min(int(limit), 1000))
+        rows = self.conn.execute(
+            """
+            SELECT id, job_id, ts, level, message FROM job_events
+            WHERE job_id = ? ORDER BY ts ASC, id ASC LIMIT ?
+            """,
+            (job_id, capped),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def _record_event_quiet(self, job_id: str, level: str, message: str) -> None:
+        """Event write that can never bubble out of a terminal transition."""
+        try:
+            self.record_event(job_id, level, message)
+        except Exception:  # noqa: BLE001
+            logger.debug("record_event(%s, %s) failed (non-fatal)", job_id, level)
+
+    # -- indexed_repos registry -----------------------------------------------------
+
+    def upsert_repo(
+        self,
+        *,
+        slug: str,
+        repo_path: str,
+        data_dir: str,
+        head_sha: str | None = None,
+    ) -> None:
+        """Insert or update the registry row for ``(slug, repo_path)``.
+
+        Preserves ``created_at`` and ``last_indexed_at`` on update; the latter
+        advances via :meth:`mark_indexed` after a successful index run.
+        """
+        now = int(time.time())
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO indexed_repos (
+                  slug, repo_path, data_dir, last_indexed_at, head_sha,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT(slug, repo_path) DO UPDATE SET
+                  data_dir = excluded.data_dir,
+                  head_sha = COALESCE(excluded.head_sha, indexed_repos.head_sha),
+                  updated_at = excluded.updated_at
+                """,
+                (slug, repo_path, data_dir, head_sha, now, now),
+            )
+
+    def set_missing_since(self, slug: str, repo_path: str, ts: int | None) -> bool:
+        """Stamp (or clear) when this checkout was first observed absent.
+
+        The stamp is the grace clock behind pruning: a checkout must still be
+        gone on a later look, far enough apart, before its index is deleted.
+        Pass ``None`` when the path is back — a transient absence must not leave
+        a clock running.
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE indexed_repos SET missing_since = ?, updated_at = ? "
+                "WHERE slug = ? AND repo_path = ?",
+                (ts, int(time.time()), slug, repo_path),
+            )
+            return cur.rowcount > 0
+
+    def mark_indexed(
+        self,
+        slug: str,
+        *,
+        head_sha: str | None = None,
+        repo_path: str | None = None,
+    ) -> bool:
+        """Advance ``last_indexed_at`` (and optionally ``head_sha``).
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise updates all entries for the slug.
+        """
+        now = int(time.time())
+        with self._lock:
+            if repo_path is not None:
+                if head_sha is None:
+                    cur = self.conn.execute(
+                        "UPDATE indexed_repos SET last_indexed_at = ?, updated_at = ? "
+                        "WHERE slug = ? AND repo_path = ?",
+                        (now, now, slug, repo_path),
+                    )
+                else:
+                    cur = self.conn.execute(
+                        "UPDATE indexed_repos SET last_indexed_at = ?, head_sha = ?, "
+                        "updated_at = ? WHERE slug = ? AND repo_path = ?",
+                        (now, head_sha, now, slug, repo_path),
+                    )
+            elif head_sha is None:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET last_indexed_at = ?, updated_at = ? WHERE slug = ?",
+                    (now, now, slug),
+                )
+            else:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET last_indexed_at = ?, head_sha = ?, "
+                    "updated_at = ? WHERE slug = ?",
+                    (now, head_sha, now, slug),
+                )
+            return cur.rowcount > 0
+
+    def get_repo(self, slug: str, *, repo_path: str | None = None) -> IndexedRepo | None:
+        """Fetch a registry row.
+
+        With only ``slug``, returns the sole entry for that slug (raises if
+        ambiguous — multiple checkouts). With both ``slug`` and ``repo_path``,
+        returns the exact match.
+        """
+        if repo_path is not None:
+            row = self.conn.execute(
+                "SELECT * FROM indexed_repos WHERE slug = ? AND repo_path = ?",
+                (slug, repo_path),
+            ).fetchone()
+            return _row_to_repo(row) if row is not None else None
+        # slug-only: return the entry if there's exactly one; else None.
+        rows = self.conn.execute("SELECT * FROM indexed_repos WHERE slug = ?", (slug,)).fetchall()
+        if len(rows) == 1:
+            return _row_to_repo(rows[0])
+        return None  # ambiguous (multiple checkouts) — caller should use repo_path
+
+    def get_repos_by_slug(self, slug: str) -> list[IndexedRepo]:
+        """All registry rows for a slug (0, 1, or multiple checkouts)."""
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE slug = ? ORDER BY repo_path",
+            (slug,),
+        ).fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def resolve_repo(self, slug: str, *, cwd: str | None = None) -> IndexedRepo | None:
+        """Resolve the registry entry for ``slug`` matching ``cwd``.
+
+        Walks up from ``cwd`` to find the enclosing git worktree, then matches
+        against registered entries. Falls back to the sole entry when
+        unambiguous. Returns None when no match or ambiguous.
+        """
+        repos = self.get_repos_by_slug(slug)
+        if not repos:
+            return None
+        if len(repos) == 1:
+            return repos[0]
+        # Multiple checkouts: match against cwd.
+        if cwd is None:
+            return None  # ambiguous without cwd
+        cwd_path = Path(cwd).resolve()
+        for repo in repos:
+            repo_root = Path(repo.repo_path).resolve()
+            # cwd must be inside or equal to the repo root
+            try:
+                cwd_path.relative_to(repo_root)
+                return repo
+            except ValueError:
+                continue
+        return None  # cwd not inside any registered checkout
+
+    def list_repos(self) -> list[IndexedRepo]:
+        rows = self.conn.execute("SELECT * FROM indexed_repos ORDER BY updated_at DESC").fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def set_watch_enabled(self, slug: str, enabled: bool, *, repo_path: str | None = None) -> bool:
+        """Flip per-repo watch enrollment. True iff the registry row exists.
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise updates all entries for the slug.
+        """
+        now = int(time.time())
+        with self._lock:
+            if repo_path is not None:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? "
+                    "WHERE slug = ? AND repo_path = ?",
+                    (1 if enabled else 0, now, slug, repo_path),
+                )
+            else:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? WHERE slug = ?",
+                    (1 if enabled else 0, now, slug),
+                )
+            return cur.rowcount > 0
+
+    def find_by_repo_path(self, repo_path: str) -> list[IndexedRepo]:
+        """Find all registry entries whose repo_path matches (resolved)."""
+        target = str(Path(repo_path).resolve())
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE repo_path = ? ORDER BY slug",
+            (target,),
+        ).fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def list_watch_enabled_repos(self) -> list[IndexedRepo]:
+        """Registry rows enrolled for watching (service-startup observer set)."""
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE watch_enabled = 1 ORDER BY slug",
+        ).fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def delete_repo(self, slug: str, *, repo_path: str | None = None) -> int:
+        """Drop registry row(s) (unwire). Returns the number of deleted rows.
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise deletes all entries for the slug.
+        """
+        with self._lock:
+            if repo_path is not None:
+                cur = self.conn.execute(
+                    "DELETE FROM indexed_repos WHERE slug = ? AND repo_path = ?",
+                    (slug, repo_path),
+                )
+            else:
+                cur = self.conn.execute("DELETE FROM indexed_repos WHERE slug = ?", (slug,))
+            return cur.rowcount
+
+    # -- diagnostics ---------------------------------------------------------------
+
+    def journal_mode(self) -> str:
+        """Current journal mode (tests verify WAL)."""
+        row = self.conn.execute("PRAGMA journal_mode").fetchone()
+        return str(row[0]) if row else ""

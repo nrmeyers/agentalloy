@@ -49,7 +49,6 @@ from datetime import date
 from pathlib import Path
 
 import yaml
-
 from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.retrieval.lm_assist import (
     FragmentScorer,

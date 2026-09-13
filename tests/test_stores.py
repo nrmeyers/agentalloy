@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from agentalloy.state_store import StateStore
-from agentalloy.telemetry import TelemetryStore
+from agentalloy.telemetry_store import TelemetryStore
 
 
 def test_state_store_contract_lifecycle() -> None:

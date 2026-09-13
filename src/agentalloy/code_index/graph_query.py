@@ -29,7 +29,7 @@ def graph_query(
     limit: int = 20,
     hops: int = 1,
     repo: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     """Expand ``query`` (or the top-centrality overview) into a subgraph."""
     query = (query or "").strip()
     if query:

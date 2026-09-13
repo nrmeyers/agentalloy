@@ -1,20 +1,52 @@
-"""Profile resolver for AgentAlloy v2.
+# pyright: reportMissingTypeStubs=false
+# pyright: reportArgumentType=false
+"""Profile management for multi-repo support.
 
-Profiles are named bundles of configuration that auto-detect based on:
-  1. Explicit project marker  (.agentalloy/profile)
-  2. Git remote URL pattern   (match_remote in profiles.yaml)
-  3. Path prefix              (match_path in profiles.yaml)
-  4. Fallback to default
+Profiles let users configure per-environment settings (skills, datastore
+paths, SDD packs, domain tags) and activate them by project marker, git
+remote, path pattern, or an explicit env var.
 
-Simplified from v1 — v2 profiles control which skill packs are active
-and which domain tags are preferred. The full corpus is always available;
-profiles filter what gets auto-injected.
+Config file location (user-level):
+    $XDG_CONFIG_HOME/agentalloy/profiles.yaml
+    (or ~/.config/agentalloy/profiles.yaml on Linux)
+
+Example profiles.yaml:
+    default_profile: default
+
+    profiles:
+      default: {}
+
+      monorepo:
+        match_remote:
+          - "git@github.com:company/*.git"
+        match_path:
+          - "~/work/company/*"
+        packs: [sdd-core, python]
+        domain_tags: [python, fastapi]
+
+      personal:
+        match_remote:
+          - "git@github.com:me/*.git"
+
+Activation rules (in order):
+    1. Explicit override: ``AGENTALLOY_PROFILE=<name>`` env var
+    2. Project marker:   ``.agentalloy/profile`` file in the repo root
+    3. Git remote match: ``git remote get-url origin`` matches a glob
+    4. Path match:        cwd matches a glob pattern
+    5. Default profile (``default_profile`` key, or "default")
+
+The v2 server uses ``packs`` / ``domain_tags`` to filter which skill packs
+and domain tags are auto-injected; the v10 install subcommands use the
+per-profile ``skills_dir`` / ``datastore_path``. Both field sets coexist on
+the same ``Profile``.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,186 +54,367 @@ from typing import Any
 
 import yaml
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+#: Default profile name when no matchers are hit.
 DEFAULT_PROFILE_NAME = "default"
+
+#: Valid keys under an ``overrides`` block in profiles.yaml.
+VALID_OVERRIDE_CLASSES: frozenset[str] = frozenset(
+    {"datastore", "skills", "paths", "code_index", "search"}
+)
+
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Profile:
-    """A resolved profile."""
+    """A resolved profile.
+
+    ``skills_dir`` / ``datastore_path`` are the per-profile storage paths used
+    by the v10 install subcommands; ``packs`` / ``domain_tags`` are the v2
+    domain-selection fields (which SDD packs to load and which entity domain
+    tags to index).
+    """
 
     name: str
+    skills_dir: Path
+    datastore_path: Path
+    is_default: bool = False
     packs: list[str] = field(default_factory=list)
     domain_tags: list[str] = field(default_factory=list)
-    is_default: bool = False
 
 
 @dataclass
 class ProfilesConfig:
-    """Parsed profiles.yaml configuration."""
+    """Parsed profiles.yaml."""
 
+    default_profile: str
     profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
-    default_profile: str = DEFAULT_PROFILE_NAME
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
 
 
 def profiles_root() -> Path:
-    """Return ~/.agentalloy/ (honoring XDG_DATA_HOME)."""
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "agentalloy"
+    """Base directory for profile config + per-profile data."""
+    cfg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if not cfg:
+        cfg = str(Path.home() / ".config")
+    root = Path(cfg) / "agentalloy"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def profile_dir(name: str) -> Path:
+    return profiles_root() / "profiles" / name
+
+
+def profile_skills_dir(name: str) -> Path:
+    d = profile_dir(name) / "skills"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def profile_datastore_path(name: str) -> Path:
+    d = profile_dir(name) / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "datastore.duckdb"
+
+
+def domain_datastore_path(domain: str = "default") -> Path:
+    """Datastore for a domain profile (one per distinct domain set)."""
+    d = profile_dir(domain) / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "datastore.duckdb"
 
 
 def profiles_yaml_path() -> Path:
-    """Return ~/.agentalloy/profiles.yaml."""
     return profiles_root() / "profiles.yaml"
 
 
 def project_marker_path(root: Path) -> Path:
-    """Return <project>/.agentalloy/profile."""
+    """Project-local marker file: ``<root>/.agentalloy/profile``."""
     return root / ".agentalloy" / "profile"
 
 
+# ---------------------------------------------------------------------------
+# YAML load / write
+# ---------------------------------------------------------------------------
+
+
 def load_profiles_config() -> ProfilesConfig:
-    """Load ~/.agentalloy/profiles.yaml."""
+    """Load profiles.yaml; returns an empty default if absent."""
     path = profiles_yaml_path()
-    if not path.exists():
-        return ProfilesConfig()
-
+    if not path.is_file():
+        return ProfilesConfig(default_profile=DEFAULT_PROFILE_NAME, profiles={})
+    raw: dict[str, Any] = {}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
-        return ProfilesConfig()
+        return ProfilesConfig(default_profile=DEFAULT_PROFILE_NAME, profiles={})
 
-    profiles_raw = data.get("profiles", {}) or {}
-    default_profile_raw = data.get("default_profile", DEFAULT_PROFILE_NAME)
+    profiles: dict[str, dict[str, Any]] = {}
+    for name, cfg in (raw.get("profiles") or {}).items():
+        if not isinstance(name, str):
+            continue
+        if not isinstance(cfg, dict):
+            cfg = {}
+        name = name.strip()
+        if not name:
+            continue
+        profiles[name] = cfg
 
-    if not profiles_raw:
-        profiles_raw = {DEFAULT_PROFILE_NAME: {}}
-    if not default_profile_raw:
-        default_profile_raw = DEFAULT_PROFILE_NAME
+    default = raw.get("default_profile")
+    if not isinstance(default, str) or not default.strip():
+        default = DEFAULT_PROFILE_NAME
+    return ProfilesConfig(default_profile=default.strip(), profiles=profiles)
 
-    return ProfilesConfig(
-        profiles=profiles_raw if isinstance(profiles_raw, dict) else {},
-        default_profile=str(default_profile_raw),
-    )
+
+def _atomic_yaml_write(path: Path, data: dict[str, Any]) -> None:
+    """Write YAML atomically via a temp file + rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _save_config(cfg: ProfilesConfig) -> None:
+    data: dict[str, Any] = {
+        "default_profile": cfg.default_profile,
+        "profiles": cfg.profiles,
+    }
+    _atomic_yaml_write(profiles_yaml_path(), data)
+
+
+# ---------------------------------------------------------------------------
+# Git helpers
+# ---------------------------------------------------------------------------
 
 
 def _git_remote_url(cwd: Path) -> str | None:
-    """Return the origin remote URL, or None."""
+    """Return the ``origin`` remote URL for ``cwd`` if it's a git repo."""
     try:
-        result = subprocess.run(
+        out = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=5,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+        if out.returncode == 0:
+            return out.stdout.strip() or None
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
         pass
     return None
 
 
-def detect_profile(cwd: Path | None = None) -> Profile:
-    """Resolve the active profile for cwd.
+def _match_pattern(value: str, pattern: str) -> bool:
+    """Glob match that also handles git remote URL forms."""
+    pat = str(pattern)
+    if fnmatch.fnmatch(value, pat):
+        return True
+    # Normalize git URLs: strip scheme, handle .git suffix
+    normalized = value.replace("git@", "").replace("https://", "")
+    if fnmatch.fnmatch(normalized, pat):
+        return True
+    if value.endswith(".git") and fnmatch.fnmatch(value[:-4], pat):
+        return True
+    return False
 
-    Priority:
-      1. Explicit project marker
-      2. Git remote URL pattern
-      3. Path prefix
-      4. Default profile
+
+# ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+
+
+def detect_profile(cwd: Path | None = None) -> Profile:
+    """Return the active profile for the current working directory.
+
+    Resolution order:
+        1. ``AGENTALLOY_PROFILE`` env var
+        2. Project marker (``.agentalloy/profile``)
+        3. Git remote URL glob match
+        4. Path glob match
+        5. ``default_profile`` setting
     """
     if cwd is None:
         cwd = Path.cwd()
 
-    config = load_profiles_config()
+    cfg = load_profiles_config()
 
-    # 1. Explicit project marker
+    # 1. Explicit env override
+    env_name = os.environ.get("AGENTALLOY_PROFILE", "").strip()
+    if env_name and env_name in cfg.profiles:
+        return _build_profile(env_name, cfg, is_default=False)
+
+    # 2. Project marker
     marker_path = project_marker_path(cwd)
-    if marker_path.exists():
+    if marker_path.is_file():
         try:
             marker_data = yaml.safe_load(marker_path.read_text(encoding="utf-8")) or {}
             marker_profile = str(marker_data.get("profile", "")).strip()
-            if marker_profile and marker_profile in config.profiles:
-                return _build_profile(marker_profile, config)
+            if marker_profile and marker_profile in cfg.profiles:
+                return _build_profile(marker_profile, cfg, is_default=False)
         except (yaml.YAMLError, OSError):
             pass
 
-    # 2. Git remote URL match
-    remote_url = _git_remote_url(cwd)
-    if remote_url:
-        for name, rules in config.profiles.items():
-            match_remote = rules.get("match_remote", []) or []
-            for pattern in match_remote:
-                if fnmatch.fnmatch(remote_url, str(pattern)):
-                    return _build_profile(name, config)
+    # 3. Git remote match
+    remote = _git_remote_url(cwd)
+    if remote:
+        for name, rules in cfg.profiles.items():
+            for pattern in rules.get("match_remote", []) or []:
+                if _match_pattern(remote, pattern):
+                    return _build_profile(name, cfg, is_default=False)
 
-    # 3. Path prefix match
-    cwd_abs = cwd.resolve()
-    for name, rules in config.profiles.items():
-        match_path = rules.get("match_path", []) or []
-        for pattern in match_path:
-            expanded = Path(str(pattern)).expanduser()
-            parts = expanded.parts
-            while len(parts) > 1 and parts[-1] in ("*", "**"):
-                parts = parts[:-1]
-            base = Path(*parts)
-            try:
-                cwd_abs.relative_to(base.resolve())
-                return _build_profile(name, config)
-            except ValueError:
-                pass
+    # 4. Path match
+    cwd_str = str(cwd)
+    for name, rules in cfg.profiles.items():
+        for pattern in rules.get("match_path", []) or []:
+            expanded = os.path.expanduser(str(pattern))
+            if fnmatch.fnmatch(cwd_str, expanded):
+                return _build_profile(name, cfg, is_default=False)
 
-    # 4. Default
-    return _build_default_profile()
+    # 5. Default
+    return _build_profile(cfg.default_profile, cfg, is_default=True)
 
 
-def _build_default_profile() -> Profile:
-    """Build the default profile."""
-    return Profile(name=DEFAULT_PROFILE_NAME, is_default=True)
-
-
-def _build_profile(name: str, config: ProfilesConfig) -> Profile:
-    """Build a Profile from config."""
-    rules = config.profiles.get(name, {})
-    packs = rules.get("packs", []) or []
-    domain_tags = rules.get("domain_tags", []) or []
+def _build_profile(name: str, cfg: ProfilesConfig, is_default: bool) -> Profile:
+    rules = cfg.profiles.get(name, {}) or {}
     return Profile(
         name=name,
-        packs=[str(p) for p in packs],
-        domain_tags=[str(t) for t in domain_tags],
-        is_default=(name == DEFAULT_PROFILE_NAME),
+        skills_dir=profile_skills_dir(name),
+        datastore_path=profile_datastore_path(name),
+        is_default=is_default,
+        packs=[str(p) for p in (rules.get("packs", []) or [])],
+        domain_tags=[str(t) for t in (rules.get("domain_tags", []) or [])],
     )
 
 
+# ---------------------------------------------------------------------------
+# Query / mutation (init / set-default / delete)
+# ---------------------------------------------------------------------------
+
+
+def get_profile(name: str) -> Profile:
+    """Return a profile by name, or raise ``KeyError`` if unknown.
+
+    The implicit default is always resolvable even if absent from the yaml.
+    """
+    cfg = load_profiles_config()
+    if name not in cfg.profiles and name != cfg.default_profile and name != DEFAULT_PROFILE_NAME:
+        raise KeyError(f"unknown profile: {name!r}")
+    return _build_profile(name, cfg, is_default=(name == cfg.default_profile))
+
+
+def init_profile(
+    name: str,
+    match_remote: list[str] | None = None,
+    match_path: list[str] | None = None,
+) -> Profile:
+    """Create a new profile entry in profiles.yaml.
+
+    Raises ``ValueError`` if the profile already exists.
+    """
+    cfg = load_profiles_config()
+    if name in cfg.profiles:
+        raise ValueError(f"profile {name!r} already exists")
+
+    rules: dict[str, Any] = {}
+    if match_remote:
+        rules["match_remote"] = list(match_remote)
+    if match_path:
+        rules["match_path"] = list(match_path)
+
+    cfg.profiles[name] = rules
+    _save_config(cfg)
+    return _build_profile(name, cfg, is_default=False)
+
+
+def set_default_profile(name: str) -> None:
+    """Change the ``default_profile`` key."""
+    cfg = load_profiles_config()
+    if name not in cfg.profiles and name != DEFAULT_PROFILE_NAME:
+        raise KeyError(f"unknown profile: {name!r}")
+    cfg.default_profile = name
+    _save_config(cfg)
+
+
+def delete_profile(name: str) -> None:
+    """Remove a profile from profiles.yaml.
+
+    Raises ``ValueError`` for the default / active default, ``KeyError`` for
+    an unknown profile. Does NOT delete the on-disk data directories.
+    """
+    if name == DEFAULT_PROFILE_NAME:
+        raise ValueError(f"cannot delete the default profile {name!r}")
+    cfg = load_profiles_config()
+    if name not in cfg.profiles:
+        raise KeyError(f"unknown profile: {name!r}")
+    if cfg.default_profile == name:
+        raise ValueError("cannot delete the active default profile; change default first")
+    del cfg.profiles[name]
+    _save_config(cfg)
+
+
 def list_profiles(cwd: Path | None = None) -> list[dict[str, Any]]:
-    """Return all configured profiles."""
-    config = load_profiles_config()
-    active = detect_profile(cwd) if cwd else None
+    """Return all configured profiles with activation metadata.
 
-    result: list[dict[str, Any]] = [
-        {
-            "name": DEFAULT_PROFILE_NAME,
-            "active": active.name == DEFAULT_PROFILE_NAME if active else False,
-            "is_default": True,
-        }
-    ]
+    Each entry is a dict with: ``name``, ``active_for_cwd``, ``is_default``,
+    ``match_remote``, ``match_path``, ``packs``, ``domain_tags``,
+    ``has_overrides``.
+    """
+    cfg = load_profiles_config()
+    active_name = detect_profile(cwd).name if cwd is not None else cfg.default_profile
+    out: list[dict[str, Any]] = []
+    for name, rules in cfg.profiles.items():
+        out.append(
+            {
+                "name": name,
+                "active_for_cwd": name == active_name,
+                "is_default": name == cfg.default_profile,
+                "match_remote": rules.get("match_remote", []) or [],
+                "match_path": rules.get("match_path", []) or [],
+                "packs": rules.get("packs", []) or [],
+                "domain_tags": rules.get("domain_tags", []) or [],
+                "has_overrides": "overrides" in rules,
+            }
+        )
+    # Ensure the default profile appears even if not explicitly in the yaml.
+    if cfg.default_profile not in cfg.profiles:
+        out.append(
+            {
+                "name": cfg.default_profile,
+                "active_for_cwd": cfg.default_profile == active_name,
+                "is_default": True,
+                "match_remote": [],
+                "match_path": [],
+                "packs": [],
+                "domain_tags": [],
+                "has_overrides": False,
+            }
+        )
+    return out
 
-    for name, rules in config.profiles.items():
-        if name == DEFAULT_PROFILE_NAME:
-            continue
-        result.append({
-            "name": name,
-            "active": active.name == name if active else False,
-            "is_default": False,
-            "packs": rules.get("packs", []) or [],
-            "match_remote": rules.get("match_remote", []) or [],
-            "match_path": rules.get("match_path", []) or [],
-        })
 
-    return result
+def _ensure_profile_dir(name: str) -> Path:
+    """Create the profile directory structure if missing."""
+    d = profile_dir(name)
+    (d / "skills").mkdir(parents=True, exist_ok=True)
+    (d / "data").mkdir(parents=True, exist_ok=True)
+    return d
 
 
-# --- Repo technology detection (skill-selection relevance filter) ---
+# ---------------------------------------------------------------------------
+# Repo technology detection (v2 — skill-selection relevance filter)
+# ---------------------------------------------------------------------------
 
 # Extensions → language tag. Only languages that also appear in skill/pack
 # names matter for filtering, but detecting broadly costs nothing.
@@ -244,8 +457,17 @@ _DEP_FRAMEWORKS: dict[str, str] = {
 }
 
 _SKIP_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "dist", "build",
-    "__pycache__", ".qwen", "target", ".mypy_cache", ".ruff_cache",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "__pycache__",
+    ".qwen",
+    "target",
+    ".mypy_cache",
+    ".ruff_cache",
 }
 
 _SCAN_FILE_CAP = 4000
@@ -261,7 +483,7 @@ def detect_repo_tags(repo_root: Path) -> set[str]:
     """
     counts: dict[str, int] = {}
     scanned = 0
-    stack = [repo_root]
+    stack = [Path(repo_root)]
     while stack and scanned < _SCAN_FILE_CAP:
         current = stack.pop()
         try:
@@ -284,19 +506,18 @@ def detect_repo_tags(repo_root: Path) -> set[str]:
     threshold = 1 if total < 30 else 3
     tags = {lang for lang, n in counts.items() if n >= threshold}
 
-    tags |= _manifest_framework_tags(repo_root)
+    tags |= _manifest_framework_tags(Path(repo_root))
     return tags
 
 
 def _manifest_framework_tags(repo_root: Path) -> set[str]:
     """Framework tags from dependency manifests (best effort)."""
-    import json as _json
-
+    root = Path(repo_root)
     tags: set[str] = set()
     try:
-        pkg = repo_root / "package.json"
+        pkg = root / "package.json"
         if pkg.exists():
-            data = _json.loads(pkg.read_text(encoding="utf-8"))
+            data = json.loads(pkg.read_text(encoding="utf-8"))
             deps: dict[str, Any] = {}
             for key in ("dependencies", "devDependencies"):
                 block = data.get(key)
@@ -311,7 +532,7 @@ def _manifest_framework_tags(repo_root: Path) -> set[str]:
 
     texts: list[str] = []
     for manifest in ("pyproject.toml", "requirements.txt"):
-        path = repo_root / manifest
+        path = root / manifest
         try:
             if path.exists():
                 texts.append(path.read_text(encoding="utf-8").lower())
@@ -319,11 +540,9 @@ def _manifest_framework_tags(repo_root: Path) -> set[str]:
             pass
     blob = "\n".join(texts)
     if blob:
-        import re as _re
-
         for dep, tag in _DEP_FRAMEWORKS.items():
             if "/" in dep:
                 continue  # npm-scoped names never appear in python manifests
-            if _re.search(rf"\b{_re.escape(dep)}\b", blob):
+            if re.search(rf"\b{re.escape(dep)}\b", blob):
                 tags.add(tag)
     return tags

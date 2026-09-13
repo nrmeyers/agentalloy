@@ -349,9 +349,7 @@ class Interpreter:
                             "steps": step,
                         }
                         return
-                    tool_calls_log.append(
-                        {"tool": tool_name, "args": tool_args, "result": result}
-                    )
+                    tool_calls_log.append({"tool": tool_name, "args": tool_args, "result": result})
                     yield {
                         "type": "tool_result",
                         "tool": tool_name,

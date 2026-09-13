@@ -43,8 +43,9 @@ def main() -> int:
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from contextlib import closing  # noqa: E402
 
-    from agentalloy.config import get_settings  # noqa: E402
     from agentalloy.storage.open import open_skills  # noqa: E402
+
+    from agentalloy.config import get_settings  # noqa: E402
 
     settings = get_settings()
     have = existing_skill_ids()

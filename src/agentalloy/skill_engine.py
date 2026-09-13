@@ -523,9 +523,8 @@ class SkillEngine:
         for skill in self.skills.values():
             if skill not in candidates and phase in skill.phases:
                 continue
-            if skill not in candidates:
-                if any(tag in task_lower for tag in skill.domain_tags):
-                    candidates.append(skill)
+            if skill not in candidates and any(tag in task_lower for tag in skill.domain_tags):
+                candidates.append(skill)
 
         return candidates[:k]
 

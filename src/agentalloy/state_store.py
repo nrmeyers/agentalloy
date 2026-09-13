@@ -53,6 +53,7 @@ class _LockedConn:
         with self._lock:
             self._conn.close()
 
+
 # The SDD lifecycle, in order. Single source of truth — phase_machine and
 # executors validate against this, so an unknown phase can never be persisted.
 PHASE_ORDER: tuple[str, ...] = ("intake", "spec", "design", "plan", "build", "qa", "ship")

@@ -30,15 +30,19 @@ def test_project_marker_detection(tmp_path: Path) -> None:
     profiles_dir = tmp_path / "profiles_root"
     profiles_dir.mkdir()
     profiles_yaml = profiles_dir / "profiles.yaml"
-    profiles_yaml.write_text(yaml.dump({
-        "profiles": {
-            "work": {
-                "packs": ["python", "fastapi"],
-                "domain_tags": ["backend"],
+    profiles_yaml.write_text(
+        yaml.dump(
+            {
+                "profiles": {
+                    "work": {
+                        "packs": ["python", "fastapi"],
+                        "domain_tags": ["backend"],
+                    }
+                },
+                "default_profile": "default",
             }
-        },
-        "default_profile": "default",
-    }))
+        )
+    )
 
     # Create project with marker
     project_dir = tmp_path / "project"
@@ -68,10 +72,14 @@ def test_list_profiles_includes_default(tmp_path: Path) -> None:
 
     profiles_dir = tmp_path / "profiles_root"
     profiles_dir.mkdir()
-    (profiles_dir / "profiles.yaml").write_text(yaml.dump({
-        "profiles": {"work": {"packs": ["python"]}},
-        "default_profile": "default",
-    }))
+    (profiles_dir / "profiles.yaml").write_text(
+        yaml.dump(
+            {
+                "profiles": {"work": {"packs": ["python"]}},
+                "default_profile": "default",
+            }
+        )
+    )
 
     original_root = profiles_mod.profiles_root
     profiles_mod.profiles_root = lambda: profiles_dir  # type: ignore[assignment]
@@ -86,13 +94,24 @@ def test_list_profiles_includes_default(tmp_path: Path) -> None:
 
 def test_profile_dataclass() -> None:
     """Profile dataclass fields."""
-    p = Profile(name="test", packs=["python"], domain_tags=["backend"])
+    p = Profile(
+        name="test",
+        skills_dir=Path("/tmp/test-skills"),
+        datastore_path=Path("/tmp/test-datastore"),
+        packs=["python"],
+        domain_tags=["backend"],
+    )
     assert p.name == "test"
     assert p.packs == ["python"]
     assert p.domain_tags == ["backend"]
     assert p.is_default is False
 
-    p2 = Profile(name="default", is_default=True)
+    p2 = Profile(
+        name="default",
+        skills_dir=Path("/tmp/default-skills"),
+        datastore_path=Path("/tmp/default-datastore"),
+        is_default=True,
+    )
     assert p2.is_default is True
     assert p2.packs == []
 
@@ -121,7 +140,7 @@ class TestDetectRepoTags:
         for i in range(4):
             (tmp_path / "app" / f"m{i}.py").write_text("x = 1\n")
         (tmp_path / "pyproject.toml").write_text(
-            "[project]\ndependencies = [\"fastapi\", \"pytest\"]\n"
+            '[project]\ndependencies = ["fastapi", "pytest"]\n'
         )
         tags = detect_repo_tags(tmp_path)
         assert "python" in tags
@@ -135,9 +154,7 @@ class TestDetectRepoTags:
         from agentalloy.profiles import detect_repo_tags
 
         (tmp_path / "index.ts").write_text("export {}\n")
-        (tmp_path / "package.json").write_text(
-            json.dumps({"dependencies": {"fastify": "^4.0.0"}})
-        )
+        (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"fastify": "^4.0.0"}}))
         tags = detect_repo_tags(tmp_path)
         assert "typescript" in tags  # small repo → threshold 1
         assert "fastify" in tags
