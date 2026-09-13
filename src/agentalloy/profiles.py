@@ -225,9 +225,7 @@ def _match_pattern(value: str, pattern: str) -> bool:
     normalized = value.replace("git@", "").replace("https://", "")
     if fnmatch.fnmatch(normalized, pat):
         return True
-    if value.endswith(".git") and fnmatch.fnmatch(value[:-4], pat):
-        return True
-    return False
+    return value.endswith(".git") and fnmatch.fnmatch(value[:-4], pat)
 
 
 # ---------------------------------------------------------------------------

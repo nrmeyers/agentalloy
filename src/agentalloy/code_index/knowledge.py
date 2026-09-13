@@ -596,7 +596,9 @@ def _contract_body(contract: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _contract_touch_edges(contract: dict[str, Any], qn: str, store: CodeGraphStore) -> list[CodeEdge]:
+def _contract_touch_edges(
+    contract: dict[str, Any], qn: str, store: CodeGraphStore
+) -> list[CodeEdge]:
     """Declared TOUCHES edges from a contract's free-text touches — one per
     unique resolved target, comma-split."""
     items = [t.strip() for t in (contract.get("touches") or "").split(",") if t.strip()]
