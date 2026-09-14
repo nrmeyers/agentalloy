@@ -1,0 +1,9 @@
+## Task
+
+Scaffold the standalone v2.0 codebase per design §2, §3, §18, §21: pyproject.toml (src layout, newagent console entry point, ruff + mypy --strict + pytest config), justfile (build/test/lint/typecheck/ci recipes), mise.toml adding the Rust toolchain, rust/ cargo workspace with the newagent-core skeleton crate (pyo3 cdylib exposing an empty DataLayer stub), src/newagent/ package skeleton (config.py with env-driven config: V2_SERVICE_PORT=48950, V2_EMBED_PORT=48951, V2_RERANK_PORT=48952, V2_MODEL_PORT=50001, budgets, caps, driver thinking budget; .env.example), pre-commit hooks (ruff + clippy). No v1 imports anywhere. ACs: AC-1, AC-15 foundation.
+
+## Test cases
+
+From test-plan.artifact (phase plan): TC-1.1, TC-1.2, TC-1.3. Global invariants apply: just ci green, offline-green with fakes, v2 never writes target source, v1 untouched.
+
+AgentAlloy v2.0 M1 (local agent). Authoritative docs in the agentalloy state store (repo_root=/home/nmeyers/dev/newagent, slug=v2-local-agent-mvp): design approach = phase design, name approach.artifact; spec = phase spec, name spec.artifact; test cases = phase plan, name test-plan.artifact. HARD CONSTRAINTS: one-way PyO3 boundary (Python workflow layer calls the Rust newagent-core DataLayer; NO Rust->Python callbacks); dev ports service :48950 / embed :48951 / rerank :48952 / model :50001 (env-driven via V2_* vars; final flip to v1 ports is config-only); DuckDB single-RW rule (Python owns the only RW handle; Rust opens the .duck read-only); v2 NEVER writes target-repo source; knowledge_* actions return structured empty (parked leg); v1 at ~/dev/agentalloy is a concepts-only reference, NEVER modified, never imported/called; temp 0 + strict json_schema for all LFM driver calls. Every task leaves just ci green (ruff + clippy + mypy --strict + pytest + cargo test) and offline-green (FakeLM / FakeEmbed / FakeRerank / MockHarness / temp stores).

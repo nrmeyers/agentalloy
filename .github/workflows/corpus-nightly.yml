@@ -4,8 +4,8 @@ name: Corpus Nightly Regression
 # self-audit + domain gold-hit probe against the live service, and fails on
 # regression vs the committed baselines in eval/corpus_baselines.json.
 #
-# Inference runs on llama-server (llama.cpp): an embed server on :47951 and a
-# reranker server on :47952 (the cpu preset points at both). pull-models
+# Inference runs on llama-server (llama.cpp): an embed server on :48951 and a
+# reranker server on :48952 (the cpu preset points at both). pull-models
 # provisions llama-server itself by downloading a prebuilt CPU build from the
 # ggml-org GitHub releases (v1.3.3+) and downloads both GGUFs from Hugging Face —
 # so this workflow no longer pre-provisions the binary; it dogfoods that path.
@@ -42,7 +42,7 @@ jobs:
       # workspace so nothing touches the runner's home defaults.
       XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
       XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
-      AGENTALLOY_URL: http://127.0.0.1:47950
+      AGENTALLOY_URL: http://127.0.0.1:48950
     steps:
       - uses: actions/checkout@v5
 
@@ -80,9 +80,9 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
-          # cpu preset points the embed server at :47951 and the reranker at
-          # :47952 (SIGNAL_INTENT_BACKEND=reranker).
-          uv run agentalloy write-env --preset cpu --port 47950 --force
+          # cpu preset points the embed server at :48951 and the reranker at
+          # :48952 (SIGNAL_INTENT_BACKEND=reranker).
+          uv run agentalloy write-env --preset cpu --port 48950 --force
           echo "--- generated .env ---"
           cat "${XDG_CONFIG_HOME}/agentalloy/.env"
 
@@ -103,13 +103,13 @@ jobs:
           JSON
           uv run agentalloy pull-models --models recommend-models.json --runner llama-server
 
-      - name: Start embed server (llama-server, :47951)
+      - name: Start embed server (llama-server, :48951)
         timeout-minutes: 5
         run: |
           set -euxo pipefail
           uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
 
-      - name: Start reranker server (llama-server, :47952)
+      - name: Start reranker server (llama-server, :48952)
         timeout-minutes: 5
         run: |
           set -euxo pipefail
@@ -139,7 +139,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${XDG_CONFIG_HOME}/agentalloy/.env"
           set +a
-          uv run uvicorn agentalloy.app:app --host 127.0.0.1 --port 47950 \
+          uv run uvicorn agentalloy.app:app --host 127.0.0.1 --port 48950 \
             > service.log 2>&1 &
           # Wait for readiness before probing.
           for i in $(seq 1 60); do
@@ -239,7 +239,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
-          uv run agentalloy write-env --preset cpu --port 47950 --force
+          uv run agentalloy write-env --preset cpu --port 48950 --force
 
       - name: Pull models (prebuilt llama-server + GGUFs)
         timeout-minutes: 30
@@ -253,13 +253,13 @@ jobs:
           JSON
           uv run agentalloy pull-models --models recommend-models.json --runner llama-server
 
-      - name: Start embed server (llama-server, :47951)
+      - name: Start embed server (llama-server, :48951)
         timeout-minutes: 5
         run: |
           set -euxo pipefail
           uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
 
-      - name: Start reranker server (llama-server, :47952)
+      - name: Start reranker server (llama-server, :48952)
         # The cpu preset's write-env sets SIGNAL_INTENT_BACKEND=reranker; serve
         # it like the corpus job does so phase-gate intent uses the real
         # reranker instead of silently failing open to cosine.
@@ -353,7 +353,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
-          uv run agentalloy write-env --preset cpu --port 47950 --force
+          uv run agentalloy write-env --preset cpu --port 48950 --force
 
       - name: Pull models (prebuilt llama-server + GGUFs)
         timeout-minutes: 30
@@ -367,7 +367,7 @@ jobs:
           JSON
           uv run agentalloy pull-models --models recommend-models.json --runner llama-server
 
-      - name: Start embed server (llama-server, :47951)
+      - name: Start embed server (llama-server, :48951)
         timeout-minutes: 5
         run: |
           set -euxo pipefail

@@ -1,7 +1,9 @@
-"""Codebase-index module — code search & call graphs served under ``/code``.
+from __future__ import annotations
 
-Optional context module toggled by ``CODE_INDEX_ENABLED``. Heavy dependencies
-(tree-sitter + grammars) ship behind the ``[code-index]`` extra; nothing in
-this package may be imported unless the toggle is on (``app.create_app`` lazy-
-imports it inside the enabled branch).
+"""Graph-native code + knowledge index (OverGraph backbone).
+
+Vendored from AgentAlloy v1 (``engine/`` is a re-vendor of the
+codebase-indexer tree-sitter engine; see ``engine/VENDORED.md`` and
+``engine/LICENSE``). The v2 service opens ONE shared multi-repo graph
+instead of v1's per-repo store pair — see ``DESIGN-codeindex-knowledge-graph.md``.
 """

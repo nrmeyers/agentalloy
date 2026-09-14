@@ -8,8 +8,8 @@ changes — the test overrides the entrypoint to launch uvicorn directly,
 skipping the GGUF download / llama-server bootstrap (irrelevant here and far
 too heavy for a test).
 
-Marked ``container`` (via conftest ``_CONTAINER_FILES``): excluded from the
-fast default suite, run serially with ``pytest -m container -n0``. The image
+Marked ``container`` (via ``pytestmark`` below): excluded from the fast
+default suite, run serially with ``pytest -m container -n0``. The image
 build is layer-cached by podman, so repeat runs are cheap; a cold build pulls
 the llama.cpp/node base images once.
 """
@@ -30,6 +30,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.container
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _IMAGE_TAG = "localhost/agentalloy:test-code-index"
 _BUILD_TIMEOUT_S = 1800  # cold build pulls base images; cached rebuilds take seconds
@@ -39,13 +41,12 @@ _BOOT_TIMEOUT_S = 120
 def _podman_env() -> dict[str, str]:
     """Environment for podman subprocesses, pinned to the HOST's real stores.
 
-    conftest isolates XDG_DATA_HOME/XDG_CONFIG_HOME (function-scoped autouse)
-    and TMPDIR (session-scoped) into pytest tmp dirs. Rootless podman keys its
-    image graphroot off XDG_DATA_HOME, so a module-scoped build and a
-    function-scoped run would otherwise hit DIFFERENT stores — the run then
-    fails to resolve the just-built local tag and tries to pull it. Strip the
-    overrides so every podman call in this file shares the host store (which
-    also keeps the built image layer-cached for developers).
+    Rootless podman keys its image graphroot off XDG_DATA_HOME. If the test
+    environment has XDG vars (or TMPDIR) redirected into per-test trees, a
+    module-scoped build and a function-scoped run could hit DIFFERENT stores
+    — the run then fails to resolve the just-built local tag and tries to
+    pull it. Strip the overrides so every podman call in this file shares the
+    host store (which also keeps the built image layer-cached for developers).
     """
     return {
         k: v

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .method_resolver import JavaMethodResolverMixin
 from .type_inference import JavaTypeInferenceEngine
 from .type_resolver import JavaTypeResolverMixin

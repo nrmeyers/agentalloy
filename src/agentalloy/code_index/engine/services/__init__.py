@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Vendored from codebase_rag/services/__init__.py — protocols only.
 # The rest of the upstream services package (LLM, graph DB, protobuf) was
 # deliberately not vendored; see ../VENDORED.md.

@@ -10,13 +10,13 @@ native
     Linux: writes three systemd user units and enables + starts them
     (no root required):
       - agentalloy.service        — the FastAPI service
-      - agentalloy-embed.service  — embed llama-server (47951, --embeddings)
-      - agentalloy-rerank.service — reranker llama-server (47952, completions)
+      - agentalloy-embed.service  — embed llama-server (48951, --embeddings)
+      - agentalloy-rerank.service — reranker llama-server (48952, completions)
 
     macOS: writes three launchd LaunchAgent plists and loads them:
       - ai.agentalloy.plist        — the FastAPI service
-      - ai.agentalloy.embed.plist  — embed llama-server (47951, --embeddings)
-      - ai.agentalloy.rerank.plist — reranker llama-server (47952, completions)
+      - ai.agentalloy.embed.plist  — embed llama-server (48951, --embeddings)
+      - ai.agentalloy.rerank.plist — reranker llama-server (48952, completions)
     All three use RunAtLoad + KeepAlive so they auto-start at login and
     restart on crash.
 
@@ -177,10 +177,10 @@ def _render_systemd_unit(uv_bin: str, repo_root: Path, port: int, env_path: Path
 
 
 # llama-server (llama.cpp) is the sole inference runner. Two dedicated
-# instances back the runtime: the embed server (47951, --embeddings mode) and
-# the reranker server (47952, completions mode for /v1/completions logprobs).
-_LLAMA_EMBED_PORT = 47951
-_LLAMA_RERANK_PORT = 47952
+# instances back the runtime: the embed server (48951, --embeddings mode) and
+# the reranker server (48952, completions mode for /v1/completions logprobs).
+_LLAMA_EMBED_PORT = 48951
+_LLAMA_RERANK_PORT = 48952
 
 # Foreign-safe cmdline matchers keyed by port. Sourced from
 # runtime_artifacts.RUNTIME_PORTS (the single source of truth) so the matchers
@@ -326,7 +326,7 @@ def _resolve_preset(st: dict[str, Any]) -> str | None:
         return preset.strip().lower()
 
     # Fallback: parse the preset from the .env header written by write-env.
-    # Format: "# Preset: nvidia, Port: 47950"
+    # Format: "# Preset: nvidia, Port: 48950"
     env_path = install_state.env_path()
     try:
         for line in env_path.read_text().splitlines():
@@ -377,7 +377,7 @@ def _write_llama_units(
     embed_gpu_device: int | None = None,
     rerank_gpu_device: int | None = None,
 ) -> list[str]:
-    """Write + enable the embed (47951) and reranker (47952) llama-server units.
+    """Write + enable the embed (48951) and reranker (48952) llama-server units.
 
     Returns the list of unit paths written (empty if llama-server is absent).
     Best-effort: a single unit's enable failure is logged, not fatal — the
@@ -475,7 +475,7 @@ def _enable_native_linux(
     )
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    # Reclaim port 47950 from a stale uvicorn (an orphan left by `--force`
+    # Reclaim port 48950 from a stale uvicorn (an orphan left by `--force`
     # reinstall also holds the corpus DuckDB lock; killing it releases both).
     _reclaim_port("agentalloy.service", port, list(_PORT_MATCH[runtime_artifacts.SERVICE_PORT]))
     result = subprocess.run(
@@ -643,7 +643,7 @@ def _write_llama_launchd_agents(
     embed_gpu_device: int | None = None,
     rerank_gpu_device: int | None = None,
 ) -> list[str]:
-    """Write + load LaunchAgent plists for the embed (47951) and reranker (47952)
+    """Write + load LaunchAgent plists for the embed (48951) and reranker (48952)
     llama-servers — the macOS mirror of ``_write_llama_units``.
 
     Returns the list of plist paths written (empty if llama-server is absent).
@@ -666,7 +666,7 @@ def _write_llama_launchd_agents(
 
     written: list[str] = []
     agents = [
-        # Embed: --embeddings mode on 47951 (matches _render_llama_embed_unit).
+        # Embed: --embeddings mode on 48951 (matches _render_llama_embed_unit).
         (
             "ai.agentalloy.embed",
             [
@@ -686,7 +686,7 @@ def _write_llama_launchd_agents(
             ],
             embed_gpu_device,
         ),
-        # Reranker: completions mode on 47952 — NO --embeddings.
+        # Reranker: completions mode on 48952 — NO --embeddings.
         (
             "ai.agentalloy.rerank",
             [llama_bin, "--port", str(_LLAMA_RERANK_PORT), *ngl_args, "-m", str(rerank_model)],
@@ -734,7 +734,7 @@ def _enable_native_macos(
     subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
     subprocess.run(["launchctl", "load", "-w", str(plist_path)], check=True)
 
-    # Register the embed (47951) and reranker (47952) llama-servers as
+    # Register the embed (48951) and reranker (48952) llama-servers as
     # LaunchAgents so they auto-start at login and restart on crash — the
     # macOS mirror of the systemd units written on Linux.
     llama_agents = _write_llama_launchd_agents(
@@ -757,7 +757,7 @@ def _enable_native_macos(
 
 def enable_service(
     mode: str,
-    port: int = 47950,
+    port: int = 48950,
     repo_root: Path | None = None,
     preset: str | None = None,
     embed_gpu_device: int | None = None,
@@ -844,7 +844,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="Service port override (default: read from user state, fallback 47950).",
+        help="Service port override (default: read from user state, fallback 48950).",
     )
     p.add_argument(
         "--embed-gpu-device",
@@ -885,7 +885,7 @@ def _render_human(result: dict[str, Any]) -> None:
 def run(args: argparse.Namespace) -> int:
     st = install_state.load_state()
     port = install_state.validate_port(
-        args.port if args.port is not None else st.get("port", 47950),
+        args.port if args.port is not None else st.get("port", 48950),
     )
     preset: str | None = _resolve_preset(st)
 

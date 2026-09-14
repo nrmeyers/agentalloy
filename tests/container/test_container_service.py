@@ -15,6 +15,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.container
+
+
+@pytest.fixture(autouse=True)
+def _clear_db_lock_sentinel():
+    """stop/restart manage AGENTALLOY_DB_LOCK_HELD in the REAL os.environ, which
+    is shared process-wide. A stop that succeeds in one test leaves the sentinel
+    set; the next test's stop() then short-circuits on the sentinel check (or
+    asserts a cleared sentinel that was never touched). Clear it before and after
+    every test so each starts from a clean environment.
+    """
+    os.environ.pop("AGENTALLOY_DB_LOCK_HELD", None)
+    yield
+    os.environ.pop("AGENTALLOY_DB_LOCK_HELD", None)
+
 
 class TestIsInContainer:
     """is_in_container() detection."""

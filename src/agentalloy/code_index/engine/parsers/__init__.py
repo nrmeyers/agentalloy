@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .call_processor import CallProcessor
 from .definition_processor import DefinitionProcessor
 from .factory import ProcessorFactory

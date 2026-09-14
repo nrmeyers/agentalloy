@@ -43,7 +43,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from agentalloy.storage.protocols import (
+from agentalloy.code_index.protocols import (
     EMBEDDING_DIM,
     CallSite,
     CodeEdge,
@@ -51,7 +51,7 @@ from agentalloy.storage.protocols import (
     CodeSymbol,
     CodeVectorRow,
     DecisionRow,
-    EmbeddingDimMismatch,
+    EmbeddingDimMismatchError,
     l2_normalize,
 )
 
@@ -256,14 +256,14 @@ class OverGraphCodeGraphStore:
             if schema and "dense_vector_dimension" in schema:
                 actual = int(schema["dense_vector_dimension"])
                 if actual != expected_dim:
-                    raise EmbeddingDimMismatch(
+                    raise EmbeddingDimMismatchError(
                         f"OverGraph database at {self._db_path} was created with "
                         f"dense_vector_dimension={actual}, but the current embedding "
                         f"model requires {expected_dim}. Delete the OverGraph directory "
                         f"and re-index from scratch."
                     )
                 logger.debug("vector dimension alignment verified: %d", actual)
-        except EmbeddingDimMismatch:
+        except EmbeddingDimMismatchError:
             raise
         except Exception:
             # Schema may not expose this field yet (first open); that's fine.
@@ -307,6 +307,31 @@ class OverGraphCodeGraphStore:
         except Exception:
             logger.debug("failed to decode result rows", exc_info=True)
             return []
+
+    def _fetch_all_rows(
+        self, match_clause: str, return_clause: str, order_by: str, page_size: int = 10_000
+    ) -> list[dict[str, Any]]:
+        """Full-scan read via stable ``ORDER BY ... SKIP/LIMIT`` pagination.
+
+        The GQL engine silently caps every row fetch at 10,000 rows (even an
+        explicit ``LIMIT 20000`` returns 10,000), so unbounded full scans
+        must page. ``order_by`` must be a stable total order over the matched
+        rows — ``n.qualified_name`` for symbols (the node key, unique), and
+        both endpoint qnames for edges (identical parallel-edge rows dedupe
+        downstream, so the tie is harmless).
+        """
+        out: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            stmt = (
+                f"{match_clause} {return_clause} "
+                f"ORDER BY {order_by} SKIP {offset} LIMIT {page_size}"
+            )
+            page = self._fetch_rows(stmt)
+            out.extend(page)
+            if len(page) < page_size:
+                return out
+            offset += len(page)
 
     # -- ID mapping ----------------------------------------------------------
 
@@ -468,6 +493,7 @@ class OverGraphCodeGraphStore:
             source_code=_decode_or_none(get("source_code")),
             contextual_prefix=str(get("contextual_prefix") or ""),
             content_hash=_decode_or_none(get("content_hash")),
+            repo=str(get("repo") or ""),
         )
 
     def _symbol_props(self, s: CodeSymbol) -> dict[str, Any]:
@@ -488,6 +514,7 @@ class OverGraphCodeGraphStore:
             "source_code": s.source_code or "",
             "contextual_prefix": s.contextual_prefix or "",
             "content_hash": s.content_hash or "",
+            "repo": s.repo or "",
             # Absent until write_centrality stamps it (read paths treat None
             # as "no score", not zero).
             "pagerank": None,
@@ -599,6 +626,7 @@ class OverGraphCodeGraphStore:
             "file_path": e.file_path or "",
             "line_start": e.line_start,
             "span": e.span or "",
+            "repo": e.repo or "",
         }
 
         if label == "Governs":
@@ -606,6 +634,7 @@ class OverGraphCodeGraphStore:
                 "resolution_tier": e.resolution_tier or 0,
                 "span": e.span or "",
                 "file_path": e.file_path or "",
+                "repo": e.repo or "",
             }
 
         try:
@@ -640,6 +669,8 @@ class OverGraphCodeGraphStore:
                 "file_path": e.file_path or "",
                 "line_start": e.line_start,
                 "span": e.span or "",
+                "repo": e.repo or "",
+                "resolution_tier": e.resolution_tier or 0,
             }
 
             if label == "Governs":
@@ -647,6 +678,7 @@ class OverGraphCodeGraphStore:
                     "resolution_tier": e.resolution_tier or 0,
                     "span": e.span or "",
                     "file_path": e.file_path or "",
+                    "repo": e.repo or "",
                 }
 
             batch_data.append(
@@ -722,6 +754,32 @@ class OverGraphCodeGraphStore:
             return 0
         return self._batch_upsert_edges(edge_list)
 
+    def _delete_edges_matching(self, match_where: str) -> int:
+        """Drain-delete every edge matched by ``match_where`` (a full
+        ``MATCH ()-[r:...]->() WHERE ...`` clause binding ``r``).
+
+        The GQL engine silently caps row fetches at 10,000, so a single
+        id-scan misses edges beyond the cap; delete a page, re-scan, repeat
+        until the scan is empty (or a pass deletes nothing, so persistent
+        failures can't loop forever).
+        """
+        removed = 0
+        while True:
+            rows = self._fetch_rows(f"{match_where} RETURN id(r) AS rid LIMIT 10000")
+            rids = [row.get("rid") for row in rows if row.get("rid") is not None]
+            if not rids:
+                return removed
+            deleted_this_pass = 0
+            for rid in rids:
+                try:
+                    self._db.delete_edge(int(rid))
+                    deleted_this_pass += 1
+                except Exception:
+                    logger.debug("failed to delete edge %s", rid, exc_info=True)
+            removed += deleted_this_pass
+            if deleted_this_pass == 0 or len(rows) < 10_000:
+                return removed
+
     def delete_for_files(self, file_paths: Sequence[str]) -> int:
         """Delete the symbols and edges indexed from the given files.
 
@@ -747,30 +805,24 @@ class OverGraphCodeGraphStore:
                 if label == "Governs":
                     continue
                 try:
-                    result = self._db.execute_gql(
-                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}' RETURN id(r)"
+                    removed_edges += self._delete_edges_matching(
+                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}'"
                     )
-                    if isinstance(result, dict):
-                        for row in result.get("rows", []):
-                            rid = row.get("id(r)")
-                            if rid is None:
-                                continue
-                            try:
-                                self._db.delete_edge(int(rid))
-                                removed_edges += 1
-                            except Exception:
-                                logger.debug("failed to delete edge %s", rid, exc_info=True)
                 except Exception:
                     logger.debug("failed to scan %s edges for file %s", label, path, exc_info=True)
 
             # Symbols indexed from this file — tombstone, don't detach.
+            # Drain-loop around the engine's silent 10k row cap: each
+            # tombstone removes the Symbol label, so the re-scan shrinks.
             try:
-                result = self._db.execute_gql(
-                    f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' "
-                    "RETURN n.qualified_name, id(n)"
-                )
-                if isinstance(result, dict):
-                    for row in result.get("rows", []):
+                while True:
+                    result = self._db.execute_gql(
+                        f"MATCH (n:Symbol) WHERE n.file_path = '{_esc(path)}' "
+                        "RETURN n.qualified_name, id(n) LIMIT 10000"
+                    )
+                    rows = result.get("rows", []) if isinstance(result, dict) else []
+                    tombstoned_this_pass = 0
+                    for row in rows:
                         key = _decode(row.get("n.qualified_name"))
                         node_id = row.get("id(n)")
                         if node_id is None:
@@ -780,17 +832,93 @@ class OverGraphCodeGraphStore:
                             # Symbol for the dangling anchor label.
                             self._db.add_node_label(int(node_id), _DANGLING_LABEL)
                             self._db.remove_node_label(int(node_id), "Symbol")
+                            # Clear the vector marker: the HNSW entry may
+                            # outlive the label change, and search_similar
+                            # filters stale hits on indexed_at IS None.
+                            self._db.execute_gql(
+                                f"MATCH (n) WHERE id(n) = {int(node_id)} SET n.indexed_at = NULL"
+                            )
                             removed_symbols += 1
+                            tombstoned_this_pass += 1
                         except Exception:
                             logger.debug("failed to tombstone %s", key, exc_info=True)
                         if key:
                             self._qn_to_id.pop(key, None)
+                    if not rows or tombstoned_this_pass == 0 or len(rows) < 10_000:
+                        break
             except Exception:
                 logger.warning("failed to delete symbols for file %s", path, exc_info=True)
 
         if removed_edges or removed_symbols:
             self._db.flush()
         return removed_symbols + removed_edges
+
+    def delete_for_repo(self, repo: str) -> int:
+        """Delete every code-index row owned by ``repo``.
+
+        Full-reindex path: the caller re-parses the repo from scratch. All
+        edge labels are swept on the edge's own ``repo`` property (GOVERNS
+        included — its doc rows are re-ingested with the repo), then every
+        Symbol node of the repo (code symbols and MarkdownDoc chunks alike)
+        is DETACH-deleted. Cross-repo edges anchored on this repo's symbols
+        go with them and are re-observed on the other repos' next ingest.
+
+        Dangling anchors carry no ``repo`` property (they name unindexed
+        externals shared across repos) and are left alone. Returns symbols +
+        edges removed.
+        """
+        removed_edges = 0
+        for label in _ALL_EDGE_LABELS:
+            try:
+                result = self._db.execute_gql(
+                    f"MATCH ()-[r:{label}]->() WHERE r.repo = '{_esc(repo)}' RETURN count(r) AS cnt"
+                )
+                if isinstance(result, dict):
+                    for row in result.get("rows", []):
+                        removed_edges += int(_opt_int(row.get("cnt")) or 0)
+            except Exception:
+                logger.debug("failed to count %s edges for repo %s", label, repo, exc_info=True)
+            try:
+                self._db.execute_gql(
+                    f"MATCH ()-[r:{label}]->() WHERE r.repo = '{_esc(repo)}' DELETE r"
+                )
+            except Exception:
+                logger.debug("failed to delete %s edges for repo %s", label, repo, exc_info=True)
+
+        stale_qns: list[str] = []
+        try:
+            # Paginated: a >10k-symbol repo would otherwise leave stale
+            # entries in _qn_to_id that later resolve to deleted node ids.
+            rows = self._fetch_all_rows(
+                f"MATCH (n:Symbol) WHERE n.repo = '{_esc(repo)}'",
+                "RETURN n.qualified_name",
+                "n.qualified_name",
+            )
+            stale_qns = [k for k in (_decode(r.get("n.qualified_name")) for r in rows) if k]
+        except Exception:
+            logger.debug("failed to list symbols for repo %s", repo, exc_info=True)
+        try:
+            self._db.execute_gql(f"MATCH (n:Symbol) WHERE n.repo = '{_esc(repo)}' DETACH DELETE n")
+        except Exception:
+            logger.warning("failed to delete symbols for repo %s", repo, exc_info=True)
+        for key in stale_qns:
+            self._qn_to_id.pop(key, None)
+
+        if removed_edges or stale_qns:
+            self._db.flush()
+        return removed_edges + len(stale_qns)
+
+    def repo_symbol_count(self, repo: str) -> int:
+        """Count Symbol nodes owned by ``repo`` (0 for unknown/empty repos)."""
+        try:
+            rows = self._fetch_rows(
+                f"MATCH (n:Symbol) WHERE n.repo = '{_esc(repo)}' RETURN count(n) AS cnt"
+            )
+            if rows:
+                return int(_opt_int(rows[0].get("cnt")) or 0)
+        except Exception:
+            logger.debug("failed to count symbols for repo %s", repo, exc_info=True)
+        return 0
 
     # -- symbol lookup -------------------------------------------------------
 
@@ -979,6 +1107,49 @@ class OverGraphCodeGraphStore:
             logger.debug("failed to fetch symbols by file %s", file_path, exc_info=True)
         return results
 
+    def symbols_matching(self, pattern: str, *, limit: int = 500) -> list[CodeSymbol]:
+        """Substring match on qualified name / short name (the ``symbols``
+        tool contract). Empty ``pattern`` returns everything, capped and
+        name-sorted. Lightweight rows — no source code.
+        """
+        pattern = (pattern or "").strip()
+        where = ""
+        if pattern:
+            where = (
+                f" AND (n.qualified_name CONTAINS '{_esc(pattern)}' "
+                f"OR n.name CONTAINS '{_esc(pattern)}')"
+            )
+        rows = self._fetch_rows(
+            f"MATCH (n:Symbol) WHERE n.kind IS NOT NULL{where} "
+            "RETURN n.qualified_name, n.kind, n.name, n.file_path, "
+            "n.start_line, n.end_line, n.docstring, n.repo"
+        )
+        out: list[CodeSymbol] = []
+        for row in rows:
+            qn = _decode(row.get("n.qualified_name"))
+            kind = _decode(row.get("n.kind"))
+            if not qn or not kind or kind == "MarkdownDoc":
+                continue
+            out.append(
+                CodeSymbol(
+                    qualified_name=qn,
+                    kind=kind,
+                    name=_decode(row.get("n.name")) or qn.rsplit(".", 1)[-1],
+                    file_path=_decode_or_none(row.get("n.file_path")),
+                    start_line=_opt_int(row.get("n.start_line")),
+                    end_line=_opt_int(row.get("n.end_line")),
+                    docstring=_decode_or_none(row.get("n.docstring")),
+                    decorators=[],
+                    is_exported=None,
+                    is_async=False,
+                    is_generator=False,
+                    source_code=None,
+                    repo=_decode(row.get("n.repo")) or "",
+                )
+            )
+        out.sort(key=lambda s: s.qualified_name)
+        return out[: max(1, int(limit))]
+
     def decision_qns(self) -> list[str]:
         """List all decision qualified names — decision docs are indexed as
         MarkdownDoc symbols, sorted for stable ``where`` clause building."""
@@ -1065,6 +1236,45 @@ class OverGraphCodeGraphStore:
                     continue
         except Exception:
             logger.debug("failed to fetch governs edges for %s", fqn, exc_info=True)
+        results.sort(key=lambda e: (e.src, e.dst))
+        return results
+
+    def governs_edges_from(self, fqn: str) -> list[CodeEdge]:
+        """Outgoing GOVERNS edges from fqn (a decision chunk's declared
+        governance targets), provenance intact. Mirror of
+        :meth:`governs_edges_for_symbol` on the other direction."""
+        node_id = self._any_node_id(fqn)
+        if node_id is None:
+            fqn = self._resolve_qn(fqn)
+            node_id = self._any_node_id(fqn)
+        if node_id is None:
+            return []
+
+        results: list[CodeEdge] = []
+        try:
+            neighbors = list(self._db.neighbors(node_id, direction="outgoing"))
+            for neighbor in neighbors:
+                if getattr(neighbor, "label", None) != "Governs":
+                    continue
+                try:
+                    dst_node = self._db.get_node(neighbor.node_id)
+                    dst_key = getattr(dst_node, "key", "")
+                    edge = self._db.get_edge(getattr(neighbor, "edge_id", -1))
+                    eprops = getattr(edge, "props", {}) or {} if edge else {}
+                    results.append(
+                        CodeEdge(
+                            src=fqn,
+                            dst=dst_key,
+                            kind="GOVERNS",
+                            file_path=_decode_or_none(eprops.get("file_path")) or "",
+                            span=_decode_or_none(eprops.get("span")),
+                            resolution_tier=_opt_int(eprops.get("resolution_tier")) or 0,
+                        )
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            logger.debug("failed to fetch outgoing governs edges for %s", fqn, exc_info=True)
         results.sort(key=lambda e: (e.src, e.dst))
         return results
 
@@ -1164,19 +1374,9 @@ class OverGraphCodeGraphStore:
         edge are untouched."""
         count = 0
         try:
-            rows = self._fetch_rows(
-                f"MATCH (a)-[r:Governs]->() WHERE a.file_path = '{_esc(doc_path)}' "
-                "RETURN id(r) AS rid"
+            count = self._delete_edges_matching(
+                f"MATCH (a)-[r:Governs]->() WHERE a.file_path = '{_esc(doc_path)}'"
             )
-            for row in rows:
-                rid = row.get("rid")
-                if rid is None:
-                    continue
-                try:
-                    self._db.delete_edge(int(rid))
-                    count += 1
-                except Exception:
-                    logger.debug("failed to delete govern edge %s", rid, exc_info=True)
             if count:
                 self._db.flush()
         except Exception:
@@ -1192,19 +1392,9 @@ class OverGraphCodeGraphStore:
         for path in file_paths:
             for label in _ENTITY_EDGE_LABELS:
                 try:
-                    rows = self._fetch_rows(
-                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}' "
-                        "RETURN id(r) AS rid"
+                    removed += self._delete_edges_matching(
+                        f"MATCH ()-[r:{label}]->() WHERE r.file_path = '{_esc(path)}'"
                     )
-                    for row in rows:
-                        rid = row.get("rid")
-                        if rid is None:
-                            continue
-                        try:
-                            self._db.delete_edge(int(rid))
-                            removed += 1
-                        except Exception:
-                            logger.debug("failed to delete entity edge %s", rid, exc_info=True)
                 except Exception:
                     logger.debug("failed to scan %s edges for doc %s", label, path, exc_info=True)
         if removed:
@@ -1319,14 +1509,15 @@ class OverGraphCodeGraphStore:
     # -- aggregates / listings -----------------------------------------------
 
     def counts_by_kind(self) -> dict[str, int]:
-        """Count symbols by kind."""
+        """Count symbols by kind (GQL group-by aggregate — immune to row caps)."""
         counts: dict[str, int] = {}
         try:
-            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.kind")
+            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.kind, count(n) AS c")
             for row in rows:
                 k = _decode(row.get("n.kind"))
-                if k:
-                    counts[k] = counts.get(k, 0) + 1
+                c = row.get("c")
+                if k and c is not None:
+                    counts[k] = int(c)
         except Exception:
             logger.debug("failed to fetch counts by kind", exc_info=True)
         return counts
@@ -1342,12 +1533,13 @@ class OverGraphCodeGraphStore:
         files: set[str] = set()
         try:
             if prefix:
-                rows = self._fetch_rows(
-                    f"MATCH (n:Symbol) WHERE n.file_path STARTS WITH '{_esc(prefix)}' "
-                    f"RETURN n.file_path"
+                rows = self._fetch_all_rows(
+                    f"MATCH (n:Symbol) WHERE n.file_path STARTS WITH '{_esc(prefix)}'",
+                    "RETURN n.file_path",
+                    "n.file_path",
                 )
             else:
-                rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.file_path")
+                rows = self._fetch_all_rows("MATCH (n:Symbol)", "RETURN n.file_path", "n.file_path")
 
             for row in rows:
                 fp = _decode_or_none(row.get("n.file_path"))
@@ -1368,8 +1560,10 @@ class OverGraphCodeGraphStore:
         """
         results: list[tuple[str, str]] = []
         try:
-            rows = self._fetch_rows(
-                "MATCH (a)-[r:Calls]->(b) RETURN a.qualified_name AS src, b.qualified_name AS dst"
+            rows = self._fetch_all_rows(
+                "MATCH (a)-[r:Calls]->(b)",
+                "RETURN a.qualified_name AS src, b.qualified_name AS dst",
+                "a.qualified_name, b.qualified_name",
             )
             for row in rows:
                 src = _decode(row.get("src"))
@@ -1435,7 +1629,11 @@ class OverGraphCodeGraphStore:
         """Return the top symbols by pagerank."""
         scored: list[tuple[str, float]] = []
         try:
-            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.qualified_name, n.pagerank")
+            rows = self._fetch_rows(
+                "MATCH (n:Symbol) WHERE n.pagerank IS NOT NULL "
+                "RETURN n.qualified_name, n.pagerank "
+                f"ORDER BY n.pagerank DESC LIMIT {max(1, int(limit))}"
+            )
             for row in rows:
                 key = _decode(row.get("n.qualified_name"))
                 pr = row.get("n.pagerank")
@@ -1443,9 +1641,145 @@ class OverGraphCodeGraphStore:
                     scored.append((key, float(pr)))
         except Exception:
             logger.debug("failed to fetch top centrality", exc_info=True)
+        return scored
 
-        scored.sort(key=lambda x: (-x[1], x[0]))
-        return scored[: max(1, int(limit))]
+    def subgraph(
+        self,
+        seeds: Sequence[str],
+        *,
+        hops: int = 1,
+        limit: int = 20,
+        repo: str | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        """N-hop undirected neighborhood around seed qualified names.
+
+        BFS over both edge directions via the native ``neighbors`` API (the
+        GQL layer here has no variable-length path syntax). Seeds are
+        resolved tolerantly (exact, then unique short-name suffix) and count
+        as hop distance 0. Returns ``(nodes, relationships)`` as wire-ready
+        dicts: nodes carry id/qname/kind/file/repo/centrality/hop_distance;
+        relationships carry source/target qnames, the DuckDB-style edge
+        ``type``, confidence and file. Nodes are capped at
+        ``min(limit * 4, 200)`` before the final ``limit`` truncation so a
+        hub seed cannot blow up the query.
+        """
+        hops = max(1, min(int(hops), 3))
+        limit = max(1, int(limit))
+        node_cap = min(max(limit * 4, 20), 200)
+
+        nodes: dict[int, dict[str, Any]] = {}
+        relationships: list[dict[str, Any]] = []
+        rel_seen: set[tuple[str, str, str]] = set()
+
+        def add_node(nid: int, hop: int) -> bool:
+            if nid in nodes or len(nodes) >= node_cap:
+                return nid in nodes
+            try:
+                node = self._db.get_node(nid)
+            except Exception:
+                return False
+            props = getattr(node, "props", {}) or {}
+            key = _decode(getattr(node, "key", "") or "")
+            if not key:
+                return False
+            pr = props.get("pagerank")
+            nodes[nid] = {
+                "id": nid,
+                "qname": key,
+                "kind": str(props.get("kind") or ""),
+                "file": _decode_or_none(props.get("file_path")) or "",
+                "repo": str(props.get("repo") or ""),
+                "centrality": float(pr) if pr is not None else None,
+                "hop_distance": hop,
+            }
+            return True
+
+        def add_relation(src_qn: str, dst_qn: str, edge_id: int, label: str) -> None:
+            edge_type = _kind_for_edge_label(label)
+            dedup = (src_qn, dst_qn, edge_type)
+            if dedup in rel_seen:
+                return
+            rel_seen.add(dedup)
+            confidence = 1.0
+            file_path = ""
+            try:
+                edge = self._db.get_edge(edge_id)
+                eprops = getattr(edge, "props", {}) or {}
+                c = eprops.get("confidence")
+                if c is not None:
+                    confidence = float(c)
+                file_path = _decode_or_none(eprops.get("file_path")) or ""
+            except Exception:
+                pass
+            relationships.append(
+                {
+                    "source": src_qn,
+                    "target": dst_qn,
+                    "type": edge_type,
+                    "confidence": confidence,
+                    "file": file_path,
+                }
+            )
+
+        frontier: list[int] = []
+        for seed in seeds:
+            if not seed:
+                continue
+            qn = self._resolve_qn(seed)
+            nid = self._get_node_id(qn)
+            if nid is None:
+                nid = self._any_node_id(qn)
+            if nid is None or nid in nodes:
+                continue
+            if add_node(int(nid), 0):
+                frontier.append(int(nid))
+
+        for hop in range(1, hops + 1):
+            if not frontier:
+                break
+            next_frontier: list[int] = []
+            for nid in frontier:
+                src_node = self._db.get_node(nid)
+                src_qn = _decode(getattr(src_node, "key", "") or "")
+                for direction in ("outgoing", "incoming"):
+                    try:
+                        neighbors = list(self._db.neighbors(nid, direction=direction))
+                    except Exception:
+                        logger.debug("neighbors(%s) failed", direction, exc_info=True)
+                        continue
+                    for nb in neighbors:
+                        edge_label = getattr(nb, "label", None)
+                        other_id = getattr(nb, "node_id", None)
+                        edge_id = getattr(nb, "edge_id", None)
+                        if not edge_label or other_id is None or edge_id is None:
+                            continue
+                        other_id = int(other_id)
+                        other_node = self._db.get_node(other_id)
+                        other_qn = _decode(getattr(other_node, "key", "") or "")
+                        if not other_qn:
+                            continue
+                        # Direction-independent: source is always the BFS
+                        # parent, target the neighbor traversed to.
+                        add_relation(src_qn, other_qn, int(edge_id), str(edge_label))
+                        if other_id not in nodes and add_node(other_id, hop):
+                            next_frontier.append(other_id)
+            frontier = next_frontier
+
+        # Repo filter (nodes), then trim relationships to the kept node set.
+        if repo:
+            kept = {nid for nid, n in nodes.items() if n["repo"] == repo}
+            nodes = {nid: n for nid, n in nodes.items() if nid in kept}
+            kept_qns = {n["qname"] for n in nodes.values()}
+            relationships = [
+                r for r in relationships if r["source"] in kept_qns and r["target"] in kept_qns
+            ]
+
+        # Sort: hop distance, then centrality (missing last), then qname.
+        ordered = sorted(
+            nodes.values(),
+            key=lambda n: (n["hop_distance"], -(n["centrality"] or 0.0), n["qname"]),
+        )
+        return ordered[:limit], relationships
 
     # -- incremental-reindex support -----------------------------------------
 
@@ -1453,7 +1787,11 @@ class OverGraphCodeGraphStore:
         """Return content hashes for all symbols."""
         result: dict[str, str] = {}
         try:
-            rows = self._fetch_rows("MATCH (n:Symbol) RETURN n.qualified_name, n.content_hash")
+            rows = self._fetch_all_rows(
+                "MATCH (n:Symbol)",
+                "RETURN n.qualified_name, n.content_hash",
+                "n.qualified_name",
+            )
             for row in rows:
                 key = _decode(row.get("n.qualified_name"))
                 ch = _decode(row.get("n.content_hash"))
@@ -1462,6 +1800,75 @@ class OverGraphCodeGraphStore:
         except Exception:
             logger.debug("failed to fetch content hashes", exc_info=True)
         return result
+
+    def fts_docs(self) -> list[tuple[str, str]]:
+        """``(qname, text)`` for every symbol — the FTS source.
+
+        Embedded symbols contribute their stored embed text (``n.text``,
+        written by the vector upsert). Symbols WITHOUT a live vector —
+        lexical-only ingest with the embed server down — contribute a
+        composed fallback from their graph props (docstring + source), so
+        BM25 works with no embedder at all instead of indexing zero docs.
+        """
+        out: list[tuple[str, str]] = []
+        try:
+            rows = self._fetch_all_rows(
+                "MATCH (n:Symbol)",
+                "RETURN n.qualified_name, n.text, n.indexed_at, n.kind, n.docstring, n.source_code",
+                "n.qualified_name",
+            )
+            for row in rows:
+                qn = _decode(row.get("n.qualified_name"))
+                if not qn:
+                    continue
+                if row.get("n.indexed_at") is not None:
+                    text = _decode(row.get("n.text"))
+                    if text:
+                        out.append((qn, text))
+                        continue
+                kind = _decode(row.get("n.kind")) or ""
+                docstring = _decode(row.get("n.docstring")) or ""
+                source = _decode(row.get("n.source_code")) or ""
+                if not docstring and not source:
+                    continue
+                parts = [f"# {kind}: {qn}" if kind else f"# {qn}", "# ---"]
+                if docstring:
+                    parts.append(docstring)
+                if source:
+                    parts.append(source)
+                # Same order-of-magnitude cap as the embed text (see
+                # ingest.embed_text.MAX_EMBED_TEXT_CHARS) so tantivy docs
+                # stay bounded.
+                out.append((qn, "\n".join(parts)[:4200]))
+        except Exception:
+            logger.warning("failed to fetch FTS docs", exc_info=True)
+        return out
+
+    def restore_vector_membership(self, qns: Sequence[str]) -> int:
+        """Re-mark vector membership for symbols that survived a
+        tombstone/re-upsert cycle unchanged (delta ingest skip path).
+
+        ``delete_for_files`` nulls ``indexed_at`` while the merge-preserving
+        symbol upsert keeps ``text``/``dense_vector``; setting ``indexed_at``
+        back makes the surviving HNSW entry live again without re-embedding.
+        Only nodes that still carry their embed text qualify.
+        """
+        restored = 0
+        now = int(time.time())
+        for qn in qns:
+            try:
+                self._db.execute_gql(
+                    f"MATCH (n:Symbol) WHERE n.qualified_name = '{_esc(qn)}' "
+                    f"AND n.text IS NOT NULL AND n.indexed_at IS NULL "
+                    f"SET n.indexed_at = {now}"
+                )
+                restored += 1
+            except Exception:
+                logger.debug("failed to restore vector membership for %s", qn, exc_info=True)
+        if restored:
+            with contextlib.suppress(Exception):
+                self._db.flush()
+        return restored
 
     # -- repo_meta kv --------------------------------------------------------
 
@@ -1513,7 +1920,7 @@ class OverGraphCodeGraphStore:
         # Check dimensions
         for r in batch:
             if len(r.embedding) != self._vector_dimension:
-                raise EmbeddingDimMismatch(
+                raise EmbeddingDimMismatchError(
                     f"qualified_name={r.qualified_name}: embedding has {len(r.embedding)} "
                     f"dimensions, expected {self._vector_dimension}",
                 )
@@ -1586,7 +1993,7 @@ class OverGraphCodeGraphStore:
         # Check dimensions
         for r in batch:
             if len(r.embedding) != self._vector_dimension:
-                raise EmbeddingDimMismatch(
+                raise EmbeddingDimMismatchError(
                     f"qualified_name={r.qualified_name}: embedding has {len(r.embedding)} "
                     f"dimensions, expected {self._vector_dimension}",
                 )
@@ -1613,7 +2020,7 @@ class OverGraphCodeGraphStore:
     ) -> list[CodeSearchHit]:
         """Top-k cosine similarity search."""
         if len(query_vec) != self._vector_dimension:
-            raise EmbeddingDimMismatch(
+            raise EmbeddingDimMismatchError(
                 f"query vector has {len(query_vec)} dimensions, expected {self._vector_dimension}",
             )
 

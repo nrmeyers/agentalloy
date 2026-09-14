@@ -17,7 +17,7 @@ from pathlib import Path
 from agentalloy.install import server_proc
 from agentalloy.install import state as install_state
 
-_DEFAULT_UVICORN_CMD = "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950"
+_DEFAULT_UVICORN_CMD = "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 48950"
 
 
 def is_in_container() -> bool:
@@ -197,7 +197,7 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
 
     # Build the uvicorn command from state.
     st = install_state.load_state()
-    port = install_state.validate_port(st.get("port", 47950))
+    port = install_state.validate_port(st.get("port", 48950))
     cmd = f"uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port {port}"
 
     log_path = server_proc.server_log_path()

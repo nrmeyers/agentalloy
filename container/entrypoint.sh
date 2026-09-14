@@ -104,9 +104,9 @@ JSON
 fi
 
 # --- llama.cpp model + server config -------------------------------
-# Two llama-server daemons back the runtime: an embed server on 47951
+# Two llama-server daemons back the runtime: an embed server on 48951
 # (--embeddings, query embedding at compose time) and a reranker server
-# on 47952 (completions mode, /v1/completions with logprobs for the
+# on 48952 (completions mode, /v1/completions with logprobs for the
 # intent classifier). Both GGUFs are downloaded on first boot into the
 # data volume so they persist across restarts.
 MODELS_DIR="$APP_DIR/data/models"
@@ -146,23 +146,23 @@ fi
 # after .bootstrap-complete, query embedding + intent reranking need
 # them up. Start them before uvicorn so /readiness reflects a usable
 # service.
-echo ">> Starting embed llama-server on 47951..."
-llama-server --threads 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &
+echo ">> Starting embed llama-server on 48951..."
+llama-server --threads 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 48951 -m "$EMBED_GGUF" &
 EMBED_PID=$!
-echo ">> Starting reranker llama-server on 47952..."
+echo ">> Starting reranker llama-server on 48952..."
 # CPU-optimal slot config (--parallel 1 -c 2048): the container llama build
 # is CPU-only, and fewer slots = MORE throughput on CPU (OpenMP contention
 # dominates multi-slot; measured warm single ~145ms vs ~600ms+ unpinned —
 # same data as install/presets/cpu.yaml + start_rerank_server).
-llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &
+llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 48952 -m "$RERANK_GGUF" &
 RERANK_PID=$!
 
-echo ">> Waiting for llama-server health (47951 + 47952)..."
+echo ">> Waiting for llama-server health (48951 + 48952)..."
 for i in $(seq 1 120); do
     EMBED_OK=false
     RERANK_OK=false
-    curl -sf http://127.0.0.1:47951/health > /dev/null 2>&1 && EMBED_OK=true
-    curl -sf http://127.0.0.1:47952/health > /dev/null 2>&1 && RERANK_OK=true
+    curl -sf http://127.0.0.1:48951/health > /dev/null 2>&1 && EMBED_OK=true
+    curl -sf http://127.0.0.1:48952/health > /dev/null 2>&1 && RERANK_OK=true
     if [ "$EMBED_OK" = "true" ] && [ "$RERANK_OK" = "true" ]; then
         echo ">> llama-server ready (embed + reranker)"
         break
@@ -226,7 +226,7 @@ fi
 # Workers: default 2 for capacity, override via AGENTALLOY_WORKERS.
 WORKERS=${AGENTALLOY_WORKERS:-2}
 echo ">> Starting uvicorn (${WORKERS} worker(s))..."
-uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')" --workers "$WORKERS" &
+uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 48950 --log-level "$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')" --workers "$WORKERS" &
 UVICORN_PID=$!
 
 # Block on uvicorn — its exit is the container's exit.

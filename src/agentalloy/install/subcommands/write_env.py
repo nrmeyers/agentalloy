@@ -6,9 +6,9 @@ Validate + write ``.env`` from a preset template.
 Preset templates live in ``src/agentalloy/install/presets/<name>.yaml``.
 Presets are named by hardware target (cpu / nvidia / radeon /
 apple-silicon). llama-server (llama.cpp) is the sole inference runner:
-the embed server listens on 47951 and the reranker server on 47952.
+the embed server listens on 48951 and the reranker server on 48952.
 
-The ``--port`` flag records the agentalloy service port (default 47950)
+The ``--port`` flag records the agentalloy service port (default 48950)
 for use by ``wire-harness``.
 """
 
@@ -27,7 +27,7 @@ from agentalloy.install import port_guard
 from agentalloy.install import state as install_state
 
 SCHEMA_VERSION = 1
-DEFAULT_PORT = 47950
+DEFAULT_PORT = 48950
 
 # Presets are named by hardware target only. llama-server (llama.cpp) is the
 # sole inference runner; the hardware difference is handled at server start via
@@ -107,7 +107,7 @@ def _validate_port_choice(port: int, values: dict[str, str]) -> None:
     (a) Reserved-port collision — a pure VALUE comparison against the embed and
         reranker ports, enforced unconditionally. Those servers are NOT running
         at write-env time, so an occupancy probe would report them free and let
-        a self-colliding port (e.g. the embed port 47951) slip through. The
+        a self-colliding port (e.g. the embed port 48951) slip through. The
         collision must be caught by comparing values, not by checking what's
         bound.
 

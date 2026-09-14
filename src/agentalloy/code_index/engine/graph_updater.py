@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import time as _time
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable, ItemsView, KeysView
+from collections.abc import Callable, ItemsView, Iterator, KeysView
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -32,7 +34,7 @@ from .types_defs import (
 )
 from .utils.path_utils import should_prune_dir, should_skip_path
 
-type FileHashCache = dict[str, str]
+FileHashCache = dict[str, str]
 
 
 @dataclass(slots=True)
@@ -64,7 +66,7 @@ class StatEntry:
     sha: str
 
 
-type FileStatCache = dict[str, StatEntry]
+FileStatCache = dict[str, StatEntry]
 
 # Sidecar cache files that should never be scanned as input. Used by
 # `_collect_eligible_files` to skip self-referential entries.
@@ -386,6 +388,11 @@ class GraphUpdater:
         self.simple_name_lookup: SimpleNameLookup = defaultdict(set)
         self.function_registry = FunctionRegistryTrie(simple_name_lookup=self.simple_name_lookup)
         self.ast_cache = BoundedASTCache(config=config)
+        # Every file that produced an AST this run, in discovery order. The
+        # LRU cache above may evict entries during Pass 2; Pass 3 and the
+        # rebind pass must still see every file (re-parsed on cache miss),
+        # or repos beyond the cache capacity silently lose CALLS edges.
+        self._parsed_files: dict[Path, cs.SupportedLanguage] = {}
         self.unignore_paths = unignore_paths
         self.exclude_paths = exclude_paths
         self._progress_cb = progress_cb
@@ -456,6 +463,7 @@ class GraphUpdater:
         if file_path in self.ast_cache:
             del self.ast_cache[file_path]
             logger.debug(ls.REMOVED_FROM_CACHE)
+        self._parsed_files.pop(file_path, None)
 
         relative_path = file_path.relative_to(self.repo_path)
         # Ingestion drops the filename for BOTH ``__init__.py`` and ``mod.rs``
@@ -687,7 +695,7 @@ class GraphUpdater:
 
             changed_count += 1
             try:
-                self._process_single_file(filepath)
+                parsed_ok = self._process_single_file(filepath)
             except OSError as exc:
                 # Same doctrine as the hash guard above: a file that turns
                 # unreadable between hash and parse skips, not crashes. Drop
@@ -698,6 +706,12 @@ class GraphUpdater:
                 new_stats.pop(file_key, None)
                 changed_count -= 1
                 continue
+            if not parsed_ok:
+                # Definition parse failed (swallowed inside the processor):
+                # drop the cache entries so the next run retries the file
+                # instead of treating it as successfully ingested.
+                new_hashes.pop(file_key, None)
+                new_stats.pop(file_key, None)
             _files_since_cb += 1
 
             _now = _time.monotonic()
@@ -735,7 +749,11 @@ class GraphUpdater:
         _save_hash_cache(cache_path, new_hashes)
         _save_stat_cache(stat_cache_path, new_stats)
 
-    def _process_single_file(self, filepath: Path) -> None:
+    def _process_single_file(self, filepath: Path) -> bool:
+        """Process one file. Returns False when the definition parse failed
+        (the processor swallows its own exceptions) so the caller can drop
+        the file's cache entries and retry it next run."""
+        parsed_ok = True
         lang_config = get_language_spec(filepath.suffix)
         if (
             lang_config
@@ -751,10 +769,14 @@ class GraphUpdater:
             if result:
                 root_node, language = result
                 self.ast_cache[filepath] = (root_node, language)
+                self._parsed_files[filepath] = language
+            else:
+                parsed_ok = False
         elif self._is_dependency_file(filepath.name, filepath):
             self.factory.definition_processor.process_dependencies(filepath)
 
         self.factory.structure_processor.process_generic_file(filepath, filepath.name)
+        return parsed_ok
 
     def _process_function_calls(self) -> None:
         # BUC-1614: optionally parallelise Pass 3 (call resolution).
@@ -768,11 +790,10 @@ class GraphUpdater:
             process_calls_parallel,
         )
 
-        ast_cache_items = list(self.ast_cache.items())
         workers = get_parse_parallelism()
 
-        if workers <= 1 or len(ast_cache_items) < 2:
-            for file_path, (root_node, language) in ast_cache_items:
+        if workers <= 1 or len(self._parsed_files) < 2:
+            for file_path, (root_node, language) in self._iter_run_asts():
                 self.factory.call_processor.process_calls_in_file(
                     file_path,
                     root_node,
@@ -781,6 +802,7 @@ class GraphUpdater:
                 )
             return
 
+        ast_cache_items = list(self._iter_run_asts())
         logger.info(
             "Pass 3 parallel: {n} files across {w} workers (PARSE_PARALLELISM)",
             n=len(ast_cache_items),
@@ -807,9 +829,35 @@ class GraphUpdater:
         matches the file-discovery order recorded in pass 2.
         """
         rebind_processor = self.factory.rebind_processor
-        for file_path, (root_node, language) in self.ast_cache.items():
+        for file_path, (root_node, language) in self._iter_run_asts():
             if language != cs.SupportedLanguage.PYTHON:
                 continue
             rebind_processor.process_file(file_path, root_node, language)
 
         rebind_processor.emit_rebind_edges()
+
+    def _iter_run_asts(
+        self,
+    ) -> Iterator[tuple[Path, tuple[Node, cs.SupportedLanguage]]]:
+        """Every (path, (root, language)) parsed this run, in discovery order.
+
+        The AST cache is LRU-bounded, so files parsed early in Pass 2 may be
+        evicted before Pass 3 runs; those are re-parsed here (parse only —
+        their definitions were already ingested). Re-parses are yielded
+        without re-inserting into the cache to avoid evicting live entries
+        mid-iteration.
+        """
+        for file_path, language in list(self._parsed_files.items()):
+            cached = self.ast_cache.cache.get(file_path)
+            if cached is not None:
+                yield file_path, cached
+                continue
+            parser = self.parsers.get(language)
+            if parser is None:
+                continue
+            try:
+                root_node = parser.parse(file_path.read_bytes()).root_node
+            except OSError as exc:
+                logger.warning("Pass 3 re-parse skipped for %s: %s", file_path, exc)
+                continue
+            yield file_path, (root_node, language)

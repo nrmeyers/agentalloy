@@ -3,7 +3,7 @@
 
 Runs between ``pull-models`` and ``install-packs`` in the setup pipeline.
 Reads ``recommend-models.json`` to discover the embed model, then launches
-``llama-server --embeddings --port 47951 --ubatch-size 2048 -m <gguf_path>``
+``llama-server --embeddings --port 48951 --ubatch-size 2048 -m <gguf_path>``
 as a background process and polls ``/health`` until it responds (or times
 out).
 
@@ -33,8 +33,8 @@ from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 SCHEMA_VERSION = 1
 STEP_NAME = "start-embed-server"
-# The embed llama-server listens on 47951 (RUNTIME_EMBED_BASE_URL in presets).
-LLAMA_EMBED_PORT = 47951
+# The embed llama-server listens on 48951 (RUNTIME_EMBED_BASE_URL in presets).
+LLAMA_EMBED_PORT = 48951
 EMBED_HOST = "127.0.0.1"
 # llama-server batch size — keeps throughput high for pack ingest without
 # requiring a fat context window.
@@ -50,7 +50,7 @@ def add_parser(
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
-        help="Start the embedding llama-server (port 47951) before pack install.",
+        help="Start the embedding llama-server (port 48951) before pack install.",
     )
     p.add_argument(
         "--models",

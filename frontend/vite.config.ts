@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-const BACKEND = 'http://localhost:47950';
+const BACKEND = 'http://localhost:48950';
 
 export default defineConfig({
   plugins: [react()],

@@ -73,7 +73,7 @@ For a proxy-wired harness, point it at your upstream LLM with `--upstream-url` /
 
 The wizard's first question is **how to deploy**; both choices run the same wizard:
 
-- **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly, **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (see the runtime probe rules under Step 13); if none is usable, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
+- **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly, **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 48950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (see the runtime probe rules under Step 13); if none is usable, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
 - **Native** — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
 
 ---
@@ -115,7 +115,7 @@ For a missing `uv`, **stop and ask the user to install it** — see https://docs
 - **llama-server (macOS):** `brew install llama.cpp`
 - **llama-server (Linux / other):** download a release binary or build from source — see https://github.com/ggml-org/llama.cpp
 
-`llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After setup, verify with `llama-server --version` (and confirm `~/.local/bin` is on your `$PATH`).
+`llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **48951** and an intent reranker server on **48952**. After setup, verify with `llama-server --version` (and confirm `~/.local/bin` is on your `$PATH`).
 
 > **Migration from an existing Ollama install:** AgentAlloy serves embeddings via `llama-server`, not Ollama. AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 768-dim vectors (`nomic-embed-text-v1.5`, mean-pooled, with the `search_query: ` / `search_document: ` prefixes applied), you can point AgentAlloy at it instead of the managed llama-server.
 
@@ -142,7 +142,7 @@ For a missing `uv`, **stop and ask the user to install it** — see https://docs
 > uv run python -m agentalloy.install preflight
 > ```
 
-This runs the host-agnostic checks: Python ≥ 3.12, `uv` present, `agentalloy` resolvable on PATH (i.e. `~/.local/bin` is in `$PATH`), XDG dirs writable, network reachable, default port `47950` free.
+This runs the host-agnostic checks: Python ≥ 3.12, `uv` present, `agentalloy` resolvable on PATH (i.e. `~/.local/bin` is in `$PATH`), XDG dirs writable, network reachable, default port `48950` free.
 
 > CONFIRM
 >
@@ -291,13 +291,13 @@ This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/shar
 > ```
 
 This brings the embedding backend online before pack ingestion. It spawns
-`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951` in the background and waits
+`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 48951` in the background and waits
 up to 120 seconds for the server to accept connections. (`nomic-embed-text-v1.5` requires `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048`; it serves on stock llama.cpp via the `nomic-bert` architecture.) The log is written to
 `~/.local/share/agentalloy/logs/embed-server.log`.
 
 > **nomic prefix footgun:** the runtime must prefix every embed input — queries with a literal `search_query: ` and documents with `search_document: ` — or retrieval quality silently degrades. The managed pipeline applies these automatically; if you point `RUNTIME_EMBED_BASE_URL` at your own endpoint, you must apply them yourself.
 
-The embed server listens on **47951** — that's the port the runtime's
+The embed server listens on **48951** — that's the port the runtime's
 `RUNTIME_EMBED_BASE_URL` points at, written into `.env` by `write-env`. The step is
 idempotent: if the embed port is already listening it exits 0 immediately.
 
@@ -369,7 +369,7 @@ If the bulk re-embed fails partway (e.g., the embedding server crashes mid-run),
 
 (Substitute the preset name from step 4's `preset` field — one of `cpu`, `nvidia`, `radeon`, `apple-silicon` — e.g., `apple-silicon`.) The `.env` is written to `${XDG_CONFIG_HOME:-~/.config}/agentalloy/.env` with mode `0600` (owner read/write only).
 
-If the user wants a non-default port (because 47950 is taken on their machine), pass `--port <n>`. Otherwise let it default to 47950.
+If the user wants a non-default port (because 48950 is taken on their machine), pass `--port <n>`. Otherwise let it default to 48950.
 
 The `.env` preset covers the core knobs (upstream, embeddings, reranker, signal intent, LM-assist). Additional optional modules:
 
@@ -541,13 +541,13 @@ Start the service in foreground (recommended):
 
 This sources `${XDG_CONFIG_HOME:-~/.config}/agentalloy/.env` into the process environment, then execs `uvicorn agentalloy.app:app` on the configured port. **Leave it running** in the terminal; open a new shell for the demo curl.
 
-Alternatively, the user can manually run `uv run uvicorn agentalloy.app:app --host 127.0.0.1 --port 47950` from a terminal of their choice — `agentalloy serve` is just the convenience wrapper.
+Alternatively, the user can manually run `uv run uvicorn agentalloy.app:app --host 127.0.0.1 --port 48950` from a terminal of their choice — `agentalloy serve` is just the convenience wrapper.
 
 Wait 3 seconds for the service to start, then in another shell:
 
 > RUN
 > ```bash
-> curl -s -X POST http://localhost:47950/compose \
+> curl -s -X POST http://localhost:48950/compose \
 >   -H 'Content-Type: application/json' \
 >   -d '{"task": "write a failing pytest", "phase": "build"}'
 > ```
@@ -556,14 +556,14 @@ Show the user the response. The `output` field contains concatenated raw skill f
 
 > "The skill API is live. Returned guidance from these skills: [list]. The full text is what your harness will see when it queries this endpoint.
 >
-> **Try it now:** open your harness (Claude Code / Cursor / etc.) and ask: 'What skills do you have access to right now? Run `curl http://localhost:47950/health` to confirm.' If everything is wired correctly, your harness should respond with a list of skill capabilities pulled from the API."
+> **Try it now:** open your harness (Claude Code / Cursor / etc.) and ask: 'What skills do you have access to right now? Run `curl http://localhost:48950/health` to confirm.' If everything is wired correctly, your harness should respond with a list of skill capabilities pulled from the API."
 
 ---
 
 ## You're done
 
 State summary:
-- Service running at `http://localhost:<port>` (default 47950)
+- Service running at `http://localhost:<port>` (default 48950)
 - Service mode recorded: `native` (systemd/launchd), `container` (podman/docker), or `manual` (`agentalloy serve`)
 - Skill corpus seeded into `${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`
 - Models pulled and on disk
@@ -617,7 +617,7 @@ agentalloy validate-pack ./my-pack                        # check schema + lint,
 agentalloy install-pack ./my-pack                         # ship it
 ```
 
-Prefer clicking? The web UI's **New Skill** wizard (`http://localhost:47950/#/wizard`)
+Prefer clicking? The web UI's **New Skill** wizard (`http://localhost:48950/#/wizard`)
 drives the same scaffold → draft → validate → install rails, with an R1–R9
 self-check panel beside the editor. Or skip the tooling entirely: in a wired
 repo, ask your agent to "add a skill for X" — intake routes it down the
@@ -665,19 +665,19 @@ The setup wizard's container path:
 │  ├── Seed prebuilt corpus (published images)     │
 │  ├── Download GGUFs into /app/data/models        │
 │  │     (embed + reranker, if missing)            │
-│  ├── Start embed llama-server (--embeddings :47951)│
-│  ├── Start reranker llama-server (:47952)         │
+│  ├── Start embed llama-server (--embeddings :48951)│
+│  ├── Start reranker llama-server (:48952)         │
 │  ├── Run migrations                              │
 │  ├── install-packs (skipped when seeded)         │
 │  ├── Touch .bootstrap-complete                   │
-│  ├── exec uvicorn (main service, :47950)         │
+│  ├── exec uvicorn (main service, :48950)         │
 │                                                  │
 │  ENV: AGENTALLOY_PACKS, CORPUS_STORE_PATH           │
 │      LOG_LEVEL, LM_ASSIST, embed/rerank URLs        │
 └───────────┬──────────────────────────────────────┘
-            │ -p 47950:47950
+            │ -p 48950:48950
             ▼
-   localhost:47950  (external)
+   localhost:48950  (external)
 ```
 
 ### Hardware requirements (container)
@@ -701,7 +701,7 @@ For container deployments (`--deployment container`), use these commands to mana
 | `podman exec -it agentalloy sh` | Open an interactive shell inside the container |
 | `podman restart agentalloy` / `podman stop agentalloy` | Restart / gracefully stop the container |
 | `podman rm -f agentalloy` | Force-remove the container |
-| `curl http://localhost:47950/health` | Check the service health endpoint |
+| `curl http://localhost:48950/health` | Check the service health endpoint |
 | `podman exec agentalloy uv run agentalloy reembed` | Re-embed corpus inside the container |
 | `podman exec agentalloy uv run agentalloy install-packs --packs all` | Install skill packs inside the container (add `--no-restart` to skip the service bounce) |
 
@@ -716,26 +716,26 @@ For container deployments (`--deployment container`), use these commands to mana
 | (named volume)    |--------->| (OverGraph + BM25 +       |
 |                   |          |  GGUFs under /models)     |
 |                   |          |                           |
-| localhost:47950   | <----->  | :47950                    |
+| localhost:48950   | <----->  | :48950                    |
 | (health API)      |  -p      | (FastAPI service)         |
 |                   |          |                           |
 +-------------------+          +---------------------------+
 ```
 
-A single volume persists across restarts: `agentalloy-data:/app/data` (OverGraph + Tantivy BM25, plus the downloaded GGUFs under `/app/data/models`, a named volume). The two `llama-server` instances (embed on 47951, reranker on 47952) run inside the container and are not exposed — only 47950 is published.
+A single volume persists across restarts: `agentalloy-data:/app/data` (OverGraph + Tantivy BM25, plus the downloaded GGUFs under `/app/data/models`, a named volume). The two `llama-server` instances (embed on 48951, reranker on 48952) run inside the container and are not exposed — only 48950 is published.
 
 ### Health check
 
 The service exposes a health endpoint at:
 
 ```bash
-curl http://localhost:47950/health
+curl http://localhost:48950/health
 ```
 
 Expected response:
 
 ```json
-{"status": "healthy", "port": 47950, "corpus_ready": true}
+{"status": "healthy", "port": 48950, "corpus_ready": true}
 ```
 
 The container uses a baked entrypoint script (`/app/entrypoint.sh`) that handles bootstrap: GGUF model download (embed + reranker), starting the two llama-servers, migrations, and pack installation. On subsequent starts, the entrypoint skips the bootstrap-only steps if `.bootstrap-complete` exists (the llama-servers still start every boot — they're long-lived runtime daemons).
@@ -748,7 +748,7 @@ The container uses a baked entrypoint script (`/app/entrypoint.sh`) that handles
 
 - **Harness carriers** in *every* repo recorded in install-state.json (CLAUDE.md, GEMINI.md, .clinerules, .cursorrules, .cursor/rules/agentalloy.mdc, opencode.json, .aider.conf.yml, .codex/, .copilot/.agentalloy-env, .hermes/, etc. — plus legacy carriers like .opencode/system-prompt.md from pre-rewrite installs). The cross-repo walk happens before the CLI is removed; pass `--no-all-repos` to limit to cwd. Tampered blocks (sha256 mismatch — the user edited inside the sentinels) are skipped without `--force`.
 - **MCP entries** for `agentalloy` from `~/.claude/mcp_servers.json`, the cwd repo's `.cursor/mcp.json`, and `.continuerc.json`. The files are deleted if `agentalloy` was their only entry.
-- **Native service units** on Linux: the main `~/.config/systemd/user/agentalloy.service` (sanitized `agentalloy.env`) plus the two llama-server units `agentalloy-embed.service` (47951) and `agentalloy-rerank.service` (47952). On macOS the launchd plists at `~/Library/LaunchAgents/ai.agentalloy.plist`, `ai.agentalloy.embed.plist`, and `ai.agentalloy.rerank.plist`.
+- **Native service units** on Linux: the main `~/.config/systemd/user/agentalloy.service` (sanitized `agentalloy.env`) plus the two llama-server units `agentalloy-embed.service` (48951) and `agentalloy-rerank.service` (48952). On macOS the launchd plists at `~/Library/LaunchAgents/ai.agentalloy.plist`, `ai.agentalloy.embed.plist`, and `ai.agentalloy.rerank.plist`.
 - **Manual-mode agentalloy server** if it's still listening on the configured port (SIGTERM, escalating to SIGKILL after 10s).
 - **User-scope state**: `${XDG_CONFIG_HOME}/agentalloy/.env`, `install-state.json`, the state directory.
 - **Derivable artifacts**: `${XDG_DATA_HOME}/agentalloy/outputs/` (per-step JSON dumps including preflight) and `server.log`.
@@ -782,7 +782,7 @@ To keep the corpus and downloaded GGUFs, use the default uninstall (or `--preset
 
 `agentalloy uninstall` is *state-driven*: it removes what `install-state.json` records. Across repeated install/uninstall churn the state can drift or be lost, leaving artifacts behind. `agentalloy cleanup` is the recovery verb for that, and `--deep` is the full, **state-independent** sanitizer.
 
-**`agentalloy cleanup`** (default) reaps orphaned *runtime* artifacts in one foreign-safe pass: our own stale processes squatting a runtime port (47950/47951/47952) with no live supervisor, stale systemd user units / launchd LaunchAgents, and a dangling `~/.local/bin/llama-server` shim. `--dry-run` prints the plan; `--yes` skips the confirm. A *foreign* process holding one of our ports is reported but never killed, and your own `llama-server` on PATH is never removed.
+**`agentalloy cleanup`** (default) reaps orphaned *runtime* artifacts in one foreign-safe pass: our own stale processes squatting a runtime port (48950/48951/48952) with no live supervisor, stale systemd user units / launchd LaunchAgents, and a dangling `~/.local/bin/llama-server` shim. `--dry-run` prints the plan; `--yes` skips the confirm. A *foreign* process holding one of our ports is reported but never killed, and your own `llama-server` on PATH is never removed.
 
 **`agentalloy cleanup --deep`** (alias `--all`) escalates to a full host sanitize that discovers artifacts by their **known absolute locations** rather than from install-state — so it catches the leftovers a state-driven teardown misses. It removes, state-independently:
 
@@ -809,8 +809,8 @@ Common stuck-states:
 - The CLI exits 3 (schema mismatch). The user has a state file from a different version. Tell them to back it up and re-run install with a fresh state.
 - The CLI exits 4 (already-completed). That step ran successfully before. Read the user-scope state file to see what's done; skip ahead. (`agentalloy status` shows this concisely.)
 - A required external tool (`llama-server`) is missing. The setup wizard's runner preflight now **offers to download a prebuilt automatically** (matched to the detected hardware) — accept it and setup continues. Only on a standalone `agentalloy preflight` run, or an unsupported platform, point the user at https://github.com/ggml-org/llama.cpp (or `brew install llama.cpp` on macOS); do NOT auto-execute third-party install scripts.
-- A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy add <harness>` so the harness config gets the new URL.
+- A port collision on 48950. Re-run `write-env` with `--port <n>` and re-run `agentalloy add <harness>` so the harness config gets the new URL.
 - **`llama-server` not on PATH (or a stale launcher):** Step 5/7 can't find the inference binary, or a launcher in `~/.local/bin` points at a runtime that was wiped (e.g. by a data reset). **Fix:** re-run `agentalloy setup` (or `agentalloy pull-models`) — it auto-provisions a prebuilt for your hardware and re-provisions a broken launcher rather than trusting it. Ensure `~/.local/bin` is on `$PATH` and confirm `llama-server --version`. Only an unsupported platform needs a manual install (`brew install llama.cpp` on macOS, or download/build from https://github.com/ggml-org/llama.cpp).
 - **GGUF download failed or incomplete:** the embed server won't start because `nomic-embed-text-v1.5.Q8_0.gguf` is missing from `${XDG_DATA_HOME}/agentalloy/models/`. **Fix:** re-run `agentalloy pull-models` (downloads resume on retry). For the container, `podman restart agentalloy` so the entrypoint re-fetches any missing GGUF.
-- **Embed/reranker server didn't bind (47951/47952):** the runtime can't reach a llama-server. **Fix:** check `curl -sf http://127.0.0.1:47951/health` and `:47952/health`; inspect `~/.local/share/agentalloy/logs/embed-server.log` (native) or `podman logs -f agentalloy` (container). 47951 down breaks composition; 47952 down only falls the intent gates open to cosine.
+- **Embed/reranker server didn't bind (48951/48952):** the runtime can't reach a llama-server. **Fix:** check `curl -sf http://127.0.0.1:48951/health` and `:48952/health`; inspect `~/.local/share/agentalloy/logs/embed-server.log` (native) or `podman logs -f agentalloy` (container). 48951 down breaks composition; 48952 down only falls the intent gates open to cosine.
 - **Corpus DB lock held (`Could not set lock on file … Lock is held by PID …`):** the running service has the corpus open, so a manual `install-packs`/`reembed` can't write. `install-packs` reclaims the lock itself (stops + restarts the service); if you hit this on an older build or a manual launch, stop the service first — `systemctl --user stop agentalloy` (systemd) or `agentalloy server-stop` (manual). A plain kill won't stick for a systemd unit; systemd respawns it. Note `install-packs` already re-embeds as part of its run — no separate `reembed` needed.

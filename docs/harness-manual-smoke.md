@@ -6,7 +6,7 @@ they need a human once per release (or after a harness updates itself).
 Each check is ~3 minutes. Record results in the release notes.
 
 Setup for all checks: a wired repo (`agentalloy add --harness <name>`) with
-the service running (`curl -s localhost:47950/health`).
+the service running (`curl -s localhost:48950/health`).
 
 ## cursor (sidecar — rules file)
 

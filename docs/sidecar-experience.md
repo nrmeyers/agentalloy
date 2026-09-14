@@ -149,7 +149,7 @@ This writes an MCP server configuration instead of a markdown-injection block. T
 The MCP server runs via stdio JSON-RPC (MCP 2024-11-05 spec). It is dependency-free — no MCP SDK required. Run it with:
 
 ```bash
-python -m agentalloy.install.mcp_server --port 47950
+python -m agentalloy.install.mcp_server --port 48950
 ```
 
 See [harness-catalog.md § "MCP fallback"](install/harness-catalog.md) for per-harness MCP configuration details.

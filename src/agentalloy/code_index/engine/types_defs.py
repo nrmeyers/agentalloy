@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, ItemsView, KeysView, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, Protocol, TypedDict
+from typing import TYPE_CHECKING, NamedTuple, Protocol, TypedDict, TypeAlias
 
 from .constants import NodeLabel, RelationshipType, SupportedLanguage
 
@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
     from .models import LanguageSpec
 
-type LanguageLoader = Callable[[], Language] | None
+LanguageLoader: TypeAlias = "Callable[[], Language] | None"
 
 PropertyValue = str | int | float | bool | list[str] | None
 PropertyDict = dict[str, PropertyValue]
 
-type ResultScalar = str | int | float | bool | None
-type ResultValue = ResultScalar | list[ResultScalar] | dict[str, ResultScalar]
-type ResultRow = dict[str, ResultValue]
+ResultScalar = str | int | float | bool | None
+ResultValue = ResultScalar | list[ResultScalar] | dict[str, ResultScalar]
+ResultRow = dict[str, ResultValue]
 
 
 class FunctionMatch(TypedDict):
@@ -50,14 +50,14 @@ class BatchWrapper(TypedDict):
     batch: Sequence[BatchParams]
 
 
-type SimpleName = str
-type QualifiedName = str
-type SimpleNameLookup = defaultdict[SimpleName, set[QualifiedName]]
+SimpleName = str
+QualifiedName = str
+SimpleNameLookup = defaultdict[SimpleName, set[QualifiedName]]
 
 NodeIdentifier = tuple[NodeLabel | str, str, str | None]
 
 
-type ASTNode = Node
+ASTNode: TypeAlias = "Node"
 
 
 class NodeType(StrEnum):
@@ -72,8 +72,8 @@ class NodeType(StrEnum):
     UNION = "Union"
 
 
-type TrieNode = dict[str, TrieNode | QualifiedName | NodeType]
-type FunctionRegistry = dict[QualifiedName, NodeType]
+TrieNode: TypeAlias = "dict[str, 'TrieNode' | QualifiedName | NodeType]"
+FunctionRegistry = dict[QualifiedName, NodeType]
 
 
 class FunctionRegistryTrieProtocol(Protocol):

@@ -1,0 +1,38 @@
+services:
+  agentalloy:
+    build: .
+    ports:
+      - "48950:48950"  # REST API + dashboard
+      - "48953:48953"  # Steering proxy
+    volumes:
+      - ./index:/app/index
+      - ./state.duck:/app/state.duck
+      - ./usage.duck:/app/usage.duck
+      - workspace:/workspace
+    environment:
+      - AGENTALLOY_SERVICE_PORT=48950
+      - AGENTALLOY_PROXY_PORT=48953
+      - AGENTALLOY_MODEL_PORT=${AGENTALLOY_MODEL_PORT:-50001}
+      - AGENTALLOY_UPSTREAM_URL=${AGENTALLOY_UPSTREAM_URL:-http://host.docker.internal:50001}
+      - AGENTALLOY_UPSTREAM_KEY=${AGENTALLOY_UPSTREAM_KEY:?set AGENTALLOY_UPSTREAM_KEY (no default — never commit a key)}
+      - AGENTALLOY_REPO_ROOT=/workspace
+      - AGENTALLOY_EXTRA_REPOS=${AGENTALLOY_EXTRA_REPOS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Optional: model server (uncomment if running locally)
+  # model-server:
+  #   image: ghcr.io/ggerganov/llama.cpp:server
+  #   ports:
+  #     - "50001:8080"
+  #   volumes:
+  #     - models:/models
+  #   command: >
+  #     -m /models/lfm2.5-2.6b.gguf
+  #     --port 8080
+  #     -ngl 99
+
+volumes:
+  workspace:
+  # models:

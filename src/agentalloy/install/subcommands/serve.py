@@ -29,7 +29,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="Override the service port (default: read from user state, fallback 47950).",
+        help="Override the service port (default: read from user state, fallback 48950).",
     )
     p.add_argument(
         "--host",
@@ -61,12 +61,12 @@ def _run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    # 2. Resolve port: CLI flag > state > default 47950.
+    # 2. Resolve port: CLI flag > state > default 48950.
     if args.port is not None:
         port = install_state.validate_port(args.port)
     else:
         st = install_state.load_state()
-        port = install_state.validate_port(st.get("port", 47950))
+        port = install_state.validate_port(st.get("port", 48950))
 
     # 3. Exec uvicorn so signals (SIGINT) propagate cleanly.
     cmd = [

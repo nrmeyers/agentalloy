@@ -3,8 +3,8 @@
 ## llama.cpp / Model Issues
 
 AgentAlloy serves inference with two `llama-server` (llama.cpp) instances: an embed
-server on **47951** (`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951`)
-and an intent reranker server on **47952** (`llama-server --port 47952`, completions mode).
+server on **48951** (`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 48951`)
+and an intent reranker server on **48952** (`llama-server --port 48952`, completions mode).
 The models are GGUFs: `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf`.
 The embed model is `nomic-embed-text-v1.5` (768-dim), which serves on stock llama.cpp via
 the `nomic-bert` architecture; queries must be prefixed with `search_query: ` and documents
@@ -40,17 +40,17 @@ download it under `~/.local/share/agentalloy/`; the container downloads it into
 container, restart it (`podman restart agentalloy`) so the entrypoint re-fetches any
 missing GGUF.
 
-### Embed/reranker server didn't bind (47951 / 47952)
+### Embed/reranker server didn't bind (48951 / 48952)
 
 The runtime can't reach a `llama-server` instance. Check that the embed server is
-listening on **47951** and the reranker on **47952**:
+listening on **48951** and the reranker on **48952**:
 
 ```bash
-curl -sf http://127.0.0.1:47951/health
-curl -sf http://127.0.0.1:47952/health
+curl -sf http://127.0.0.1:48951/health
+curl -sf http://127.0.0.1:48952/health
 ```
 
-If 47951 is down, embedding (and therefore composition) fails. If 47952 is down, the
+If 48951 is down, embedding (and therefore composition) fails. If 48952 is down, the
 phase-gate intent classifier simply falls open to cosine — composition still works.
 Check the server log at `~/.local/share/agentalloy/logs/embed-server.log`, or for the
 container, `podman logs -f agentalloy`.
@@ -64,7 +64,7 @@ container, `podman logs -f agentalloy`.
 
 ## Service / API Issues
 
-### Port 47950 is already in use
+### Port 48950 is already in use
 
 Another instance of AgentAlloy is running, or another service is using the default port.
 
@@ -80,7 +80,7 @@ Repeated install/uninstall cycles — or a lost `install-state.json` — can str
 container/volume corpse from an interrupted container install, a `.claude/settings.local.json` proxy
 carrier in a repo the state never recorded, or a downloaded model.
 
-**Fix (recover):** `agentalloy cleanup` reaps orphaned processes (47950/47951/47952), stale service
+**Fix (recover):** `agentalloy cleanup` reaps orphaned processes (48950/48951/48952), stale service
 units, and a dangling `~/.local/bin/llama-server` shim — foreign-safe (a process you didn't start is
 never killed).
 
@@ -106,9 +106,9 @@ You need Python 3.12 or later.
 
 ### Embedding server won't start
 
-The embed `llama-server` (on 47951) failed to start. Check the
+The embed `llama-server` (on 48951) failed to start. Check the
 log at `~/.local/share/agentalloy/logs/embed-server.log`. Common causes: the
-`llama-server` binary is not on PATH, the GGUF was not downloaded, or port 47951 is
+`llama-server` binary is not on PATH, the GGUF was not downloaded, or port 48951 is
 already in use.
 
 ### DuckDB lock conflict
@@ -172,7 +172,7 @@ The service is running but `CODE_INDEX_ENABLED` is not set.
 
 ### Index job fails in the `embed` phase (`LMUnavailable`)
 
-The embed llama-server on 47951 is down or unreachable. Parsing and the graph
+The embed llama-server on 48951 is down or unreachable. Parsing and the graph
 write don't need it; embedding does. (Oversized inputs are handled client-side —
 a size rejection degrades to a shorter embed, so `LMUnavailable` here almost
 always means the server itself.)

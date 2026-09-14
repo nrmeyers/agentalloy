@@ -3,8 +3,9 @@
 import subprocess
 import sys
 
-from agentalloy.config import get_settings
 from agentalloy.storage.open import open_skills
+
+from agentalloy.config import get_settings
 
 
 def main():

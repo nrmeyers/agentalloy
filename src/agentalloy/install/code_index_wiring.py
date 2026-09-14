@@ -183,7 +183,7 @@ def service_base_url(port: int) -> str:
 
     This is what keeps the test suite off a developer's live service. XDG
     redirection isolates every other write, but these calls leave the process:
-    a wiring test would reach the real :47950, whose own environment resolves
+    a wiring test would reach the real :48950, whose own environment resolves
     the real data dir, and the service would index the test's ``tmp_path`` into
     ``~/.local/share/agentalloy/code_index``. That is how 32 pytest temp dirs
     ended up in the registry (2026-07-28 cleanup); ``tests/conftest.py`` pins

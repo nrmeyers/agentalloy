@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Vendored from codebase_rag/models.py — CLI/MCP-only models (SessionState,
 # AppContext, ToolMetadata) and the rich.Console dependency were removed.
 

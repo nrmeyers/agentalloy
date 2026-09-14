@@ -508,7 +508,9 @@ class FunctionIngestMixin:
                 if name_node := current.child_by_field_name(cs.FIELD_NAME):
                     parent_text = name_node.text
                     if parent_text is None:
-                        continue
+                        # Bail to module parent — `continue` here would
+                        # re-test the same node forever (no advance).
+                        break
                     if parent_func_name := safe_decode_text(name_node):
                         if parent_func_qn := self._build_nested_qualified_name(
                             current,

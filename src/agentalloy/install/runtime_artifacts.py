@@ -3,8 +3,8 @@
 
 A running native install leaves three classes of artifact on the host:
 
-1. **Processes** — the FastAPI service (``uvicorn``, :47950) and the two
-   llama-server runners (embed :47951, reranker :47952).
+1. **Processes** — the FastAPI service (``uvicorn``, :48950) and the two
+   llama-server runners (embed :48951, reranker :48952).
 2. **Service units** — systemd user units (Linux) or launchd LaunchAgents
    (macOS) that supervise those processes.
 3. **The llama-server shim** — a generated launcher on PATH
@@ -40,9 +40,9 @@ logger = logging.getLogger(__name__)
 
 # --- Ports + foreign-safe cmdline signatures -------------------------------
 
-SERVICE_PORT = 47950
-EMBED_PORT = 47951
-RERANK_PORT = 47952
+SERVICE_PORT = 48950
+EMBED_PORT = 48951
+RERANK_PORT = 48952
 
 # (port, cmdline-match-substrings): a listener on the port is reaped only when
 # its /proc/<pid>/cmdline contains *every* substring. This is the foreign-safe
@@ -197,7 +197,7 @@ def _unit_active(port: int) -> bool:
 def _agentalloy_container_running() -> bool:
     """True if a container named ``agentalloy`` is running under podman or docker.
 
-    In container mode the host listener on :47950 is the runtime's port-forwarder
+    In container mode the host listener on :48950 is the runtime's port-forwarder
     (e.g. podman ``rootlessport``), whose cmdline does not match our native
     uvicorn signature. Recognizing our own container keeps detect/reap from
     flagging it as a foreign conflict. Any failure (no runtime, error, timeout)
@@ -293,7 +293,7 @@ def detect_orphans() -> list[Orphan]:
         if pid is None:
             continue
         if port == SERVICE_PORT and container_active:
-            # Our own container's port-forwarder holds :47950, not an orphan.
+            # Our own container's port-forwarder holds :48950, not an orphan.
             continue
         cmdline = _cmdline(pid)
         if cmdline and all(s in cmdline for s in match):
@@ -357,7 +357,7 @@ def _reap_processes(*, dry_run: bool) -> list[Action]:
         if pid is None:
             continue
         if port == SERVICE_PORT and container_active:
-            # Our own container's port-forwarder holds :47950 — never reap or warn.
+            # Our own container's port-forwarder holds :48950 — never reap or warn.
             continue
         cmdline = _cmdline(pid)
         if not cmdline or not all(s in cmdline for s in match):

@@ -100,7 +100,7 @@ mistakes that previously leaked into PRs. The hooks are configured in
 every `git commit` will automatically run `ruff --fix` and `ruff format` on
 staged files.
 
-The `-m integration` suite (needs a live embed server on 47951) never runs on
+The `-m integration` suite (needs a live embed server on 48951) never runs on
 PRs — it runs nightly (`corpus-nightly.yml`, `integration-tests` job); failures
 open an issue labeled `nightly-integration`. Run it locally before risky
 retrieval/embedding changes: `uv run pytest -m integration`.

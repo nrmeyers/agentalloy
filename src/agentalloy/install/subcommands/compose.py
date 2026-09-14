@@ -35,8 +35,8 @@ def add_parser(
     p.add_argument(
         "--port",
         type=int,
-        default=47950,
-        help="AgentAlloy service port (default: 47950).",
+        default=48950,
+        help="AgentAlloy service port (default: 48950).",
     )
     p.set_defaults(func=_run)
 

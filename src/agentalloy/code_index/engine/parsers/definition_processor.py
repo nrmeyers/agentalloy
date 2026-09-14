@@ -170,20 +170,73 @@ class DefinitionProcessor(
 
     def _get_docstring(self, node: ASTNode) -> str | None:
         body_node = node.child_by_field_name(cs.FIELD_BODY)
-        if not body_node or not body_node.children:
+        if body_node is not None and body_node.children:
+            first_statement = body_node.children[0]
+            if (
+                first_statement.type == cs.TS_PY_EXPRESSION_STATEMENT
+                and first_statement.children
+                and first_statement.children[0].type == cs.TS_PY_STRING
+            ):
+                text = first_statement.children[0].text
+                if text is not None:
+                    result: str = safe_decode_with_fallback(first_statement.children[0]).strip(
+                        cs.DOCSTRING_STRIP_CHARS,
+                    )
+                    return result
+        return self._get_jsdoc(node)
+
+    #: Node types the JSDoc lookup climbs through to reach the enclosing
+    #: statement: the comment precedes `const foo = () => {}` (arrow inside a
+    #: variable_declarator/lexical_declaration), `export const ...`, object
+    #: literal pairs, and prototype assignments — never the inner function
+    #: node itself.
+    _JSDOC_WRAPPER_TYPES = frozenset(
+        {
+            "variable_declarator",
+            "lexical_declaration",
+            "variable_declaration",
+            "pair",
+            "assignment_expression",
+            "expression_statement",
+            "public_field_definition",
+            cs.TS_EXPORT_STATEMENT,
+        }
+    )
+
+    def _get_jsdoc(self, node: ASTNode) -> str | None:
+        """The JSDoc block comment immediately preceding a JS/TS declaration.
+
+        The only docstring source for JS/TS (their mixin implementations are
+        stubs): the ``/**`` prefix makes JSDoc unambiguous across languages —
+        Python comments are ``#``, so this never fires on Python nodes. The
+        comment precedes the outermost enclosing statement (export wrapper,
+        const/let declaration, object pair, prototype assignment), so climb
+        there first; a comment separated by blank lines is not this
+        declaration's doc.
+        """
+        target = node
+        while target.parent is not None and target.parent.type in self._JSDOC_WRAPPER_TYPES:
+            target = target.parent
+        prev = target.prev_named_sibling
+        if prev is None or prev.type != "comment":
             return None
-        first_statement = body_node.children[0]
-        if (
-            first_statement.type == cs.TS_PY_EXPRESSION_STATEMENT
-            and first_statement.children[0].type == cs.TS_PY_STRING
-        ):
-            text = first_statement.children[0].text
-            if text is not None:
-                result: str = safe_decode_with_fallback(first_statement.children[0]).strip(
-                    cs.DOCSTRING_STRIP_CHARS,
-                )
-                return result
-        return None
+        if target.start_point[0] - prev.end_point[0] > 1:
+            return None
+        text = safe_decode_with_fallback(prev)
+        return self._clean_jsdoc(text) if text else None
+
+    @staticmethod
+    def _clean_jsdoc(text: str) -> str | None:
+        """Strip ``/**`` / ``*`` / ``*/`` markers from a JSDoc comment node."""
+        body = text.strip()
+        if not body.startswith("/**"):
+            return None
+        body = body[3:]
+        if body.endswith("*/"):
+            body = body[:-2]
+        lines = [line.strip().lstrip("*").strip() for line in body.splitlines()]
+        cleaned = "\n".join(lines).strip()
+        return cleaned or None
 
     def _extract_decorators(self, node: ASTNode) -> list[str]:
         return self._handler.extract_decorators(node)

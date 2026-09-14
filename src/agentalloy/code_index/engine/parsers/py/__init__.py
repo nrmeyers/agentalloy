@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .ast_analyzer import PythonAstAnalyzerMixin
 from .expression_analyzer import PythonExpressionAnalyzerMixin
 from .type_inference import PythonTypeInferenceEngine

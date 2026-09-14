@@ -26,12 +26,13 @@ from typing import Any
 # Add src to path so we can import the classifier module
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agentalloy.config import get_settings
 from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.signals.classifier import (
     _INTENT_REFERENCES,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.signals.predicates import PredicateContext
+
+from agentalloy.config import get_settings
 
 
 def load_fixture(path: Path) -> list[dict[str, Any]]:

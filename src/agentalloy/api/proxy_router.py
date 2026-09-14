@@ -477,12 +477,29 @@ def _extract_tokens_out(body: dict[str, Any]) -> int | None:
     return None
 
 
+def _extract_tokens_in(body: dict[str, Any]) -> int | None:
+    """Pull ``usage.prompt_tokens`` from a non-streaming chat-completions body.
+
+    The model's own count of what it actually saw — the number triage needs
+    for "was the prompt near the context limit" (the proxy rewrites usage to
+    include injected steering, so this is the full delivered prompt).
+    """
+    usage = body.get("usage")
+    if isinstance(usage, dict):
+        val = cast(dict[str, Any], usage).get("prompt_tokens")
+        if isinstance(val, int):
+            return val
+    return None
+
+
 class _SseUsageScanner:
-    """Scan SSE text chunks for a terminal ``usage.completion_tokens`` field.
+    """Scan SSE text chunks for a terminal ``usage`` block.
 
     Only present on OpenAI chat-completions streams when the caller set
     ``stream_options.include_usage`` — absent otherwise, in which case
-    ``latest`` stays None rather than inventing a token count.
+    ``latest`` / ``latest_in`` stay None rather than inventing a token count.
+    ``latest`` is ``usage.completion_tokens`` (output); ``latest_in`` is
+    ``usage.prompt_tokens`` (input, the delivered prompt size).
 
     ``resp.aiter_text()`` yields byte-boundary chunks, not line-aligned ones —
     a ``data: {...}`` line carrying the usage block can straddle two chunks, so
@@ -494,6 +511,7 @@ class _SseUsageScanner:
     def __init__(self) -> None:
         self._buffer = ""
         self.latest: int | None = None
+        self.latest_in: int | None = None
 
     def feed(self, chunk: str) -> None:
         self._buffer += chunk
@@ -518,6 +536,9 @@ class _SseUsageScanner:
             val = cast(dict[str, Any], usage).get("completion_tokens")
             if isinstance(val, int):
                 self.latest = val
+            val_in = cast(dict[str, Any], usage).get("prompt_tokens")
+            if isinstance(val_in, int):
+                self.latest_in = val_in
 
 
 def _emit_llm_sent(
@@ -557,6 +578,7 @@ def _emit_llm_received(
     tokens_out: int | None,
     latency_ms: int,
     repo: str | None = None,
+    tokens_in: int | None = None,
 ) -> None:
     if writer is None:
         return
@@ -565,6 +587,7 @@ def _emit_llm_received(
             trace_id or "",
             phase or "unknown",
             model=model,
+            tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
             success=True,
@@ -605,6 +628,18 @@ def _emit_llm_error(
 # ---------------------------------------------------------------------------
 
 
+def _sse_obj_has_finish_reason(obj: object) -> bool:
+    """True if a parsed SSE JSON object carries a non-null ``finish_reason`` in any choice."""
+    if isinstance(obj, dict):
+        data: dict[str, Any] = obj
+        choices = data.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if isinstance(choice, dict) and choice.get("finish_reason") is not None:
+                    return True
+    return False
+
+
 def _sse_chunk_has_finish_reason(text: str) -> bool:
     """Scan an SSE text chunk for a ``finish_reason`` field in choices.
 
@@ -623,12 +658,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
     stripped = text.strip()
     if stripped.startswith("data: "):
         try:
-            obj = json.loads(stripped[6:])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
+            if _sse_obj_has_finish_reason(json.loads(stripped[6:])):
+                return True
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -643,12 +674,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
         if brace_end == -1:
             brace_end = len(text)
         try:
-            obj = json.loads(text[idx + 6 : brace_end])
-            if isinstance(obj, dict) and obj.get("choices"):
-                for choice in obj["choices"]:
-                    fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                    if fr is not None:
-                        return True
+            if _sse_obj_has_finish_reason(json.loads(text[idx + 6 : brace_end])):
+                return True
         except (json.JSONDecodeError, ValueError):
             pass
         search_start = idx + 1
@@ -657,12 +684,8 @@ def _sse_chunk_has_finish_reason(text: str) -> bool:
     # This handles raw JSON fragments that may have been relayed without the
     # ``data: `` prefix.
     try:
-        obj = json.loads(stripped)
-        if isinstance(obj, dict) and obj.get("choices"):
-            for choice in obj["choices"]:
-                fr = choice.get("finish_reason") if isinstance(choice, dict) else None
-                if fr is not None:
-                    return True
+        if _sse_obj_has_finish_reason(json.loads(stripped)):
+            return True
     except (json.JSONDecodeError, ValueError):
         pass
 
@@ -711,6 +734,7 @@ def _stream_upstream_response(
                 telemetry.phase,
                 telemetry.model,
                 tokens_out=usage_scanner.latest,
+                tokens_in=usage_scanner.latest_in,
                 latency_ms=int((time.monotonic() - dispatch_start) * 1000),
                 repo=telemetry.repo,
             )
@@ -1631,6 +1655,7 @@ async def proxy_chat_completions(
         phase,
         upstream_model,
         tokens_out=_extract_tokens_out(body),
+        tokens_in=_extract_tokens_in(body),
         latency_ms=latency_ms,
         repo=repo,
     )

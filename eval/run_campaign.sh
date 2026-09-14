@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 
 LOAD_MODEL="${LOAD_MODEL:-$HOME/scripts/load-model.sh}"
 export LM_STUDIO_URL="${LM_STUDIO_URL:-http://192.168.4.26:60000}"
-export AGENTALLOY_URL="${AGENTALLOY_URL:-http://localhost:47950}"
+export AGENTALLOY_URL="${AGENTALLOY_URL:-http://localhost:48950}"
 N="${N:-5}"
 
 declare -A ALIASES=(

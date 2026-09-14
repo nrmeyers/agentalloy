@@ -3,14 +3,14 @@
 
 Runs right after ``start-embed-server`` in the setup pipeline. Reads
 ``recommend-models.json`` to discover the reranker model, then launches a
-**second** ``llama-server`` instance serving the reranker GGUF at port 47952
+**second** ``llama-server`` instance serving the reranker GGUF at port 48952
 in COMPLETIONS mode (NOT ``--embeddings``) so it exposes ``/v1/completions``
 with logprobs for the signal intent reranker.
 
 llama-server (llama.cpp) is the sole inference runner. This is a dedicated
-instance separate from the embed server (47951).
+instance separate from the embed server (48951).
 
-The step is idempotent: if port 47952 is already reachable it exits 0
+The step is idempotent: if port 48952 is already reachable it exits 0
 immediately without spawning a second process.
 """
 
@@ -34,8 +34,8 @@ from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 SCHEMA_VERSION = 1
 STEP_NAME = "start-rerank-server"
-# The reranker llama-server listens on 47952 (SIGNAL_INTENT_RERANK_URL).
-LLAMA_RERANK_PORT = 47952
+# The reranker llama-server listens on 48952 (SIGNAL_INTENT_RERANK_URL).
+LLAMA_RERANK_PORT = 48952
 RERANK_HOST = "127.0.0.1"
 # Seconds to wait for llama-server /health before giving up.
 LLAMA_START_TIMEOUT = 120
@@ -92,7 +92,7 @@ def add_parser(
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
-        help="Start the reranker llama-server (port 47952) after the embed server.",
+        help="Start the reranker llama-server (port 48952) after the embed server.",
     )
     p.add_argument(
         "--models",

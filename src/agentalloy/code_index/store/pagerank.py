@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from agentalloy.storage.protocols import CodeGraphStore
+from agentalloy.code_index.protocols import CodeGraphStore
 
 logger = logging.getLogger(__name__)
 

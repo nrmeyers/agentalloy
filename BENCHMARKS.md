@@ -212,7 +212,7 @@ classifying user utterances against named transition intents (completion /
 approval / redirection). This benchmark measures that classifier, not retrieval.
 
 ```bash
-uv run python -m eval.intent_bench          # needs llama-server embed :47951 + reranker :47952
+uv run python -m eval.intent_bench          # needs llama-server embed :48951 + reranker :48952
 ```
 
 Two backends, selected by `SIGNAL_INTENT_BACKEND` (**default `reranker`**, on the
@@ -290,7 +290,7 @@ and fall open to cosine more often — safe, but the lift weakens on weak CPUs.
 **Status.** Measured win on a small labeled set → shipped as **the default**
 backend (`SIGNAL_INTENT_BACKEND=reranker`), with cosine as the opt-out and
 fail-open floor. The reranker needs a `qwen3-reranker-0.6b` server (default
-`:47952`); where none is running, the gates fall open to cosine byte-for-byte, so
+`:48952`); where none is running, the gates fall open to cosine byte-for-byte, so
 the default is safe but the lift is latent until the server is provisioned. Not
 yet field-validated.
 

@@ -2,3 +2,12 @@
 [env]
 QWEN_HOME = "{{config_root}}/.qwen"
 # <!-- END agentalloy install -->
+
+# Toolchain (merged 2026-09-12): the rust/agentalloy-core crate builds as
+# part of the package via maturin, so a Rust toolchain is now a hard
+# requirement of `uv sync` / `uv build`. Python pinned to 3.12 (v1's
+# requires-python floor; v2 tolerated 3.11).
+[tools]
+rust = "latest"
+python = "3.12"
+just = "latest"

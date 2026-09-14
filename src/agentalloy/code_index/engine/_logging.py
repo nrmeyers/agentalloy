@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Loguru-compatibility shim backed by stdlib logging.
 #
 # The vendored engine was written against loguru's call forms:

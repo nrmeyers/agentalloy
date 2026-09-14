@@ -368,7 +368,7 @@ def _wire_continue(
 
 def wire_harness(
     harness: str,
-    port: int = 47950,
+    port: int = 48950,
     root: Path | None = None,
     force: bool = False,
     mcp_fallback: bool = False,
@@ -404,7 +404,7 @@ def wire_harness(
 
 def _wire_harness_core(
     harness: str,
-    port: int = 47950,
+    port: int = 48950,
     root: Path | None = None,
     force: bool = False,
     mcp_fallback: bool = False,
@@ -2436,7 +2436,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="AgentAlloy service port (default: read from user state, fallback 47950).",
+        help="AgentAlloy service port (default: read from user state, fallback 48950).",
     )
     p.add_argument(
         "--force",
@@ -2496,7 +2496,7 @@ def _run(args: argparse.Namespace) -> int:
     )
     st = install_state.load_state()
     port = install_state.validate_port(
-        args.port if args.port is not None else st.get("port", 47950),
+        args.port if args.port is not None else st.get("port", 48950),
     )
     result = wire_harness(
         args.harness,

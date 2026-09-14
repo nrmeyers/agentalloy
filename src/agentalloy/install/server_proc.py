@@ -27,7 +27,7 @@ from agentalloy.install import state as install_state
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT_FALLBACK = 47950
+DEFAULT_PORT_FALLBACK = 48950
 STOP_POLL_INTERVAL_S = 0.2
 START_POLL_INTERVAL_S = 0.2
 
@@ -63,7 +63,7 @@ class DeploymentTarget:
 
 
 def configured_port() -> int:
-    """Read the configured server port from install state; fall back to 47950."""
+    """Read the configured server port from install state; fall back to 48950."""
     st = install_state.load_state()
     return install_state.validate_port(st.get("port", DEFAULT_PORT_FALLBACK))
 
@@ -158,7 +158,7 @@ def find_listening_pid(port: int, host: str = DEFAULT_HOST) -> int | None:
         return None
     for line in result.stdout.splitlines():
         # Filter to lines actually bound to the target host:port; ss can
-        # surface IPv6 wildcards (`*:47950`) or other hosts when the sport
+        # surface IPv6 wildcards (`*:48950`) or other hosts when the sport
         # filter matches a range.
         if f":{port}" not in line:
             continue

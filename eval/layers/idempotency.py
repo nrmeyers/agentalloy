@@ -22,7 +22,7 @@ import httpx
 
 from eval.tasks import TASKS
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 
 
 @dataclass(frozen=True)

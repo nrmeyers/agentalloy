@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tree_sitter import Node
 
 from ... import constants as cs

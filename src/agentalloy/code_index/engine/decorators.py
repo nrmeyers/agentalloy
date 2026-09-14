@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from functools import wraps
+from typing import ParamSpec, TypeVar
 
 from . import exceptions as ex
 from . import logs as ls
@@ -13,8 +16,11 @@ from .types_defs import (
     PathValidatorProtocol,
 )
 
+T = TypeVar("T")
+P = ParamSpec("P")
 
-def ensure_loaded[T](func: Callable[..., T]) -> Callable[..., T]:
+
+def ensure_loaded(func: Callable[..., T]) -> Callable[..., T]:
     @wraps(func)
     def wrapper(self: LoadableProtocol, *args, **kwargs) -> T:
         self._ensure_loaded()
@@ -23,7 +29,7 @@ def ensure_loaded[T](func: Callable[..., T]) -> Callable[..., T]:
     return wrapper
 
 
-def timing_decorator[**P, T](func: Callable[P, T]) -> Callable[P, T]:
+def timing_decorator(func: Callable[P, T]) -> Callable[P, T]:
     @wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         start = time.perf_counter()
@@ -36,7 +42,7 @@ def timing_decorator[**P, T](func: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-def async_timing_decorator[**P, T](
+def async_timing_decorator(
     func: Callable[P, Awaitable[T]],
 ) -> Callable[P, Awaitable[T]]:
     @wraps(func)
@@ -51,7 +57,7 @@ def async_timing_decorator[**P, T](
     return wrapper
 
 
-def validate_project_path[T](
+def validate_project_path(
     result_factory: type[T],
     path_arg_name: str,
 ) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
@@ -87,18 +93,18 @@ def validate_project_path[T](
 _GUARD_REGISTRY: dict[str, ContextVar[set[str] | None]] = {}
 
 
-def recursion_guard[**P, T](
+def recursion_guard(
     key_func: Callable[..., str],
     guard_name: str | None = None,
 ) -> Callable[[Callable[P, T | None]], Callable[P, T | None]]:
     if guard_name:
         context_var = _GUARD_REGISTRY.get(guard_name)
         if context_var is None:
-            new_var = ContextVar[set[str] | None](guard_name, default=None)
+            new_var = ContextVar(guard_name, default=None)
             context_var = _GUARD_REGISTRY.setdefault(guard_name, new_var)
     else:
         name = getattr(key_func, "__name__", "guard")
-        context_var = ContextVar[set[str] | None](name, default=None)
+        context_var = ContextVar(name, default=None)
 
     def decorator(func: Callable[P, T | None]) -> Callable[P, T | None]:
         @wraps(func)
@@ -122,7 +128,7 @@ def recursion_guard[**P, T](
     return decorator
 
 
-def log_operation[T](
+def log_operation(
     start_msg: str,
     end_msg: str,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
@@ -139,7 +145,7 @@ def log_operation[T](
     return decorator
 
 
-def mcp_try_except[T](
+def mcp_try_except(
     error_factory: Callable[[str], T],
 ) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:

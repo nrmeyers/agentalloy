@@ -2,7 +2,7 @@
 
 Operator guide for AgentAlloy. Covers key concepts, terminology, system architecture, configuration, and customization for operators who install, maintain, and extend their AgentAlloy instance.
 
-> For the step-by-step install runbook, the full `agentalloy` command reference (`add` — the primary wiring verb, `worktree`, `customize`, `cleanup`/`cleanup --deep`, the deprecated per-harness `wire`/`unwire`, …), and container operations (the `ghcr.io/nrmeyers/agentalloy` image, ports `47950`/`47951`/`47952`, and corpus volume self-heal on reuse), see **[INSTALL.md](../INSTALL.md)**.
+> For the step-by-step install runbook, the full `agentalloy` command reference (`add` — the primary wiring verb, `worktree`, `customize`, `cleanup`/`cleanup --deep`, the deprecated per-harness `wire`/`unwire`, …), and container operations (the `ghcr.io/nrmeyers/agentalloy` image, ports `48950`/`48951`/`48952`, and corpus volume self-heal on reuse), see **[INSTALL.md](../INSTALL.md)**.
 
 ## Key Concepts and Terminology
 
@@ -164,7 +164,7 @@ The agent writes the contract once at task start. When present, `domain_tags` fr
 The signal layer is a Python module (deterministic by default) that evaluates conditions and triggers actions. Three event types:
 
 1. **Pre-filter** — cheap keyword matching + file-event scope checks. Decides if a signal evaluation is warranted.
-2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus named-intent gates. The named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder (`SIGNAL_INTENT_BACKEND=reranker`, **the default** — a measured win on the labeled intent benchmark, see BENCHMARKS.md). This backend needs a reranker server — a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (completions mode), default `127.0.0.1:47952`; if it is unreachable, or you set `SIGNAL_INTENT_BACKEND=cosine`, the gates fall open to cosine-similarity scoring against reference phrase sets, byte-for-byte. Cosine is the fail-open floor, so the default is safe even where the reranker server is not running — but the lift only materializes where it is.
+2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus named-intent gates. The named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder (`SIGNAL_INTENT_BACKEND=reranker`, **the default** — a measured win on the labeled intent benchmark, see BENCHMARKS.md). This backend needs a reranker server — a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (completions mode), default `127.0.0.1:48952`; if it is unreachable, or you set `SIGNAL_INTENT_BACKEND=cosine`, the gates fall open to cosine-similarity scoring against reference phrase sets, byte-for-byte. Cosine is the fail-open floor, so the default is safe even where the reranker server is not running — but the lift only materializes where it is.
 3. **Action** — write phase file atomically, emit workflow skill prose, or fire system skills.
 
 The signal layer runs per-request through the proxy for proxy-wired harnesses. For sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Antigravity CLI), the proxy path is not available and the signal layer is replaced by a file-watching sidecar. See [Sidecar Experience](sidecar-experience.md).
@@ -224,7 +224,7 @@ Embeddings are stored on the `Fragment` nodes of the OverGraph store (HNSW vecto
 
 ### Service
 
-AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
+AgentAlloy runs as a FastAPI service on port 48950 (default). Endpoints:
 
 - `POST /compose` — hybrid retrieve + assemble (the primary entry point)
 - `POST /compose/text` — same as `/compose`, returns `text/plain`
@@ -252,7 +252,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 
 ### Embedding Model
 
-Single model for all embedding needs: `nomic-embed-text-v1.5.Q8_0.gguf` at 768 dimensions, served by llama-server on `47951`. Used for:
+Single model for all embedding needs: `nomic-embed-text-v1.5.Q8_0.gguf` at 768 dimensions, served by llama-server on `48951`. Used for:
 - Fragment embeddings (retrieval)
 - Semantic gate scoring (cosine similarity against reference phrase sets)
 - Contract query embeddings
@@ -277,7 +277,7 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 
 - `CORPUS_STORE_PATH` — OverGraph corpus store (skill graph + fragment vectors) location
 - `TELEMETRY_DB_PATH` — DuckDB trace store location
-- `RUNTIME_EMBED_BASE_URL` — embedding llama-server URL (default `http://localhost:47951`)
+- `RUNTIME_EMBED_BASE_URL` — embedding llama-server URL (default `http://localhost:48951`)
 - `RUNTIME_EMBEDDING_MODEL` — embedding model GGUF (default `nomic-embed-text-v1.5.Q8_0.gguf`)
 - `SIGNAL_INTENT_BACKEND` — phase-gate intent backend (`reranker`/`cosine`)
 - `SIGNAL_INTENT_RERANK_URL` — reranker llama-server URL
@@ -318,10 +318,10 @@ profiles:
 |----------|---------|---------|
 | `ANTHROPIC_UPSTREAM_URL` | Upstream for the native Anthropic passthrough (`/proj/<token>/v1/messages`); point at another proxy to chain, or at an Anthropic-compatible provider (see below) | `https://api.anthropic.com` |
 | `RESPONSES_UPSTREAM_URL` | Upstream for the native OpenAI Responses passthrough (`/proj/<token>/v1/responses` — the codex path, [responses-surface.md](responses-surface.md)); auth-transparent like the Anthropic passthrough | `https://api.openai.com` |
-| `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
+| `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:48951` |
 | `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `nomic-embed-text-v1.5.Q8_0.gguf` |
 | `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |
-| `SIGNAL_INTENT_RERANK_URL` | Reranker llama-server URL | `http://127.0.0.1:47952` |
+| `SIGNAL_INTENT_RERANK_URL` | Reranker llama-server URL | `http://127.0.0.1:48952` |
 | `SIGNAL_INTENT_RERANK_MODEL` | Reranker model (GGUF) | `Qwen3-Reranker-0.6B-Q8_0.gguf` |
 | `RUNTIME_DIVERSITY_SELECTION` | Diversity mode | `on` |
 | `AGENTALLOY_RELEASE_CHECK` | New-release check: the service polls the GitHub releases API at most once a day (its only outbound call, fail-silent) and caches the result for the status-line badge, `agentalloy status`, and the server-start line. Set `0`/`off` to disable. | `1` |
@@ -339,7 +339,7 @@ coding-plan subscription (Zhipu's endpoint is Anthropic-compatible):
    `…/api/anthropic/v1/messages`.
 2. In the **user's Claude Code environment**: `export ANTHROPIC_AUTH_TOKEN=<GLM key>`.
    The proxy stores no credential and forwards this token untouched; the
-   repo wiring (`ANTHROPIC_BASE_URL=http://localhost:47950/proj/<token>`) is
+   repo wiring (`ANTHROPIC_BASE_URL=http://localhost:48950/proj/<token>`) is
    unchanged.
 3. Verify: run one session in a wired repo and check
    `agentalloy telemetry savings` records the request — skill injection is
@@ -412,7 +412,7 @@ A skill about "how to write tests" in category `ops` is a category-fit failure. 
 
 ## Web UI
 
-The service serves a browser dashboard at `http://localhost:47950/` from the same process. Setup downloads the prebuilt bundle from the version-matched GitHub release (`agentalloy pull-web` re-fetches; upgrades refresh it); container images bake it in; dev checkouts can build locally with `cd frontend && pnpm install && pnpm build` (Node via mise). The API runs fine without a bundle — `/` answers 501. Pages:
+The service serves a browser dashboard at `http://localhost:48950/` from the same process. Setup downloads the prebuilt bundle from the version-matched GitHub release (`agentalloy pull-web` re-fetches; upgrades refresh it); container images bake it in; dev checkouts can build locally with `cd frontend && pnpm install && pnpm build` (Node via mise). The API runs fine without a bundle — `/` answers 501. Pages:
 
 - **Config** — edit the user-scoped `.env` with field validation and masked secrets; soft-reload without a restart.
 - **Telemetry** — trace explorer with the full signal story per request (gates met/unmet, pre-filter, Stage A/B rerank outcomes), token-savings charts, and composed-vs-passthrough coverage.

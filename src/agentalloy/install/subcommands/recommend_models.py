@@ -13,7 +13,7 @@ Preset resolution table (from contracts.md):
 
 llama-server (llama.cpp) is the sole inference runner. There is no runner
 choice: every preset serves the Qwen3 embed + reranker GGUFs through two
-dedicated llama-server instances (embed on 47951, reranker on 47952). The
+dedicated llama-server instances (embed on 48951, reranker on 48952). The
 hardware difference is handled at server start via ``-ngl``, not by the
 preset name.
 """

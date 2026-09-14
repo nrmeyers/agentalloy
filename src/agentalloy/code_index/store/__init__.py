@@ -1,26 +1,17 @@
-"""Per-repo storage for the code-index module.
+"""Code-index storage — unified OverGraph store + registry/jobs + PageRank.
 
-Two engines per indexed repo (under ``{code_index_data_dir}/repos/{slug}/``):
-
-- ``graph.overgraph`` — OverGraph unified symbol graph + vector/BM25 index:
-  symbols, edges, centrality, repo_meta, dense vectors, keyword index.
-  -> ``overgraph_store.OverGraphCodeGraphStore``
-- ``jobs.sqlite``     — one shared WAL SQLite at the data root: index jobs,
-  job events, indexed-repos registry.  -> ``jobs_store.CodeIndexJobsStore``
-
-DTOs / Protocols live in ``agentalloy.storage.protocols`` (the canonical home
-for storage contracts). Use ``open.open_code_index`` to construct handles.
+The v10 facade surface (open_code_index / CodeIndexJob(s)Store / paths /
+locks) is the contract the rest of the shell imports; the underlying store
+is the v2 unified OverGraph handle (graph + vectors in one DB).
 """
-
-from __future__ import annotations
 
 from agentalloy.code_index.store.jobs_store import (
     CodeIndexJob,
     CodeIndexJobsStore,
     IndexedRepo,
-    repo_path_key,
 )
 from agentalloy.code_index.store.open import (
+    CodeIndexHandles,
     CodeIndexPaths,
     code_index_paths,
     open_code_index,
@@ -28,21 +19,28 @@ from agentalloy.code_index.store.open import (
     remove_repo,
     slug_write_lock,
 )
-from agentalloy.code_index.store.overgraph_store import OverGraphCodeGraphStore
-from agentalloy.code_index.store.pagerank import compute_pagerank, refresh_centrality
+from agentalloy.code_index.store.overgraph_store import (
+    CodeSearchHit,
+    OverGraphCodeGraphStore,
+)
+from agentalloy.code_index.store.pagerank import (
+    compute_pagerank,
+    refresh_centrality,
+)
 
 __all__ = [
-    "OverGraphCodeGraphStore",
+    "CodeIndexHandles",
     "CodeIndexJob",
     "CodeIndexJobsStore",
-    "IndexedRepo",
-    "repo_path_key",
     "CodeIndexPaths",
+    "CodeSearchHit",
+    "IndexedRepo",
+    "OverGraphCodeGraphStore",
     "code_index_paths",
+    "compute_pagerank",
     "open_code_index",
     "open_jobs",
+    "refresh_centrality",
     "remove_repo",
     "slug_write_lock",
-    "compute_pagerank",
-    "refresh_centrality",
 ]

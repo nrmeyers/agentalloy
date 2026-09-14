@@ -149,11 +149,11 @@ _INTENT_INSTRUCT = (
 # benchmark: macro-F1 peaks at ~0.45 (0.44–0.46 plateau). Env-overridable.
 _DEFAULT_RERANK_THRESHOLD = 0.45
 
-# AgentAlloy's own reranker (llama-server) listens on 47952 — see
+# AgentAlloy's own reranker (llama-server) listens on 48952 — see
 # install/presets/*.yaml and install/subcommands/start_rerank_server.py. The
 # old default (60001) pointed at an unrelated local service; when nothing was
 # listening there the intent scorer silently fell through to the cosine floor.
-_DEFAULT_RERANK_URL = "http://127.0.0.1:47952"
+_DEFAULT_RERANK_URL = "http://127.0.0.1:48952"
 _DEFAULT_RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 # 600ms budget before the intent reranker falls through to the cosine floor.
 # Raised from 300ms to match Stage A/B: a cold/loaded CPU reranker crossed it.

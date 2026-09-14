@@ -98,7 +98,7 @@ def add_parser(
 
 def _service_port() -> int:
     st = install_state.load_state()
-    return install_state.validate_port(st.get("port", 47950))
+    return install_state.validate_port(st.get("port", 48950))
 
 
 def _jobs_db_path() -> Path:

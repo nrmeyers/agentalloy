@@ -279,10 +279,10 @@ def _generate_entrypoint(packs: str) -> Path:
     1. Check if ``$APP_DIR/.bootstrap-complete`` exists — if so, skip to uvicorn.
     2. Download both GGUF models (embed + reranker) into ``$APP_DIR/data/models``
        on first boot if missing (``curl`` from the verified Hugging Face URLs).
-    3. Start the embed ``llama-server --embeddings`` on ``127.0.0.1:47951`` and
-       the reranker ``llama-server`` (completions mode) on ``127.0.0.1:47952``,
+    3. Start the embed ``llama-server --embeddings`` on ``127.0.0.1:48951`` and
+       the reranker ``llama-server`` (completions mode) on ``127.0.0.1:48952``,
        both in the background.
-    4. Poll ``:47951/health`` and ``:47952/health`` until both are ready.
+    4. Poll ``:48951/health`` and ``:48952/health`` until both are ready.
     5. Run migrations (``uv run python -m agentalloy.migrate``).
     6. If *packs* is non-empty, run ``uv run agentalloy install-packs --packs <packs>``
        for each pack. If *packs* is empty, run ``uv run agentalloy install-packs``
@@ -296,7 +296,7 @@ def _generate_entrypoint(packs: str) -> Path:
        downloading — the host-side log streamer uses this as a transition
        marker to switch from log streaming to readiness polling.
     10. Trap SIGTERM/SIGINT for graceful shutdown (kills both llama-server PIDs).
-    11. Start uvicorn on ``0.0.0.0:47950``.
+    11. Start uvicorn on ``0.0.0.0:48950``.
 
     Parameters
     ----------
@@ -462,9 +462,9 @@ def _build_entrypoint_script(packs: str) -> str:
         "fi",
         "",
         "# --- llama.cpp model + server config -------------------------------",
-        "# Two llama-server daemons back the runtime: an embed server on 47951",
+        "# Two llama-server daemons back the runtime: an embed server on 48951",
         "# (--embeddings, query embedding at compose time) and a reranker server",
-        "# on 47952 (completions mode, /v1/completions with logprobs for the",
+        "# on 48952 (completions mode, /v1/completions with logprobs for the",
         "# intent classifier). Both GGUFs are downloaded on first boot into the",
         "# data volume so they persist across restarts.",
         'MODELS_DIR="$APP_DIR/data/models"',
@@ -504,23 +504,23 @@ def _build_entrypoint_script(packs: str) -> str:
         "# after .bootstrap-complete, query embedding + intent reranking need",
         "# them up. Start them before uvicorn so /readiness reflects a usable",
         "# service.",
-        'echo ">> Starting embed llama-server on 47951..."',
-        'llama-server --threads 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &',
+        'echo ">> Starting embed llama-server on 48951..."',
+        'llama-server --threads 4 --embeddings --pooling mean --ubatch-size 4096 --host 127.0.0.1 --port 48951 -m "$EMBED_GGUF" &',
         "EMBED_PID=$!",
-        'echo ">> Starting reranker llama-server on 47952..."',
+        'echo ">> Starting reranker llama-server on 48952..."',
         "# CPU-optimal slot config (--parallel 1 -c 2048): the container llama build",
         "# is CPU-only, and fewer slots = MORE throughput on CPU (OpenMP contention",
         "# dominates multi-slot; measured warm single ~145ms vs ~600ms+ unpinned —",
         "# same data as install/presets/cpu.yaml + start_rerank_server).",
-        'llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &',
+        'llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 48952 -m "$RERANK_GGUF" &',
         "RERANK_PID=$!",
         "",
-        'echo ">> Waiting for llama-server health (47951 + 47952)..."',
+        'echo ">> Waiting for llama-server health (48951 + 48952)..."',
         "for i in $(seq 1 120); do",
         "    EMBED_OK=false",
         "    RERANK_OK=false",
-        "    curl -sf http://127.0.0.1:47951/health > /dev/null 2>&1 && EMBED_OK=true",
-        "    curl -sf http://127.0.0.1:47952/health > /dev/null 2>&1 && RERANK_OK=true",
+        "    curl -sf http://127.0.0.1:48951/health > /dev/null 2>&1 && EMBED_OK=true",
+        "    curl -sf http://127.0.0.1:48952/health > /dev/null 2>&1 && RERANK_OK=true",
         '    if [ "$EMBED_OK" = "true" ] && [ "$RERANK_OK" = "true" ]; then',
         '        echo ">> llama-server ready (embed + reranker)"',
         "        break",
@@ -636,7 +636,7 @@ def _build_entrypoint_script(packs: str) -> str:
             # uvicorn accepts lowercase level names only; forwarded host .env
             # values may arrive uppercase (presets historically shipped "INFO"),
             # and an invalid value crash-loops the container at startup.
-            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 "
+            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 48950 "
             "--log-level \"$(echo \"${LOG_LEVEL:-info}\" | tr '[:upper:]' '[:lower:]')\" "
             '--workers "$WORKERS" &',
             "UVICORN_PID=$!",
@@ -692,7 +692,7 @@ def _run_container(
     packs: str,
     image_ref: str | None = None,
     projects_root: Path | None = None,
-    port: int = 47950,
+    port: int = 48950,
 ) -> int:
     """Run the agentalloy container with volumes, env, and port mapping.
 
@@ -709,7 +709,7 @@ def _run_container(
       ``AGENTALLOY_RUNTIME_STATE_DIR``, ``LOG_LEVEL``) plus every *intent*
       key present in the host ``.env``, forwarded through the audited
       allowlist in :mod:`agentalloy.install.env_forwarding`.
-    * Port mapping: ``-p 47950:47950``
+    * Port mapping: ``-p 48950:48950``
 
     The container runs the image's **baked** ``/app/entrypoint.sh`` (the
     ENTRYPOINT/CMD declared in the Containerfile) — we deliberately do NOT
@@ -731,7 +731,7 @@ def _run_container(
         Image reference to run. Defaults to ``ghcr.io/nrmeyers/agentalloy:latest``.
     port : int
         Host-side port to publish. The container-internal side always stays
-        ``47950`` (that's what the baked entrypoint binds to) — only the host
+        ``48950`` (that's what the baked entrypoint binds to) — only the host
         side is configurable, per ``install-state.json["port"]``.
 
     Returns
@@ -827,7 +827,7 @@ def _run_container(
         "--name",
         "agentalloy",
         "-p",
-        f"{port}:47950",
+        f"{port}:48950",
         "-v",
         "agentalloy-data:/app/data",
         *projects_mount,
@@ -878,7 +878,7 @@ def _run_container(
 def _list_conflicting_containers(
     runtime: str,
     container_name: str = "agentalloy",
-    port: int = 47950,
+    port: int = 48950,
 ) -> list[tuple[str, str]]:
     """Return [(name, status), ...] for containers that would block a fresh start.
 
@@ -896,7 +896,7 @@ def _list_conflicting_containers(
     container_name : str
         Exact container name to search for. Default ``"agentalloy"``.
     port : int
-        Host-side port to search for. Default ``47950``.
+        Host-side port to search for. Default ``48950``.
 
     """
     out: list[tuple[str, str]] = []

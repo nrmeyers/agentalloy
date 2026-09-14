@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # (H) Provider logs
 PROVIDER_REGISTERED = "Registered provider: {name}"
 

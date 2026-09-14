@@ -75,7 +75,7 @@ class ParseResult:
     edges: list[ParsedEdge]
 
 
-type _RawEdge = tuple[
+_RawEdge = tuple[
     tuple[str, str, PropertyValue],
     str,
     tuple[str, str, PropertyValue],

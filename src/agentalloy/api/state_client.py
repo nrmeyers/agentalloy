@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-DEFAULT_PORT_FALLBACK = 47950
+DEFAULT_PORT_FALLBACK = 48950
 
 
 def resolve_base_url() -> str:
@@ -29,7 +29,7 @@ def resolve_base_url() -> str:
 
     ``STATE_SERVICE_URL`` when set, else ``http://127.0.0.1:<port>`` with the
     port from install state (the same value the service binds), falling back
-    to 47950.  Shared by :class:`StateClient` and the state-leg panel so the
+    to 48950.  Shared by :class:`StateClient` and the state-leg panel so the
     URL an agent is told to call is the URL the client actually uses.
     """
     return os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}"
@@ -74,7 +74,7 @@ class StateClient:
     2. the ``STATE_SERVICE_URL`` environment variable (useful for tests
        that spin up a fake service);
     3. the port recorded in install state — the same value the service
-       itself binds — falling back to 47950.
+       itself binds — falling back to 48950.
 
     Step 3 matters: the default used to be a hard-coded ``:8400``, which no
     deployment has ever listened on.  Every ``is_running()`` therefore

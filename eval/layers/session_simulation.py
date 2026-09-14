@@ -26,7 +26,7 @@ import httpx
 
 from eval.tasks import GRADERS, TASKS
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 
 # A realistic session: 10-15 tasks transitioning through phases
 # Uses tasks from TASKS that span spec, design, build, qa phases

@@ -23,11 +23,22 @@ live here as the single canonical home; callers import from
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from agentalloy.code_index.protocols import (
+    CallSite,
+    CodeEdge,
+    CodeGraphStore,
+    CodeSearchHit,
+    CodeSymbol,
+    CodeVectorRow,
+    CodeVectorStore,
+    DecisionRow,
+)
 
 EMBEDDING_DIM = 768
 """Vector dimensionality. Tied to ``nomic-embed-text-v1.5`` (768-dim). Fixed:
@@ -175,111 +186,12 @@ class CompositionTrace:
 
 
 # ---------------------------------------------------------------------------
-# Code-index DTOs (per-repo symbol graph + vector index; see
-# ``agentalloy.code_index.store``)
+# Code-index DTOs — canonical home is agentalloy.code_index.protocols.
+# CodeSymbol, CodeEdge, CodeVectorRow, CallSite, DecisionRow, and CodeSearchHit
+# are re-exported at the top of this module so `from agentalloy.storage.protocols
+# import CodeSymbol` keeps working. EMBEDDING_DIM deliberately stays here: the
+# corpus/skills store uses 768-dim while the code index uses its own 384-dim.
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CodeSymbol:
-    """One code symbol row in the per-repo code graph.
-
-    Field names line up with ``code_index.facade.ParsedSymbol`` so ingest is a
-    plain field-copy; ``contextual_prefix`` / ``content_hash`` are storage-side
-    enrichments (embedding context, incremental-reindex change detection).
-    """
-
-    qualified_name: str
-    kind: str
-    name: str
-    file_path: str | None
-    start_line: int | None
-    end_line: int | None
-    docstring: str | None
-    decorators: list[str]
-    is_exported: bool | None
-    is_async: bool
-    is_generator: bool
-    source_code: str | None
-    contextual_prefix: str = ""
-    content_hash: str | None = None
-
-
-@dataclass(frozen=True)
-class CodeEdge:
-    """One relationship row (CALLS / CONTAINS / IMPORTS / ...) between two
-    qualified names. Endpoints may dangle (unresolved externals) — no FKs.
-    """
-
-    src: str
-    dst: str
-    kind: str
-    file_path: str = ""
-    line_start: int = 0
-    col_start: int = 0
-    resolved_via: str = "unknown"
-    confidence: float = 1.0
-    new_target: str = ""
-    # Provenance for GOVERNS edges (#527 C): the fenced span that resolved to
-    # ``dst`` and the resolution tier (1 = exact fqn, 2 = unique short-name).
-    # None for non-GOVERNS edges (CALLS/IMPORTS/... never populate these).
-    span: str | None = None
-    resolution_tier: int | None = None
-
-
-@dataclass(frozen=True)
-class CodeVectorRow:
-    """A symbol's embedding plus the denormalized columns the search surface
-    returns. Derived from the graph store; rebuilt on re-embed.
-    """
-
-    qualified_name: str
-    embedding: Sequence[float]  # raw; normalized on insert
-    symbol_type: str
-    file_path: str
-    start_line: int | None
-    end_line: int | None
-    text: str  # embedded text (contextual prefix + source); indexed for BM25
-    indexed_at: int  # unix epoch seconds
-
-
-@dataclass(frozen=True)
-class CallSite:
-    """One caller/callee hit for the symbol-relations query surface."""
-
-    qualified_name: str
-    file_path: str | None
-    line: int | None
-
-
-@dataclass(frozen=True)
-class DecisionRow:
-    """One decision governing a queried symbol (Knowledge module).
-
-    The decision is a ``MarkdownDoc`` heading-chunk (``qualified_name`` =
-    ``path::anchor``); ``heading`` is the chunk's heading and ``snippet`` its
-    body. Distinct from :class:`CallSite` — a decision's ``start_line`` is a
-    heading offset, and the heading/snippet have no home in the call-site view.
-    """
-
-    qualified_name: str
-    file_path: str | None
-    start_line: int | None
-    heading: str
-    snippet: str | None
-
-
-@dataclass(frozen=True)
-class CodeSearchHit:
-    """One vector/FTS search hit. ``score`` is higher-is-better (cosine
-    similarity for the dense leg, BM25 for the sparse leg).
-    """
-
-    qualified_name: str
-    file_path: str
-    start_line: int | None
-    end_line: int | None
-    score: float
 
 
 # ---------------------------------------------------------------------------
@@ -528,81 +440,9 @@ class TelemetryStore(Protocol):
     def close(self) -> None: ...
 
 
-@runtime_checkable
-class CodeGraphStore(Protocol):
-    """Per-repo symbol graph (``graph.overgraph``). Source of truth for the
-    code index; the vector index is derived from it.
-    """
-
-    def migrate(self) -> None: ...
-    def replace_all(
-        self,
-        symbols: Iterable[CodeSymbol],
-        edges: Iterable[CodeEdge],
-    ) -> tuple[int, int]: ...
-    def upsert_symbols(self, symbols: Iterable[CodeSymbol]) -> int: ...
-    def upsert_edges(self, edges: Iterable[CodeEdge]) -> int: ...
-    def delete_for_files(self, file_paths: Sequence[str]) -> int: ...
-    def symbol(self, qualified_name: str) -> CodeSymbol | None: ...
-    def callers(self, fqn: str) -> list[CallSite]: ...
-    def callees(self, fqn: str) -> list[CallSite]: ...
-    def transitive_callers(self, fqn: str, *, max_depth: int = 4) -> list[CallSite]: ...
-    def symbols_by_name(self, name: str) -> list[tuple[str, str]]: ...
-    def symbols_by_file(self, file_path: str) -> list[tuple[str, str]]: ...
-    def decision_qns(self) -> list[str]: ...
-    def governing_decisions(self, fqn: str) -> list[DecisionRow]: ...
-    def decisions_for_files(self, file_paths: Sequence[str]) -> list[DecisionRow]: ...
-    def decision_docs_governing(self, fqns: Sequence[str]) -> list[str]: ...
-    def delete_govern_edges_for_doc(self, doc_path: str) -> int: ...
-    def delete_entity_edges_for_docs(self, file_paths: Sequence[str]) -> int: ...
-    def count_govern_edges_for_doc(self, doc_path: str) -> int: ...
-    def typed_edges_for_fqn(self, fqn: str) -> list[CodeEdge]: ...
-    def typed_edges_from_chunks(
-        self, chunk_qns: Sequence[str], *, limit: int = 20
-    ) -> list[CodeEdge]: ...
-    def counts_by_kind(self) -> dict[str, int]: ...
-    def list_files(
-        self,
-        *,
-        prefix: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[str]: ...
-    def calls_edges(self) -> list[tuple[str, str]]: ...
-    def write_centrality(self, scores: Mapping[str, float]) -> int: ...
-    def read_centrality(self, qualified_names: Sequence[str]) -> dict[str, float]: ...
-    def top_centrality(self, limit: int = 20) -> list[tuple[str, float]]: ...
-    def content_hashes(self) -> dict[str, str]: ...
-    def set_meta(self, key: str, value: str) -> None: ...
-    def get_meta(self, key: str) -> str | None: ...
-    def close(self) -> None: ...
-
-
-@runtime_checkable
-class CodeVectorStore(Protocol):
-    """Per-repo vector ANN + BM25 over symbols (served by the code graph store)."""
-
-    def upsert(self, rows: Iterable[CodeVectorRow]) -> int: ...
-    def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int: ...
-    def search_similar(
-        self,
-        query_vec: Sequence[float],
-        *,
-        k: int = 10,
-        where: str | None = None,
-    ) -> list[CodeSearchHit]: ...
-    def search_bm25(
-        self,
-        query: str,
-        *,
-        k: int = 10,
-        where: str | None = None,
-    ) -> list[tuple[str, float]]: ...
-    def delete(self, qualified_names: Sequence[str]) -> int: ...
-    def count(self) -> int: ...
-    def rebuild_fts_index(self) -> None: ...
-    def embedding_dim(self) -> int | None: ...
-    def close(self) -> None: ...
+# CodeGraphStore / CodeVectorStore — canonical home is
+# agentalloy.code_index.protocols (re-exported at the top of this module).
+# OverGraphCodeGraphStore conforms to the fuller code_index protocol.
 
 
 @dataclass
@@ -692,6 +532,7 @@ __all__ = [
     "CodeEdge",
     "CodeVectorRow",
     "CallSite",
+    "DecisionRow",
     "CodeSearchHit",
     "CodeGraphStore",
     "CodeVectorStore",

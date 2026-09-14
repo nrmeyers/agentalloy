@@ -46,7 +46,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="Override the service port (default: read from user state, fallback 47950).",
+        help="Override the service port (default: read from user state, fallback 48950).",
     )
     p.add_argument(
         "--upstream-url",
@@ -156,11 +156,11 @@ def capture_upstream(
 
 
 def resolve_port(port_override: int | None) -> int:
-    """Resolve the service port: explicit override, else user state, else 47950."""
+    """Resolve the service port: explicit override, else user state, else 48950."""
     if port_override is not None:
         return install_state.validate_port(port_override)
     st = install_state.load_state()
-    return install_state.validate_port(st.get("port", 47950))
+    return install_state.validate_port(st.get("port", 48950))
 
 
 def adopt_and_wire(

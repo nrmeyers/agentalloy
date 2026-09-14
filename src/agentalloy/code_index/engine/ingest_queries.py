@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Vendored subset of codebase_rag/cypher_queries.py — only the incremental
 # module-removal queries used by GraphUpdater.remove_file_from_state(). They
 # are only executed when the ingestor implements execute_write() (a real

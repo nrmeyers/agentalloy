@@ -200,7 +200,7 @@ class SetupConfig:
 
     runner: str | None = None
     model: str = ""
-    port: int = 47950
+    port: int = 48950
     mode: str = "persistent"  # "persistent" or "manual"
     packs: str = ""  # comma-separated, empty = always-on only
     harness: str = "manual"
@@ -1198,7 +1198,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     """
     # 1. Run early preflight
     _print("  [dim]-> Preflight (early)[/dim]")
-    preflight_result = preflight.run_preflight(phase="early", port=47950)
+    preflight_result = preflight.run_preflight(phase="early", port=48950)
     fatal = [
         c["name"]
         for c in preflight_result.get("checks", [])
@@ -1325,7 +1325,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 5. Set fixed values (container mode overrides)
     cfg.runner = "llama-server"
-    cfg.port = 47950
+    cfg.port = 48950
     cfg.mode = "manual"
     cfg.deployment = "container"
 
@@ -1391,7 +1391,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     #   a) _list_project_containers: label-based + fixed compose names (old compose installs).
     #   b) _list_conflicting_containers: name-exact + port-match (single-container GHCR
     #      installs — no compose label). An Exited container from a crashed bootstrap
-    #      holds podman's rootlessport reservation for port 47950 even though nothing
+    #      holds podman's rootlessport reservation for port 48950 even though nothing
     #      listens, causing `podman run` to fail with "address already in use".
     _label_containers = _list_project_containers(binary_path)
     _conflict_containers = _list_conflicting_containers(
@@ -2015,8 +2015,8 @@ def run_setup(cfg: SetupConfig) -> int:
     if not cfg.non_interactive:
         port_str = _prompt_context(
             "  Service port",
-            "  Port the agentalloy FastAPI service will listen on (default: 47950)",
-            default=47950,
+            "  Port the agentalloy FastAPI service will listen on (default: 48950)",
+            default=48950,
         )
         try:
             cfg.port = int(port_str)
@@ -2233,7 +2233,7 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step f: Start embed server (llama-server, port 47951)
+    # Step f: Start embed server (llama-server, port 48951)
     _print("  [dim]-> Starting embed server[/dim]")
     rc = start_embed_server.run(
         _build_namespace(
@@ -2245,7 +2245,7 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step f2: Start reranker server (second llama-server, port 47952)
+    # Step f2: Start reranker server (second llama-server, port 48952)
     _print("  [dim]-> Starting reranker server[/dim]")
     rc = start_rerank_server.run(
         _build_namespace(
@@ -2430,7 +2430,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="Service port (default: 47950).",
+        help="Service port (default: 48950).",
     )
     p.add_argument(
         "--mode",
@@ -2531,7 +2531,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
     cfg = SetupConfig(
         runner=args.runner,  # may be None; resolved inside run_setup
         model=args.model or "",
-        port=args.port or 47950,
+        port=args.port or 48950,
         mode=args.mode or "persistent",
         packs=args.packs or "",
         harness=args.harness or "manual",

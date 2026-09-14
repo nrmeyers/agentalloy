@@ -1,0 +1,28 @@
+# AgentAlloy v2 spike — classify-then-fill harness config.
+# Target: MiniCPM5-2B-Q8_0 (llama-server, port 50001). Swapped from
+# LFM2.5-2.6B on 2026-09-11: gates measured 66/66 classification and zero
+# hallucination vs LFM's 62/66 / 3%. Sampling per the HF model card.
+# 2026-09-12: server now runs with the MiniCPM5-2B-DSpark speculative
+# drafter (llama-server-cuda:dspark image) — suite wall time 3m35s → 2m31s
+# with identical gates; no config change needed here (server-side only).
+
+endpoint = "http://127.0.0.1:50001/v1/chat/completions"
+model = "minicpm5-2b"
+# "env" → read $OPENAI_API_KEY (some local servers require it).
+api_key = "env"
+temperature = 1.0
+# This model thinks before answering; 512 was exhausted by internal reasoning
+# on abstention cases (finish_reason=length, empty content). 2048 leaves headroom.
+max_tokens = 2048
+timeout_s = 300
+
+# One retry per stage (classify / fill) on invalid or schema-failing output.
+max_retries = 1
+
+# Gate table for the spike. A gate PASSES when the measured rate meets it.
+# hallucination is an upper bound (rate must be BELOW it); the rest are floors.
+[gates]
+classification = 0.85      # fraction of steps where final action == expected
+argument_fill = 0.95        # fraction of correctly-classified steps with valid + correct args
+loop_two_step = 0.70        # fraction of multi-step tasks where BOTH steps succeed
+hallucination_max = 0.05    # false-action + fabricated-value rate, must stay below

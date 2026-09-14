@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Replacement for the upstream `from .config import settings` pydantic-settings
 # module. The engine must not read env vars or config files; callers construct
 # an EngineConfig (or accept these defaults, which mirror upstream config.py).
