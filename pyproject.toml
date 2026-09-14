@@ -79,7 +79,11 @@ dev = [
 ]
 
 [project.scripts]
-agentalloy = "agentalloy.cli:main"
+# The installed CLI is the v10 product shell (wire/unwire/update/reset/...)
+# running on the v2 execution layer — see the M0 merge (ac04873). The v2
+# execution layer's own thin CLI (agentalloy.cli) stays importable for
+# python -m agentalloy and tests/test_cli.py; it is not the product entry.
+agentalloy = "agentalloy.install.__main__:main"
 
 [build-system]
 requires = ["maturin>=1.7,<2"]

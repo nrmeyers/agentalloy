@@ -73,10 +73,11 @@ COPY pyproject.toml uv.lock ./
 # tree-sitter is now a core dependency — no --extra flag needed.
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Copy the project source and README (used by hatchling for metadata),
-# then install the project itself.
+# Copy the project source, README (used by maturin for metadata), and the
+# Rust core crate, then install the project itself.
 COPY README.md ./
 COPY src/ ./src/
+COPY rust/ ./rust/
 
 # Create an empty data dir so the image is runnable without a bind mount.
 # The corpus (OverGraph agentalloy.overgraph + Tantivy BM25 agentalloy.bm25) is not committed

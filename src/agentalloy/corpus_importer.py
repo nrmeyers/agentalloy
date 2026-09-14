@@ -15,8 +15,8 @@ import yaml
 from agentalloy.skill_engine import Skill, SkillFragment
 from agentalloy.state_store import PHASE_ORDER
 
-# Default v1 packs location (sibling repo)
-DEFAULT_V1_PACKS = Path.home() / "dev" / "agentalloy" / "src" / "agentalloy" / "_packs"
+# Default v1 packs location (bundled in the wheel as package data)
+DEFAULT_V1_PACKS = Path(__file__).resolve().parent / "_packs"
 
 # v1 phase names that map to v2 phases
 VALID_PHASES = {"spec", "design", "plan", "build", "qa", "ship", "intake"}

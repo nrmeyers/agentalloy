@@ -17,6 +17,10 @@ build/
 dist/
 *.egg-info/
 
+# Rust crate local build output — the image builds from source in the final
+# `uv sync` (uv provisions the Rust toolchain), so host artifacts stay out.
+rust/target/
+
 # The webui stage builds the SPA from frontend/ sources — keep local build
 # output and node_modules out of the context (fresh install in the stage).
 frontend/node_modules/
