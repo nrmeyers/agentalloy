@@ -11,7 +11,7 @@ results file to ``eval/runs/gold-hit-<ts>.json``, and always exits 0 — the
 regression comparator (``eval.check_corpus_regression``) judges the numbers.
 
 Requires the AgentAlloy service running on ``$AGENTALLOY_URL`` (default
-``http://localhost:47950``). Read-only; makes no model calls.
+``http://localhost:48950``). Read-only; makes no model calls.
 
 Usage::
 
@@ -32,7 +32,7 @@ import httpx
 
 from eval.domain_tasks import DOMAIN_TASKS
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 

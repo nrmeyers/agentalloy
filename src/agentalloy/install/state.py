@@ -141,7 +141,7 @@ def load_env_into_environ(path: Path | None = None) -> list[str]:
 # AgentAlloy's reranker (a second llama-server) listens here by default — the
 # signal-intent layer scores phase-transition intent against it. Keep in sync
 # with signals/classifier._DEFAULT_RERANK_URL and the install presets.
-DEFAULT_RERANK_URL = "http://127.0.0.1:47952"
+DEFAULT_RERANK_URL = "http://127.0.0.1:48952"
 
 
 def resolve_intent_reranker(env: dict[str, str] | None = None) -> tuple[str, str]:
@@ -174,7 +174,7 @@ def rerank_reachable(url: str, timeout_s: float = 2.0) -> bool:
 
     parsed = urlparse(url)
     host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 47952
+    port = parsed.port or 48952
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(timeout_s)
@@ -400,7 +400,7 @@ def _empty_state() -> dict[str, Any]:
         "models_pulled": [],
         "env_original_content": None,  # Backup of original .env content for restore
         "env_path": None,
-        "port": 47950,
+        "port": 48950,
         "last_verify_passed_at": None,
         # Pack selection from setup wizard, awaiting consumption by
         # install-packs. Cleared once install-packs has applied it. When
@@ -615,7 +615,7 @@ def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
         data.setdefault("harness_files_written", [])
         data.setdefault("models_pulled", [])
         data.setdefault("env_path", None)
-        data.setdefault("port", 47950)
+        data.setdefault("port", 48950)
         data.setdefault("last_verify_passed_at", None)
     if from_version < 2:
         # v1 → v2: state moved from per-repo to user-scope. v1 had a

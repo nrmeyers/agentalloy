@@ -218,10 +218,10 @@ def _render_clear(result: dict[str, Any]) -> None:
 
 
 def _service_port() -> int:
-    """Resolve the configured service port from user-scope state (fallback 47950)."""
+    """Resolve the configured service port from user-scope state (fallback 48950)."""
     from agentalloy.install import state as install_state
 
-    return install_state.validate_port(install_state.load_state().get("port", 47950))
+    return install_state.validate_port(install_state.load_state().get("port", 48950))
 
 
 def _fetch_savings_via_api(port: int, repo: str | None = None) -> dict[str, Any] | None:

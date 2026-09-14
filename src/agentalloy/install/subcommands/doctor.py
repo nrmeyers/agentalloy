@@ -13,7 +13,7 @@ Two deployment modes (read from ``install-state.json``):
  6. embedding_dim   — stored fragments dim matches EMBEDDING_DIM constant
  7. service         — port /health responding (down is ok; up-degraded is warned)
  8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
- 9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
+ 9. reranker        — signal-intent reranker (:48952) reachable (warn, not fail)
 10. orphans         — stray runtime processes / dangling shim on host (warn, not fail)
 11. code_index      — module state + /code/repos when CODE_INDEX_ENABLED (warn/fail)
 12. code_indexer_legacy — old standalone daemon (:8003) / data dir leftovers (warn)
@@ -373,7 +373,7 @@ def _check_service(port: int) -> dict[str, Any]:
 def _check_reranker(env: dict[str, str]) -> dict[str, Any]:
     """Check 9: signal-intent reranker reachable (soft warn, never fatal).
 
-    The reranker (Qwen3-Reranker on :47952) is the primary phase-transition
+    The reranker (Qwen3-Reranker on :48952) is the primary phase-transition
     trigger; when it's down the signal layer falls back to the cosine floor, so
     an absent reranker warns rather than fails (matching the service check).
     ``SIGNAL_INTENT_BACKEND=cosine`` → plain pass (reranker not used).
@@ -971,7 +971,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
     t0 = time.monotonic()
     runtime = st.get("runtime_binary") or "podman"
     container_name = st.get("container_name") or "agentalloy"
-    port = install_state.validate_port(st.get("port", 47950))
+    port = install_state.validate_port(st.get("port", 48950))
 
     # Preflight: container must be running.
     state = _container_state(runtime, container_name)
@@ -1030,7 +1030,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
         )
 
     # embed_runtime — trust the service's own dependency probe rather than
-    # hitting :47951 (a GET returns 415 from llama-server, a false negative).
+    # hitting :48951 (a GET returns 415 from llama-server, a false negative).
     embed_status = _dep_status(health, "embedding_runtime") if health else None
     checks.append(
         {
@@ -1169,7 +1169,7 @@ def _run_doctor_host() -> dict[str, Any]:
 
     # Resolve embed URL / model from .env (fall back to Settings defaults)
     env = parse_env_file(env_path())
-    base_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
+    base_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:48951")
     model = env.get("RUNTIME_EMBEDDING_MODEL", "nomic-embed-text-v1.5.Q8_0.gguf")
 
     checks.append(_check_embed_server(base_url, model))
@@ -1189,7 +1189,7 @@ def _run_doctor_host() -> dict[str, Any]:
     checks.append(_check_embedding_dim(store_path))
 
     st = install_state.load_state()
-    port = install_state.validate_port(st.get("port", 47950))
+    port = install_state.validate_port(st.get("port", 48950))
     checks.append(_check_service(port))
     checks.append(_check_pack_manifests())
     checks.append(_check_reranker(env))

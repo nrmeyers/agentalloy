@@ -5,7 +5,7 @@ The user-facing recovery verb. A native install leaves three classes of
 artifact on the host (see :mod:`agentalloy.install.runtime_artifacts`):
 
 1. **Processes** — our own ``uvicorn`` / ``llama-server`` runners squatting a
-   runtime port (47950/47951/47952) with no live supervisor.
+   runtime port (48950/48951/48952) with no live supervisor.
 2. **Service units** — stale systemd user units / launchd LaunchAgents.
 3. **The llama-server shim** — a dangling ``~/.local/bin/llama-server``
    launcher pointing at a prebuilt that no longer exists.

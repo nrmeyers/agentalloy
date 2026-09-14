@@ -20,7 +20,7 @@ Thin HTTP clients against the local agentalloy service:
     agentalloy code watch status|start|stop             Master switch + enrollment report
 
 The module is served by the main agentalloy service (port from user state,
-default 47950) when ``CODE_INDEX_ENABLED=1``; there is no separate daemon.
+default 48950) when ``CODE_INDEX_ENABLED=1``; there is no separate daemon.
 """
 
 from __future__ import annotations
@@ -44,12 +44,12 @@ _POLL_INTERVAL_S = 0.5
 
 
 def _resolve_port(args: argparse.Namespace) -> int:
-    """Service port: explicit ``--port``, else user state, else 47950."""
+    """Service port: explicit ``--port``, else user state, else 48950."""
     override = getattr(args, "port", None)
     if override is not None:
         return install_state.validate_port(override)
     st = install_state.load_state()
-    return install_state.validate_port(st.get("port", 47950))
+    return install_state.validate_port(st.get("port", 48950))
 
 
 def _make_client(port: int) -> httpx.Client:
@@ -996,7 +996,7 @@ def _add_common(p: argparse.ArgumentParser, *, repo_flag: bool = False) -> None:
         "--port",
         type=int,
         default=None,
-        help="Service port (default: read from user state, fallback 47950).",
+        help="Service port (default: read from user state, fallback 48950).",
     )
     p.add_argument("--json", action="store_true", default=False, help="Output raw JSON.")
     if repo_flag:

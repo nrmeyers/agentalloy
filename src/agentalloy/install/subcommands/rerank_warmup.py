@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 STEP_NAME = "rerank-warmup"
 
-_DEFAULT_PORT = 47952
+_DEFAULT_PORT = 48952
 _DEFAULT_HEALTH_TIMEOUT_S = 90.0
 _HEALTH_POLL_INTERVAL_S = 0.5
 _WARMUP_REQUEST_TIMEOUT_S = 30.0
@@ -48,7 +48,7 @@ def add_parser(
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
         help=(
-            "Warm the reranker (port 47952) by sending one tiny /v1/completions "
+            "Warm the reranker (port 48952) by sending one tiny /v1/completions "
             "request after llama-server is ready. Eliminates the first-request "
             "Stage B fallback on a cold restart. Wired into the rerank systemd "
             "unit via ExecStartPost."

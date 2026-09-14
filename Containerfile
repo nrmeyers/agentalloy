@@ -10,7 +10,7 @@
 #
 # Run:    agentalloy setup --deployment container  (recommended — single-container with entrypoint)
 #         or manually (bare run — bootstrap runs automatically):
-#         podman run --replace -d --name agentalloy -p 47950:47950 \
+#         podman run --replace -d --name agentalloy -p 48950:48950 \
 #                    -v agentalloy-data:/app/data \
 #                    ghcr.io/nrmeyers/agentalloy:latest
 #         The GGUF models persist under /app/data/models inside the agentalloy-data
@@ -104,13 +104,13 @@ RUN chmod +x /app/entrypoint.sh
 RUN uv sync --frozen --no-dev
 
 # Runtime configuration. The two llama-server daemons are addressed here:
-# the embed server on 47951 (RUNTIME_EMBED_BASE_URL) and the reranker server
-# on 47952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
+# the embed server on 48951 (RUNTIME_EMBED_BASE_URL) and the reranker server
+# on 48952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
 # the GGUFs the entrypoint downloads into /app/data/models.
 #
 # LM_ASSIST (Stage B fragment reranker) is OFF in the container — the image is
 # CPU-only (no GPU passthrough) and CPU Stage B is not viable at the budget.
-# Measured 2026-07-09 on the shipped 47952 reranker (`--parallel 1 -c 2048`): real
+# Measured 2026-07-09 on the shipped 48952 reranker (`--parallel 1 -c 2048`): real
 # distinct-doc scoring costs ~1800ms/candidate, and production telemetry isolates
 # Stage B at ~6.6s median / ~11s p90 added latency vs the 203ms deterministic path
 # — 2.3x the 3000ms budget, so it times out and fails open on real composes. (The
@@ -128,13 +128,13 @@ ENV AGENTALLOY_WEB_DIST=/app/web-dist \
     LOG_LEVEL=INFO \
     LM_ASSIST=off \
     CODE_INDEX_REFRESH_SECONDS=300 \
-    RUNTIME_EMBED_BASE_URL=http://localhost:47951 \
+    RUNTIME_EMBED_BASE_URL=http://localhost:48951 \
     RUNTIME_EMBEDDING_MODEL=nomic-embed-text-v1.5.Q8_0.gguf \
     SIGNAL_INTENT_BACKEND=reranker \
-    SIGNAL_INTENT_RERANK_URL=http://127.0.0.1:47952 \
+    SIGNAL_INTENT_RERANK_URL=http://127.0.0.1:48952 \
     SIGNAL_INTENT_RERANK_MODEL=Qwen3-Reranker-0.6B-Q8_0.gguf
 
-EXPOSE 47950
+EXPOSE 48950
 
 # Conditional GGUF pre-bake for the "full" image variant.
 # When PULL_MODEL=true, this layer downloads both GGUFs into the image under

@@ -22,7 +22,7 @@ import httpx
 
 from eval.tasks import GRADERS, TASKS
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 
 # Pre-defined model lineup. Each is an OpenAI-compatible endpoint + model
 # name, all env-overridable. The four slots span architecture x scale:

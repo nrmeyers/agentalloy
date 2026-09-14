@@ -83,10 +83,10 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
-          # cpu preset points the embed server at the llama-server port (47951)
+          # cpu preset points the embed server at the llama-server port (48951)
           # and selects nomic-embed-text-v1.5 (768-dim). Ollama was dropped in
           # v1.3.1; the embedder went to nomic in v2.0.
-          uv run agentalloy write-env --preset cpu --port 47950 --force
+          uv run agentalloy write-env --preset cpu --port 48950 --force
           cat > recommend-models.json <<'JSON'
           {"schema_version": 1, "preset": "cpu", "selected_runner": "llama-server",
            "options": [{"default": true,

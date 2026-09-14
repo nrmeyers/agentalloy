@@ -60,8 +60,8 @@ INTENT_KEYS: frozenset[str] = frozenset(
         "AGENTALLOY_RELEASE_CHECK",
         # Assist-stack group (not Settings fields; read via os.environ by the
         # retrieval/signal layers). Forwarded as one coupled group: the preset
-        # rerank URLs are localhost:47952 and the container's baked reranker
-        # listens on in-container localhost:47952, so a forwarded preset URL
+        # rerank URLs are localhost:48952 and the container's baked reranker
+        # listens on in-container localhost:48952, so a forwarded preset URL
         # and the baked reality are identical; the behavioral keys are
         # hardware intent and the container runs on the machine the preset
         # was chosen for.

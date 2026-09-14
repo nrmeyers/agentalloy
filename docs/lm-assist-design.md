@@ -6,7 +6,7 @@ Status: **shipped (current as of v9.0.0).** Originally a design sketch
 (2026-06-12); the slices it scoped are now in the codebase, each fail-open to the
 deterministic path. Since v2.4.0 the signals-layer intent reranker is the
 **primary phase-transition trigger** (the prefilter no longer short-circuits it),
-and the installer now provisions the reranker service on `:47952`. Their defaults
+and the installer now provisions the reranker service on `:48952`. Their defaults
 follow what they measured (see "How we know it works"):
 
 - **Stage 0 — skill-card indexing** shipped (the re-embed pass indexes a
@@ -182,7 +182,7 @@ then became the default once measured.)
 
 - **Model: `qwen3-reranker-0.6b`** — pair-scored via `/v1/completions`
   yes/no logprobs. (The earlier LFM2.5-350M vs `qwen3.5:0.8b` bake-off is
-  obsolete; the reranker won.) Default served at `http://127.0.0.1:47952`.
+  obsolete; the reranker won.) Default served at `http://127.0.0.1:48952`.
 - Budget: hard `LM_ASSIST_TIMEOUT_MS` timeout (GPU presets **2000 ms**;
   per-request reaped at 0.9x the batch budget), then fail-open. Stage B scores up
   to `LM_ASSIST_MAX_CANDIDATES` (GPU presets **16**) fragments across the
@@ -225,9 +225,9 @@ measured separately on 2026-06-12, and their shipped defaults follow the results
 5. Cost gate: p50/p95 compose latency reported both ways.
 
 > **Deployment note.** Default-on `reranker` only delivers the measured lift
-> where a `qwen3-reranker-0.6b` server is reachable (default `:47952`). The setup
-> wizard now provisions that server (the installer writes embed (47951) +
-> reranker (47952) llama-server units/plists — see `install/subcommands/enable_service.py`),
+> where a `qwen3-reranker-0.6b` server is reachable (default `:48952`). The setup
+> wizard now provisions that server (the installer writes embed (48951) +
+> reranker (48952) llama-server units/plists — see `install/subcommands/enable_service.py`),
 > so a fresh install serves the reranker by default; it still fails open to cosine
 > if the server is unreachable.
 

@@ -2,7 +2,7 @@
 
 The optional second context module (`src/agentalloy/code_index/`): a tree-sitter
 symbol graph plus hybrid semantic/lexical search over the operator's own repos,
-served under `/code/*` on the main service port (47950). No separate process,
+served under `/code/*` on the main service port (48950). No separate process,
 no separate port — the routers register on the same FastAPI app as compose.
 
 - **Toggle**: `CODE_INDEX_ENABLED=1` (default off). The setup wizard's module

@@ -35,7 +35,7 @@ container guard. See `docs/followups.md`.
 ## Security posture (the AC-7 decision)
 
 Corpus mutation is a new authority on the service port, and a container publishes
-`0.0.0.0:47950` to the LAN/tailscale. The proxy `/proj/{token}` scheme is **not**
+`0.0.0.0:48950` to the LAN/tailscale. The proxy `/proj/{token}` scheme is **not**
 auth — the token is `base64url(realpath(project_dir))`, publicly derivable — so it
 cannot guard this endpoint.
 

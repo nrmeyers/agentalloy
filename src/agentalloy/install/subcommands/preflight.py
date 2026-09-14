@@ -38,12 +38,12 @@ from agentalloy.install.output import add_json_flag, write_result
 
 SCHEMA_VERSION = 1
 
-_DEFAULT_PORT = 47950
+_DEFAULT_PORT = 48950
 _PHASES = ("early", "runner", "container")
 
 # llama-server (llama.cpp) is the sole inference runner. The embed server
-# listens on 47951 (--embeddings mode); RUNTIME_EMBED_BASE_URL overrides it.
-_LLAMA_EMBED_PORT = 47951
+# listens on 48951 (--embeddings mode); RUNTIME_EMBED_BASE_URL overrides it.
+_LLAMA_EMBED_PORT = 48951
 _DEFAULT_EMBED_BASE_URL = f"http://localhost:{_LLAMA_EMBED_PORT}"
 
 
@@ -385,7 +385,7 @@ def _embed_base_url() -> str:
     """Resolve the embed server base URL from .env (fallback to the default).
 
     Honors ``RUNTIME_EMBED_BASE_URL`` written by ``write-env``; defaults to
-    the llama-server embed port (47951) when no env file is present.
+    the llama-server embed port (48951) when no env file is present.
     """
     env = install_state.parse_env_file(install_state.env_path())
     return env.get("RUNTIME_EMBED_BASE_URL", _DEFAULT_EMBED_BASE_URL).rstrip("/")

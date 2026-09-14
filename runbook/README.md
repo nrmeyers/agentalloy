@@ -65,9 +65,9 @@ Dev ports (this build):
 - :50001 — driver LFM2.5-2.6B (shared with v1, already running)
 
 Final flip (after M1 ACs pass):
-- :47950 — newagent service (drop-in replacement for v1)
-- :47951 — embedding server
-- :47952 — rerank server
+- :48950 — newagent service (drop-in replacement for v1)
+- :48951 — embedding server
+- :48952 — rerank server
 - v1 decommissioned
 
 ## Health Checks

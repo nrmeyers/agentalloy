@@ -36,7 +36,7 @@ const config: ConfigData = {
   upstream_model: 'global-model',
   upstream_api_key: null,
   anthropic_upstream_url: '',
-  runtime_embed_base_url: 'http://localhost:47951',
+  runtime_embed_base_url: 'http://localhost:48951',
   runtime_embedding_model: 'embed-model',
   embedding_provider: 'local',
   log_level: 'INFO',

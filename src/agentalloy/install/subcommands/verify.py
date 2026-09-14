@@ -168,7 +168,7 @@ def _check_embedding_endpoint_reachable(embed_url: str) -> dict[str, Any]:
             "error": str(exc),
             "remediation": (
                 "Start the embed llama-server (e.g. `llama-server --embeddings "
-                "--pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951`), "
+                "--pooling mean --ctx-size 2048 --ubatch-size 2048 --port 48951`), "
                 "then re-run verify"
             ),
         }
@@ -626,7 +626,7 @@ def _check_harness_config_present(st: dict[str, Any]) -> dict[str, Any]:
 def _check_harness_config_url(st: dict[str, Any]) -> dict[str, Any]:
     """Check 7: Injected URL matches the configured port."""
     t0 = time.monotonic()
-    port = install_state.validate_port(st.get("port", 47950))
+    port = install_state.validate_port(st.get("port", 48950))
     expected_url = f"http://localhost:{port}"
     files_written = st.get("harness_files_written", [])
     # harness_files_written is empty if: (a) user chose "manual" harness,
@@ -730,7 +730,7 @@ def _check_port_available(port: int) -> dict[str, Any]:
 def _check_reranker_reachable(env: dict[str, str]) -> dict[str, Any]:
     """Check 9: signal-intent reranker reachable (advisory — never fails the suite).
 
-    The reranker (Qwen3-Reranker on :47952) is the primary phase-transition
+    The reranker (Qwen3-Reranker on :48952) is the primary phase-transition
     trigger as of v2.4.0, but it is NOT required: when unreachable the signal
     layer falls back to the cosine floor (functional, less precise), so an
     absent reranker is a soft warn (``passed: True``), not a failure — matching
@@ -852,18 +852,18 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     # user sees "wait, bootstrap in progress" instead of a wall of false
     # "port bound by other process" failures.
     if st.get("deployment") == "container":
-        port = install_state.validate_port(st.get("port", 47950))
+        port = install_state.validate_port(st.get("port", 48950))
         bootstrap_result = _check_bootstrap_in_progress(port)
         if bootstrap_result is not None:
             return bootstrap_result
 
     env = _read_env_values(install_state.user_config_dir())
 
-    embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
+    embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:48951")
     embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "nomic-embed-text-v1.5.Q8_0.gguf")
     user_corpus = install_state.corpus_dir()
     store_path = env.get("CORPUS_STORE_PATH", str(user_corpus / "agentalloy.overgraph"))
-    port = install_state.validate_port(st.get("port", 47950))
+    port = install_state.validate_port(st.get("port", 48950))
 
     # Resolve a relative path against the user corpus dir (not the cwd) —
     # the service no longer assumes a project-relative working directory.

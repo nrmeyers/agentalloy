@@ -16,8 +16,8 @@ def test_config_env_override(monkeypatch: object) -> None:
     from typing import Any
 
     mp: Any = monkeypatch
-    mp.setenv("AGENTALLOY_SERVICE_PORT", "47950")
+    mp.setenv("AGENTALLOY_SERVICE_PORT", "48999")
     mp.setenv("AGENTALLOY_MODEL", "test-model")
     config = Config.from_env()
-    assert config.service_port == 47950
+    assert config.service_port == 48999
     assert config.model == "test-model"

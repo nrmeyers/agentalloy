@@ -48,7 +48,7 @@ def add_parser(
         "--port",
         type=int,
         default=None,
-        help="Override the service port (default: read from user state, fallback 47950).",
+        help="Override the service port (default: read from user state, fallback 48950).",
     )
     p.add_argument(
         "--upstream-url",

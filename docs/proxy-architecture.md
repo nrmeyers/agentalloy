@@ -27,7 +27,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  AgentAlloy Proxy (:47950)                                   │
+│  AgentAlloy Proxy (:48950)                                   │
 │                                                              │
 │  1. Extract working directory from request                   │
 │  2. Read phase from DuckDB state store                       │
@@ -98,7 +98,7 @@ qwen-code:              # OpenAI chat-completions harness
   non-passthrough entry); with none present the surface 503s rather than falling
   back to anything global.
 
-The harness never sees any of these values — it only talks to `localhost:47950`.
+The harness never sees any of these values — it only talks to `localhost:48950`.
 `key_env` is read by the proxy from its own process env at request time; no
 credential is written into the repo.
 
@@ -281,7 +281,7 @@ The proxy does NOT maintain:
 
 ### Universal Wiring
 
-Harnesses that support custom API endpoints wire to the proxy by changing their LLM configuration to point to `http://localhost:47950/v1`. The harness's own client appends the endpoint path (e.g., `/chat/completions`) to this base URL.
+Harnesses that support custom API endpoints wire to the proxy by changing their LLM configuration to point to `http://localhost:48950/v1`. The harness's own client appends the endpoint path (e.g., `/chat/completions`) to this base URL.
 
 ```bash
 agentalloy add <harness>
@@ -314,7 +314,7 @@ Phase-drift adherence (banner, scold-after-stray, artifact-as-key, intent-drift,
 
 The old three-tier model (hooks / per-session injection / sidecar) collapsed to a binary proxy-wired vs sidecar classification (see [Harness Classification](harness-classification.md)). The proxy is now the universal mechanism for interceptable harnesses; the file-watching sidecar remains for non-interceptable ones (cursor, windsurf, github-copilot, antigravity).
 
-There is **no hook transport**. Claude Code is **proxy-wired** via the native Anthropic passthrough at `/proj/<token>/v1/messages` (`ANTHROPIC_BASE_URL`); the per-turn hook routes have been removed. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 47951, queries prefixed `search_query: ` and documents `search_document: `), the OverGraph corpus store + Tantivy BM25 sidecar, signal layer, phase file, and contracts all carried over unchanged.
+There is **no hook transport**. Claude Code is **proxy-wired** via the native Anthropic passthrough at `/proj/<token>/v1/messages` (`ANTHROPIC_BASE_URL`); the per-turn hook routes have been removed. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 48951, queries prefixed `search_query: ` and documents `search_document: `), the OverGraph corpus store + Tantivy BM25 sidecar, signal layer, phase file, and contracts all carried over unchanged.
 
 ## Telemetry
 

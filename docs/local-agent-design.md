@@ -271,7 +271,7 @@ determinism only for the loop, generation-level only for the answer).
 - **New service unit** `agentalloy-local-agent` (systemd) /
   `ai.agentalloy.local-agent.plist` (launchd): `llama-server` serving the
   2.6B GGUF with the DSpark compressor sidecar on `:50001`, written alongside
-  the embed (`:47951`) and rerank (`:47952`) units in
+  the embed (`:48951`) and rerank (`:48952`) units in
   `install/subcommands/enable_service.py`, including the existing port-reclaim
   logic. Best-effort skip + log when `llama-server` is absent, same as the
   other two units. Exact compressor launch args: pinned in the plan phase

@@ -1,7 +1,7 @@
 """POC harness: composed vs flat across the 5 pre-registered tasks.
 
 Composed arm: POST /compose to a running agentalloy (uvicorn at $AGENTALLOY_URL,
-default http://localhost:47950), then call the agent model with /compose's
+default http://localhost:48950), then call the agent model with /compose's
 ``output`` field as a system prompt + the task spec as user prompt.
 
 Flat arm: concatenate the gold skills' ``raw_prose`` from the pack corpus
@@ -45,7 +45,7 @@ PACKS_ROOT = REPO_ROOT / "src" / "agentalloy" / "_packs"
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 CONTRACTS_ROOT = REPO_ROOT / "eval" / "contracts"
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen3.6-35b-a3b")
 

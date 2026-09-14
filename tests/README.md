@@ -55,10 +55,10 @@ The suite is organized into module-aligned packages that mirror `src/agentalloy/
 
 ## Test Markers
 
-- **`integration`** — Tests requiring a live embed runtime (llama-server on `:47951`). Excluded from default runs.
+- **`integration`** — Tests requiring a live embed runtime (llama-server on `:48951`). Excluded from default runs.
 - **`container`** — Tests requiring podman. Excluded from default runs.
 - **`harness_e2e`** — End-to-end harness tests requiring real harness binaries. Excluded from default runs.
-- **`xdist_group`** — Tests that must run serially (e.g., tests binding to `:47950`).
+- **`xdist_group`** — Tests that must run serially (e.g., tests binding to `:48950`).
 
 ## Running Tests
 

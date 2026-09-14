@@ -35,7 +35,7 @@ Usage
     uv run python -m eval.intent_bench
     uv run python -m eval.intent_bench --limit 20        # quick smoke
 
-Requires the live embedder (llama-server :47951) and reranker (llama-server :47952).
+Requires the live embedder (llama-server :48951) and reranker (llama-server :48952).
 """
 
 from __future__ import annotations
@@ -69,9 +69,9 @@ INTENTS = ["completion", "approval", "redirection"]
 LABELS = [*INTENTS, "none"]
 DIFFICULTIES = ["clear", "paraphrase", "negation", "scoped"]
 
-_EMBED_URL = "http://localhost:47951"
+_EMBED_URL = "http://localhost:48951"
 _EMBED_MODEL = "nomic-embed-text-v1.5"
-_RERANK_URL = "http://127.0.0.1:47952"
+_RERANK_URL = "http://127.0.0.1:48952"
 _RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 _COSINE_THRESHOLD = 0.75
 

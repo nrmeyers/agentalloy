@@ -1048,7 +1048,7 @@ def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[
     image = image or _target_image(state.get("image_tag"), None)
 
     packs = _installed_packs(state)
-    port = install_state.validate_port(state.get("port", 47950))
+    port = install_state.validate_port(state.get("port", 48950))
     # Runs the image's baked /app/entrypoint.sh with AGENTALLOY_PACKS — no
     # host-generated entrypoint bind-mount. This both makes the container
     # survive `start`/reboot and fixes the prior temp-file leak: the old path

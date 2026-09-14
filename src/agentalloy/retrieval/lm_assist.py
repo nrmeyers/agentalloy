@@ -51,10 +51,10 @@ logger = logging.getLogger(__name__)
 # Config (env-driven). Read once per build; reset_lm_assist_cache() for tests.
 # ---------------------------------------------------------------------------
 
-# AgentAlloy's reranker (llama-server) listens on 47952; the old 60001 default
+# AgentAlloy's reranker (llama-server) listens on 48952; the old 60001 default
 # pointed at an unrelated local service. Stage B is off by default (LM_ASSIST),
 # but when enabled it shares the same reranker as the signal intent scorer.
-_DEFAULT_URL = "http://127.0.0.1:47952"
+_DEFAULT_URL = "http://127.0.0.1:48952"
 
 # Shared concurrency semaphore — bounds TOTAL in-flight requests across BOTH
 # scorer singletons (compose Stage B + signal intent classifier) to a safe

@@ -414,7 +414,7 @@ def _stop_container_stack(
         if runtime is None:
             return actions
         port_raw = st.get("port")
-        port = port_raw if isinstance(port_raw, int) else 47950
+        port = port_raw if isinstance(port_raw, int) else 48950
         conflicts = _list_conflicting_containers(runtime, container_name, port)
         named = [(n, s) for n, s in conflicts if n == container_name]
         if not named:
@@ -1643,7 +1643,7 @@ def uninstall(
 
     # 5b/6. Full native teardown: stop+disable+remove all systemd user units
     # (or launchd plists), reclaim our own stale processes squatting ports
-    # 47950/47951/47952, and strip the llama-server shim. Foreign processes are
+    # 48950/48951/48952, and strip the llama-server shim. Foreign processes are
     # never killed — they surface as warnings. Skipped by `unwire`, which passes
     # stop_services=False so a soft unwire leaves running services in place.
     if stop_services:

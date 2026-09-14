@@ -19,7 +19,7 @@ Usage:
     uv run python -m eval.retrieval_audit [--k 4] [--limit N] [--packs a,b]
 
 Requires the AgentAlloy service running on $AGENTALLOY_URL (default
-http://localhost:47950). Read-only; makes no model calls.
+http://localhost:48950). Read-only; makes no model calls.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from typing import Any
 import httpx
 import yaml
 
-AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:48950")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKS_ROOT = REPO_ROOT / "src" / "agentalloy" / "_packs"
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
