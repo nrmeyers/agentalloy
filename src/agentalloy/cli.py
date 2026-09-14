@@ -40,7 +40,7 @@ def _local_index_build(repo_path: Path, config: Config) -> None:
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="AgentAlloy — local agent with MiniCPM5 interpreter + LangGraph workflow"
+        description="AgentAlloy — local agent with LFM2.5-2.6B interpreter + LangGraph workflow"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

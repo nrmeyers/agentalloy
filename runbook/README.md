@@ -5,7 +5,7 @@ Named M1 deliverable (design §22). Exact commands to start the LFM2.5 model sta
 ## Model Locations
 
 All GGUFs in `~/.local/share/agentalloy/models/`:
-- `LFM2.5-2.6B-Q8_0.gguf` — driver (interpreter, :50001, shared with v1)
+- `LFM2.5-2.6B-QAD-Q4_0.gguf` — driver (interpreter, :50001, shared with v1)
 - `LFM2.5-Embedding-350M-Q8_0.gguf` — embedding model (:48951)
 - `LFM2.5-ColBERT-350M-Q8_0.gguf` — ColBERT rerank model (:48952, **see §9 decision below**)
 

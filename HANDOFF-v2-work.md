@@ -72,7 +72,7 @@ Previously-known quirks, now resolved:
 
 ```bash
 # full stack: uv sync + podman model servers + service
-# (interpreter :50001 is now MiniCPM5-2B with DSpark speculative decoding;
+# (interpreter :50001 is LFM2.5-2.6B (QAD-Q4_0) with DSpark speculative decoding;
 #  embed nomic-embed-text-v1.5 :48951; local-agent proxy :48953 — the last
 #  two are for the v2 local agent, not TheForge)
 scripts/v2-bringup.sh up            # or: serve | smoke | status | down
