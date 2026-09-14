@@ -461,7 +461,7 @@ def compose(request: ComposeRequest) -> ComposeResponse:
             # The follow-up goes to the SIDECAR (interpreter client), so it
             # uses the interp model name, not the main upstream model.
             follow = interpreter.client.chat.completions.create(
-                model=config.interp_model if config else "minicpm5-2b",
+                model=config.interp_model if config else "lfm2.5-2.6b-compressor",
                 messages=history
                 + [
                     {

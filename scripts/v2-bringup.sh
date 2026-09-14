@@ -19,18 +19,18 @@ INSTANCE="${INSTANCE:-$HOME/.local/share/agentalloy-instance}"
 MODELS_DIR="${MODELS_DIR:-/mnt/ai-data/llama/models}"
 IMAGE="${IMAGE:-localhost/llama-server-cuda:latest}"
 
-# Models. Interp: MiniCPM5-2B replaced LFM2.5-2.6B on 2026-09-11 — spike
-# gates measured 66/66 classification / 0 hallucination vs LFM's 62/66 / 3%,
-# faster compose (~9s vs ~20s), clean native tool-call parsing in
-# llama-server. Sampling per the HF model card (temp 1.0, top-p 0.95).
-# DSpark speculative decoding added 2026-09-12: the 653MB DSpark drafter
-# cut the spike suite 3m35s → 2m31s (-30%) with identical gates (draft
-# acceptance ~50%, mean run ~4.7 tok). Needs the :dspark image
-# (--spec-type draft-dspark). Set INTERP_DRAFT_MODEL="" to disable.
-INTERP_MODEL="${INTERP_MODEL:-MiniCPM5-2B-Q8_0.gguf}"
-INTERP_NAME="${INTERP_NAME:-minicpm5-2b}"
+# Models. Interp: back to LFM2.5-2.6B (QAD-Q4_0) on 2026-09-14 — MiniCPM5-2B
+# had replaced it on 2026-09-11 (66/66 classification / 0 hallucination vs
+# LFM's 62/66 / 3%, faster compose ~9s vs ~20s); the engine is the LFM again.
+# Sampler is LFM's task-tuned config (temp 0.2 / top-k 80 / repeat-penalty
+# 1.05); the interpreter sends temperature 0 per request anyway. DSpark
+# speculative decoding: the 633MB LFM DSpark-F16 drafter (needs the :dspark
+# image, --spec-type draft-dspark; n-max 9 = the drafter's trained block
+# size). Set INTERP_DRAFT_MODEL="" to disable.
+INTERP_MODEL="${INTERP_MODEL:-LFM2.5-2.6B-QAD-Q4_0.gguf}"
+INTERP_NAME="${INTERP_NAME:-lfm2.5-2.6b-compressor}"
 INTERP_IMAGE="${INTERP_IMAGE:-localhost/llama-server-cuda:dspark}"
-INTERP_DRAFT_MODEL="${INTERP_DRAFT_MODEL-MiniCPM5-2.6B-DSpark.gguf}"
+INTERP_DRAFT_MODEL="${INTERP_DRAFT_MODEL-LFM2.5-2.6B-DSpark-F16.gguf}"
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text-v1.5.Q8_0.gguf}"
 
 # Ports (v2 dev range :48950-3)
@@ -94,6 +94,10 @@ export AGENTALLOY_REPO_ROOT=$REPO_ROOT
 export AGENTALLOY_STATE_DUCK=$INSTANCE/state.duck
 export AGENTALLOY_USAGE_DUCK=$INSTANCE/usage.duck
 export AGENTALLOY_INDEX_DIR=$INSTANCE/index
+# Telemetry DB too — otherwise the dev instance and any other running
+# agentalloy service share ~/.local/share/agentalloy/telemetry.duck and
+# the second one dies on the DuckDB writer lock.
+export TELEMETRY_DB_PATH=$INSTANCE/telemetry.duck
 EOF
 }
 
@@ -110,10 +114,10 @@ cmd_up(){
   local draft_args=()
   if [ -n "$INTERP_DRAFT_MODEL" ]; then
     draft_args=(--spec-type draft-dspark --spec-draft-model "/models/$INTERP_DRAFT_MODEL" \
-                --spec-draft-n-max 7 --spec-draft-ngl 99)
+                --spec-draft-n-max 9 --spec-draft-ngl 99)
   fi
   start_llama agentalloy-interp "$INTERP_IMAGE" "$MODEL_PORT" --model "/models/$INTERP_MODEL" \
-    --alias "$INTERP_NAME" --jinja --temp 1.0 --top-p 0.95 "${draft_args[@]}"
+    --alias "$INTERP_NAME" --jinja --temp 0.2 --top-k 80 --repeat-penalty 1.05 "${draft_args[@]}"
   start_llama agentalloy-embed "$IMAGE" "$EMBED_PORT" --model "/models/$EMBED_MODEL" --embeddings --pooling mean --ctx-size 2048 --batch-size 2048 --ubatch-size 2048
 
   write_env
@@ -122,11 +126,19 @@ cmd_up(){
 
 cmd_serve(){
   cd "$REPO_ROOT"; source "$INSTANCE/env.sh"
-  local pid; pid="$(service_pid)"
+  # `|| true`: with pipefail, an empty port makes the service_pid pipeline
+  # exit 1, and set -e would abort here before serving.
+  local pid; pid="$(service_pid || true)"
   [ -n "${pid:-}" ] && { log "stopping existing service pid $pid"; kill "$pid" 2>/dev/null || true; sleep 2; }
   log "serving on :$PORT"
-  nohup uv run agentalloy serve --port "$PORT" --host 127.0.0.1 > "$INSTANCE/serve.log" 2>&1 &
-  wait_health "http://127.0.0.1:$PORT/health" 30 \
+  # `python -m agentalloy` = the v2 stack CLI (agentalloy.cli → server.py).
+  # The installed `agentalloy` entry is the v10 product shell since the M0
+  # merge — `agentalloy serve` would start agentalloy.app:app, which has no
+  # /chat or JSON /status.
+  nohup uv run python -m agentalloy serve --port "$PORT" --host 127.0.0.1 > "$INSTANCE/serve.log" 2>&1 &
+  # 300s: a cold instance dir ingests the whole repo (parse + embed every
+  # chunk) before the port binds — measured ~2.5 min on the agentalloy repo.
+  wait_health "http://127.0.0.1:$PORT/health" 300 \
     && log "service healthy: http://127.0.0.1:$PORT" \
     || { tail -20 "$INSTANCE/serve.log"; die "service did not come up (see $INSTANCE/serve.log)"; }
   log "dashboard: http://127.0.0.1:$PORT/dashboard"
@@ -155,7 +167,8 @@ cmd_smoke(){
 }
 
 cmd_down(){
-  local pid; pid="$(service_pid)"
+  # `|| true`: see cmd_serve — a free port must not abort the pipeline.
+  local pid; pid="$(service_pid || true)"
   [ -n "${pid:-}" ] && { log "killing service pid $pid"; kill "$pid" 2>/dev/null || true; }
   log "stopping model servers"
   "$RUNTIME" stop agentalloy-interp agentalloy-embed 2>/dev/null || true

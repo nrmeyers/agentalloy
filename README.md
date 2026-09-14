@@ -36,7 +36,7 @@ Coding agents don't fail for lack of intelligence — they fail for lack of **co
 - **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated ~350-skill corpus across 41 packs) that fit *this* moment. Nothing changed means nothing injected.
 - **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs and budgeted context bundles, served over a 15-tool execution surface. The agent **queries it**; nothing is pushed.
 - **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index: a deterministic `_index_decisions` pass links each decision (`docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand or let it push at design/build.
-- **Execution (new in v11)** — knows *how to act*. A local **MiniCPM5-2B interpreter** drives a read-only query protocol in-process: it classifies the question, fills the arguments, executes against the index, loops or stops, and answers — **zero cloud tokens**. This is what turns a context *engine* into an Agent *OS*.
+- **Execution (new in v11)** — knows *how to act*. A local **LFM2.5-2.6B interpreter** drives a read-only query protocol in-process: it classifies the question, fills the arguments, executes against the index, loops or stops, and answers — **zero cloud tokens**. This is what turns a context *engine* into an Agent *OS*.
 
 It attaches as a **local steering proxy**: your harness points its base URL at AgentAlloy and every request flows through with the right context composed in — for Claude Code, wiring sets a single env var and your own credentials pass through untouched. Smaller models get leverage they don't have alone; larger models get your actual house rules and a way to interrogate your actual codebase and its decisions — instead of their best guess.
 
@@ -56,7 +56,7 @@ v11 is the **Agent OS**: the v10 product shell (install runbook, setup wizard, h
 
 | | v10 (context engine) | **v11 (Agent OS)** |
 |---|---|---|
-| Execution | Proxy-only; the harness model does the work | **Local MiniCPM5-2B interpreter** drives the query protocol; optional **DSpark** speculative drafter |
+| Execution | Proxy-only; the harness model does the work | **Local LFM2.5-2.6B interpreter** drives the query protocol; optional **DSpark** speculative drafter |
 | Surface | Vite web app | **In-app dashboard** at `/dashboard` (retires `frontend/`) |
 | Ports | one process on `47950` (+ `47951`/`47952`) | **service `48950` · proxy `48953` · embed `48951` · model `50001`** |
 | Intelligence | Retrieved, not executed | **Local Agent Mode**: the 2B model runs a 10-action read-only protocol, opt-in, zero cloud tokens |
@@ -111,7 +111,7 @@ agentalloy setup                                                  # 3. run the s
 cd /path/to/your/repo && agentalloy add claude-code              # 4. add each project (per-repo)
 ```
 
-The wizard detects your hardware, downloads the GGUF models (MiniCPM5-2B interpreter, optional DSpark drafter, nomic-embed-text-v1.5), starts the embed server, lets you pick skill packs, wires your harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**: **Container** (default — one GHCR image, zero host-side inference dependencies) or **Native** (llama-server on your host, GPU acceleration). Trade-offs and the full runbook — scripted flags, air-gapped installs — live in **[INSTALL.md](INSTALL.md)**.
+The wizard detects your hardware, downloads the GGUF models (LFM2.5-2.6B interpreter, optional DSpark drafter, nomic-embed-text-v1.5), starts the embed server, lets you pick skill packs, wires your harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**: **Container** (default — one GHCR image, zero host-side inference dependencies) or **Native** (llama-server on your host, GPU acceleration). Trade-offs and the full runbook — scripted flags, air-gapped installs — live in **[INSTALL.md](INSTALL.md)**.
 
 Scripted installs skip the wizard: `agentalloy setup -n --hardware nvidia --packs all --harness claude-code` (native) or `agentalloy setup -n --deployment container --harness claude-code`.
 
@@ -161,7 +161,7 @@ v11 runs as **one local platform with two cooperating processes** (plus your ups
    │   │  41 packs · ~350 skills · versions · fragments · embeds│ │
    │   └────────────────────────────────────────────────────────┘ │
    │                                                              │
-   │   Local Agent (opt-in) ─ MiniCPM5-2B interpreter :50001      │
+   │   Local Agent (opt-in) ─ LFM2.5-2.6B interpreter :50001      │
    │   SDD Flow ─ phase · workflow · task · approve               │
    └──────────────────────────────────────────────────────────────┘
                              │
@@ -176,7 +176,7 @@ v11 runs as **one local platform with two cooperating processes** (plus your ups
 - **Skill Corpus** — ~350 production-validated skills across 41 packs, versions and dependencies tracked in an embedded OverGraph store with HNSW embeddings and a BM25 sidecar. The serving process opens it read-only so re-embedding can hold the single writer lock.
 - **Code Index** — per-repo, git-driven; tree-sitter symbol extraction with a Rust core for the hot path; hybrid dense + BM25 + PageRank retrieval; the 15-tool `execute_tool` chain.
 - **Knowledge Graph** — links decisions in your code so the agent can answer *"why was this built this way?"* and *"what's related to this?"*
-- **Local Agent (opt-in)** — the MiniCPM5-2B interpreter runs a read-only query protocol in-process (see [Local Agent Mode](#local-agent-mode)).
+- **Local Agent (opt-in)** — the LFM2.5-2.6B interpreter runs a read-only query protocol in-process (see [Local Agent Mode](#local-agent-mode)).
 - **SDD Flow** — the structured spec → design → plan → build → QA → ship workflow, driven by `phase`, `workflow`, `task`, and `approve`.
 
 ---
@@ -204,7 +204,7 @@ Three small artifacts drive everything AgentAlloy does. None of them belong to y
 
 ## Local Agent Mode
 
-The v11 execution layer. A question goes to the service; the **local MiniCPM5-2B** interpreter — *not* the harness's cloud model — classifies it into one of **10 read-only actions**, fills the arguments under that action's JSON schema, the service executes the query **in-process**, the model decides loop-or-stop, and finally generates an answer from what was retrieved. **Zero cloud tokens**; the harness keeps its cloud model for writing code.
+The v11 execution layer. A question goes to the service; the **local LFM2.5-2.6B** interpreter — *not* the harness's cloud model — classifies it into one of **10 read-only actions**, fills the arguments under that action's JSON schema, the service executes the query **in-process**, the model decides loop-or-stop, and finally generates an answer from what was retrieved. **Zero cloud tokens**; the harness keeps its cloud model for writing code.
 
 - Ships **off by default**. When on, it adds only `POST /local-agent/ask` and `GET /local-agent/health`.
 - The 10 actions mirror the code-intelligence surface: `code_search`, `symbols`, `knowledge_why`, `knowledge_related`, `knowledge_entities`, `artifact_body`, `contract_detail`, `telemetry`, `get_skill_for`, `none`.
@@ -381,7 +381,7 @@ Every skill is sourced from authoritative upstream docs and validated against th
 | **Embeddings** | `nomic-embed-text-v1.5` (Q8_0) | `48951` |
 | **Rerank** *(roadmap, off)* | ColBERT | `48952` |
 | **Steering Proxy** (harness injection) | — | `48953` |
-| **Local interpreter** | `MiniCPM5-2B-Q8_0` (+ optional `MiniCPM5-2.6B-DSpark` drafter) | `50001` |
+| **Local interpreter** | `LFM2.5-2.6B-QAD-Q4_0` (+ optional `LFM2.5-2.6B-DSpark-F16` drafter) | `50001` |
 | **Upstream** (your main session model) | your local or cloud model | — |
 
 The **interpreter** (`:50001`) is the local orchestrator sidecar — the 2B model that drives the Local Agent protocol. The **upstream** is *your* model (local or cloud) that writes the code; AgentAlloy never ships a default for it. The v1 `47950`/`47951`/`47952` ports retire in v11.
@@ -434,7 +434,7 @@ v11.0.0 cuts from `feat/v2-transition` as a `feat!`/BREAKING PR (the version-bot
 Two result sets stand out:
 
 - **Composition lift.** On a 4-model × 3-condition matrix (composed / flat-oracle / no skills) over 18 pre-registered domain tasks, composed injection beat the bare model on every architecture, capturing most of a hand-picked oracle's lift at 21–32% fewer tokens — automatic selection doing the job a human curator would. The lift is biggest for the small edge model, which also runs more concise.
-- **Interpreter gate.** The MiniCPM5-2B interpreter — the model that drives Local Agent Mode — passes the 66-task classify-then-fill gate at **66/66 with 0% hallucination**, replacing the prior LFM2.5-2.6B baseline (62/66, 3% hallucination).
+- **Interpreter gate.** Local Agent Mode's interpreter is measured on the 66-task classify-then-fill gate: MiniCPM5-2B (the engine from 2026-09-11 to 09-14) passed at **66/66 with 0% hallucination**, ahead of the LFM2.5-2.6B baseline (62/66, 3% hallucination). As of 2026-09-14 the engine is LFM2.5-2.6B (QAD-Q4_0) again.
 
 Full matrix, methodology, and caveats in [BENCHMARKS.md](BENCHMARKS.md).
 

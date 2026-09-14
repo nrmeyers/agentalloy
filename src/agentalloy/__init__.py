@@ -1,6 +1,6 @@
 """AgentAlloy — in-package execution layer.
 
-Local agent runtime: MiniCPM5-2B interpreter + LangGraph workflow +
+Local agent runtime: LFM2.5-2.6B interpreter + LangGraph workflow +
 OverGraph code index (tree-sitter symbol graph, hybrid search) + phase
 machine with approval gates, wired behind an unauthenticated local
 FastAPI service and an OpenAI-compatible proxy.
