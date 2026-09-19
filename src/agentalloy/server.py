@@ -117,7 +117,11 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "actual work right after you. Before the handoff, do your state work with your tools:\n"
     "- contract_add: record key requirements, decisions, or constraints from the request.\n"
     "- contract_detail: review active contracts when the request interacts with them.\n"
-    "- phase_advance: only when the current phase's exit criteria are clearly met.\n"
+    "Phase advance — strict protocol, the service rejects anything else:\n"
+    "1. The lifecycle is walked one phase at a time: intake→spec→design→plan→build→qa→ship. Never skip a phase.\n"
+    "2. Before phase_advance(target), record the evidence: artifact_record(phase=<current>, name='<current>-exit', body=<the concrete evidence that phase produced>). An advance without a non-empty exit artifact is rejected.\n"
+    "3. Gated transitions (spec→design, design→plan, plan→build) additionally require approved=true — pass it only when the user has explicitly approved the presented work. Never assume approval.\n"
+    "Advance only when the phase's work is actually done and the request moves past it.\n"
     "Skill selection (pick what the task needs, then assemble):\n"
     "1. get_skill_for WITHOUT packs → the pack catalog (one row per pack).\n"
     "2. get_skill_for WITH packs=[the 1-4 relevant packs] → skill rows with "
@@ -129,7 +133,8 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "main model receives it, not you. Do not re-pull skills or restate the "
     "assembled skill in the brief.\n"
     "Be economical: at most 3 tool calls for skill selection "
-    "(catalog → skills → assemble), plus at most 2 for contracts or phase. "
+    "(catalog → skills → assemble), plus at most 3 for state work "
+    "(contract_add, and the advance pair: artifact_record + phase_advance). "
     "Never repeat a call: each tool at most once per distinct target — ONE "
     "contract_add per new requirement (slugs are unique; re-adding an "
     "existing or just-added slug, or the same requirement under a reworded "
@@ -582,6 +587,21 @@ def tool_exec(request: ToolRequest) -> dict[str, Any]:
             result = execute_tool(request.name, request.args)
         finally:
             set_run_store(None)
+        # MCP calls bypass the interpreter loop — without this row, state
+        # moves made over the MCP bridge (phase_advance, artifact_record)
+        # leave no trace at all. Telemetry must never break the call.
+        if telemetry_store and state_store:
+            scope = state_store.scoped(request.project) if request.project else state_store
+            with contextlib.suppress(Exception):
+                telemetry_store.record_trace(
+                    f"mcp:{request.project or 'global'}",
+                    0,
+                    request.name,
+                    request.args[:500],
+                    (result if isinstance(result, str) else json.dumps(result))[:500],
+                    stop_reason="tool_call",
+                    phase=scope.get_current_phase(),
+                )
         # The contract says `result` is a JSON string the client parses;
         # non-string executor results must be JSON-encoded, never repr'd.
         return {"ok": True, "result": result if isinstance(result, str) else json.dumps(result)}

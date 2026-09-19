@@ -3,7 +3,9 @@
 import tempfile
 from pathlib import Path
 
-from agentalloy.state_store import StateStore
+import pytest
+
+from agentalloy.state_store import PhaseAdvanceError, StateStore
 from agentalloy.telemetry_store import TelemetryStore
 
 
@@ -54,7 +56,7 @@ def test_state_store_artifact_lifecycle() -> None:
 
 
 def test_state_store_phase_advance() -> None:
-    """Phase advance."""
+    """Phase advance — one step, exit artifact required."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = str(Path(tmpdir) / "state.duck")
         store = StateStore(db_path)
@@ -62,7 +64,17 @@ def test_state_store_phase_advance() -> None:
         # New stores start at intake, the lifecycle front door
         assert store.get_current_phase() == "intake"
 
-        # Advance
+        # A forward move needs the current phase's exit artifact
+        with pytest.raises(PhaseAdvanceError, match="exit artifact"):
+            store.advance_phase("spec")
+
+        # With the evidence, the adjacent move passes
+        store.record_artifact("intake", "intake-exit", "route decided: full")
+        store.advance_phase("spec")
+        assert store.get_current_phase() == "spec"
+
+        # And so on, one phase at a time
+        store.record_artifact("spec", "spec-exit", "spec complete")
         store.advance_phase("design")
         assert store.get_current_phase() == "design"
 
@@ -95,9 +107,14 @@ def test_state_store_reset_phase() -> None:
         store = StateStore(db_path)
 
         # Build up lifecycle state
-        store.advance_phase("plan")
+        store.record_artifact("intake", "intake-exit", "full")
+        store.advance_phase("spec")
         digest = store.record_artifact("spec", "spec-exit", "done")
         store.record_approval("spec→design", digest)
+        store.advance_phase("design")
+        design_digest = store.record_artifact("design", "design-exit", "done")
+        store.record_approval("design→plan", design_digest)
+        store.advance_phase("plan")
         store.add_contract("keep-me", ["python"], "touches")
 
         # Reset
@@ -191,6 +208,7 @@ def test_project_scoping_isolates_lifecycle_state() -> None:
         b = store.scoped("beta-22222222")
 
         a.add_contract("invoice-export", ["finance"], "invoices")
+        a.record_artifact("intake", "intake-exit", "full")
         a.advance_phase("spec")
 
         # New scope starts at lifecycle start with no contracts.

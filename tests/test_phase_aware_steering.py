@@ -48,8 +48,11 @@ def test_phase_change_triggers_activation() -> None:
     _, ctx_type_1 = steering.build_context(prompt="spec task")
     assert ctx_type_1 == 2
 
-    # Advance phase
-    steering.state_store.record_artifact("spec", "spec-exit", "spec done")
+    # Advance phase (intake → spec → design, each move with its evidence)
+    steering.state_store.record_artifact("intake", "intake-exit", "full")
+    steering.state_store.advance_phase("spec")
+    spec_digest = steering.state_store.record_artifact("spec", "spec-exit", "spec done")
+    steering.state_store.record_approval("spec→design", spec_digest)
     steering.state_store.advance_phase("design")
 
     # Next turn should be activation for design phase

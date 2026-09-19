@@ -140,27 +140,34 @@ def test_ac9_property_3_digest_invalidation() -> None:
 
 
 def test_ac9_property_4_force_never_bypasses() -> None:
-    """AC-9 #4: --force never bypasses the gate.
+    """AC-9 #4: force never bypasses the gate.
 
-    The phase_advance executor rejects advance without approval,
-    regardless of any force flag.
+    The phase_advance executor rejects advance without the exit artifact
+    even when approved=True, and a gated transition refuses a
+    non-approved advance once the artifact exists.
     """
     from agentalloy.executors import _phase_advance, set_store
 
     with tempfile.TemporaryDirectory() as tmpdir:
         store = _make_store(tmpdir)
         set_store(store)
+        store.record_artifact("intake", "intake-exit", "full")
         store.advance_phase("spec")
 
-        # Record exit artifact but don't approve
-        store.record_artifact("spec", "spec-exit", "done")
-
-        # Try to advance with approved=True (simulating --force)
+        # No exit artifact: approved=True (simulating --force) cannot
+        # bypass the hard gate.
         result = json.loads(_phase_advance({"target": "design", "approved": True}))
-
-        # Should be rejected — no approval recorded
         assert result["status"] == "rejected"
-        assert "requires approval" in result["reason"]
+        assert "exit artifact" in result["reason"]
+        assert store.get_current_phase() == "spec"
+
+        # With the exit artifact, the gated transition still refuses a
+        # non-approved advance.
+        store.record_artifact("spec", "spec-exit", "done")
+        result = json.loads(_phase_advance({"target": "design"}))
+        assert result["status"] == "rejected"
+        assert "requires the user's approval" in result["reason"]
+        assert store.get_current_phase() == "spec"
 
         set_store(None)
         store.close()
@@ -233,7 +240,8 @@ def test_ac16_v2_never_writes_target_source() -> None:
 
         # All v2 state operations
         store.add_contract("test-contract", ["python"], "test")
-        store.record_artifact("spec", "spec-exit", "spec done")
+        store.record_artifact("intake", "intake-exit", "full")
+        store.advance_phase("spec")
         digest = store.record_artifact("spec", "spec-exit", "spec done")
         store.record_approval("spec→design", digest)
         store.advance_phase("design")
@@ -271,7 +279,8 @@ def test_ac11_crash_resumable_sessions() -> None:
 
         # Do some work
         store1.add_contract("contract-auth", ["python"], "auth module")
-        store1.record_artifact("spec", "spec-exit", "spec complete")
+        store1.record_artifact("intake", "intake-exit", "full")
+        store1.advance_phase("spec")
         digest = store1.record_artifact("spec", "spec-exit", "spec complete")
         store1.record_approval("spec→design", digest)
         store1.advance_phase("design")

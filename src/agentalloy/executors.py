@@ -14,7 +14,7 @@ import threading
 from typing import Any
 
 from agentalloy.skill_engine import SkillEngine
-from agentalloy.state_store import LIFECYCLE_START, PHASE_ORDER, StateStore
+from agentalloy.state_store import LIFECYCLE_START, PHASE_ORDER, PhaseAdvanceError, StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -516,18 +516,38 @@ def _artifact_record(args: dict[str, Any]) -> str:
     phase = args.get("phase", "")
     name = args.get("name", "")
     body = args.get("body", "")
+
+    # An empty body is a placeholder, not evidence — the store rejects it at
+    # the write (the advance gate reads this row); reject here too, in both
+    # store and fallback modes, so the LLM gets an actionable message.
+    if not body or not body.strip():
+        return json.dumps(
+            {
+                "status": "rejected",
+                "phase": phase,
+                "name": name,
+                "reason": "body must not be empty — record the concrete evidence this phase produced",
+            }
+        )
+
     store = _current_store()
     if store:
-        store.record_artifact(phase, name, body)
+        try:
+            digest = store.record_artifact(phase, name, body)
+        except ValueError as exc:
+            return json.dumps(
+                {"status": "rejected", "phase": phase, "name": name, "reason": str(exc)}
+            )
     else:
+        digest = None
         key = f"{phase}::{name}"
         _fallback["artifacts"][key] = body
-    return json.dumps({"status": "ok", "phase": phase, "name": name})
+    return json.dumps({"status": "ok", "phase": phase, "name": name, "digest": digest})
 
 
 def _phase_advance(args: dict[str, Any]) -> str:
     target = args.get("target", "")
-    approved = args.get("approved", False)
+    approved = bool(args.get("approved", False))
 
     # Fail-closed at the tool surface: an unknown target is rejected here,
     # before it can reach the store's write-side validation.
@@ -542,51 +562,85 @@ def _phase_advance(args: dict[str, Any]) -> str:
         )
 
     store = _current_store()
-    # AC-9 gate: advance rejected unless exit artifact recorded for current phase
-    if approved and store:
-        current = store.get_current_phase()
-        if current not in PHASE_ORDER:
-            # Corrupt state from before write-side validation — recovery
-            # is an explicit operator reset, not a silent advance.
+    if store is None:
+        # No store wired (standalone tests): no state leg to consult, so the
+        # approved flag is the caller's claim, as before.
+        if approved:
+            _fallback["phases"]["current"] = target
+        return json.dumps({"status": "ok" if approved else "rejected", "target": target})
+
+    current = store.get_current_phase()
+    if current not in PHASE_ORDER:
+        # Corrupt state — recovery is an explicit operator reset, not an
+        # advance. The store refuses the write too; this is the friendly path.
+        return json.dumps(
+            {
+                "status": "rejected",
+                "target": target,
+                "reason": f"current phase {current!r} is not part of the lifecycle; "
+                "use phase_reset to recover",
+                "legal_phases": list(PHASE_ORDER),
+            }
+        )
+
+    cur_idx = PHASE_ORDER.index(current)
+    tgt_idx = PHASE_ORDER.index(target)
+
+    if tgt_idx > cur_idx + 1:
+        return json.dumps(
+            {
+                "status": "rejected",
+                "target": target,
+                "reason": f"cannot advance {current} → {target}: the lifecycle is "
+                "walked one phase at a time",
+            }
+        )
+
+    if tgt_idx > cur_idx:
+        # Hard gate (artifacts): the store re-enforces this at the write; the
+        # pre-check exists so the LLM gets an actionable rejection, not an
+        # error raised out of the tool.
+        if not store.has_exit_artifact(current):
             return json.dumps(
                 {
                     "status": "rejected",
                     "target": target,
-                    "reason": f"current phase {current!r} is not part of the lifecycle; "
-                    "use phase_reset to recover",
-                    "legal_phases": list(PHASE_ORDER),
-                }
-            )
-        exit_digest = store.get_exit_artifact_digest(current)
-        if exit_digest is None:
-            return json.dumps(
-                {
-                    "status": "rejected",
-                    "target": target,
-                    "reason": f"no exit artifact recorded for phase '{current}'",
+                    "reason": f"no substantive exit artifact for phase '{current}' — "
+                    f"call artifact_record(phase='{current}', name='{current}-exit', "
+                    f"body=<the concrete evidence this phase produced>) first",
                 }
             )
 
-        # Check approval gate
+        # Soft gate (approval): the LLM claims the user's approval; the store
+        # pins it to the exit artifact's digest, so editing the artifact
+        # voids it (AC-9). Only the gated transitions are checked.
         from agentalloy.phase_machine import APPROVAL_GATES
 
         transition = f"{current}→{target}"
-        if transition in APPROVAL_GATES and not store.is_approved(transition, exit_digest):
-            return json.dumps(
-                {
-                    "status": "rejected",
-                    "target": target,
-                    "reason": f"transition '{transition}' requires approval",
-                    "digest": exit_digest,
-                }
-            )
+        if transition in APPROVAL_GATES:
+            exit_digest = store.get_exit_artifact_digest(current) or ""
+            if not store.is_approved(transition, exit_digest):
+                if not approved:
+                    return json.dumps(
+                        {
+                            "status": "rejected",
+                            "target": target,
+                            "reason": f"transition '{transition}' requires the user's "
+                            "approval — pass approved=true only after the user has "
+                            "explicitly approved the work",
+                            "digest": exit_digest,
+                        }
+                    )
+                store.record_approval(transition, exit_digest)
 
-    if approved:
-        if store:
-            store.advance_phase(target)
-        else:
-            _fallback["phases"]["current"] = target
-    return json.dumps({"status": "ok" if approved else "rejected", "target": target})
+    try:
+        store.advance_phase(target)
+    except PhaseAdvanceError as exc:
+        # The store is authoritative; this fires only on a state change
+        # between the pre-checks above and the write.
+        return json.dumps({"status": "rejected", "target": target, "reason": str(exc)})
+
+    return json.dumps({"status": "ok", "from": current, "target": target})
 
 
 def _phase_reset(args: dict[str, Any]) -> str:

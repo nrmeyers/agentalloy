@@ -147,8 +147,11 @@ def test_phase_aware_steering_activation_and_diffing() -> None:
         ctx3, type3 = steering.build_context(prompt="search for auth code")
         assert type3 == 0  # no injection
 
-        # Advance phase
-        store.record_artifact("spec", "spec-exit", "done")
+        # Advance phase (intake → spec → design, each move with its evidence)
+        store.record_artifact("intake", "intake-exit", "full")
+        store.advance_phase("spec")
+        spec_digest = store.record_artifact("spec", "spec-exit", "done")
+        store.record_approval("spec→design", spec_digest)
         store.advance_phase("design")
 
         # Turn 4: new phase → activation again

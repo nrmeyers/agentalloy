@@ -347,6 +347,7 @@ def test_interpreter_phase_advance_allowed_with_exit_artifact() -> None:
 
         # Start in spec, record exit artifact and approval (spec→design is
         # an approval gate)
+        store.record_artifact("intake", "intake-exit", "full")
         store.advance_phase("spec")
         digest = store.record_artifact("spec", "spec-exit", "spec complete")
         store.record_approval("spec→design", digest)

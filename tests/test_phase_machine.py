@@ -186,6 +186,7 @@ def test_phase_machine_interrupt_and_resume_at_approval_gate() -> None:
     """interrupt() pauses at the approval gate; resume() completes it."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = _make_store(tmpdir)
+        store.record_artifact("intake", "intake-exit", "full")
         store.advance_phase("spec")
         digest = store.record_artifact("spec", "spec-exit", "done")
 
@@ -209,7 +210,17 @@ def test_phase_machine_run_advances_through_non_gated() -> None:
     """Phase machine can run through non-gated transitions."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = _make_store(tmpdir)
-        # Start at build (past the gated transitions)
+        # Start at build (past the gated transitions), each move with its evidence
+        store.record_artifact("intake", "intake-exit", "full")
+        store.advance_phase("spec")
+        spec_digest = store.record_artifact("spec", "spec-exit", "done")
+        store.record_approval("spec→design", spec_digest)
+        store.advance_phase("design")
+        design_digest = store.record_artifact("design", "design-exit", "done")
+        store.record_approval("design→plan", design_digest)
+        store.advance_phase("plan")
+        plan_digest = store.record_artifact("plan", "plan-exit", "done")
+        store.record_approval("plan→build", plan_digest)
         store.advance_phase("build")
 
         machine = PhaseMachine(store)
