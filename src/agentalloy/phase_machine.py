@@ -45,6 +45,41 @@ APPROVAL_GATES: set[str] = {"spec→design", "design→plan", "plan→build"}
 _TRANSITIONS = list(itertools.pairwise(PHASE_ORDER))
 
 
+def gate_status(state_store: StateStore, phase: str) -> dict[str, Any]:
+    """Gate status for *phase*'s outgoing transition (non-blocking, no graph).
+
+    The same predicates ``PhaseMachine.check_gate`` reports, factored out so
+    the light read endpoints (``GET /status``) can surface the next gate
+    without compiling the phase graph per request. Unknown phase values are
+    reported, not raised — read surfaces stay fail-closed.
+    """
+    if phase not in PHASE_ORDER:
+        return {
+            "phase": phase,
+            "status": "invalid",
+            "reason": f"unknown phase {phase!r}",
+            "legal_phases": list(PHASE_ORDER),
+        }
+    current_idx = PHASE_ORDER.index(phase)
+    if current_idx >= len(PHASE_ORDER) - 1:
+        return {"phase": phase, "status": "terminal"}
+    next_phase = PHASE_ORDER[current_idx + 1]
+    transition = f"{phase}→{next_phase}"
+    exit_digest = state_store.get_exit_artifact_digest(phase)
+    result: dict[str, Any] = {
+        "phase": phase,
+        "transition": transition,
+        # Same substantive-body predicate the store's advance gate uses — a
+        # placeholder row reports False here and fails the gate there.
+        "has_exit_artifact": state_store.has_exit_artifact(phase),
+        "requires_approval": transition in APPROVAL_GATES,
+    }
+    if exit_digest and transition in APPROVAL_GATES:
+        result["approved"] = state_store.is_approved(transition, exit_digest)
+        result["digest"] = exit_digest
+    return result
+
+
 @dataclass
 class PhaseState:
     """State for the phase machine graph."""
@@ -297,35 +332,7 @@ class PhaseMachine:
         Unknown phase values (corrupt store state) are reported, not raised —
         the gate endpoint is a read surface and must stay fail-closed.
         """
-        if phase not in PHASE_ORDER:
-            return {
-                "phase": phase,
-                "status": "invalid",
-                "reason": f"unknown phase {phase!r}",
-                "legal_phases": list(PHASE_ORDER),
-            }
-        current_idx = PHASE_ORDER.index(phase)
-        if current_idx >= len(PHASE_ORDER) - 1:
-            return {"phase": phase, "status": "terminal"}
-
-        next_phase = PHASE_ORDER[current_idx + 1]
-        transition = f"{phase}→{next_phase}"
-        exit_digest = self.state_store.get_exit_artifact_digest(phase)
-
-        result: dict[str, Any] = {
-            "phase": phase,
-            "transition": transition,
-            # Same substantive-body predicate the store's advance gate uses —
-            # a placeholder row reports False here and fails the gate there.
-            "has_exit_artifact": self.state_store.has_exit_artifact(phase),
-            "requires_approval": transition in APPROVAL_GATES,
-        }
-
-        if exit_digest and transition in APPROVAL_GATES:
-            result["approved"] = self.state_store.is_approved(transition, exit_digest)
-            result["digest"] = exit_digest
-
-        return result
+        return gate_status(self.state_store, phase)
 
 
 def create_task_fanout(task_ids: list[str], target_node: str) -> list[Any]:

@@ -393,6 +393,19 @@ class StateStore:
         ).fetchone()
         return result[0] if result else LIFECYCLE_START
 
+    def has_phase_row(self) -> bool:
+        """True when this scope has an explicit phase row.
+
+        Distinguishes "at lifecycle start by default" (no row yet) from
+        "at lifecycle start for real" — scope selection (state leg,
+        /status?project=) needs the difference to tell which machine a work
+        item actually lives on.
+        """
+        return (
+            self.conn.execute("SELECT 1 FROM phases WHERE project = ?", [self.project]).fetchone()
+            is not None
+        )
+
     def advance_phase(self, target: str) -> None:
         """Advance the lifecycle to *target* — the state leg's hard gate.
 

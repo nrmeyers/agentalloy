@@ -25,6 +25,11 @@ from typing import Any
 
 CURRENT_SCHEMA_VERSION = 5
 
+# v1 service port, retired in v11 — the v2 execution stack owns the state
+# service on 48950 (README port table). A file still carrying it is v1
+# residue; load_state repairs it (docs/bug-v2-steering-split.md, RC-1).
+RETIRED_V1_SERVICE_PORT = 47950
+
 STATE_DIR_NAME = "agentalloy"  # under XDG_CONFIG_HOME
 STATE_FILE_NAME = "install-state.json"
 OUTPUTS_DIR_NAME = "outputs"
@@ -493,7 +498,26 @@ def load_state(root: Path | None = None) -> dict[str, Any]:
         raise SystemExit(3)
     if file_version < CURRENT_SCHEMA_VERSION:
         data = _migrate(data, file_version)
+    if _repair_retired_port(data):
+        # One-shot self-heal: persist the repaired port so the file stops
+        # advertising a port nothing listens on. A write failure only
+        # degrades to the in-memory fix — the load itself must not fail.
+        with contextlib.suppress(OSError):
+            save_state(data, root)
     return data
+
+
+def _repair_retired_port(data: dict[str, Any]) -> bool:
+    """Replace the retired v1 service port with the v2 one, in place.
+
+    Only the exact v1 port counts as stale — any other value is a
+    user-chosen ``setup --port`` and must be left alone. Returns True when
+    the state changed so the caller can persist.
+    """
+    if data.get("port") == RETIRED_V1_SERVICE_PORT:
+        data["port"] = 48950
+        return True
+    return False
 
 
 def _atomic_write(target: Path, content: str, *, mode: int = 0o644) -> None:

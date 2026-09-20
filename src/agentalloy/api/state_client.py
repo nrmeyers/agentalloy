@@ -27,12 +27,26 @@ DEFAULT_PORT_FALLBACK = 48950
 def resolve_base_url() -> str:
     """Base URL of the local state service.
 
-    ``STATE_SERVICE_URL`` when set, else ``http://127.0.0.1:<port>`` with the
-    port from install state (the same value the service binds), falling back
-    to 48950.  Shared by :class:`StateClient` and the state-leg panel so the
-    URL an agent is told to call is the URL the client actually uses.
+    Resolution order:
+
+    1. ``STATE_SERVICE_URL`` when set — explicit full-URL override;
+    2. ``AGENTALLOY_SERVICE_PORT`` when set — the port the harness bound the
+       service to (present in wired proxy/MCP environments).  Authoritative
+       while set, so a stale install-state copy cannot re-advertise a
+       retired port (docs/bug-v2-steering-split.md, RC-1);
+    3. the port from install state (the same value the service binds),
+       falling back to 48950.
+
+    Shared by :class:`StateClient` and the state-leg panel so the URL an
+    agent is told to call is the URL the client actually uses.
     """
-    return os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}"
+    base = os.environ.get("STATE_SERVICE_URL")
+    if base:
+        return base
+    env_port = os.environ.get("AGENTALLOY_SERVICE_PORT", "").strip()
+    if env_port.isdigit():
+        return f"http://127.0.0.1:{int(env_port)}"
+    return f"http://127.0.0.1:{_configured_port()}"
 
 
 def _configured_port() -> int:
@@ -73,7 +87,9 @@ class StateClient:
     1. the ``base_url`` dataclass field, when passed explicitly;
     2. the ``STATE_SERVICE_URL`` environment variable (useful for tests
        that spin up a fake service);
-    3. the port recorded in install state — the same value the service
+    3. the ``AGENTALLOY_SERVICE_PORT`` environment variable — the port the
+       harness bound the service to, authoritative while set;
+    4. the port recorded in install state — the same value the service
        itself binds — falling back to 48950.
 
     Step 3 matters: the default used to be a hard-coded ``:8400``, which no

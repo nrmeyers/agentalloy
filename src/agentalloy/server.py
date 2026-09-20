@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from pydantic import BaseModel
@@ -318,8 +318,15 @@ def _capabilities() -> dict[str, bool]:
 
 
 @app.get("/status")
-def status() -> dict[str, Any]:
-    """Get current status."""
+def status(project: str = Query("")) -> dict[str, Any]:
+    """Get current status.
+
+    ``project`` scopes the phase to one work item (additive; empty = the
+    legacy global machine). ``phase_set`` reports whether that scope actually
+    has a phase row, and ``next_gate`` is the machine's gate for the phase's
+    outgoing transition — together they let a steering client pick and read
+    the machine a work item lives on in one round trip.
+    """
     base: dict[str, Any] = {
         "api_version": API_VERSION,
         "capabilities": _capabilities(),
@@ -328,13 +335,20 @@ def status() -> dict[str, Any]:
         return {
             **base,
             "phase": "uninitialized",
+            "phase_set": False,
             "service_port": 48950,
             "model_port": 50001,
         }
 
+    from agentalloy.phase_machine import gate_status
+
+    store = state_store.scoped(project) if project else state_store
+    phase = store.get_current_phase()
     result: dict[str, Any] = {
         **base,
-        "phase": state_store.get_current_phase(),
+        "phase": phase,
+        "phase_set": store.has_phase_row(),
+        "next_gate": gate_status(store, phase),
         "service_port": config.service_port,
         "model_port": config.model_port,
     }
@@ -800,14 +814,18 @@ def profiles() -> dict[str, Any]:
 
 
 @app.get("/gates")
-def gates() -> dict[str, Any]:
-    """Check approval gate status for all phase transitions."""
+def gates(project: str = Query("")) -> dict[str, Any]:
+    """Check approval gate status for all phase transitions.
+
+    ``project`` scopes the gates to one work item (additive; empty = the
+    legacy global machine).
+    """
     if not state_store:
         return {"gates": []}
 
     from agentalloy.phase_machine import APPROVAL_GATES, PHASE_ORDER, PhaseMachine
 
-    machine = PhaseMachine(state_store)
+    machine = PhaseMachine(state_store.scoped(project) if project else state_store)
     gate_results = []
     for phase in PHASE_ORDER:
         gate_info = machine.check_gate(phase)
