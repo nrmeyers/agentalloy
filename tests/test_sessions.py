@@ -49,6 +49,8 @@ def test_stash_and_resume() -> None:
         # Create session and add some state
         mgr.create("my-session")
         store.add_contract("contract-1", ["python"], "auth module")
+        store.record_artifact("intake", "intake-exit", "full")
+        store.advance_phase("spec")
         digest = store.record_artifact("spec", "spec-exit", "spec done")
         store.record_approval("spec→design", digest)
         store.advance_phase("design")

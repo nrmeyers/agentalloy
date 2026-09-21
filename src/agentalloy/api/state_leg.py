@@ -1,30 +1,33 @@
 """State leg — structured JSON context briefing injected every carrier turn.
 
-The state leg gives the LLM a machine-readable snapshot of the current lifecycle
-state: phase, active contract, artifact status, gate evaluation, and available
-actions. It replaces the need for the LLM to run CLI commands to query state.
+The state leg gives the LLM a machine-readable snapshot of the current
+lifecycle state: phase, active contract, artifact status, gate evaluation,
+and available actions. It replaces the need for the LLM to run CLI commands
+to query state.
 
-Designed for the stateless-phase model: a fresh agent picking up at any phase
-boundary can read the state leg and immediately understand where things stand.
-The query tool (``agentalloy_query``) provides deep-dive access to full artifact
-bodies, decision rationale, and code-index lookups when the summary isn't enough.
+Designed for the stateless-phase model: a fresh agent picking up at any
+phase boundary can read the state leg and immediately understand where
+things stand.
+
+Action hints quote the v2 service surface verbatim — ``POST /tool`` with a
+tool name, JSON-string args, and the ``project`` scope key, plus the
+``GET /status`` / ``GET /gates`` reads — so a hint is a ready-to-send
+request, not a paraphrase the LLM has to reconstruct.
 
 Injection follows the banner pattern: built in the signal layer, stored on
-``SignalResult.state_leg``, injected by the routers as strip-and-replace every
-carrier turn with its own marker family (``AGENTALLOY-STATE``).
+``SignalResult.state_leg``, injected by the routers as strip-and-replace
+every carrier turn with its own marker family (``AGENTALLOY-STATE``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from agentalloy.api.state_client import resolve_base_url
-from agentalloy.code_index.slug import repo_slug
-from agentalloy.storage.stream_id import resolve_stream_id
+from agentalloy.registry import project_key
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +40,14 @@ def build_state_leg(
     contract_id: str | None = None,
     gates_met: list[str] | None = None,
     gates_unmet: list[str] | None = None,
-    repo_root: Path | str | None = None,
+    project_root: Path | str | None = None,
 ) -> str | None:
     """Build the structured state JSON for injection.
 
     Returns a JSON string ready for injection, or ``None`` when the state is
-    too thin to be useful (no phase, no store). Soft: never raises — any
-    failure in contract/artifact loading yields a minimal state with what's
-    available rather than suppressing the entire leg.
+    too thin to be useful (no phase). Soft: never raises — any failure in
+    contract/artifact loading yields a minimal state with what's available
+    rather than suppressing the entire leg.
 
     Parameters
     ----------
@@ -53,7 +56,7 @@ def build_state_leg(
     paused_mode:
         Whether the workflow is paused (``mode: paused`` in the store).
     store:
-        ``DuckDBStateStore`` instance for loading contract and artifact data.
+        State store instance for loading contract and artifact data.
         ``None`` yields a minimal state (phase + mode only).
     contract_id:
         The active contract ID (from the signal layer's cursor). Used to load
@@ -61,11 +64,11 @@ def build_state_leg(
     gates_met / gates_unmet:
         Gate names from the signal layer's evaluation. Surfaced so the LLM
         knows what's passing and what's blocking.
-    repo_root:
+    project_root:
         The project root this panel describes. When given, a ``scope`` object
-        is added so an agent hitting the service over HTTP can target the
-        right bucket (state endpoints take ``?repo_root=``, code-index
-        endpoints take ``?repo=<slug>``) instead of reverse-engineering it.
+        is added (service base URL + ``project`` key) so an agent hitting the
+        service over HTTP targets the right bucket — every ``/tool`` body and
+        every ``?project=`` read must carry it.
     """
     if not phase:
         return None
@@ -75,7 +78,7 @@ def build_state_leg(
         "mode": "paused" if paused_mode else "workflow",
     }
 
-    scope = _add_scope(state, repo_root)
+    scope = _add_scope(state, project_root)
 
     if store is not None:
         _add_contract_state(state, store, contract_id, phase)
@@ -89,32 +92,38 @@ def build_state_leg(
     return json.dumps(state, indent=2)
 
 
-@lru_cache(maxsize=256)
-def _repo_slug_for(root: str) -> str:
-    """Slug the repo root for the scope panel (cached — git probe per miss)."""
-    return repo_slug(Path(root))
+def _add_scope(state: dict[str, Any], project_root: Path | str | None) -> dict[str, Any] | None:
+    """Expose the (service, project) scope this panel describes.
 
-
-def _add_scope(state: dict[str, Any], repo_root: Path | str | None) -> dict[str, Any] | None:
-    """Expose the active (repo, stream) scope this panel describes.
-
-    The service serves every repo from one store; a call without the right
-    scope lands in a different bucket and reads back empty.  An agent with no
-    other view of the deployment had to reverse-engineer this — surface it.
-    Returns the scope dict (also stored on ``state["scope"]``) so the action
-    hints can quote its values verbatim.
+    The v2 service serves every project from one store; a ``/tool`` call or
+    a ``?project=`` read without the right key lands in a different bucket
+    and reads back empty. An agent with no other view of the deployment had
+    to reverse-engineer this — surface it. Returns the scope dict (also
+    stored on ``state["scope"]``) so the action hints can quote its values
+    verbatim.
     """
-    if repo_root is None:
+    if project_root is None:
         return None
-    root = Path(repo_root)
     scope: dict[str, Any] = {
-        "repo_root": str(root),
-        "repo": _repo_slug_for(str(root)),
-        "stream_id": resolve_stream_id(root),
         "service": resolve_base_url(),
+        "project": project_key(project_root),
     }
     state["scope"] = scope
     return scope
+
+
+def _tool_body(project: str, name: str, args: dict[str, Any]) -> str:
+    """Render the exact ``POST /tool`` body for a tool call.
+
+    The service parses ``args`` with ``json.loads``, so the tool arguments
+    are a JSON *string* inside the body — double-encoded on purpose. The
+    rendered text is the wire format; the agent fills in only the
+    ``<placeholders>``.
+    """
+    return json.dumps(
+        {"name": name, "args": json.dumps(args, separators=(",", ":")), "project": project},
+        separators=(",", ":"),
+    )
 
 
 def _add_contract_state(
@@ -288,157 +297,142 @@ def _add_gate_status(
     }
 
 
+def _next_phase_info(phase: str) -> tuple[str | None, bool]:
+    """(next phase, is the outgoing transition approval-gated).
+
+    Lazy imports: this module sits on the proxy's hot path and must not pull
+    the phase graph (langgraph) at import time.
+    """
+    try:
+        from agentalloy.phase_machine import APPROVAL_GATES
+        from agentalloy.state_store import PHASE_ORDER
+    except Exception:
+        logger.debug("state_leg: lifecycle import failed", exc_info=True)
+        return None, False
+    if phase not in PHASE_ORDER:
+        return None, False
+    idx = PHASE_ORDER.index(phase)
+    if idx + 1 >= len(PHASE_ORDER):
+        return None, False
+    return PHASE_ORDER[idx + 1], f"{phase}→{PHASE_ORDER[idx + 1]}" in APPROVAL_GATES
+
+
 def _add_actions(
     state: dict[str, Any],
     phase: str,
     gates_unmet: list[str] | None,
     scope: dict[str, Any] | None = None,
 ) -> None:
-    """Add available action hints based on current state.
+    """Add available action hints for the v2 service surface.
 
-    These are natural-language descriptions of what the LLM can do, not CLI
-    commands. They tell the LLM about the marker convention and query tool
-    without prescribing specific command strings.
+    Every hint quotes a ready-to-send request — a ``POST /tool`` body (tool
+    name + JSON-string args + project key) or a ``GET``/``POST`` to a route —
+    so the LLM never has to reconstruct the wire format from memory.
     """
     actions: dict[str, str] = {}
 
-    # Artifact recording is always available — the store endpoint is the one
-    # authoritative mechanism (marker extraction is off by default).
-    actions["record_artifact"] = (
-        "Record artifacts via the state service artifact endpoint "
-        "(PUT /state/artifact). A file on disk is not an artifact — the "
-        "artifact exists only once the PUT succeeds."
-    )
-
-    # Contract recording is always available; it is how intake authors the first
-    # downstream contract (there is no current contract to auto-propagate yet).
-    actions["record_contract"] = (
-        "To create the next phase's contract, use the advance action (POST "
-        "/state/advance writes the contract in the same request). For per-task "
-        "build contracts during plan, use POST /contracts (scoped by "
-        "?repo_root=). The contract body becomes the next phase's retrieval prompt."
-    )
-
-    # Phase advance depends on gate status
+    # Phase advance depends on gate status.
     unmet = gates_unmet or []
-    if not unmet:
-        if phase == "ship":
-            actions["advance_phase"] = (
-                "Ship is terminal — it does not self-advance. "
-                "When the user confirms they're ready for the next work item, "
-                "use the reset action below to return to intake."
-            )
-        else:
-            actions["advance_phase"] = (
-                "When the phase's work is complete, advance via the advance "
-                "action below (POST /state/advance) — approval-gated phases "
-                "need approved: true once the user approves."
-            )
-    else:
+    if unmet:
         actions["blocked"] = f"Phase cannot advance: {', '.join(unmet)} must be satisfied first."
 
-    # Query tool is always available. When the scope is known, make the hint
-    # self-sufficient: the tool is not in every harness's reachable tool set,
-    # so the fallback (raw HTTP against the local service) must carry the
-    # base URL and the scoping params inline — worked examples, no more.
     if scope is not None:
         service = scope["service"]
-        # Artifact recording: the explicit PUT endpoint is the reliable path —
-        # marker extraction is off by default, and the exit gates match on the
-        # artifact NAME, so the hint must pin the exact names per phase.
+        project = scope["project"]
+        next_phase, approval_gated = _next_phase_info(phase)
+
+        # Artifact recording is always available — the tool is the one
+        # authoritative mechanism (marker extraction is off by default).
         actions["record_artifact"] = (
-            f"To record this phase's deliverable artifact, pipe its body "
-            f"straight into the state store — the store is the artifact's only "
-            f"home, so never write deliverables to files on disk:\n"
-            f"  agentalloy artifact put --phase <phase> --slug <task-slug> "
-            f"--name <artifact-name> <<'EOF'\n"
-            f"  <markdown body>\n"
-            f"  EOF\n"
-            f"Exit gates match on the artifact name — use exactly: "
-            f"spec → 'spec.artifact', design → 'approach.artifact', "
-            f"plan → 'tasks.artifact' and 'test-plan.artifact', "
-            f"sdd-fast → 'fast.artifact'. "
-            f"If the CLI is unavailable, PUT {service}/state/artifact?"
-            f"repo_root={scope['repo_root']} with JSON body "
-            f'{{"phase": "<phase>", "slug": "<task-slug>", '
-            f'"name": "<artifact-name>", "content": "<markdown body>"}}. '
-            f"In a spec artifact, '## AC-N: <text>' headings are merged into the "
-            f"contract's success criteria automatically."
+            "Record this phase's exit artifact — the advance gate reads the "
+            f"'{phase}-exit' row and a file on disk is not an artifact:\n"
+            f"  POST {service}/tool with body "
+            f"{_tool_body(project, 'artifact_record', {'phase': phase, 'name': f'{phase}-exit', 'body': '<the deliverable>'})}\n"
+            "Replace <the deliverable> with the artifact's markdown; the artifact exists only once the call returns ok."
         )
+
+        # Contract recording is always available; it is how intake authors
+        # the first downstream contract (there is no current contract to
+        # auto-propagate yet).
+        actions["record_contract"] = (
+            "Author the next phase's contract — its body becomes that phase's "
+            "retrieval prompt:\n"
+            f"  POST {service}/tool with body "
+            f"{_tool_body(project, 'contract_add', {'slug': '<task-slug>', 'domain_tags': ['<stack>'], 'touches': '<files that phase will touch>'})}"
+        )
+
+        if not unmet:
+            if phase == "ship":
+                actions["advance_phase"] = (
+                    "Ship is terminal — it does not self-advance. "
+                    "When the user confirms they're ready for the next work item, "
+                    "use the reset action below to return to intake."
+                )
+            elif next_phase is None:
+                actions["advance_phase"] = (
+                    "This phase is terminal — it does not self-advance."
+                )
+            else:
+                hint = (
+                    f"Advance to {next_phase} once the phase's work and its "
+                    f"'{phase}-exit' artifact are recorded:\n"
+                    f"  POST {service}/tool with body "
+                )
+                if approval_gated:
+                    hint += (
+                        f"{_tool_body(project, 'phase_advance', {'target': next_phase, 'approved': True})}\n"
+                        "Set approved to true ONLY once the user has explicitly "
+                        "approved the presented work — the gate refuses without it."
+                    )
+                else:
+                    hint += (
+                        f"{_tool_body(project, 'phase_advance', {'target': next_phase})}"
+                    )
+                actions["advance_phase"] = hint
+
+        # Read-only lookups. When the scope is known, make the hint
+        # self-sufficient: the MCP tool is not in every harness's reachable
+        # set, so the fallback (raw HTTP against the local service) carries
+        # the base URL and project key inline — worked examples, no more.
         actions["query"] = (
-            "Deep-dive lookups beyond this summary (artifact bodies, contract "
-            "detail, code search, symbol lookup, governing decisions): use the "
-            "agentalloy_query tool when it is in your tool set; if it is not, "
-            f"GET the service directly. Key endpoints (all scoped by ?repo_root={scope['repo_root']}):\n"
-            f"  - List contracts: {service}/contracts?repo_root={scope['repo_root']}\n"
-            f"  - Get artifact: {service}/state/artifact/{phase}/<slug>/<name>?repo_root={scope['repo_root']}\n"
-            f"  - Get phase: {service}/state/phase?repo_root={scope['repo_root']}\n"
-            f"/state/* and /contracts/* are scoped by ?repo_root=; /code/* "
-            f"by ?repo={scope['repo']} (see the code_index action)."
+            "Read-only lookups (no state writes):\n"
+            f"  - Lifecycle: GET {service}/status?project={project} (phase + next gate) | "
+            f"GET {service}/gates?project={project} (every transition gate)\n"
+            f"  - Tools: POST {service}/tool with one of these bodies (fill the <placeholders>):\n"
+            f"    {_tool_body(project, 'code_search', {'query': '<symptom or term>', 'k': 8})}\n"
+            f"    {_tool_body(project, 'symbols', {'fqn': '<module.Func>'})}\n"
+            f"    {_tool_body(project, 'knowledge_why', {'fqn': '<module.Func>'})}\n"
+            f"    {_tool_body(project, 'knowledge_related', {'query': '<decision or topic>'})}\n"
+            f"    {_tool_body(project, 'artifact_body', {'phase': phase, 'name': '<artifact-name>'})}\n"
+            f"    {_tool_body(project, 'contract_detail', {'slug': '<task-slug>'})}\n"
+            f"    {_tool_body(project, 'get_skill_for', {'task': '<what you are doing>', 'phase': phase})}"
         )
-        # Code index / knowledge graph: semantic + lexical search, symbol lookup,
-        # structural graph queries, and decision-doc (knowledge) retrieval.
-        actions["code_index"] = (
-            f"Code index / knowledge graph (all scoped by ?repo={scope['repo']}):\n"
-            f"  - Semantic search: GET {service}/code/search/semantic?repo={scope['repo']}&q=<query>&k=10\n"
-            f"  - Lexical (BM25) search: GET {service}/code/search/lexical?repo={scope['repo']}&q=<query>\n"
-            f"  - Symbol lookup by FQN: GET {service}/code/search/symbol?repo={scope['repo']}&fqn=<fully.qualified.Name>\n"
-            f"  - Graph queries: GET {service}/code/search/structural?repo={scope['repo']}"
-            f"&query=<callers|callees|transitive_callers|governing_decisions|counts_by_kind>&fqn=<fqn>\n"
-            f"  - Decision docs (why code exists): GET {service}/code/search/related-decisions?repo={scope['repo']}&q=<query>\n"
-            f"  - Entity edges for a symbol: GET {service}/code/search/entities?repo={scope['repo']}&query=<symbol>\n"
-            f"  - Budgeted task context: POST {service}/code/context-bundle "
-            f'with JSON body: {{"repo": "{scope["repo"]}", "task": "<task description>", "budget_chars": 24000}}\n'
-            f"Use semantic search to find code, structural callers/callees to trace "
-            f"impact, governing_decisions to find the rationale behind code."
-        )
-        # Phase advancement tool: single call to write contract + advance phase
-        actions["advance"] = (
-            f"To advance to the next phase, call POST {service}/state/advance?repo_root={scope['repo_root']} "
-            f'with JSON body: {{"slug": "<task-slug>", "contract_body": "<what the next phase needs to know>", '
-            f'"to_phase": "<target-phase>", "route": "full", "approved": true}}. '
-            f'Set "approved": true when the user has approved the presented work — it records the '
-            f"approval and advances in one call (standalone: POST {service}/state/approve-phase). "
-            f"Approval-gated phases (spec, design) block until approved; approval is refused until the "
-            f"phase's exit artifact is recorded, and editing an approved artifact voids the approval."
-        )
-        # Contract retrieval: pull a specific contract by ID or list all
-        actions["contracts"] = (
-            f"To retrieve contracts:\n"
-            f"  - List all: GET {service}/contracts?repo_root={scope['repo_root']}\n"
-            f"  - Get by ID: GET {service}/contracts/<contract_id>?repo_root={scope['repo_root']} "
-            f"(contract_id format: '<phase>/<slug>', e.g., 'spec/test-feature')\n"
-            f"  - Filter by phase: GET {service}/contracts?repo_root={scope['repo_root']}&phase=<phase>\n"
-            f"Use this to pull the current contract before starting phase work."
-        )
-        # Session management: list, stash, resume, archive, cancel
+
+        # Session management: list, detail, stash, resume, archive, cancel
         actions["sessions"] = (
-            f"To manage workflow sessions (all POSTs take JSON body: "
-            f'{{"session_key": "<session-id>"}}):\n'
-            f"  - List active: GET {service}/state/sessions/active?repo_root={scope['repo_root']}\n"
-            f"  - Stash (park work-in-progress to resume later): "
-            f"POST {service}/state/sessions/stash?repo_root={scope['repo_root']}\n"
-            f"  - Resume (bring a stashed session and its contracts back): "
-            f"POST {service}/state/sessions/resume?repo_root={scope['repo_root']}\n"
-            f"  - Archive (work item done, reached product — terminal): "
-            f"POST {service}/state/sessions/archive?repo_root={scope['repo_root']}\n"
-            f"  - Cancel (work item abandoned, never reached product — terminal): "
-            f"POST {service}/state/sessions/cancel?repo_root={scope['repo_root']}\n"
-            f"Use stash/resume to park and restore work-in-progress; "
-            f"archive/cancel only when the work item is finished or abandoned."
+            "Work-in-progress sessions — park and restore, or close a work item:\n"
+            f"  - List: GET {service}/sessions | Detail: GET {service}/sessions/<session_key>\n"
+            f"  - Stash: POST {service}/sessions/<session_key>/stash | Resume: POST {service}/sessions/<session_key>/resume\n"
+            f"  - Archive (work item done): POST {service}/sessions/<session_key>/archive\n"
+            f"  - Cancel (abandoned): POST {service}/sessions/<session_key>/cancel\n"
+            "Use stash/resume to park and restore work-in-progress; "
+            "archive/cancel only when the work item is finished or abandoned."
         )
+
         # Reset to intake: start a new work item or abandon a stuck one.
         # Resets are backward moves — the exit gate does not guard them.
         actions["reset"] = (
-            f"To reset the workflow back to intake (start a new work item, or "
-            f"abandon a stuck/finished one): POST {service}/state/phase?repo_root={scope['repo_root']} "
-            f'with JSON body: {{"value": "intake"}}. Resets are not gated. '
-            f"Only reset when the user confirms the current work item is done or abandoned."
+            "Operator-only (the user must confirm the work item is done or "
+            "abandoned): reset the lifecycle to intake and clear approvals — "
+            "contracts and artifacts are kept:\n"
+            f"  POST {service}/tool with body "
+            f"{_tool_body(project, 'phase_reset', {})}"
         )
     else:
         actions["query"] = (
-            "Use the agentalloy_query tool for code search, symbol lookup, "
-            "knowledge rationale, artifact bodies, or related decisions."
+            "Use the agentalloy MCP tools (code_search, contract_detail, ...) "
+            "for code search, symbol lookup, knowledge rationale, or artifact "
+            "bodies."
         )
 
     state["actions"] = actions

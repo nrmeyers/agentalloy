@@ -1,14 +1,17 @@
 # AgentAlloy v2 spike — classify-then-fill harness config.
-# Target: LFM2.5-2.6B-QAD-Q4_0 (llama-server, port 50001). Engine swapped
-# back from MiniCPM5-2B on 2026-09-14 — MiniCPM5 (served 2026-09-11→09-14)
-# had measured 66/66 classification and zero hallucination vs LFM's 62/66
-# / 3%. Sampling per the LFM HF model card.
+# Target: MiniCPM5-2B-Q8_0 (llama-server, port 50001). Swapped from
+# LFM2.5-2.6B on 2026-09-11: gates measured 66/66 classification and zero
+# hallucination vs LFM's 62/66 / 3%. Sampling per the HF model card.
+# 2026-09-12: server now runs with the MiniCPM5-2B-DSpark speculative
+# drafter (llama-server-cuda:dspark image) — suite wall time 3m35s → 2m31s
+# with identical gates; no config change needed here (server-side only).
+# 2026-09-20: engine back on MiniCPM5-2B + DSpark (n-max 7, temp 1.0).
 
 endpoint = "http://127.0.0.1:50001/v1/chat/completions"
-model = "lfm2.5-2.6b-compressor"
+model = "minicpm5-2b"
 # "env" → read $OPENAI_API_KEY (some local servers require it).
 api_key = "env"
-temperature = 0.1
+temperature = 1.0
 # This model thinks before answering; 512 was exhausted by internal reasoning
 # on abstention cases (finish_reason=length, empty content). 2048 leaves headroom.
 max_tokens = 2048

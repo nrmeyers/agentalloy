@@ -1,7 +1,7 @@
 """Interpreter: tool-calling agent loop (LangGraph ToolNode pattern).
 
 The interpreter receives a user request, calls the local orchestrator
-sidecar (config.interp_model — LFM2.5-2.6B by default) with 14 tools,
+sidecar (config.interp_model — MiniCPM5-2B by default) with 14 tools,
 and loops until the model emits a final answer or an exit condition is hit.
 
 Exit conditions (R1):
@@ -46,7 +46,7 @@ class Interpreter:
         max_steps: int = 6,
         hard_cap: int = 6,
         state_store: StateStore | None = None,
-        model: str = "lfm2.5-2.6b-compressor",
+        model: str = "minicpm5-2b",
     ):
         self.client = client
         self.max_steps = max_steps

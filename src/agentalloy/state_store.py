@@ -60,6 +60,15 @@ PHASE_ORDER: tuple[str, ...] = ("intake", "spec", "design", "plan", "build", "qa
 LIFECYCLE_START: str = PHASE_ORDER[0]
 
 
+class PhaseAdvanceError(ValueError):
+    """A lifecycle advance the state leg refuses to persist.
+
+    Subclass of ValueError: callers that guard store writes with
+    ``except ValueError`` (artifact/contract bodies, phase advances) keep
+    working unchanged.
+    """
+
+
 class StateStore:
     """DuckDB state store for contracts, artifacts, phases.
 
@@ -326,7 +335,14 @@ class StateStore:
         ]
 
     def record_artifact(self, phase: str, name: str, body: str) -> str:
-        """Record a phase artifact. Returns the digest."""
+        """Record a phase artifact. Returns the digest.
+
+        An empty or whitespace-only body is rejected: the artifact is the
+        phase's evidence (the advance gate reads the {phase}-exit row), and
+        a placeholder row must not exist to be mistaken for it.
+        """
+        if not body or not body.strip():
+            raise ValueError(f"artifact body must not be empty (phase={phase!r}, name={name!r})")
         digest = hashlib.sha256(body.encode()).hexdigest()[:16]
         self.conn.execute(
             """
@@ -377,14 +393,65 @@ class StateStore:
         ).fetchone()
         return result[0] if result else LIFECYCLE_START
 
-    def advance_phase(self, target: str) -> None:
-        """Advance to target phase.
+    def has_phase_row(self) -> bool:
+        """True when this scope has an explicit phase row.
 
-        Fails closed: an unknown phase is rejected here, at the write, so a
-        value the phase machine cannot resolve can never be persisted.
+        Distinguishes "at lifecycle start by default" (no row yet) from
+        "at lifecycle start for real" — scope selection (state leg,
+        /status?project=) needs the difference to tell which machine a work
+        item actually lives on.
+        """
+        return (
+            self.conn.execute("SELECT 1 FROM phases WHERE project = ?", [self.project]).fetchone()
+            is not None
+        )
+
+    def advance_phase(self, target: str) -> None:
+        """Advance the lifecycle to *target* — the state leg's hard gate.
+
+        Enforced at the write, so no caller (LLM tool, graph node, session
+        restore, hand-rolled SQL via the tool layer) can persist an
+        illegitimate jump:
+
+        - unknown phase               → rejected
+        - corrupt current phase       → rejected (operator reset required)
+        - same phase                  → no-op
+        - backward move               → allowed (retry/rollback; never exit-gated)
+        - non-adjacent forward jump   → rejected (phases are walked one at a time)
+        - adjacent forward move       → requires a substantive exit artifact
         """
         if target not in PHASE_ORDER:
-            raise ValueError(f"unknown phase {target!r}; legal phases: {' → '.join(PHASE_ORDER)}")
+            raise PhaseAdvanceError(
+                f"unknown phase {target!r}; legal phases: {' → '.join(PHASE_ORDER)}"
+            )
+        current = self.get_current_phase()
+        if current not in PHASE_ORDER:
+            raise PhaseAdvanceError(
+                f"current phase {current!r} is not part of the lifecycle; "
+                "use reset_phase() to recover"
+            )
+        if current == target:
+            return
+        cur_idx = PHASE_ORDER.index(current)
+        tgt_idx = PHASE_ORDER.index(target)
+        if tgt_idx < cur_idx:
+            # Backward move — the exit gate never guards retries.
+            self._set_current_phase(target)
+            return
+        if tgt_idx > cur_idx + 1:
+            raise PhaseAdvanceError(
+                f"cannot advance {current} → {target}: the lifecycle is walked one phase at a time"
+            )
+        if not self.has_exit_artifact(current):
+            raise PhaseAdvanceError(
+                f"no substantive exit artifact for phase {current!r} — record "
+                f"{current!r}-exit with the phase's evidence before advancing"
+            )
+        self._set_current_phase(target)
+
+    def _set_current_phase(self, target: str) -> None:
+        """Raw phase upsert. No validation — internal use only (advance_phase
+        is the public gated path; reset/restore are the two other callers)."""
         self.conn.execute(
             """
             INSERT INTO phases (project, current_phase, updated_at)
@@ -396,6 +463,15 @@ class StateStore:
             [self.project, target],
         )
 
+    def has_exit_artifact(self, phase: str) -> bool:
+        """True when a substantive {phase}-exit artifact exists.
+
+        The advance gate's predicate: the row must exist AND carry a
+        non-empty body — a placeholder row is not evidence.
+        """
+        body = self.get_artifact(phase, f"{phase}-exit")
+        return bool(body is not None and body.strip())
+
     def reset_phase(self) -> str:
         """Reset the lifecycle to its start (intake) and clear approvals.
 
@@ -405,16 +481,7 @@ class StateStore:
         Returns the new phase.
         """
         self.conn.execute("DELETE FROM approvals WHERE project = ?", [self.project])
-        self.conn.execute(
-            """
-            INSERT INTO phases (project, current_phase, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(project) DO UPDATE SET
-                current_phase = excluded.current_phase,
-                updated_at = excluded.updated_at
-            """,
-            [self.project, LIFECYCLE_START],
-        )
+        self._set_current_phase(LIFECYCLE_START)
         return LIFECYCLE_START
 
     # --- Approval gates (AC-9) ---
@@ -525,10 +592,12 @@ class StateStore:
         cursor = json.loads(result[1]) if result[1] else {}
         phase = result[2] or LIFECYCLE_START
 
-        # Restore state
+        # Restore state. Phase restore uses the raw setter: a snapshot was
+        # captured at a phase that was legitimate when taken, so recovery
+        # must never fail on exit-gate state (crash recovery, stash/resume).
         self._restore_snapshot(snapshot)
-        if phase:
-            self.advance_phase(phase)
+        if phase and phase in PHASE_ORDER:
+            self._set_current_phase(phase)
 
         now = datetime.now().isoformat()
         self.conn.execute(

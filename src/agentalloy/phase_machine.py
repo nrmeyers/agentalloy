@@ -17,6 +17,7 @@ Key features:
 from __future__ import annotations
 
 import itertools
+import logging
 import sqlite3
 from collections.abc import Hashable
 from dataclasses import dataclass, field
@@ -28,10 +29,12 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from agentalloy.state_store import LIFECYCLE_START, StateStore
+from agentalloy.state_store import LIFECYCLE_START, PhaseAdvanceError, StateStore
 
 # Explicit re-export — state_store is the source of truth for the lifecycle.
 from agentalloy.state_store import PHASE_ORDER as PHASE_ORDER
+
+logger = logging.getLogger(__name__)
 
 Phase = Literal["intake", "spec", "design", "plan", "build", "qa", "ship"]
 
@@ -40,6 +43,41 @@ APPROVAL_GATES: set[str] = {"spec→design", "design→plan", "plan→build"}
 
 # Adjacent (current, target) pairs along the lifecycle.
 _TRANSITIONS = list(itertools.pairwise(PHASE_ORDER))
+
+
+def gate_status(state_store: StateStore, phase: str) -> dict[str, Any]:
+    """Gate status for *phase*'s outgoing transition (non-blocking, no graph).
+
+    The same predicates ``PhaseMachine.check_gate`` reports, factored out so
+    the light read endpoints (``GET /status``) can surface the next gate
+    without compiling the phase graph per request. Unknown phase values are
+    reported, not raised — read surfaces stay fail-closed.
+    """
+    if phase not in PHASE_ORDER:
+        return {
+            "phase": phase,
+            "status": "invalid",
+            "reason": f"unknown phase {phase!r}",
+            "legal_phases": list(PHASE_ORDER),
+        }
+    current_idx = PHASE_ORDER.index(phase)
+    if current_idx >= len(PHASE_ORDER) - 1:
+        return {"phase": phase, "status": "terminal"}
+    next_phase = PHASE_ORDER[current_idx + 1]
+    transition = f"{phase}→{next_phase}"
+    exit_digest = state_store.get_exit_artifact_digest(phase)
+    result: dict[str, Any] = {
+        "phase": phase,
+        "transition": transition,
+        # Same substantive-body predicate the store's advance gate uses — a
+        # placeholder row reports False here and fails the gate there.
+        "has_exit_artifact": state_store.has_exit_artifact(phase),
+        "requires_approval": transition in APPROVAL_GATES,
+    }
+    if exit_digest and transition in APPROVAL_GATES:
+        result["approved"] = state_store.is_approved(transition, exit_digest)
+        result["digest"] = exit_digest
+    return result
 
 
 @dataclass
@@ -132,9 +170,10 @@ class PhaseMachine:
     def _router_node(self, state: PhaseState) -> PhaseState:
         """Route to the current phase from the state store.
 
-        A phase value outside the lifecycle (corrupt state from before
-        write-side validation) is normalized to the lifecycle start — the
-        phase node then re-persists the repaired value.
+        A phase value outside the lifecycle (corrupt state) is normalized to
+        the lifecycle start for this run's walk; the stored value itself is
+        NOT repaired — the state leg treats a corrupt phase row as
+        fail-closed, and recovery is an explicit operator phase_reset.
         """
         current = self.state_store.get_current_phase()
         if current not in PHASE_ORDER:
@@ -154,7 +193,14 @@ class PhaseMachine:
         """Create a node function for a phase."""
 
         def node(state: PhaseState) -> PhaseState:
-            self.state_store.advance_phase(phase)
+            # The router just sent us to the current phase, so this is a
+            # no-op persist in the normal path; if the store rejects it
+            # (state changed under us), the gate router below sees the
+            # store's truth anyway — never let a stale write crash the walk.
+            try:
+                self.state_store.advance_phase(phase)
+            except PhaseAdvanceError as exc:
+                logger.warning(f"phase node {phase}: store refused advance — {exc}")
             return PhaseState(
                 current_phase=phase,
                 messages=state.messages,
@@ -172,9 +218,9 @@ class PhaseMachine:
         """Determine the next step based on gate conditions."""
         current = state.current_phase
         if current not in PHASE_ORDER:
-            # Corrupt phase value — the router node already normalized it, so
-            # the phase node re-persisted the repaired value. Stop the walk
-            # rather than index into an unknown position.
+            # Corrupt phase value — the router node normalized it for the
+            # walk but the store's row is untouched (fail-closed). Stop the
+            # walk rather than index into an unknown position.
             return "end"
         current_idx = PHASE_ORDER.index(current)
         # Last phase → end
@@ -184,12 +230,15 @@ class PhaseMachine:
         next_phase = PHASE_ORDER[current_idx + 1]
         transition = f"{current}→{next_phase}"
 
-        # Every gate requires its exit artifact before it passes — approval
-        # only applies to the gated transitions.
-        exit_digest = self.state_store.get_exit_artifact_digest(current)
-        if exit_digest is None:
-            # No exit artifact — can't advance, stay in phase
+        # Every gate requires a substantive exit artifact before it passes —
+        # same predicate the store's advance gate enforces at the write, so
+        # the graph and the state leg can never disagree on passability.
+        # Approval only applies to the gated transitions.
+        if not self.state_store.has_exit_artifact(current):
+            # No (substantive) exit artifact — can't advance, stay in phase
             return "end"
+
+        exit_digest = self.state_store.get_exit_artifact_digest(current) or ""
 
         if transition in APPROVAL_GATES:
             # Check if already approved with matching digest
@@ -283,33 +332,7 @@ class PhaseMachine:
         Unknown phase values (corrupt store state) are reported, not raised —
         the gate endpoint is a read surface and must stay fail-closed.
         """
-        if phase not in PHASE_ORDER:
-            return {
-                "phase": phase,
-                "status": "invalid",
-                "reason": f"unknown phase {phase!r}",
-                "legal_phases": list(PHASE_ORDER),
-            }
-        current_idx = PHASE_ORDER.index(phase)
-        if current_idx >= len(PHASE_ORDER) - 1:
-            return {"phase": phase, "status": "terminal"}
-
-        next_phase = PHASE_ORDER[current_idx + 1]
-        transition = f"{phase}→{next_phase}"
-        exit_digest = self.state_store.get_exit_artifact_digest(phase)
-
-        result: dict[str, Any] = {
-            "phase": phase,
-            "transition": transition,
-            "has_exit_artifact": exit_digest is not None,
-            "requires_approval": transition in APPROVAL_GATES,
-        }
-
-        if exit_digest and transition in APPROVAL_GATES:
-            result["approved"] = self.state_store.is_approved(transition, exit_digest)
-            result["digest"] = exit_digest
-
-        return result
+        return gate_status(self.state_store, phase)
 
 
 def create_task_fanout(task_ids: list[str], target_node: str) -> list[Any]:

@@ -1,4 +1,4 @@
-"""Live reliability gate — run T4 scenarios against the real :50001 LFM2.5-2.6B driver.
+"""Live reliability gate — run T4 scenarios against the real :50001 MiniCPM5-2B driver.
 
 Pass criteria (per tasks.artifact):
 - >=90% fully correct single-turn (tool+args)
@@ -21,7 +21,7 @@ CLIENT = OpenAI(
     base_url="http://localhost:50001/v1",
     api_key="sk-local-f2d05be43df88a4c5b96b0915ec10029",
 )
-MODEL = "lfm2.5-2.6b-compressor"
+MODEL = "minicpm5-2b"
 
 # Single-turn scenarios
 SINGLE_TURN: list[dict[str, Any]] = [

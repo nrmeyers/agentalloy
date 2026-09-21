@@ -18,7 +18,7 @@
 
 [project]
 name = "agentalloy"
-version = "11.0.1"
+version = "11.0.2"
 description = "AgentAlloy — the Agent Operating System: a single, self-contained, stateless, multi-harness agent runtime (v10 runtime surface + v2 execution stack)"
 readme = "README.md"
 requires-python = ">=3.12"

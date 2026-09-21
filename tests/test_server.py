@@ -104,6 +104,10 @@ def test_compose_phase_change_activates_without_flag(compose_env: StateStore) ->
     client = TestClient(app)
 
     client.post("/compose", json={"prompt": "start work", "new_session": True})
+    compose_env.record_artifact("intake", "intake-exit", "full")
+    compose_env.advance_phase("spec")
+    spec_digest = compose_env.record_artifact("spec", "spec-exit", "done")
+    compose_env.record_approval("spec→design", spec_digest)
     compose_env.advance_phase("design")
 
     result = client.post("/compose", json={"prompt": "keep going"})
@@ -290,6 +294,17 @@ def test_compose_stamps_store_facts_and_scopes_project(compose_env: StateStore) 
 
     alpha = compose_env.scoped("alpha-11111111")
     alpha.add_contract("money-integer-cents", ["finance"], "ledger")
+    # Walk intake → build, each move with its evidence
+    alpha.record_artifact("intake", "intake-exit", "full")
+    alpha.advance_phase("spec")
+    spec_digest = alpha.record_artifact("spec", "spec-exit", "done")
+    alpha.record_approval("spec→design", spec_digest)
+    alpha.advance_phase("design")
+    design_digest = alpha.record_artifact("design", "design-exit", "done")
+    alpha.record_approval("design→plan", design_digest)
+    alpha.advance_phase("plan")
+    plan_digest = alpha.record_artifact("plan", "plan-exit", "done")
+    alpha.record_approval("plan→build", plan_digest)
     alpha.advance_phase("build")
 
     r = client.post(

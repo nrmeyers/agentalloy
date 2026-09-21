@@ -18,7 +18,7 @@ class TestLoadConfig:
         assert cfg.mode is LocalAgentMode.OFF
         assert cfg.enabled is False
         assert cfg.url == "http://127.0.0.1:50001"
-        assert cfg.model == "lfm2.5-2.6b-compressor"
+        assert cfg.model == "minicpm5-2b"
         assert cfg.timeout_ms == 30000
         assert cfg.max_steps == 2
         assert cfg.max_tokens == 2048

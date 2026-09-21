@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentalloy"
-version = "11.0.1"
+version = "11.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

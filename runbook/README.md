@@ -5,7 +5,7 @@ Named M1 deliverable (design §22). Exact commands to start the LFM2.5 model sta
 ## Model Locations
 
 All GGUFs in `~/.local/share/agentalloy/models/`:
-- `LFM2.5-2.6B-QAD-Q4_0.gguf` — driver (interpreter, :50001, shared with v1)
+- `MiniCPM5-2B-Q8_0.gguf` — driver (interpreter, :50001)
 - `LFM2.5-Embedding-350M-Q8_0.gguf` — embedding model (:48951)
 - `LFM2.5-ColBERT-350M-Q8_0.gguf` — ColBERT rerank model (:48952, **see §9 decision below**)
 
@@ -62,7 +62,7 @@ Dev ports (this build):
 - :48950 — newagent service (FastAPI, T9)
 - :48951 — embedding server (this runbook)
 - :48952 — rerank server (this runbook, currently non-functional)
-- :50001 — driver LFM2.5-2.6B (shared with v1, already running)
+- :50001 — driver MiniCPM5-2B (already running)
 
 Final flip (after M1 ACs pass):
 - :48950 — newagent service (drop-in replacement for v1)

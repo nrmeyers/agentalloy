@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # against the other being up instead.
 _DEFAULT_URL = "http://127.0.0.1:50001"
 # Pinned model tag — recorded in every trace for provenance (reranker-tag style).
-_DEFAULT_MODEL = "lfm2.5-2.6b-compressor"
+_DEFAULT_MODEL = "minicpm5-2b"
 # Per-stage timeout. The spike's 300 s was a cold-server wall number; warm
 # stages are seconds. The "thinks before answering" reasoning budget is inside
 # max_tokens, not the timeout.
