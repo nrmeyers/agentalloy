@@ -47,7 +47,7 @@ class Config:
     # interp_model is mostly cosmetic — but keep them distinct: they are
     # different models with different roles.
     model: str = "lfm2.5-2.6b"
-    interp_model: str = "lfm2.5-2.6b-compressor"
+    interp_model: str = "minicpm5-2b"
     embed_model: str = "LFM2.5-Embedding-350M"
     rerank_model: str = "LFM2.5-ColBERT-350M"
 
@@ -96,7 +96,7 @@ class Config:
             rerank_port=int(environ.get("AGENTALLOY_RERANK_PORT", "48952")),
             model_port=int(environ.get("AGENTALLOY_MODEL_PORT", "50001")),
             model=environ.get("AGENTALLOY_MODEL", "lfm2.5-2.6b"),
-            interp_model=environ.get("AGENTALLOY_INTERP_MODEL", "lfm2.5-2.6b-compressor"),
+            interp_model=environ.get("AGENTALLOY_INTERP_MODEL", "minicpm5-2b"),
             embed_model=environ.get("AGENTALLOY_EMBED_MODEL", "LFM2.5-Embedding-350M"),
             rerank_model=environ.get("AGENTALLOY_RERANK_MODEL", "LFM2.5-ColBERT-350M"),
             max_steps=int(environ.get("AGENTALLOY_MAX_STEPS", "6")),

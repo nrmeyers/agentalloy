@@ -19,18 +19,18 @@ INSTANCE="${INSTANCE:-$HOME/.local/share/agentalloy-instance}"
 MODELS_DIR="${MODELS_DIR:-/mnt/ai-data/llama/models}"
 IMAGE="${IMAGE:-localhost/llama-server-cuda:latest}"
 
-# Models. Interp: back to LFM2.5-2.6B (QAD-Q4_0) on 2026-09-14 — MiniCPM5-2B
-# had replaced it on 2026-09-11 (66/66 classification / 0 hallucination vs
-# LFM's 62/66 / 3%, faster compose ~9s vs ~20s); the engine is the LFM again.
-# Sampler is LFM's task-tuned config (temp 0.2 / top-k 80 / repeat-penalty
-# 1.05); the interpreter sends temperature 0 per request anyway. DSpark
-# speculative decoding: the 633MB LFM DSpark-F16 drafter (needs the :dspark
-# image, --spec-type draft-dspark; n-max 9 = the drafter's trained block
-# size). Set INTERP_DRAFT_MODEL="" to disable.
-INTERP_MODEL="${INTERP_MODEL:-LFM2.5-2.6B-QAD-Q4_0.gguf}"
-INTERP_NAME="${INTERP_NAME:-lfm2.5-2.6b-compressor}"
+# Models. Interp: MiniCPM5-2B — first swapped in 2026-09-11 (66/66
+# classification / 0 hallucination vs LFM's 62/66 / 3%, faster compose
+# ~9s vs ~20s), briefly back to LFM on 2026-09-14, restored as the engine
+# on 2026-09-20. Sampling per the HF model card (temp 1.0, top-p 0.95).
+# DSpark speculative decoding (added 2026-09-12): the 653MB DSpark drafter
+# cut the spike suite 3m35s → 2m31s (-30%) with identical gates (draft
+# acceptance ~50%, mean run ~4.7 tok). Needs the :dspark image
+# (--spec-type draft-dspark). Set INTERP_DRAFT_MODEL="" to disable.
+INTERP_MODEL="${INTERP_MODEL:-MiniCPM5-2B-Q8_0.gguf}"
+INTERP_NAME="${INTERP_NAME:-minicpm5-2b}"
 INTERP_IMAGE="${INTERP_IMAGE:-localhost/llama-server-cuda:dspark}"
-INTERP_DRAFT_MODEL="${INTERP_DRAFT_MODEL-LFM2.5-2.6B-DSpark-F16.gguf}"
+INTERP_DRAFT_MODEL="${INTERP_DRAFT_MODEL-MiniCPM5-2.6B-DSpark.gguf}"
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text-v1.5.Q8_0.gguf}"
 
 # Ports (v2 dev range :48950-3)
@@ -114,10 +114,10 @@ cmd_up(){
   local draft_args=()
   if [ -n "$INTERP_DRAFT_MODEL" ]; then
     draft_args=(--spec-type draft-dspark --spec-draft-model "/models/$INTERP_DRAFT_MODEL" \
-                --spec-draft-n-max 9 --spec-draft-ngl 99)
+                --spec-draft-n-max 7 --spec-draft-ngl 99)
   fi
   start_llama agentalloy-interp "$INTERP_IMAGE" "$MODEL_PORT" --model "/models/$INTERP_MODEL" \
-    --alias "$INTERP_NAME" --jinja --temp 0.2 --top-k 80 --repeat-penalty 1.05 "${draft_args[@]}"
+    --alias "$INTERP_NAME" --jinja --temp 1.0 --top-p 0.95 "${draft_args[@]}"
   start_llama agentalloy-embed "$IMAGE" "$EMBED_PORT" --model "/models/$EMBED_MODEL" --embeddings --pooling mean --ctx-size 2048 --batch-size 2048 --ubatch-size 2048
 
   write_env
