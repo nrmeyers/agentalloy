@@ -140,3 +140,11 @@ def test_lock_off_when_token_unset(state: StateStore, monkeypatch: pytest.Monkey
     client = TestClient(app)
     _to_spec_with_artifact(client, {})
     assert _tool(client, "phase_advance", {"target": "design", "approved": True})["status"] == "ok"
+
+
+def test_status_reports_approval_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    monkeypatch.delenv("AGENTALLOY_APPROVER_TOKEN", raising=False)
+    assert client.get("/status").json()["approval_locked"] is False
+    monkeypatch.setenv("AGENTALLOY_APPROVER_TOKEN", TOKEN)
+    assert client.get("/status").json()["approval_locked"] is True

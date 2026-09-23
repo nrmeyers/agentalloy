@@ -330,6 +330,11 @@ def status(project: str = Query("")) -> dict[str, Any]:
     base: dict[str, Any] = {
         "api_version": API_VERSION,
         "capabilities": _capabilities(),
+        # Additive: True when AGENTALLOY_APPROVER_TOKEN is set, i.e. gated
+        # approvals are recordable only by the orchestrator holding the token.
+        # Orchestrators that dispatch coding agents must refuse to run when
+        # this is False (fail closed).
+        "approval_locked": bool(os.environ.get("AGENTALLOY_APPROVER_TOKEN")),
     }
     if not state_store or not config:
         return {
