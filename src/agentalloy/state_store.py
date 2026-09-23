@@ -60,6 +60,18 @@ PHASE_ORDER: tuple[str, ...] = ("intake", "spec", "design", "plan", "build", "qa
 LIFECYCLE_START: str = PHASE_ORDER[0]
 
 
+# Optional contract columns (all TEXT; list/dict values are stored as JSON).
+CONTRACT_EXTRA_COLUMNS: tuple[str, ...] = (
+    "route",
+    "scope_avoids",
+    "success_criteria",
+    "body",
+    "work_item",
+    "source_ref",
+)
+_CONTRACT_JSON_COLUMNS = frozenset({"scope_avoids", "success_criteria", "source_ref"})
+
+
 class PhaseAdvanceError(ValueError):
     """A lifecycle advance the state leg refuses to persist.
 
@@ -156,6 +168,12 @@ class StateStore:
             )
         """)
         self._migrate_project_scope()
+        # Factory handoff fields (additive, nullable). A contract written by
+        # an external orchestrator (TheForge) carries its lane, scope, the
+        # business success criteria it must satisfy, and a back-reference to
+        # the work item that produced it. Legacy slim contracts leave them NULL.
+        for col in CONTRACT_EXTRA_COLUMNS:
+            self.conn.execute(f"ALTER TABLE contracts ADD COLUMN IF NOT EXISTS {col} TEXT")
         # Work-item cursor table
         self.conn.execute("""
             CREATE SEQUENCE IF NOT EXISTS work_item_seq
@@ -282,57 +300,93 @@ class StateStore:
         }
         self.conn.execute(ddl[table])
 
-    def add_contract(self, slug: str, domain_tags: list[str], touches: str) -> None:
-        """Add or update a contract."""
+    def add_contract(
+        self,
+        slug: str,
+        domain_tags: list[str],
+        touches: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Add or update a contract.
+
+        ``extra`` carries the optional CONTRACT_EXTRA_COLUMNS. An upsert only
+        overwrites extras that are provided, so a later slim contract_add
+        (slug/tags/touches) never wipes a factory contract's handoff fields.
+        """
         import json
         from datetime import datetime
 
         now = datetime.now().isoformat()
+        extras: dict[str, str | None] = {}
+        for col in CONTRACT_EXTRA_COLUMNS:
+            value = (extra or {}).get(col)
+            if value is None:
+                extras[col] = None
+            elif col in _CONTRACT_JSON_COLUMNS:
+                extras[col] = json.dumps(value)
+            else:
+                extras[col] = str(value)
+        cols = ", ".join(CONTRACT_EXTRA_COLUMNS)
+        marks = ", ".join("?" for _ in CONTRACT_EXTRA_COLUMNS)
+        updates = ",\n                ".join(
+            f"{c} = COALESCE(excluded.{c}, contracts.{c})" for c in CONTRACT_EXTRA_COLUMNS
+        )
         self.conn.execute(
-            """
-            INSERT INTO contracts (project, slug, domain_tags, touches, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            f"""
+            INSERT INTO contracts (project, slug, domain_tags, touches, updated_at, {cols})
+            VALUES (?, ?, ?, ?, ?, {marks})
             ON CONFLICT(project, slug) DO UPDATE SET
                 domain_tags = excluded.domain_tags,
                 touches = excluded.touches,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                {updates}
             """,
-            [self.project, slug, json.dumps(domain_tags), touches, now],
+            [
+                self.project,
+                slug,
+                json.dumps(domain_tags),
+                touches,
+                now,
+                *(extras[c] for c in CONTRACT_EXTRA_COLUMNS),
+            ],
         )
+
+    @staticmethod
+    def _contract_row(r: tuple[Any, ...]) -> dict[str, Any]:
+        """Wire shape: slug/domain_tags/touches always; extras only when set
+        (legacy contracts serialize byte-identically to before)."""
+        import json
+
+        row: dict[str, Any] = {
+            "slug": r[0],
+            "domain_tags": json.loads(r[1]) if r[1] else [],
+            "touches": r[2] or "",
+        }
+        for col, value in zip(CONTRACT_EXTRA_COLUMNS, r[3:], strict=True):
+            if value is not None:
+                row[col] = json.loads(value) if col in _CONTRACT_JSON_COLUMNS else value
+        return row
 
     def get_contract(self, slug: str) -> dict[str, Any] | None:
         """Get contract by slug."""
-        import json
-
+        cols = ", ".join(CONTRACT_EXTRA_COLUMNS)
         result = self.conn.execute(
-            "SELECT slug, domain_tags, touches FROM contracts WHERE project = ? AND slug = ?",
+            f"SELECT slug, domain_tags, touches, {cols} FROM contracts "
+            "WHERE project = ? AND slug = ?",
             [self.project, slug],
         ).fetchone()
-        if result:
-            return {
-                "slug": result[0],
-                "domain_tags": json.loads(result[1]),
-                "touches": result[2],
-            }
-        return None
+        return self._contract_row(result) if result else None
 
     def list_contracts(self) -> list[dict[str, Any]]:
-        """All contracts as ``{"slug", "domain_tags", "touches"}`` dicts (SDD
-        projection source)."""
-        import json
-
+        """All contracts as ``{"slug", "domain_tags", "touches", ...extras}``
+        dicts (SDD projection source)."""
+        cols = ", ".join(CONTRACT_EXTRA_COLUMNS)
         results = self.conn.execute(
-            "SELECT slug, domain_tags, touches FROM contracts WHERE project = ? ORDER BY slug",
+            f"SELECT slug, domain_tags, touches, {cols} FROM contracts "
+            "WHERE project = ? ORDER BY slug",
             [self.project],
         ).fetchall()
-        return [
-            {
-                "slug": r[0],
-                "domain_tags": json.loads(r[1]) if r[1] else [],
-                "touches": r[2] or "",
-            }
-            for r in results
-        ]
+        return [self._contract_row(r) for r in results]
 
     def record_artifact(self, phase: str, name: str, body: str) -> str:
         """Record a phase artifact. Returns the digest.
