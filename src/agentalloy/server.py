@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, Query
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from pydantic import BaseModel
@@ -330,6 +330,11 @@ def status(project: str = Query("")) -> dict[str, Any]:
     base: dict[str, Any] = {
         "api_version": API_VERSION,
         "capabilities": _capabilities(),
+        # Additive: True when AGENTALLOY_APPROVER_TOKEN is set, i.e. gated
+        # approvals are recordable only by the orchestrator holding the token.
+        # Orchestrators that dispatch coding agents must refuse to run when
+        # this is False (fail closed).
+        "approval_locked": bool(os.environ.get("AGENTALLOY_APPROVER_TOKEN")),
     }
     if not state_store or not config:
         return {
@@ -585,15 +590,44 @@ class ToolRequest(BaseModel):
     project: str = ""
 
 
+def _approver_header_valid(presented: str | None) -> bool:
+    """Constant-time check of X-AgentAlloy-Approver against
+    AGENTALLOY_APPROVER_TOKEN (unset → never valid; the lock is then off)."""
+    import hmac
+
+    expected = os.environ.get("AGENTALLOY_APPROVER_TOKEN", "")
+    return bool(expected) and presented is not None and hmac.compare_digest(presented, expected)
+
+
 @app.post("/tool")
-def tool_exec(request: ToolRequest) -> dict[str, Any]:
+def tool_exec(
+    request: ToolRequest,
+    x_agentalloy_approver: str | None = Header(default=None),
+) -> dict[str, Any]:
     """Single-tool execution for the MCP bridge (no LFM loop, no steering).
 
     The MCP server never opens state.duck (the service holds the only RW
     handle); it delegates every tool call here over HTTP.
-    """
-    from agentalloy.executors import execute_tool, set_run_store
 
+    ``X-AgentAlloy-Approver`` (additive): when AGENTALLOY_APPROVER_TOKEN is
+    set, only a request carrying it may record approvals or reset the
+    lifecycle — see executors._approval_locked.
+    """
+    from agentalloy.executors import (
+        execute_tool,
+        reset_approver_authorized,
+        set_approver_authorized,
+        set_run_store,
+    )
+
+    approver_token = set_approver_authorized(_approver_header_valid(x_agentalloy_approver))
+    try:
+        return _tool_exec(request, execute_tool, set_run_store)
+    finally:
+        reset_approver_authorized(approver_token)
+
+
+def _tool_exec(request: ToolRequest, execute_tool: Any, set_run_store: Any) -> dict[str, Any]:
     try:
         if request.project and state_store:
             set_run_store(state_store.scoped(request.project))

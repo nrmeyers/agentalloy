@@ -10,13 +10,51 @@ without the index.
 
 import json
 import logging
+import os
 import threading
+from contextvars import ContextVar
 from typing import Any
 
 from agentalloy.skill_engine import SkillEngine
-from agentalloy.state_store import LIFECYCLE_START, PHASE_ORDER, PhaseAdvanceError, StateStore
+from agentalloy.state_store import (
+    CONTRACT_EXTRA_COLUMNS,
+    LIFECYCLE_START,
+    PHASE_ORDER,
+    PhaseAdvanceError,
+    StateStore,
+)
 
 logger = logging.getLogger(__name__)
+
+# Approver lock (software-factory mode). When AGENTALLOY_APPROVER_TOKEN is
+# set, recording a human approval (phase_advance approved=true on a gated
+# transition) and phase_reset require the caller to have presented that token
+# — the HTTP /tool handler sets this flag per request after a constant-time
+# compare. Every other path (the /chat interpreter loop, an MCP bridge whose
+# process lacks the token, an agent curl-ing /tool) runs with it False, so a
+# headless coding agent cannot approve its own spec/design/plan. Unset → the
+# lock is off and behavior is unchanged (solo harness use).
+_approver_authorized: ContextVar[bool] = ContextVar("approver_authorized", default=False)
+
+
+def set_approver_authorized(value: bool) -> Any:
+    """Mark the current call as carrying the approver token. Returns the
+    ContextVar token for ``reset_approver_authorized``."""
+    return _approver_authorized.set(value)
+
+
+def reset_approver_authorized(token: Any) -> None:
+    _approver_authorized.reset(token)
+
+
+def _approval_locked() -> bool:
+    return bool(os.environ.get("AGENTALLOY_APPROVER_TOKEN")) and not _approver_authorized.get()
+
+
+_APPROVER_REJECTION = (
+    "approvals are locked to the orchestrator (AGENTALLOY_APPROVER_TOKEN is set): "
+    "a human must approve this transition in the orchestrator UI"
+)
 
 # Module-level store reference — set by interpreter via set_store()
 _store: StateStore | None = None
@@ -500,14 +538,18 @@ def _contract_add(args: dict[str, Any]) -> str:
     slug = args.get("slug", "")
     domain_tags = args.get("domain_tags", [])
     touches = args.get("touches", "")
+    # Optional factory handoff fields (route, scope_avoids, success_criteria,
+    # body, work_item, source_ref) — additive; absent keys are left alone.
+    extra = {k: args[k] for k in CONTRACT_EXTRA_COLUMNS if args.get(k) is not None}
     store = _current_store()
     if store:
-        store.add_contract(slug, domain_tags, touches)
+        store.add_contract(slug, domain_tags, touches, extra or None)
     else:
         _fallback["contracts"][slug] = {
             "slug": slug,
             "domain_tags": domain_tags,
             "touches": touches,
+            **extra,
         }
     return json.dumps({"status": "ok", "slug": slug})
 
@@ -565,6 +607,10 @@ def _phase_advance(args: dict[str, Any]) -> str:
     if store is None:
         # No store wired (standalone tests): no state leg to consult, so the
         # approved flag is the caller's claim, as before.
+        if approved and _approval_locked():
+            return json.dumps(
+                {"status": "rejected", "target": target, "reason": _APPROVER_REJECTION}
+            )
         if approved:
             _fallback["phases"]["current"] = target
         return json.dumps({"status": "ok" if approved else "rejected", "target": target})
@@ -631,6 +677,15 @@ def _phase_advance(args: dict[str, Any]) -> str:
                             "digest": exit_digest,
                         }
                     )
+                if _approval_locked():
+                    return json.dumps(
+                        {
+                            "status": "rejected",
+                            "target": target,
+                            "reason": _APPROVER_REJECTION,
+                            "digest": exit_digest,
+                        }
+                    )
                 store.record_approval(transition, exit_digest)
 
     try:
@@ -650,6 +705,8 @@ def _phase_reset(args: dict[str, Any]) -> str:
     lifecycle state. This is the recovery path for stores whose phase
     value predates write-side validation.
     """
+    if _approval_locked():
+        return json.dumps({"status": "rejected", "reason": _APPROVER_REJECTION})
     store = _current_store()
     if store:
         phase = store.reset_phase()
