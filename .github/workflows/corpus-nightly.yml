@@ -14,9 +14,15 @@ name: Corpus Nightly Regression
 # choices below are the most standard form and are flagged with a one-line
 # comment; shake them out on the first manual dispatch.
 
+# RETIRED FROM THE SCHEDULE (2026-09-27): every job here exercises the v1
+# stack that #655 retired. The retrieval probes post to v1's task-based
+# /compose (agentalloy.app:app) and score embedding hit@k — v2 has no
+# embedding retrieval of skills (the interpreter picks from the catalog and
+# assemble_skill expands it), and the `-m integration` suite was deleted in
+# #655, so the integration job collects 0 tests (pytest exit 5). It has failed
+# every night since #641 (2026-08-30). Kept for manual dispatch until the
+# v2 corpus/selection eval replaces it (#661).
 on:
-  schedule:
-    - cron: "0 7 * * *" # 07:00 UTC nightly
   workflow_dispatch:
 
 concurrency:
