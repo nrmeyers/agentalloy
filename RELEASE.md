@@ -227,6 +227,11 @@ build itself; don't also dispatch it.
 - [ ] Pre-commit hooks installed (`uv run pre-commit install`) — they auto-format
       on every commit, preventing formatting leaks into PRs.
 - [ ] Local gate green: `scripts/local-ci.sh` (or the individual commands below).
+- [ ] Model gate green on the dev server when the PR can move skill selection
+      (interpreter, prompts, tools, `skill_engine`, packs): `scripts/pre-pr-eval.sh`.
+      It needs the GPU interpreter, so it is not part of GitHub CI. Paste its
+      summary line in the PR description. If a change moves the score on
+      purpose, re-baseline `eval/selection_baselines.json` in the same PR.
 - [ ] PR opened against `main`, required checks green, squash-merged with
       authorization (`gh pr merge --auto --squash`).
 - [ ] If the PR bumped the version: `Release Cut` created `v<X.Y.Z>` after CI
