@@ -21,3 +21,14 @@ def test_config_env_override(monkeypatch: object) -> None:
     config = Config.from_env()
     assert config.service_port == 48999
     assert config.model == "test-model"
+
+
+def test_model_timeout_default_and_override(monkeypatch: object) -> None:
+    """The interpreter's model timeout keeps its 30s default; CPU runs raise it."""
+    from typing import Any
+
+    mp: Any = monkeypatch
+    mp.delenv("AGENTALLOY_MODEL_TIMEOUT", raising=False)
+    assert Config.from_env().model_timeout == 30.0
+    mp.setenv("AGENTALLOY_MODEL_TIMEOUT", "900")
+    assert Config.from_env().model_timeout == 900.0

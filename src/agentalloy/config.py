@@ -57,6 +57,10 @@ class Config:
     hard_cap: int = 6
     max_tokens: int = 2048
     thinking_budget: int = 1024
+    # Per-request timeout (seconds) for the interpreter's model calls. 30s
+    # suits a GPU sidecar; CPU-only inference needs minutes per reasoning
+    # step. scripts/pre-pr-eval.sh raises it for its isolated service.
+    model_timeout: float = 30.0
 
     # Retrieval
     search_k: int = 10
@@ -103,6 +107,7 @@ class Config:
             hard_cap=int(environ.get("AGENTALLOY_HARD_CAP", "6")),
             max_tokens=int(environ.get("AGENTALLOY_MAX_TOKENS", "2048")),
             thinking_budget=int(environ.get("AGENTALLOY_THINKING_BUDGET", "1024")),
+            model_timeout=float(environ.get("AGENTALLOY_MODEL_TIMEOUT", "30")),
             search_k=int(environ.get("AGENTALLOY_SEARCH_K", "10")),
             skill_candidates=int(environ.get("AGENTALLOY_SKILL_CANDIDATES", "30")),
             instruction_budget_chars=int(

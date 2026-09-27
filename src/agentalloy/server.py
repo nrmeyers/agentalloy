@@ -264,7 +264,7 @@ def startup() -> None:
         client = OpenAI(
             base_url=f"http://localhost:{config.model_port}/v1",
             api_key=config.model_key,
-            timeout=30.0,
+            timeout=config.model_timeout,
             max_retries=1,
         )
         interpreter = Interpreter(

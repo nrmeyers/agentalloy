@@ -419,7 +419,13 @@ uv run maturin develop --release                        # build the Rust core (a
 scripts/local-ci.sh
 ```
 
-Integration tests (`uv run pytest -m integration`) need a running nomic-embed llama-server. Branching, CI gates, and where the tests live: [RELEASE.md](RELEASE.md).
+**Pre-PR model gate (dev server).** Before opening a PR that can move skill selection (interpreter, prompts, tools, `skill_engine`, packs), run on the dev server:
+
+```bash
+scripts/pre-pr-eval.sh
+```
+
+It starts an isolated `agentalloy serve` from your checkout against the GPU interpreter (`:50001`), runs the v2 integration suite (`tests/integration`) and the skill-selection eval (`eval/skill_selection.py`), and checks the result against `eval/selection_baselines.json` — about 10 minutes. The live service on `:48950` is never touched. Branching, CI gates, and where the tests live: [RELEASE.md](RELEASE.md).
 
 ---
 

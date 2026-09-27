@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "measured": {
+    "date": "2026-09-27",
+    "where": "dev server GPU sidecar (:50001), isolated agentalloy serve, lexical-only code index",
+    "model": "openbmb/MiniCPM5-2B-GGUF MiniCPM5-2B-Q8_0.gguf (sha256 c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078)",
+    "llama_cpp": "b9992, --jinja --reasoning on --reasoning-format deepseek",
+    "total": 18,
+    "hits": 9,
+    "matched_total": 12,
+    "matched_hits": 8,
+    "hit_tasks": [
+      "domain_10_gha_concurrency",
+      "domain_11_gha_caching",
+      "domain_12_redis_streams_workers",
+      "domain_13_redis_optimistic_lock",
+      "domain_14_snowflake_time_travel",
+      "domain_17_airflow_task_hygiene",
+      "domain_1_webhook_signature",
+      "domain_6_github_actions_oidc",
+      "domain_8_scd_type2"
+    ]
+  },
+  "max_errors": 0,
+  "floors": {
+    "hits": 8,
+    "matched_hits": 7
+  }
+}
