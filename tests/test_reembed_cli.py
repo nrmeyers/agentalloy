@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import random
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,7 +21,14 @@ from agentalloy.config import Settings
 from agentalloy.reembed import cli as reembed_cli
 from agentalloy.storage.card_index import META_KEY_LAST_REEMBED
 from agentalloy.storage.open import open_skills
-from agentalloy.storage.protocols import EMBEDDING_DIM, FragmentRow, SkillRow, SkillVersionRow
+from agentalloy.storage.overgraph_skill_store import OverGraphSkillStore
+from agentalloy.storage.protocols import (
+    EMBEDDING_DIM,
+    FragmentEmbedding,
+    FragmentRow,
+    SkillRow,
+    SkillVersionRow,
+)
 
 MODEL_A = "fake-embed-v1"
 MODEL_B = "fake-embed-v2"
@@ -140,6 +148,28 @@ def no_service_stop(monkeypatch):
 def _seed_two_skills(store: Any) -> None:
     _seed_skill(store, "skill-a", "Alpha", "alpha")
     _seed_skill(store, "skill-b", "Beta", "beta")
+
+
+def _embed_all(store: Any, model: str) -> None:
+    """Insert embeddings for every active fragment with no last_reembed stamp —
+    the state a bulk pass (install-packs) leaves behind."""
+    now = int(time.time())
+    for row in store.discover_fragments():
+        store.insert_embeddings(
+            [
+                FragmentEmbedding(
+                    fragment_id=row.fragment_id,
+                    embedding=_vec_for(row.content),
+                    skill_id=row.skill_id,
+                    category=row.category,
+                    fragment_type=row.fragment_type,
+                    embedded_at=now,
+                    embedding_model=model,
+                    prose=row.content,
+                )
+            ]
+        )
+    store.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +399,71 @@ def test_first_run_on_fresh_store_succeeds(corpus_env, discover_probe, no_servic
     discover_probe.clear()
     assert reembed_cli.main([]) == reembed_cli.EXIT_OK
     assert len(discover_probe) == 1
+
+
+def test_plain_run_on_fully_embedded_corpus_stamps(
+    corpus_env, discover_probe, no_service_stop
+) -> None:
+    """Corpus fully embedded outside main() (install-packs shape): the first
+    plain pass still records the stamp, and the next plain run fast-paths."""
+    _, client = corpus_env
+
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_A)
+    finally:
+        store.close()
+
+    discover_probe.clear()
+    assert reembed_cli.main([]) == reembed_cli.EXIT_OK
+
+    store = open_skills(read_only=True)
+    try:
+        stamp = json.loads(store.get_meta(META_KEY_LAST_REEMBED))
+    finally:
+        store.close()
+    assert stamp["model"] == MODEL_A
+    assert stamp["card_index"] == "both"
+    assert len(stamp["hash"]) == 64
+
+    # Second plain run: corpus unchanged since the stamp → fast path.
+    discover_probe.clear()
+    calls_before = len(client.calls)
+    assert reembed_cli.main([]) == reembed_cli.EXIT_OK
+    assert discover_probe == [], "unchanged stamped corpus must take the fast path"
+    assert len(client.calls) == calls_before, "fast path must not embed"
+
+
+def test_plain_run_with_foreign_model_does_not_stamp(
+    corpus_env, discover_probe, no_service_stop, monkeypatch
+) -> None:
+    """Vectors built with a different model: discovery is presence-based, so a
+    plain pass must not re-embed AND must not stamp the new model (that would
+    mask the --force migration a model switch requires)."""
+    _, client = corpus_env
+    # Deterministic presence: every fragment counts as embedded, so discovery
+    # is 0 regardless of HNSW persistence across reopens.
+    monkeypatch.setattr(
+        OverGraphSkillStore, "fragment_ids_present", lambda self, ids: set(ids)
+    )
+
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_B)
+    finally:
+        store.close()
+
+    discover_probe.clear()
+    assert reembed_cli.main([]) == reembed_cli.EXIT_OK
+    assert len(client.calls) == 0, "a plain pass must not re-embed on a model switch"
+
+    store = open_skills(read_only=True)
+    try:
+        assert store.get_meta(META_KEY_LAST_REEMBED) is None
+    finally:
+        store.close()
 
 
 def test_settings_env_paths_resolve(tmp_path, monkeypatch) -> None:

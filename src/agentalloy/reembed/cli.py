@@ -735,6 +735,49 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             return EXIT_OK
 
         if not fragments and not args.rebuild_fts:
+            if args.skill_id is None and args.limit is None and not args.force:
+                # A plain full-scope pass over an already-embedded corpus still
+                # converges: refresh the BM25 index and record the idempotency
+                # stamp, so a later unchanged run can take the fast path
+                # instead of repeating discovery forever. A corpus that was
+                # fully embedded outside this code path (install-packs) never
+                # gets a stamp any other way. Discovery is presence-based, so
+                # a plain pass cannot re-embed: stamp only when the stored
+                # vectors were built with this run's model — stamping a
+                # foreign model would mask the --force migration a model
+                # switch requires.
+                models = vs.distinct_embedding_models()
+                if models is None:
+                    logger.warning(
+                        "could not verify the existing embeddings' model — "
+                        "no stamp recorded (re-run to retry)"
+                    )
+                elif models - {model_id}:
+                    logger.warning(
+                        "existing embeddings were built with model(s) %s but "
+                        "this run uses %s — a plain re-embed cannot re-embed; "
+                        "use --force to migrate (no stamp recorded)",
+                        sorted(models - {model_id}),
+                        model_id,
+                    )
+                else:
+                    try:
+                        vs.rebuild_fts_index()
+                        logger.info("BM25 FTS index rebuilt")
+                    except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
+                        logger.warning("FTS index rebuild failed (BM25 leg degraded): %s.", exc)
+                    try:
+                        stamp = {
+                            "hash": _corpus_content_hash(store),
+                            "model": model_id,
+                            "card_index": card_mode.value,
+                            "at": int(time.time()),
+                        }
+                        store.set_meta(META_KEY_LAST_REEMBED, json.dumps(stamp, sort_keys=True))
+                        logger.info("recorded last_reembed stamp (model=%s, card-index=%s)",
+                                    model_id, card_mode.value)
+                    except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+                        logger.warning("could not record last_reembed meta: %s", exc)
             logger.info("nothing to do — all fragments already embedded")
             return EXIT_OK
 

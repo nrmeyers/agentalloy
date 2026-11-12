@@ -1326,6 +1326,28 @@ class OverGraphSkillStore:
             return None
         return self._vector_dimension
 
+    def distinct_embedding_models(self) -> set[str] | None:
+        """Return the set of embedding-model values recorded on fragment nodes.
+
+        ``None`` means the query failed (callers should treat the existing
+        vectors' model as unverified rather than empty).
+        """
+        try:
+            rows = self._db.execute_gql(
+                "MATCH (f:Fragment) WHERE f.embedding_model IS NOT NULL "
+                "RETURN DISTINCT f.embedding_model AS model"
+            )
+        except Exception:
+            logger.debug("distinct_embedding_models query failed", exc_info=True)
+            return None
+        models: set[str] = set()
+        if isinstance(rows, dict):
+            for row in rows.get("rows", []):
+                model = row.get("model")
+                if model:
+                    models.add(str(model))
+        return models
+
     def fragment_ids_present(self, fragment_ids: Sequence[str]) -> set[str]:
         """Check which fragment_ids already have embeddings.
 
