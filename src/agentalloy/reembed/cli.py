@@ -23,6 +23,12 @@ Usage::
     python -m agentalloy.reembed --skill-id <id>    # one skill only
     python -m agentalloy.reembed --force            # re-embed everything (delete + insert)
 
+Idempotency fast path: every successful full-scope pass stamps a corpus
+content hash (plus the embedding model and card-index mode) into
+corpus_meta. A later full-scope run whose corpus hash still matches — and
+which passes no explicit rework flag — exits 0 before taking the writer
+lock, skipping the service stop/restart cycle entirely.
+
 Retries: 3 attempts with 1s/2s/4s exponential backoff on transient LM Studio
 failures (timeouts, 5xx). A hard failure after retries halts the run and
 leaves already-embedded fragments in place (idempotency means the next run
@@ -32,6 +38,8 @@ picks up where this one stopped).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 import sys
 import time
@@ -52,6 +60,7 @@ from agentalloy.storage.card_index import (
     CARD_FRAGMENT_TYPE,
     CORPUS_SCHEMA_VERSION,
     META_KEY_CARD_INDEX,
+    META_KEY_LAST_REEMBED,
     META_KEY_SCHEMA_VERSION,
     CardIndexMode,
     apply_prefix,
@@ -180,6 +189,38 @@ def discover_unembedded_fragments(
 
     present = vector_store.fragment_ids_present([f.fragment_id for f in all_fragments])
     return [f for f in all_fragments if f.fragment_id not in present]
+
+
+def _corpus_content_hash(store: SkillStore) -> str:
+    """Stable SHA-256 over the full active corpus.
+
+    Hashes, in a deterministic (skill_id, fragment_id) order, every field
+    ``discover_fragments`` feeds into the indexed representation: fragment
+    identity (skill_id, fragment_id, fragment_type, category), the fragment
+    body, and the skill-card inputs (canonical_name, domain_tags,
+    description) that drive both the ``prefix`` header and the synthetic
+    card text. Any content edit, add, or removal changes the hash; a stored
+    hash that still matches means the corpus is byte-identical to what the
+    last successful pass embedded (given the same model and card-index
+    mode, which the caller records alongside).
+    """
+    h = hashlib.sha256()
+    rows = store.discover_fragments()
+    for r in sorted(rows, key=lambda row: (row.skill_id, row.fragment_id)):
+        parts = (
+            r.skill_id,
+            r.fragment_id,
+            r.fragment_type,
+            r.category,
+            r.canonical_name,
+            ",".join(sorted(r.domain_tags)),
+            r.description or "",
+            r.content,
+        )
+        for part in parts:
+            h.update(part.encode("utf-8"))
+            h.update(b"\x00")
+    return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +634,40 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
     model_id = args.model or settings.runtime_embedding_model
     settings.ensure_data_dirs()
 
+    # Idempotency fast path: a full-scope pass over a corpus that is
+    # byte-identical to the last successful pass's (same model, same
+    # card-index mode) has nothing to embed and a current FTS index — skip
+    # before taking the writer lock, which is what forces the service
+    # stop/restart cycle. Explicit rework flags (--force, --rebuild-fts,
+    # --skill-id, --limit, --dry-run) opt out; any probe failure falls
+    # through to the normal path below.
+    if (
+        args.skill_id is None
+        and args.limit is None
+        and not (args.force or args.rebuild_fts or args.dry_run)
+    ):
+        try:
+            probe = open_skills(settings, read_only=True)
+            try:
+                last_stamp = probe.get_meta(META_KEY_LAST_REEMBED)
+                if last_stamp:
+                    stamp = json.loads(last_stamp)
+                    if (
+                        stamp.get("hash") == _corpus_content_hash(probe)
+                        and stamp.get("model") == model_id
+                        and stamp.get("card_index") == card_mode.value
+                    ):
+                        logger.info(
+                            "corpus unchanged since last reembed (model=%s, card-index=%s) — skipping",
+                            model_id,
+                            card_mode.value,
+                        )
+                        return EXIT_OK
+            finally:
+                probe.close()
+        except Exception as exc:  # noqa: BLE001 — the probe is an optimization only
+            logger.debug("last-reembed probe failed; running normal path: %s", exc)
+
     # Telemetry lives in a separate file. The corpus store's writer lock (the
     # Tantivy BM25 index) is exclusive between writers; the running native
     # service holds only a read handle and never blocks this open. On a lock
@@ -660,6 +735,49 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             return EXIT_OK
 
         if not fragments and not args.rebuild_fts:
+            if args.skill_id is None and args.limit is None and not args.force:
+                # A plain full-scope pass over an already-embedded corpus still
+                # converges: refresh the BM25 index and record the idempotency
+                # stamp, so a later unchanged run can take the fast path
+                # instead of repeating discovery forever. A corpus that was
+                # fully embedded outside this code path (install-packs) never
+                # gets a stamp any other way. Discovery is presence-based, so
+                # a plain pass cannot re-embed: stamp only when the stored
+                # vectors were built with this run's model — stamping a
+                # foreign model would mask the --force migration a model
+                # switch requires.
+                models = vs.distinct_embedding_models()
+                if models is None:
+                    logger.warning(
+                        "could not verify the existing embeddings' model — "
+                        "no stamp recorded (re-run to retry)"
+                    )
+                elif models - {model_id}:
+                    logger.warning(
+                        "existing embeddings were built with model(s) %s but "
+                        "this run uses %s — a plain re-embed cannot re-embed; "
+                        "use --force to migrate (no stamp recorded)",
+                        sorted(models - {model_id}),
+                        model_id,
+                    )
+                else:
+                    try:
+                        vs.rebuild_fts_index()
+                        logger.info("BM25 FTS index rebuilt")
+                    except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
+                        logger.warning("FTS index rebuild failed (BM25 leg degraded): %s.", exc)
+                    try:
+                        stamp = {
+                            "hash": _corpus_content_hash(store),
+                            "model": model_id,
+                            "card_index": card_mode.value,
+                            "at": int(time.time()),
+                        }
+                        store.set_meta(META_KEY_LAST_REEMBED, json.dumps(stamp, sort_keys=True))
+                        logger.info("recorded last_reembed stamp (model=%s, card-index=%s)",
+                                    model_id, card_mode.value)
+                    except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+                        logger.warning("could not record last_reembed meta: %s", exc)
             logger.info("nothing to do — all fragments already embedded")
             return EXIT_OK
 
@@ -877,6 +995,24 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                 logger.info("BM25 FTS index rebuilt")
             except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
                 logger.warning("FTS index rebuild failed (BM25 leg degraded): %s.", exc)
+        # Idempotency stamp: a full-scope pass (no --skill-id/--limit) that
+        # reaches this point has every active fragment embedded and a
+        # current FTS index — record the corpus's content hash alongside
+        # the model and card-index mode the vectors were built with, so a
+        # later unchanged run can skip the service stop/restart cycle.
+        # Skill-scoped and capped passes don't stamp: they only prove their
+        # own scope is current.
+        if args.skill_id is None and args.limit is None:
+            try:
+                stamp = {
+                    "hash": _corpus_content_hash(store),
+                    "model": model_id,
+                    "card_index": card_mode.value,
+                    "at": int(time.time()),
+                }
+                store.set_meta(META_KEY_LAST_REEMBED, json.dumps(stamp, sort_keys=True))
+            except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+                logger.warning("could not record last_reembed meta: %s", exc)
         # reembed_fragments raises on any failure (see its handlers), so
         # stats.failed is always 0 here — no EXIT_LLM branch is reachable.
         return dedup_exit
