@@ -15,6 +15,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+import overgraph
 import pytest
 
 from agentalloy.config import Settings
@@ -444,9 +445,7 @@ def test_plain_run_with_foreign_model_does_not_stamp(
     _, client = corpus_env
     # Deterministic presence: every fragment counts as embedded, so discovery
     # is 0 regardless of HNSW persistence across reopens.
-    monkeypatch.setattr(
-        OverGraphSkillStore, "fragment_ids_present", lambda self, ids: set(ids)
-    )
+    monkeypatch.setattr(OverGraphSkillStore, "fragment_ids_present", lambda self, ids: set(ids))
 
     store = open_skills()
     try:
@@ -471,3 +470,89 @@ def test_settings_env_paths_resolve(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CORPUS_STORE_PATH", str(tmp_path / "env.overgraph"))
     settings = Settings()
     assert settings.corpus_store_path == str(tmp_path / "env.overgraph")
+
+
+# ---------------------------------------------------------------------------
+# Vector index health probe → self-heal
+#
+# A successful re-embed pass persists ``embedded_at`` markers on fragment
+# nodes, but a later HNSW loss (data loss, a failed HNSW write left the
+# index empty, a schema-mismatched index that matches nothing) leaves
+# markers pointing at vectors that no longer exist. Markers alone must not
+# be trusted: the probe queries the live index, and an empty or failing
+# index reports everything unembedded so the next pass re-embeds.
+# ---------------------------------------------------------------------------
+
+
+def _fragment_ids(store: Any) -> list[str]:
+    return [row.fragment_id for row in store.discover_fragments()]
+
+
+def test_empty_vector_index_reports_nothing_present(corpus_env, monkeypatch) -> None:
+    """Markers exist but the HNSW index is empty → probe says unhealthy →
+    markers are not trusted → everything reports unembedded (self-heal)."""
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_A)
+        ids = _fragment_ids(store)
+        assert len(ids) == 4
+        # Simulate a lost/empty index: the 1-vector probe gets zero hits.
+        # (Pyo3 instances reject instance attributes; patch the class.)
+        monkeypatch.setattr(overgraph.OverGraph, "vector_search", lambda self, **kwargs: [])
+        assert store._vector_index_healthy() is False
+        assert store.fragment_ids_present(ids) == set(), (
+            "markers must not be trusted while the index is empty"
+        )
+    finally:
+        store.close()
+
+
+def test_vector_index_probe_failure_is_unhealthy(corpus_env, monkeypatch) -> None:
+    """A raising probe (corrupt index) must degrade to 'unhealthy', never
+    raise out of discovery — discovery re-embeds instead of crashing."""
+
+    def boom(self, **kwargs):
+        raise RuntimeError("corrupt HNSW segment")
+
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_A)
+        monkeypatch.setattr(overgraph.OverGraph, "vector_search", boom)
+        assert store._vector_index_healthy() is False
+        assert store.fragment_ids_present(_fragment_ids(store)) == set()
+    finally:
+        store.close()
+
+
+def test_vector_index_probe_hit_is_healthy(corpus_env, monkeypatch) -> None:
+    """A healthy, non-empty index → markers are trusted → embedded
+    fragments report present (the skip path stays intact)."""
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_A)
+        monkeypatch.setattr(
+            overgraph.OverGraph, "vector_search", lambda self, **kwargs: [(0.5, "n1")]
+        )
+        assert store._vector_index_healthy() is True
+        ids = _fragment_ids(store)
+        assert store.fragment_ids_present(ids) == set(ids)
+    finally:
+        store.close()
+
+
+def test_unembedded_fragment_is_absent_regardless_of_probe(corpus_env, monkeypatch) -> None:
+    """A fragment with no marker reports absent even with a healthy index —
+    the probe gates marker *trust*, it never fabricates embeddings."""
+    store = open_skills()
+    try:
+        _seed_two_skills(store)
+        _embed_all(store, MODEL_A)
+        monkeypatch.setattr(
+            overgraph.OverGraph, "vector_search", lambda self, **kwargs: [(0.5, "n1")]
+        )
+        assert store.fragment_ids_present(["no-such-fragment"]) == set()
+    finally:
+        store.close()

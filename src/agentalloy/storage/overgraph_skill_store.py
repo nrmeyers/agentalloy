@@ -1374,17 +1374,26 @@ class OverGraphSkillStore:
     def _vector_index_healthy(self) -> bool:
         """Probe the HNSW index with a trivial dense search.
 
-        An empty-but-healthy index returns no hits; a corrupt one raises
-        (CorruptRecordException). Gates marker trust in
-        :meth:`fragment_ids_present`.
+        A corrupt index raises (CorruptRecordException); an *empty* index
+        (HNSW data files lost or never built) returns no hits. Both cases
+        mean the ``embedded_at`` markers can't be trusted — return False so
+        :meth:`fragment_ids_present` reports nothing present and the caller
+        re-embeds everything (self-heal).
         """
         try:
-            self._db.vector_search(
+            hits = self._db.vector_search(
                 mode="dense",
                 k=1,
                 dense_query=[1.0] + [0.0] * (self._vector_dimension - 1),
                 label_filter={"labels": ["Fragment"]},
             )
+            if not hits:
+                logger.warning(
+                    "vector index probe returned 0 hits — treating index as "
+                    "empty (HNSW data files lost or never built) so re-embed "
+                    "can self-heal",
+                )
+                return False
             return True
         except Exception:
             logger.warning(
