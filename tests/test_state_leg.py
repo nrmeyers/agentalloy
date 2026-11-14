@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.api.state_leg import build_state_leg, _tool_body
+from agentalloy.api.state_leg import _tool_body, build_state_leg
 from agentalloy.registry import project_key
 
 
@@ -112,8 +112,15 @@ def test_query_sessions_reset_hints_use_v2_routes(tmp_path: Path) -> None:
     project = project_key(tmp_path)
     assert f"GET http://127.0.0.1:48950/status?project={project}" in query
     assert f"GET http://127.0.0.1:48950/gates?project={project}" in query
-    for name in ("code_search", "symbols", "knowledge_why", "knowledge_related",
-                 "artifact_body", "contract_detail", "get_skill_for"):
+    for name in (
+        "code_search",
+        "symbols",
+        "knowledge_why",
+        "knowledge_related",
+        "artifact_body",
+        "contract_detail",
+        "get_skill_for",
+    ):
         assert f'"name":"{name}"' in query
 
     assert "GET http://127.0.0.1:48950/sessions" in actions["sessions"]

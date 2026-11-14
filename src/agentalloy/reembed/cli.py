@@ -774,8 +774,11 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                             "at": int(time.time()),
                         }
                         store.set_meta(META_KEY_LAST_REEMBED, json.dumps(stamp, sort_keys=True))
-                        logger.info("recorded last_reembed stamp (model=%s, card-index=%s)",
-                                    model_id, card_mode.value)
+                        logger.info(
+                            "recorded last_reembed stamp (model=%s, card-index=%s)",
+                            model_id,
+                            card_mode.value,
+                        )
                     except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
                         logger.warning("could not record last_reembed meta: %s", exc)
             logger.info("nothing to do — all fragments already embedded")

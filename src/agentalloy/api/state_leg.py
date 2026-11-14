@@ -369,9 +369,7 @@ def _add_actions(
                     "use the reset action below to return to intake."
                 )
             elif next_phase is None:
-                actions["advance_phase"] = (
-                    "This phase is terminal — it does not self-advance."
-                )
+                actions["advance_phase"] = "This phase is terminal — it does not self-advance."
             else:
                 hint = (
                     f"Advance to {next_phase} once the phase's work and its "
@@ -385,9 +383,7 @@ def _add_actions(
                         "approved the presented work — the gate refuses without it."
                     )
                 else:
-                    hint += (
-                        f"{_tool_body(project, 'phase_advance', {'target': next_phase})}"
-                    )
+                    hint += f"{_tool_body(project, 'phase_advance', {'target': next_phase})}"
                 actions["advance_phase"] = hint
 
         # Read-only lookups. When the scope is known, make the hint
