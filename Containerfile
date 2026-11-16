@@ -19,12 +19,34 @@
 #         built image that has no prebuilt corpus seed (GHCR images seed all packs automatically).
 
 # ---------------------------------------------------------------------------
-# Stage 0: llama.cpp binaries. The :full image ships llama-server plus its
-# co-located shared libs under /app (libllama*.so, libggml*.so, the per-arch
-# libggml-cpu-*.so loaded at runtime). We copy the whole dir and front it with
-# a wrapper that sets LD_LIBRARY_PATH so the dynamic loader finds the libs.
+# Stage 0: llama.cpp binaries (pinned prebuilt). We download the pinned
+# release asset — the SAME build ``pull-models`` provisions for native
+# installs (``_LLAMA_CPP_PREBUILT_BUILD`` in src/agentalloy/install/
+# subcommands/pull_models.py) — instead of the moving
+# ``ghcr.io/ggml-org/llama.cpp:full`` tag, which on 2026-11 advanced to a
+# glibc-2.43 image base and no longer runs on this python:3.12-slim base.
+# The b9631 asset needs only glibc 2.34, so it runs on bookworm (2.36) and
+# trixie (2.41). The tarball ships llama-server plus its co-located shared
+# libs (libllama*.so, libggml*.so, the per-arch libggml-cpu-*.so loaded at
+# runtime); we extract it to /app and the base stage copies it and fronts it
+# with a wrapper that sets LD_LIBRARY_PATH. Bump LLAMA_CPP_BUILD deliberately
+# (a build bump is a llama.cpp compatibility test, like the harness matrix).
 # ---------------------------------------------------------------------------
-FROM ghcr.io/ggml-org/llama.cpp:full AS llamacpp
+FROM python:3.12-slim AS llamacpp
+ARG TARGETARCH
+ARG LLAMA_CPP_BUILD=b9631
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ARCH="$(case "$TARGETARCH" in amd64|x86_64) echo x64 ;; arm64|aarch64) echo arm64 ;; *) echo "unsupported TARGETARCH: $TARGETARCH (expected amd64 or arm64)" >&2 && exit 1 ;; esac)" \
+    && echo "Downloading llama.cpp ${LLAMA_CPP_BUILD} (${ARCH}) prebuilt..." \
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 \
+        -o /tmp/llama.tar.gz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_BUILD}/llama-${LLAMA_CPP_BUILD}-bin-ubuntu-${ARCH}.tar.gz" \
+    && mkdir -p /app \
+    && tar -xzf /tmp/llama.tar.gz -C /app --strip-components=1 \
+    && rm /tmp/llama.tar.gz \
+    && LD_LIBRARY_PATH=/app /app/llama-server --version
 
 # ---------------------------------------------------------------------------
 # Stage 1: web UI build. Bakes the SPA into the image so the dashboard is live

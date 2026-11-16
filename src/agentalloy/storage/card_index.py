@@ -40,6 +40,12 @@ META_KEY_CARD_INDEX = "card_index"
 # "implicit v1".
 META_KEY_SCHEMA_VERSION = "schema_version"
 
+# corpus_meta key recording the last successful full-scope reembed pass: a
+# JSON stamp {hash, model, card_index, at}. A full-scope run whose current
+# corpus content hash matches this stamp (same model, same card-index mode)
+# exits without the service stop/restart cycle.
+META_KEY_LAST_REEMBED = "last_reembed"
+
 # Current corpus schema version, stamped into corpus_meta at build time. Bump
 # this when a corpus migration lands (and add the matching entry to
 # install/subcommands/update.py MIGRATIONS).

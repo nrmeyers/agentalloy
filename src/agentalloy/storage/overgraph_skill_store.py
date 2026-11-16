@@ -1326,6 +1326,28 @@ class OverGraphSkillStore:
             return None
         return self._vector_dimension
 
+    def distinct_embedding_models(self) -> set[str] | None:
+        """Return the set of embedding-model values recorded on fragment nodes.
+
+        ``None`` means the query failed (callers should treat the existing
+        vectors' model as unverified rather than empty).
+        """
+        try:
+            rows = self._db.execute_gql(
+                "MATCH (f:Fragment) WHERE f.embedding_model IS NOT NULL "
+                "RETURN DISTINCT f.embedding_model AS model"
+            )
+        except Exception:
+            logger.debug("distinct_embedding_models query failed", exc_info=True)
+            return None
+        models: set[str] = set()
+        if isinstance(rows, dict):
+            for row in rows.get("rows", []):
+                model = row.get("model")
+                if model:
+                    models.add(str(model))
+        return models
+
     def fragment_ids_present(self, fragment_ids: Sequence[str]) -> set[str]:
         """Check which fragment_ids already have embeddings.
 
@@ -1352,17 +1374,26 @@ class OverGraphSkillStore:
     def _vector_index_healthy(self) -> bool:
         """Probe the HNSW index with a trivial dense search.
 
-        An empty-but-healthy index returns no hits; a corrupt one raises
-        (CorruptRecordException). Gates marker trust in
-        :meth:`fragment_ids_present`.
+        A corrupt index raises (CorruptRecordException); an *empty* index
+        (HNSW data files lost or never built) returns no hits. Both cases
+        mean the ``embedded_at`` markers can't be trusted — return False so
+        :meth:`fragment_ids_present` reports nothing present and the caller
+        re-embeds everything (self-heal).
         """
         try:
-            self._db.vector_search(
+            hits = self._db.vector_search(
                 mode="dense",
                 k=1,
                 dense_query=[1.0] + [0.0] * (self._vector_dimension - 1),
                 label_filter={"labels": ["Fragment"]},
             )
+            if not hits:
+                logger.warning(
+                    "vector index probe returned 0 hits — treating index as "
+                    "empty (HNSW data files lost or never built) so re-embed "
+                    "can self-heal",
+                )
+                return False
             return True
         except Exception:
             logger.warning(

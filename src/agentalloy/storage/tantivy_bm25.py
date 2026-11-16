@@ -95,9 +95,14 @@ class TantivyBM25Index:
 
         searcher = self._index.searcher()
 
-        # Build the text query
+        # Build the text query. Tantivy's query parser interprets ':' as a
+        # field separator, so any colon in the raw task text (e.g. "How
+        # should I approach: git-commit-standards?") causes a parse failure
+        # or 0 hits. Replace colons with spaces before parsing — the BM25
+        # tokenizer splits on whitespace anyway, so no terms are lost.
+        sanitized = query.strip().replace(":", " ")
         try:
-            text_query = self._index.parse_query(query.strip(), default_field_names=["prose"])
+            text_query = self._index.parse_query(sanitized, default_field_names=["prose"])
         except Exception:
             logger.debug("Tantivy query parse failed for %r", query, exc_info=True)
             return []
