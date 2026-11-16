@@ -5,7 +5,7 @@
 repos:
   # Auto-fix lint issues and format
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.9
+    rev: v0.15.11
     hooks:
       # Auto-fix lint issues (including unsafe fixes like UP038 isinstance tuples)
       - id: ruff
