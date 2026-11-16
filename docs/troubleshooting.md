@@ -27,8 +27,9 @@ If your platform has no prebuilt asset (e.g. s390x), install llama.cpp manually
 (`brew install llama.cpp` on macOS, or build/download a release from
 https://github.com/ggml-org/llama.cpp) and put it on your PATH.
 
-The container image bundles `llama-server` (copied from
-`ghcr.io/ggml-org/llama.cpp:full`), so this only applies to native installs.
+The container image bundles `llama-server` (the pinned `b9631` prebuilt — the
+same build `pull-models` provisions for native installs), so this only applies
+to native installs.
 
 ### GGUF model not downloaded
 

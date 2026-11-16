@@ -154,3 +154,7 @@ corpus-seed/*
 !corpus-seed/.keep
 
 gha-creds-*.json
+
+# Wizard-generated model recommendation output (the install wizard writes it
+# to the user-scoped outputs dir; a root-level copy is local test residue).
+/recommend-models.json

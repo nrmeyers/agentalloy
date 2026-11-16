@@ -646,7 +646,7 @@ repo, ask your agent to "add a skill for X" — intake routes it down the
 
 ### Container architecture
 
-The image bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the llama.cpp toolchain copied from `ghcr.io/ggml-org/llama.cpp:full` — the recommended deployment when you want zero host-side inference dependencies.
+The image bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the pinned llama.cpp prebuilt (`b9631` — the same build `pull-models` provisions for native installs, see the `llamacpp` build stage in the `Containerfile`) — the recommended deployment when you want zero host-side inference dependencies.
 
 The setup wizard's container path:
 
