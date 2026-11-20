@@ -72,9 +72,47 @@ old store still issues the `ADD COLUMN`, so the window remains for those;
 we keep the crash-window small (checkpoint right after migrate) and the
 quarantine procedure documented.
 
+## Captured error (deterministic fixture, 2026-11-19)
+
+Captured under **duckdb 1.5.4 via the Python client** by replaying a
+deterministic fixture whose WAL contains exactly one uncheckpointed
+statement, `ALTER TABLE sdd_state ADD COLUMN stream_id TEXT NOT NULL
+DEFAULT ''` (SIGKILL immediately after that statement was committed to
+the WAL — upgrade-in-place shape):
+
+```text
+INTERNAL Error: Failure while replaying WAL file "<state.duck>.wal":
+Calling DatabaseManager::GetDefaultDatabase with no default database set
+This error signals an assertion failure within DuckDB. This usually
+occurs due to unexpected conditions or errors in the program's logic.
+For more information, see https://duckdb.org/docs/stable/dev/internal_errors
+```
+
+Failure path (from the Python client's stack trace):
+
+```text
+WriteAheadLogDeserializer::ReplayAlter
+  -> Catalog::Alter -> DuckSchemaEntry::Alter -> CatalogSet::AlterEntry
+     -> DuckTableEntry::AlterEntry -> DuckTableEntry::AddColumn
+  -> Binder::BindCreateTableInfo -> Binder::BindDefaultValues
+     -> ExpressionBinder::BindAndQualifyFunction
+  -> CatalogEntryRetriever::GetEntry -> Catalog::GetEntry
+     -> Catalog::GetCatalogEntry
+  -> INTERNAL: GetDefaultDatabase with no default database set
+```
+
+Replaying `ADD COLUMN` re-binds the table's default values, and binding
+the default (`''`) does a catalog lookup that requires the default
+database, which the WAL-replay context has not set up yet. Note that the
+failing statement carries a `DEFAULT` — a bare `ADD COLUMN b TEXT`
+without a default may not trigger it (verify when testing newer
+releases, checklist below).
+
 ## Filing checklist
 
-- [ ] Capture exact replay error text + DuckDB version from an incident log
+- [x] Capture exact replay error text + DuckDB version from an incident log
+      (done 2026-11-19 — see "Captured error" above; duckdb 1.5.4,
+      Python client)
 - [ ] Test the repro on the latest 1.5.x and 1.6.x releases (may be fixed)
 - [ ] Note Python client vs C++ behavior if different (we hit it via the
       Python client 1.5.4)
