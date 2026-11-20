@@ -344,26 +344,16 @@ async def _trigger_compose_in_process(
         except Exception:
             logger.exception("In-process compose failed for contract %s", contract_id)
 
-        # 4. Gate feedback: evaluate AC completeness after compose and store
-        #     feedback as a gate_feedback artifact.
+        # 4. Gate feedback: apply the AC-feedback lifecycle after compose —
+        #     (re)write and re-activate feedback for unmet ACs, retire it
+        #     when this write met all of them (predicates._apply_ac_feedback).
         try:
-            from agentalloy.signals.predicates import (
-                _evaluate_ac_feedback,
-                _gate_trigger_enabled,
-            )
+            from agentalloy.signals.predicates import _apply_ac_feedback
 
-            if _gate_trigger_enabled():
-                feedback = _evaluate_ac_feedback(store, contract)
-                if feedback is not None:
-                    store.set_artifact(
-                        contract["phase"],
-                        contract["slug"],
-                        "gate_feedback",
-                        feedback,
-                    )
+            _apply_ac_feedback(store, contract)
         except Exception:
             logger.debug(
-                "Gate feedback evaluation failed for contract %s",
+                "Gate feedback lifecycle failed for contract %s",
                 contract_id,
                 exc_info=True,
             )
