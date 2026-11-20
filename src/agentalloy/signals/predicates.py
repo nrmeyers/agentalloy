@@ -1535,6 +1535,12 @@ def evaluate_predicate(
 # Gate feedback — AC completeness check for phase gates
 # ---------------------------------------------------------------------------
 
+# Stored names the gate-feedback lifecycle writes (canonical and bare forms).
+# The AC-met scan must skip these: the feedback body names the unmet AC ids,
+# so scanning it would let a report "satisfy" the criteria it is reporting
+# on (self-poisoning) and keep the row archived forever.
+_GATE_FEEDBACK_NAMES = frozenset({"gate_feedback", "gate_feedback.artifact"})
+
 
 def _gate_trigger_enabled() -> bool:
     """Whether the gate-trigger (AC feedback) feature is enabled.
@@ -1569,6 +1575,8 @@ def _ac_is_met(
         if rows is None:
             return False
         for row in rows:
+            if row.get("name") in _GATE_FEEDBACK_NAMES:
+                continue
             content = row.get("content") or ""
             if ac_id in content or ac_text in content:
                 return True
@@ -1617,3 +1625,50 @@ def _evaluate_ac_feedback(
     if unmet:
         return f"[agentalloy-gate-feedback] Unmet criteria: {', '.join(unmet)}"
     return None
+
+
+def _apply_ac_feedback(store: Any, contract: dict[str, Any]) -> str | None:
+    """Apply the gate-feedback lifecycle to a contract's gate_feedback artifact.
+
+    Called after every in-process contract write/compose (see
+    ``api.state_router._trigger_compose_in_process``) and after re-embed
+    recovery, so the agent-facing feedback row always reflects the current
+    AC state:
+
+    - unmet ACs → (re)write the feedback; if the row was archived (stale
+      after a service restart, or retired earlier) re-activate it so the
+      agent sees it again;
+    - all ACs met (or no structured ACs, or trigger disabled) → retire: an
+      active row is archived so stale feedback stops reaching the agent.
+
+    Idempotent: a row whose content already matches the freshly computed
+    feedback is not rewritten (no spurious ``updated_at`` bump or status
+    flip on a restart where the stamp is still current). Returns the
+    applied feedback string, or ``None`` when nothing is due.
+    """
+    if not _gate_trigger_enabled():
+        return None
+
+    phase = str(contract.get("phase", ""))
+    slug = str(contract.get("slug", ""))
+    if not phase or not slug:
+        return None
+
+    feedback = _evaluate_ac_feedback(store, contract)
+
+    row: dict[str, Any] | None
+    try:
+        row = store.get_artifact(phase, slug, "gate_feedback", status="all")
+    except Exception:
+        row = None
+
+    if feedback is None:
+        if row is not None and row.get("status") == "active":
+            store.set_artifact_status(phase, slug, "gate_feedback", "archived")
+        return None
+
+    if row is None or (row.get("content") or "") != feedback:
+        store.set_artifact(phase, slug, "gate_feedback", feedback)
+    if row is not None and row.get("status") != "active":
+        store.set_artifact_status(phase, slug, "gate_feedback", "active")
+    return feedback

@@ -138,6 +138,11 @@ CREATE TABLE IF NOT EXISTS sdd_artifact (
     slug               TEXT NOT NULL,
     name               TEXT NOT NULL,
     content            TEXT,
+    -- In the base DDL (not an after-the-fact ALTER) so a fresh store's
+    -- first-boot WAL carries no ADD COLUMN record: DuckDB 1.5.x cannot
+    -- replay one when the writer died before checkpointing
+    -- (upstream note: docs/bug-duckdb-1.5-wal-add-column.md).
+    status             TEXT NOT NULL DEFAULT 'active',
     updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (repo, phase, slug, name)
 );
@@ -401,9 +406,52 @@ class DuckDBStateStore:
         try:
             self._conn = duckdb.connect(self._db_path, read_only=self._read_only)
         except duckdb.Error as exc:
-            raise StateStoreError(str(exc)) from exc
+            if not self._rescue_unreplayable_wal(exc):
+                raise StateStoreError(str(exc)) from exc
+            try:
+                self._conn = duckdb.connect(self._db_path, read_only=self._read_only)
+            except duckdb.Error as retry_exc:
+                raise StateStoreError(str(retry_exc)) from retry_exc
         self._locked = _LockedConn(self._conn, self._txn.lock)
         return self
+
+    def _rescue_unreplayable_wal(self, exc: BaseException) -> bool:
+        """Delete a WAL that the pinned DuckDB engine cannot replay.
+
+        DuckDB 1.5.x dies with an uncaught
+        ``InternalException: ... Failure while replaying WAL file ...`` when a
+        file's uncheckpointed WAL contains an ``ALTER TABLE ... ADD COLUMN``
+        against a table with a function default (``DEFAULT CURRENT_TIMESTAMP``)
+        — exactly what the boot migration writes.  A hard kill mid-migration
+        therefore leaves a file that crashes every later boot in a loop.
+        The uncheckpointed window only ever holds the idempotent migration DDL
+        (migrate() runs before the store serves, so no user writes are in it),
+        so deleting the WAL and letting :meth:`migrate` replay the DDL against
+        the last checkpoint is lossless.  DuckDB 2.0.0 replays such files
+        without the defect; the rescue is what makes existing 1.5.x installs
+        recoverable.
+
+        Only the WAL-replay failure matches — a lock or other error passes
+        through untouched (deleting a live writer's WAL would lose data).
+        Returns True when a WAL was deleted and the connect should be retried.
+        """
+        if "Failure while replaying WAL" not in str(exc):
+            return False
+        wal_path = Path(self._db_path + ".wal")
+        if not wal_path.exists():
+            return False
+        logger.warning(
+            "DuckDB cannot replay %s (%s); deleting the uncheckpointed WAL and "
+            "retrying — the migration DDL in it is idempotent and will be "
+            "replayed against the last checkpoint by migrate()",
+            self._db_path,
+            type(exc).__name__,
+        )
+        try:
+            wal_path.unlink()
+        except OSError:
+            return False
+        return True
 
     def close(self) -> None:
         if self._conn is not None:
@@ -587,10 +635,10 @@ class DuckDBStateStore:
             )
         logger.debug("sdd_state/sdd_contract stream_id column ensured")
 
-        # Lifecycle column on sdd_artifact — added after DDL so it runs on
-        # first boot after this change, and is idempotent for subsequent boots.
-        # DuckDB does not support ADD COLUMN ... NOT NULL DEFAULT in one
-        # statement, so we do it in three steps.
+        # Lifecycle column on sdd_artifact.  Fresh stores get it from the
+        # base DDL; this branch only fires for stores created before the
+        # column existed.  DuckDB does not support ADD COLUMN ... NOT NULL
+        # DEFAULT in one statement, so we do it in two steps.
         # Check first to avoid a cascade of errors.
         row = self.conn.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
@@ -649,6 +697,14 @@ class DuckDBStateStore:
         # On first boot the tables are created with full schema + indexes.
         # On subsequent boots CREATE TABLE IF NOT EXISTS is a no-op.
         logger.debug("pr_narrative / ci_telemetry / pr_lifecycle schema ensured via DDL")
+
+        # Fold the migration DDL out of the WAL so a kill right after boot
+        # cannot leave an un-replayable one: DuckDB 1.5.x cannot replay a WAL
+        # that ADD COLUMNs a table carrying a function default (see
+        # _rescue_unreplayable_wal), which is precisely what this migration
+        # wrote.  On an up-to-date store the checkpoint is a cheap no-op.
+        if not self._in_transaction:
+            self.conn.execute("CHECKPOINT")
 
     # -- read / write --------------------------------------------------------
 
@@ -1736,6 +1792,40 @@ class DuckDBStateStore:
             "UPDATE sdd_artifact SET status='archived', updated_at=? "
             "WHERE repo=? AND phase=? AND slug=? AND name=? AND status != 'archived'",
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), repo, phase, slug, name),
+        )
+        count = result.fetchall()
+        return bool(count) and count[0][0] > 0
+
+    def set_artifact_status(self, phase: str, slug: str, name: str, status: str) -> bool:
+        """Move an artifact row between lifecycle statuses, in either direction.
+
+        :meth:`set_artifact` is a content write that preserves the row's
+        existing status; this is the explicit lifecycle path the gate-feedback
+        loop uses to retire stale feedback (``archived``) and to re-activate a
+        row a rewrite re-introduces (``active``) after a service restart.
+        Returns True if a row was updated.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        if status not in ("active", "archived"):
+            raise StateStoreError(f"Invalid artifact status: {status!r}")
+        from agentalloy.storage.artifact_naming import (  # noqa: PLC0415
+            canonicalize_artifact_name,
+        )
+
+        name = canonicalize_artifact_name(phase, name)
+        repo = self._repo()
+        result = self.conn.execute(
+            "UPDATE sdd_artifact SET status=?, updated_at=? "
+            "WHERE repo=? AND phase=? AND slug=? AND name=?",
+            (
+                status,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                repo,
+                phase,
+                slug,
+                name,
+            ),
         )
         count = result.fetchall()
         return bool(count) and count[0][0] > 0
